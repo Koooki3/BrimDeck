@@ -55,6 +55,7 @@ internal sealed class MonitorView : Grid
     private readonly MemoryBlock _memory;
     private readonly NetworkBlock _network;
     private readonly StorageBlock? _storage;
+    private readonly PowerBlock? _power;
     private readonly bool _temperatures;
     private readonly Grid _readings = new();
     // How far the readings stop above the page's foot, so their last line ends level with the list's last row (AlignFoot).
@@ -69,9 +70,10 @@ internal sealed class MonitorView : Grid
     private GpuSample? _nextGpu;
 
     // temperatures: the gauges carry the processor's and the graphics adapter's temperatures after their figures, and the drives'
-    // lines theirs (the layout's StorageLines are the lines kept for the drives under memory and network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
+    // entries theirs (the layout's StorageLines and StorageColumns are the places kept for the volumes under memory and network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
     public MonitorView(MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
-        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures = false, bool smallTemperature = false)
+        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures = false, bool smallTemperature = false,
+        PowerOptions? power = null)
     {
         _layout = layout; _colors = colors; _main = main; _temperatures = temperatures;
         bool cpuMain = main == MonitorMain.Cpu;
@@ -79,6 +81,7 @@ internal sealed class MonitorView : Grid
         var readings = _readings;
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
+        readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -137,10 +140,17 @@ internal sealed class MonitorView : Grid
         }
         if (layout.StorageLines > 0)
         {
-            // Under the line memory and network share, or under network; its lines are list rows' height.
-            _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.RowHeight, layout.StorageLines, layout.StorageLines, temperatures)
+            // Under the line memory and network share, or under network; its lines are tighter than the list's rows.
+            _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, layout.StorageLines, layout.StorageColumns, temperatures)
             { Margin = new Thickness(0, layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }, 0, 0) };
             SetRow(_storage, layout.Metrics == MetricsMode.Line ? 3 : 4); readings.Children.Add(_storage);
+        }
+        if (layout.PowerLines > 0 && power is not null)
+        {
+            // Under the drives (or under network), at the same distance; one line of a list row's height.
+            _power = new PowerBlock(colors, power, layout.Body, layout.Caption, layout.StorageRow)
+            { Margin = new Thickness(0, layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }, 0, 0) };
+            SetRow(_power, 5); readings.Children.Add(_power);
         }
 
         if (layout.List == ListPlacement.None) Children.Add(readings);
@@ -169,12 +179,18 @@ internal sealed class MonitorView : Grid
         }
         SetColumnSpan(_overlay, 3); SetRowSpan(_overlay, 3);
         Children.Add(_overlay);
-        // A click anywhere outside the card and the list closes it; the click still reaches what it was meant for. On the list the
-        // row decides (Open): its own row closes the card, another row opens its own.
-        PreviewMouseLeftButtonDown += (_, e) => { if (_card is not null && !_card.IsMouseOver && _list?.IsMouseOver != true) CloseCard(animate: true); };
     }
 
     public bool CardOpen => _card is not null;
+    // A press anywhere in the window outside the card and the list's rows closes the card: the page's blank room, the list's own
+    // blank room and its sort buttons, the window's top bar. The click still reaches what it was meant for. On a row the row
+    // decides (Open): its own row closes the card, another row opens its own.
+    public void WindowPressed()
+    {
+        if (_card is not null && !_card.IsMouseOver && _list?.PointerOnRow != true) CloseCard(animate: true);
+    }
+    // Whether the page has the power line (the layout had room for it): the power is read only then.
+    public bool ShowsPower => _power is not null;
     // The widest a graphics engine's column grows on the page with the GPU large: no narrower than the graph's room needs, so the
     // few kinds of engine an adapter has always fill it.
     public const double EngineColumn = 1000;
@@ -270,6 +286,7 @@ internal sealed class MonitorView : Grid
         _memory.Set(snapshot.Memory, motion);
         _network.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
         _storage?.Set(snapshot.Storage, motion);
+        _power?.Set(snapshot, motion);
         _list?.Set(snapshot.Processes, _cores, motion);
         _processes = snapshot.Processes.OrDefault;
         // An open card follows its app's readings; it closes when the app has left the list.
@@ -302,6 +319,7 @@ internal sealed class MonitorView : Grid
         var card = new ProcessCard(_layout.Body, _layout.Caption);
         card.Show(sample, _cores, _layout.Body, _layout.Caption);
         card.MouseLeftButtonUp += (_, e) => { e.Handled = true; CloseCard(animate: true); };
+        card.Switched += () => CloseCard(animate: true);
         card.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var origin = _list.TranslatePoint(new Point(row.X, row.Y), this);
         double width = card.DesiredSize.Width, height = card.DesiredSize.Height;

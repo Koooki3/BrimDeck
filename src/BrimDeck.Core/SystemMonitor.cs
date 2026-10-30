@@ -241,10 +241,22 @@ public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors,
     // The internal drives with their lettered volumes (Storage), each with its temperature while drive temperatures are read;
     // empty while storage is not read.
     public IReadOnlyList<StorageDrive> Storage { get; init; } = [];
+    // The whole machine's power draw and its own battery, read only while something shows them (SystemSampler.SetExtras); PowerHistory
+    // is the last readings in watts, oldest first, and PowerSummary their peak and average (PowerStats).
+    public Reading<PowerSample> Power { get; init; } = Reading<PowerSample>.Unavailable(Loc.T("正在读取", "Reading"));
+    public Reading<BatterySample> Battery { get; init; } = Reading<BatterySample>.Unavailable(Loc.T("正在读取", "Reading"));
+    public IReadOnlyList<double> PowerHistory { get; init; } = [];
+    public PowerSummary? PowerSummary { get; init; }
+    // The processor's and the graphics' own power over the same readings, for the page's power line when it shows one of them.
+    public PowerTrack CpuPower { get; init; } = PowerTrack.None;
+    public PowerTrack GpuPower { get; init; } = PowerTrack.None;
     public static MonitorSnapshot Empty(int logicalProcessors, string reason) => new(DateTimeOffset.Now, logicalProcessors,
         Reading<CpuSample>.Unavailable(reason), Reading<MemorySample>.Unavailable(reason), Reading<NetworkSample>.Unavailable(reason),
         Reading<GpuSample>.Unavailable(reason), Reading<ProcessList>.Unavailable(reason));
 }
+
+// Seconds: how long the readings behind the peak and the average cover.
+public sealed record PowerSummary(double Peak, double Average, int Count, double Seconds = 0);
 
 // Deltas between two cumulative counters. Each returns null when no time passed or a counter went backwards, as after
 // sleep or when an interface went away, so a reading is skipped rather than shown wrong.

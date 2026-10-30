@@ -392,7 +392,8 @@ internal sealed class MemoryBlock : FrameworkElement
 }
 
 // Download and upload: a badge with the arrow, the rate, and the last minute as a soft line, each scaled to its own highest
-// reading: under the rate in a block, after it on a line (Lines), or not at all where both share a line with memory (Line).
+// reading: after the rate on a line (Lines, and Blocks too: a block of its own under the rate took twice the height for a line that
+// says little more, and the core columns use it better), or not at all where both share a line with memory (Line).
 internal sealed class NetworkBlock : FrameworkElement
 {
     private readonly MonitorColors _colors;
@@ -404,8 +405,8 @@ internal sealed class NetworkBlock : FrameworkElement
 
     public NetworkBlock(MonitorColors colors, MetricsMode mode, double body, double caption)
     {
-        _colors = colors; _mode = mode; _body = body; _caption = caption;
-        Height = mode == MetricsMode.Blocks ? Math.Ceiling(body * 1.7 + 4 + body * 2) : Math.Ceiling(body * 1.7);
+        _colors = colors; _mode = mode == MetricsMode.Blocks ? MetricsMode.Lines : mode; _body = body; _caption = caption;
+        Height = Math.Ceiling(body * 1.7);
     }
 
     public void Set(Reading<NetworkSample> reading, IReadOnlyList<double> down, IReadOnlyList<double> up)
@@ -439,11 +440,11 @@ internal sealed class NetworkBlock : FrameworkElement
         x += number.WidthIncludingTrailingWhitespace;
         if (q.Unit.Length > 0) { var unit = MonitorDraw.Text(q.Unit, _caption, UI.Tertiary, ppd); MonitorDraw.Baseline(drawing, unit, x + 3, baseline); x += 3 + unit.WidthIncludingTrailingWhitespace; }
         if (_mode == MetricsMode.Line || history.Count < 3) return;
-        // On a line the sparkline takes the rest of the half after the rate, at the line's height; in a block, the row under it.
-        // Measured before a Rect is made: a Rect does not take a negative size, and a narrow half leaves none.
-        double start = _mode == MetricsMode.Lines ? Math.Max(x + 10, left + width * .45) : left;
-        double areaWidth = left + width - start, areaTop = _mode == MetricsMode.Lines ? 2 : line + 4;
-        double areaHeight = _mode == MetricsMode.Lines ? line - 4 : ActualHeight - line - 4;
+        // The sparkline takes the rest of the half after the rate, centred on the line and as tall as the power line's curve (a drive
+        // line less 4), so the page's small curves are one size. Measured before a Rect is made: a Rect does not take a negative size,
+        // and a narrow half leaves none.
+        double start = Math.Max(x + 10, left + width * .45);
+        double areaWidth = left + width - start, areaHeight = Math.Min(line - 4, Math.Ceiling(_body * 1.5) - 4), areaTop = Math.Round((line - areaHeight) / 2);
         if (areaWidth >= 24 && areaHeight >= 6) Sparkline(drawing, new Rect(start, areaTop, areaWidth, areaHeight), history, color);
     }
 
@@ -455,27 +456,29 @@ internal sealed class NetworkBlock : FrameworkElement
 
 }
 
-// The internal drives, one line per physical drive (Storage.Rows), as tall as a row of the process list so its lines and the
-// list's share their baselines: a drive glyph, the drive's letters ("C:", or "C: D:" for a drive split into volumes), its space
-// in use against its size, a bar of the space in use as memory's bar draws it, split into a segment per volume, and, where the
-// drive reports one, its temperature at the end in its level's color. The columns line up from line to line; the temperature
-// column takes room only while a line has a temperature, so no line ends in a gap. With more drives than lines the last line
-// holds the others ("+2"). The bars ease to each reading, and the lines fade in when the first reading arrives.
+// The internal drives' volumes, an entry each (Storage.Rows) in lines tighter than the process list's rows (MonitorLayout.StorageRow),
+// filled left to right in one or two columns: a drive glyph, the volume's letter, its space in use
+// against its size, a bar of the space in use as memory's bar draws it, and, where its physical drive reports one, that drive's
+// temperature at the end in its level's color (volumes on one drive show the same). The parts line up from entry to entry; the
+// temperature takes room only while an entry has one, so no entry ends in a gap. With more volumes than places the last entry
+// holds the others ("+2"). The bars ease to each reading, and the entries fade in when the first reading arrives.
 internal sealed class StorageBlock : FrameworkElement
 {
-    private const double Gap = 2;
+    // Between the columns.
+    private const double ColumnGap = 20;
     private readonly MonitorColors _colors;
     private readonly double _body, _caption, _row;
-    private readonly int _room;
+    private readonly int _columns, _room;
     private readonly bool _temperatures;
     private IReadOnlyList<StorageRow> _rows = [];
-    private Eased[][] _segments = [];
+    private Eased[] _used = [];
     private Eased _shown, _heat;
 
-    // lines: the lines the page keeps for the drives; room: the most it shows; temperatures: whether lines carry temperatures.
-    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int room, bool temperatures)
+    // lines and columns: the places the page keeps for the volumes; temperatures: whether entries carry temperatures.
+    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int columns, bool temperatures)
     {
-        _colors = colors; _body = body; _caption = caption; _row = row; _room = Math.Max(1, room); _temperatures = temperatures;
+        _colors = colors; _body = body; _caption = caption; _row = row; _columns = Math.Max(1, columns);
+        _room = Math.Max(1, lines) * _columns; _temperatures = temperatures;
         Height = Math.Max(1, lines) * row;
         SnapsToDevicePixels = true;
     }
@@ -483,23 +486,21 @@ internal sealed class StorageBlock : FrameworkElement
     public void Set(IReadOnlyList<StorageDrive> drives, bool motion)
     {
         var rows = Storage.Rows(drives, _room, _temperatures);
-        bool same = rows.Count == _segments.Length && rows.Select(row => row.Segments.Count).SequenceEqual(_segments.Select(segments => segments.Length));
-        // New lines start from an empty bar, so a first reading grows into place as the page's other values do.
-        if (!same) _segments = [.. rows.Select(row => new Eased[row.Segments.Count])];
+        // New entries start from an empty bar, so a first reading grows into place as the page's other values do.
+        if (rows.Count != _used.Length) _used = new Eased[rows.Count];
         bool moving = false;
-        for (int i = 0; i < rows.Count; i++)
-            for (int s = 0; s < rows[i].Segments.Count; s++) moving |= _segments[i][s].Set(rows[i].Segments[s].Used, motion);
+        for (int i = 0; i < rows.Count; i++) moving |= _used[i].Set(rows[i].UsedFraction, motion);
         if (rows.Count > 0) _rows = rows;
         moving |= _shown.Set(rows.Count > 0 ? 1 : 0, motion);
         moving |= _heat.Set(rows.Any(row => row.Celsius is not null) ? 1 : 0, motion);
-        ToolTip = rows.Count == 0 ? null : string.Join("\n", rows.SelectMany(row => row.Drives).Select(Describe));
+        ToolTip = rows.Count == 0 ? null : string.Join("\n", drives.Select(Describe));
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
     }
     private bool Step(double now)
     {
         InvalidateVisual();
         if (_shown.Moving(now) || _heat.Moving(now)) return true;
-        foreach (var segments in _segments) foreach (var segment in segments) if (segment.Moving(now)) return true;
+        foreach (var used in _used) if (used.Moving(now)) return true;
         return false;
     }
 
@@ -540,20 +541,21 @@ internal sealed class StorageBlock : FrameworkElement
         double heatWidth = (MonitorDraw.Text("100", _body, UI.Primary, ppd, strong: true).WidthIncludingTrailingWhitespace + 2 + unitText.WidthIncludingTrailingWhitespace + space)
             * Math.Clamp(_heat.At(now), 0, 1);
         double glyph = Math.Round(badge * 9 / 16), labelX = badge + Math.Round(_body * .5), figureX = labelX + labels + space, barX = figureX + figures + space;
-        double barEnd = Math.Max(barX, w - heatWidth);
+        double cell = Math.Floor((w - ColumnGap * (_columns - 1)) / _columns);
+        double barEnd = Math.Max(barX, cell - heatWidth);
         for (int i = 0; i < _rows.Count; i++)
         {
             var row = _rows[i]; var t = texts[i];
-            double top = i * _row, baseline = Math.Round(top + _row / 2 + _body * .36), middle = top + _row / 2;
-            MonitorDraw.Arrow(drawing, new Point((badge - glyph) / 2, middle - glyph / 2), glyph, Math.Max(1, glyph * .13), MonitorGlyph.Drive, UI.Secondary);
-            MonitorDraw.Baseline(drawing, t.Label, labelX, baseline);
-            MonitorDraw.Baseline(drawing, t.Used, figureX, baseline);
-            MonitorDraw.Baseline(drawing, t.Size, figureX + t.Used.WidthIncludingTrailingWhitespace, baseline);
-            if (barEnd - barX >= 16) Bar(drawing, new Rect(barX, Math.Round(middle - 2), barEnd - barX, 4), row, i, now);
+            double left = i % _columns * (cell + ColumnGap), top = i / _columns * _row, baseline = Math.Round(top + _row / 2 + _body * .36), middle = top + _row / 2;
+            MonitorDraw.Arrow(drawing, new Point(left + (badge - glyph) / 2, middle - glyph / 2), glyph, Math.Max(1, glyph * .13), MonitorGlyph.Drive, UI.Secondary);
+            MonitorDraw.Baseline(drawing, t.Label, left + labelX, baseline);
+            MonitorDraw.Baseline(drawing, t.Used, left + figureX, baseline);
+            MonitorDraw.Baseline(drawing, t.Size, left + figureX + t.Used.WidthIncludingTrailingWhitespace, baseline);
+            if (barEnd - barX >= 16) Bar(drawing, new Rect(left + barX, Math.Round(middle - 2), barEnd - barX, 4), row, i, now);
             if (row.Celsius is { } celsius && heatWidth > 1)
             {
                 var number = MonitorDraw.Text(Temperatures.Format(celsius), _body, _colors.Level(row.Level, UI.Primary), ppd, strong: true);
-                double right = w - unitText.WidthIncludingTrailingWhitespace;
+                double right = left + cell - unitText.WidthIncludingTrailingWhitespace;
                 MonitorDraw.Baseline(drawing, unitText, right, baseline);
                 MonitorDraw.Baseline(drawing, number, right - 2 - number.WidthIncludingTrailingWhitespace, baseline);
             }
@@ -561,20 +563,12 @@ internal sealed class StorageBlock : FrameworkElement
         if (opacity < .999) drawing.Pop();
     }
 
-    // The volumes side by side, each its share of the bar, each filled to its own used share, as memory's bar is drawn.
+    // The space in use, as memory's bar is drawn.
     private void Bar(DrawingContext drawing, Rect r, StorageRow row, int index, double now)
     {
-        double radius = r.Height / 2, gaps = Gap * (row.Segments.Count - 1), x = r.X, room = Math.Max(0, r.Width - gaps);
-        var track = UI.Brush(UI.Track); var fill = UI.Brush(_colors.Storage);
-        var eased = index < _segments.Length ? _segments[index] : [];
-        for (int s = 0; s < row.Segments.Count; s++)
-        {
-            double width = s == row.Segments.Count - 1 ? r.Right - x : Math.Round(room * row.Segments[s].Width);
-            if (width <= 0) continue;
-            drawing.DrawRoundedRectangle(track, null, new Rect(x, r.Y, width, r.Height), radius, radius);
-            double used = Math.Clamp(s < eased.Length ? eased[s].At(now) : row.Segments[s].Used, 0, 1) * width;
-            if (used > .5) drawing.DrawRoundedRectangle(fill, null, new Rect(x, r.Y, Math.Max(r.Height, used), r.Height), radius, radius);
-            x += width + Gap;
-        }
+        double radius = r.Height / 2;
+        drawing.DrawRoundedRectangle(UI.Brush(UI.Track), null, r, radius, radius);
+        double used = Math.Clamp(index < _used.Length ? _used[index].At(now) : row.UsedFraction, 0, 1) * r.Width;
+        if (used > .5) drawing.DrawRoundedRectangle(UI.Brush(_colors.Storage), null, new Rect(r.X, r.Y, Math.Max(r.Height, used), r.Height), radius, radius);
     }
 }

@@ -23,6 +23,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | DeepSeek | ✓ | | Enter an API key in settings |
 | Kimi Code API | ✓ | | Enter a Kimi Code API key in settings |
 | OpenCode Go | ✓ | | Enter an OpenCode Console API key in settings |
+| OpenRouter | ✓ | | Enter an OpenRouter API key in settings |
 | New API, Sub2API relay sites | ✓ | | Enter the site address and key in settings |
 | Custom | ✓ | | Write a short JavaScript script |
 
@@ -45,7 +46,7 @@ When "Include usage from WSL" is turned on in Settings › Quotas and usage, Bri
 
 Rows whose quota source is Claude or Grok Bot can be expanded, and each row has its own "Fetch quota online" switch (on by default):
 
-- **On**: the app's sign-in on this PC is used to read the account quota online. If a read fails, the last successful reading or the quota the desktop app recorded on this PC is shown, with its time.
+- **On**: the app's sign-in on this PC is used to read the account quota online. If a read fails, the last successful reading or the quota the desktop app recorded on this PC is shown, with its time. For Claude it is still shown after restarting BrimDeck, for the same account. When Claude's account API answers that there are too many requests (429), requests pause for the wait it names (a wait over 7 days is taken as invalid), or for 2, 4, 8 and 16 minutes in turn (30 at most) when it names none. No request goes out each minute during the pause, a manual refresh does not go round it, and the status gives the time of the next request.
 - **Off**: no sign-in is read and nothing is sent; only the latest quota the desktop app recorded on this PC is shown. This data is marked as old and does not trigger quota alerts.
 
 ## Grok Bot
@@ -85,7 +86,7 @@ The OpenCode CLI and desktop app share one data folder (`%USERPROFILE%\.local\sh
 
 ## Sources entered by hand
 
-Choose Zhipu GLM, Z.ai GLM, DeepSeek, Kimi Code API, OpenCode Go, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
+Choose Zhipu GLM, Z.ai GLM, DeepSeek, Kimi Code API, OpenCode Go, OpenRouter, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
 
 - **Key**: stored on this PC, encrypted by Windows, and never written to the settings file. It is deleted when you remove the column or change its quota source.
 - **Site address**: the home page address is enough. A trailing `/v1`, or the path of a console page you paste, is removed automatically. Requests carry the API key, so the address must use HTTPS; HTTP is only for this PC (`localhost`, `127.0.0.1`, `[::1]`).
@@ -108,6 +109,10 @@ Enter an API key created in the Kimi Code console (starting with `sk-kimi-`); Ki
 ### OpenCode Go
 
 Enter an API key created in OpenCode Console (starting with `oc_sk_`); OpenCode does not need to be installed or signed in on this PC. Shows the OpenCode Go allowance of the key's workspace, the same as the automatic OpenCode source: the 5-hour, weekly and monthly limits. When the workspace has no OpenCode Go plan, the status says so. No token usage is counted.
+
+### OpenRouter
+
+Enter an API key created on OpenRouter (starting with `sk-or-v1-`). Shows the account balance (credits purchased minus credits used) and what this key has been charged today and this month, in US dollars. Today and this month follow UTC, so they reset at midnight UTC. When the key has a credit limit, its remaining amount and reset time are shown too; when an account admin has set a budget, the budget that limits requests first is shown instead. No token usage is counted.
 
 ### New API
 

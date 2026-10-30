@@ -11,6 +11,8 @@ namespace BrimDeck.Native;
 // (https://github.com/Nongfsq/ftop, MIT License; see ThirdPartyNotices.txt): one provider per module keeps the counters
 // it needs for deltas and returns a Reading; nothing here throws; listing processes, the costliest reading, runs every
 // other tick. The readings themselves are the Windows ones Task Manager shows.
+// A guarded reading (SensorGuard) that never answers holds the thread it was asked on for good; the sampler then starts another
+// thread with providers of its own, and the old one ends should the driver ever answer (ReadingAbandoned).
 internal sealed class SystemSampler : IDisposable
 {
     // Reopening the page within this time finds the sampler still running and the readings current.
@@ -23,18 +25,33 @@ internal sealed class SystemSampler : IDisposable
     private readonly DispatcherTimer _linger;
     private readonly AutoResetEvent _wake = new(false);
     private Thread? _thread;
-    private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses;
+    // Raised when a thread is replaced: only the thread of the current generation reads.
+    private int _generation;
+    private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses, _primePower;
     private volatile int _intervalMilliseconds = 1000;
     // The providers belong to the sampling thread, which creates them: adding the performance counters can take tens of
-    // milliseconds, which the panel must not wait for. Only HoldProcesses reaches them from the UI thread.
-    private PdhQuery? _pdh;
+    // milliseconds, which the panel must not wait for. Only HoldProcesses reaches them from the UI thread. The thermal zones and the
+    // power meter have queries of their own (_zonesPdh, _meterPdh), so a stuck collection is known to be theirs.
+    private PdhQuery? _pdh, _zonesPdh, _meterPdh;
     private CpuProvider? _cpu;
     private GpuProvider? _gpu;
     private ThermalZones? _zones;
-    private readonly GpuTemperatures _gpuTemperatures = new();
+    private GpuTemperatures? _gpuTemperatures;
     private readonly StorageReader _storage = new();
     // Whether the processor's and the graphics adapter's temperatures are read, the drives, and the drives' temperatures (SetExtras).
-    private volatile bool _temperatures, _storageWanted, _driveTemperatures;
+    // _powerWanted: the whole machine's power (the Energy Meter counters, NVIDIA's board power); _batteryWanted: the battery alone, which
+    // the machine's charge reading needs without any of the rest.
+    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted, _batteryWanted;
+    // The whole machine's power and the machine's battery (PowerProvider, BatteryProvider), made on the sampling thread.
+    private PowerProvider? _power;
+    private BatteryProvider? _battery;
+    private readonly Queue<double> _powerHistory = new(HistoryLength);
+    private readonly PowerStats _powerStats = new(HistoryLength);
+    // Where the last whole-machine figure came from: the peak and mean (of the curve's readings) start over when it changes (plugged in
+    // or out), so a measurement and an estimate are never counted together. The curve keeps its readings.
+    private PowerSource? _powerSource;
+    // The processor's and the graphics' own power, read with the whole machine's, for the page's power line when it shows one of them.
+    private readonly PowerTrail _cpuPower = new(HistoryLength), _gpuPower = new(HistoryLength);
     private readonly NetworkProvider _network = new();
     private readonly ProcessProvider _processes = new();
     private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
@@ -84,54 +101,86 @@ internal sealed class SystemSampler : IDisposable
         _linger.Stop();
         if (_wanted) return;
         _wanted = true;
-        if (_thread is null)
-        {
-            _thread = new Thread(Run) { IsBackground = true, Name = "BrimDeck system monitor", Priority = ThreadPriority.BelowNormal };
-            // The shell's icon lookup (ProcessIcons) needs a single-threaded apartment.
-            _thread.SetApartmentState(ApartmentState.STA);
-            _thread.Start();
-        }
+        if (_thread is null) StartThread(0);
         else _wake.Set();
+    }
+
+    private void StartThread(int generation)
+    {
+        var thread = new Thread(() => Run(generation)) { IsBackground = true, Name = "BrimDeck system monitor", Priority = ThreadPriority.BelowNormal };
+        // The shell's icon lookup (ProcessIcons) needs a single-threaded apartment.
+        thread.SetApartmentState(ApartmentState.STA);
+        _thread = thread;
+        thread.Start();
+    }
+
+    // A guarded reading on the thread of this generation did not answer (SensorGuard): another thread takes over, and the reading
+    // is not asked again. Called on the guard's thread.
+    private void Replace(int generation)
+    {
+        if (_disposed || Interlocked.CompareExchange(ref _generation, generation + 1, generation) != generation) return;
+        StartThread(generation + 1);
     }
 
     // Called on the UI thread with what the panels show: temperatures, the processor's and the graphics adapter's (the expanded page
     // with temperatures on, or the collapsed row's temperature); storage, the drives (the page with storage on, or the collapsed
     // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
     // page knows early how many lines it needs for them.
-    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures)
+    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false)
     {
-        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures;
+        bool newly = power && !_powerWanted;
+        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power; _batteryWanted = power || battery;
+        // Power asked for while the sampler already runs (the collapsed row's readings kept it going): the counters are read at once and again
+        // after the short priming window, so the first figure comes with the next snapshot and not a second reading later.
+        if (newly && _wanted && _thread is not null) { _primePower = true; _wake.Set(); }
         if (storage && (_storage.Drives == SensorState.Unknown || _driveTemperatures && _storage.Temperatures == SensorState.Unknown)) _storage.Start(_driveTemperatures);
     }
     // Whether the processor's zones, the graphics adapters and the drives have given temperatures, and whether drives were found and
     // how many (-1 until read); the page keeps room for what has turned up or has not been asked yet.
     public SensorState CpuSensor => _zones?.State ?? SensorState.Unknown;
-    public SensorState GpuSensor => _gpuTemperatures.State;
+    public SensorState GpuSensor => _gpuTemperatures?.State ?? SensorState.Unknown;
     public SensorState DriveSensor => _storage.Temperatures;
     public SensorState StorageState => _storage.Drives;
     public int StorageCount => _storage.Count;
+    // Whether the machine gives a power reading and has a battery of its own; Unknown until read.
+    public SensorState PowerSensor => _power?.State ?? SensorState.Unknown;
+    public SensorState BatterySensor => _battery?.State ?? SensorState.Unknown;
 
-    private void Run()
+    // generation: the thread's own; a thread replaced (Replace) leaves its providers to the thread stuck in them.
+    private void Run(int generation)
     {
         // Without performance counters (the library is missing or broken) the processor falls back to the kernel's times
         // and the GPU reads as unavailable; nothing here may end the process.
-        try { _pdh = new PdhQuery(); }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { Debug.WriteLine(ex); }
+        static PdhQuery? Query()
+        {
+            try { return new PdhQuery(); }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { Debug.WriteLine(ex); return null; }
+        }
+        Action stuck = () => Replace(generation);
+        _pdh = Query(); _zonesPdh = Query(); _meterPdh = Query();
         _cpu = new CpuProvider(_pdh);
         _gpu = new GpuProvider(_pdh);
-        _zones = new ThermalZones(_pdh);
+        _zones = new ThermalZones(_zonesPdh, stuck);
+        _power = new PowerProvider(_meterPdh, stuck);
+        _gpuTemperatures = new GpuTemperatures(stuck);
+        _battery = new BatteryProvider();
         bool primed = false, first = false;
-        while (!_disposed)
+        while (!_disposed && Volatile.Read(ref _generation) == generation)
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _storage.Rest(); _wake.WaitOne(); continue; }
-                if (!primed || _primeProcesses)
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _powerSource = null; _cpuPower.Clear(); _gpuPower.Clear(); _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _wake.WaitOne(); continue; }
+                bool primePower = _primePower;
+                _primePower = false;
+                if (!primed || _primeProcesses || primePower)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
-                    // figures cover the short window and not the whole pause.
+                    // figures cover the short window and not the whole pause. Power asked for while the sampler runs is primed the same way:
+                    // one collection now, and the next (the first snapshot) has the two samples a rate needs.
+                    bool primeProcesses = _primeProcesses;
                     _primeProcesses = false;
                     if (!primed) Collect(listProcesses: true);
+                    else if (primePower) Collect(listProcesses: primeProcesses && _listProcesses);
                     else if (_listProcesses) _processes.Sample(Now());
                     primed = true; first = true;
                     _wake.WaitOne(PrimeMilliseconds);
@@ -150,6 +199,8 @@ internal sealed class SystemSampler : IDisposable
                 });
                 _wake.WaitOne(_intervalMilliseconds);
             }
+            // The driver answered after this thread was replaced: the new thread reads now.
+            catch (ReadingAbandoned) { return; }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 // A reading that fails in an unexpected way is skipped; the page keeps its last figures.
@@ -164,6 +215,7 @@ internal sealed class SystemSampler : IDisposable
     private MonitorSnapshot Collect(bool listProcesses)
     {
         double now = Now();
+        bool meter = _power!.Prepare(_powerWanted);
         bool pdh = _pdh?.Collect() == true;
         if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; }
         else if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
@@ -179,15 +231,58 @@ internal sealed class SystemSampler : IDisposable
         bool temperatures = _temperatures;
         var cpu = _cpu!.Sample(pdh); var gpus = _gpu!.Sample(pdh);
         // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted.
-        if (_zones!.Sample(pdh, temperatures, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
+        if (_zones!.Sample(temperatures, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
         IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         var adapters = gpus.TryGet(out var read) ? Remember(read) : [];
+        // The machine's power and battery: read only while something shows them; the history and the peak start over once none does.
+        var power = Reading<PowerSample>.Unavailable(Why.Waiting);
+        var battery = Reading<BatterySample>.Unavailable(Why.Waiting);
+        bool powerWanted = _powerWanted, batteryWanted = _batteryWanted;
+        if (batteryWanted)
+        {
+            // Apart from the rest: a battery or a driver that fails in an unexpected way costs these two readings, never the page's.
+            try
+            {
+                var (batteryInputs, batterySample) = _battery!.Sample();
+                battery = batterySample;
+                if (powerWanted)
+                {
+                    power = _power!.Sample(meter, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present);
+                    if (power.TryGet(out var drawn))
+                    {
+                        if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
+                        if (_powerSource is { } last && last != drawn.Source) _powerStats.Reset();
+                        _powerSource = drawn.Source;
+                        _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts, now);
+                        if (PowerResolver.PartWatts(drawn, "cpu") is { } cpuWatts) _cpuPower.Add(cpuWatts, now);
+                        if (PowerResolver.PartWatts(drawn, "gpu") is { } gpuWatts) _gpuPower.Add(gpuWatts, now);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Debug.WriteLine(ex);
+                power = Reading<PowerSample>.Unavailable(ex.Message); battery = Reading<BatterySample>.Unavailable(ex.Message);
+            }
+        }
+        // Power no longer wanted (the page left, the row dropped the reading, the display went off): the counters leave the query, the
+        // NVIDIA helper ends and the history starts over, at this very reading and not after the sampler's pause.
+        if (!powerWanted)
+        {
+            if (_powerHistory.Count > 0) { _powerHistory.Clear(); _powerStats.Reset(); }
+            _powerSource = null;
+            _cpuPower.Clear(); _gpuPower.Clear();
+            _power!.Sample(false, false, now, [], default, false);
+        }
         var snapshot = new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network,
             Reading<GpuSample>.Unavailable(gpus.Reason), _lastProcesses)
         {
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
-            CpuHistory = _cpuHistory.ToArray(), Gpus = adapters, Storage = storage
+            CpuHistory = _cpuHistory.ToArray(), Gpus = adapters, Storage = storage,
+            Power = power, Battery = battery, PowerHistory = _powerHistory.ToArray(),
+            PowerSummary = _powerStats.Summary(now),
+            CpuPower = _cpuPower.Track(now), GpuPower = _gpuPower.Track(now)
         };
         var shown = WithGpu(snapshot, _autoGpu, out bool automatic);
         if (automatic && shown.Gpu.TryGet(out var gpu)) Volatile.Write(ref _autoGpu, gpu.Luid);
@@ -199,7 +294,9 @@ internal sealed class SystemSampler : IDisposable
     {
         if (!snapshot.Gpu.TryGet(out var gpu)) return snapshot;
         var working = snapshot.Gpus.Where(adapter => adapter.Usage > 0).Select(adapter => GpuReadings.LuidText(adapter.Luid)).Order(StringComparer.OrdinalIgnoreCase).ToList();
-        if (_gpuTemperatures.ReadFor(GpuReadings.LuidText(gpu.Luid), working, now) is not { } heat) return snapshot;
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var adapter in snapshot.Gpus) names.TryAdd(GpuReadings.LuidText(adapter.Luid), adapter.Name ?? "GPU");
+        if (_gpuTemperatures!.ReadFor(GpuReadings.LuidText(gpu.Luid), working, names, now) is not { } heat) return snapshot;
         var from = heat.Adapter == GpuReadings.LuidText(gpu.Luid) ? null : snapshot.Gpus.FirstOrDefault(adapter => GpuReadings.LuidText(adapter.Luid) == heat.Adapter);
         return snapshot with
         {
@@ -233,6 +330,9 @@ internal sealed class SystemSampler : IDisposable
         if (GpuChoice.Resolve(snapshot.Gpus, key, name, previousAuto, out automatic, out var upgrade) is not { } gpu) return snapshot;
         // A choice found by an older mark (a key saved before adapters had a location) is saved again under the adapter's key.
         if (upgrade is not null) _dispatcher.BeginInvoke(DispatcherPriority.Background, () => GpuKeyUpgraded?.Invoke(key!, upgrade));
+        // Only the adapter shown carries a temperature (WithTemperature), not its entry in Gpus: resolved again to the same
+        // adapter, the shown one is kept, or the temperature read for it would be lost on the way to the page.
+        if (snapshot.Gpu.TryGet(out var shown) && shown.Luid == gpu.Luid) gpu = shown;
         return snapshot with { Gpu = gpu, GpuHistory = gpu.History };
     }
     // Shows the newest readings again for a new choice of graphics adapter, at once instead of with the next reading.
@@ -255,7 +355,7 @@ internal sealed class SystemSampler : IDisposable
         _disposed = true; _wanted = false; _linger.Stop();
         _wake.Set();
         // The thread may be inside a reading; it ends on its own as a background thread if it does not stop in time.
-        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures.Dispose(); _wake.Dispose(); }
+        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _zonesPdh?.Dispose(); _meterPdh?.Dispose(); _power?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures?.Dispose(); _wake.Dispose(); }
     }
 }
 

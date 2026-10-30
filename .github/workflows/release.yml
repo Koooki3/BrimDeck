@@ -1,6 +1,7 @@
 name: Publish Windows release
-# v1.2.0 publishes a release from a commit on main. v1.2.0-alpha.1 and v1.2.0-beta.1 publish a prerelease from a commit
-# on dev; the app only offers releases, never prereleases. A tag on any other commit publishes nothing.
+# v1.2.0 publishes a release from a commit on main. v1.2.0-alpha.1 publishes a prerelease from a commit on dev, and
+# v1.2.0-beta.1 one from a commit on release/1.2.0, where the version is tested while dev moves on. The app only offers
+# releases, never prereleases. A tag on any other commit publishes nothing.
 on:
   push:
     tags: ['v*']
@@ -26,11 +27,11 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          if ($env:RELEASE_TAG -notmatch '^v(\d+\.\d+\.\d+(-(alpha|beta)\.\d+)?)$') {
+          if ($env:RELEASE_TAG -notmatch '^v((\d+\.\d+\.\d+)(-(alpha|beta)\.\d+)?)$') {
               throw 'Use v1.2.0 for a release, or v1.2.0-alpha.1 or v1.2.0-beta.1 for a prerelease.'
           }
-          $version = $Matches[1]; $prerelease = [bool]$Matches[2]
-          $branch = if ($prerelease) { 'dev' } else { 'main' }
+          $version = $Matches[1]; $prerelease = [bool]$Matches[3]
+          $branch = if ($Matches[4] -eq 'alpha') { 'dev' } elseif ($Matches[4] -eq 'beta') { "release/$($Matches[2])" } else { 'main' }
           git merge-base --is-ancestor HEAD "origin/$branch"
           if ($LASTEXITCODE -ne 0) { throw "$env:RELEASE_TAG must point to a commit on $branch." }
           "version=$version" >> $env:GITHUB_OUTPUT
@@ -86,3 +87,18 @@ jobs:
           $latest = @(if (!$prerelease) { '--latest' })
           gh release edit $env:RELEASE_TAG --draft=false @latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed.' }
+      # Copies that receive beta updates also read update.json from the beta-channel release. Each beta replaces it there;
+      # the first beta creates that release, as a prerelease that is never marked latest.
+      - name: Update beta channel
+        if: contains(needs.check.outputs.version, '-beta.')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          gh release view beta-channel *> $null
+          if ($LASTEXITCODE -ne 0) {
+              gh release create beta-channel --target $env:RELEASE_COMMIT --prerelease --latest=false --title 'Beta channel' --notes 'Points BrimDeck copies that receive beta updates to the newest beta. Download betas from their own releases.'
+              if ($LASTEXITCODE -ne 0) { throw 'The beta channel could not be created.' }
+          }
+          gh release upload beta-channel artifacts/releases/update.json --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'The beta channel could not be updated.' }

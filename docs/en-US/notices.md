@@ -9,15 +9,31 @@ Settings › Live notices › Turn on live notices (off by default). Then:
 - The open panel gains a "Notice history" page (bell icon, with a red dot while there are notices you have not seen; a notice that popped up but that you did not hover, open or see on the page still counts as unseen). It lists the notices kept, where each can be expanded, opened in its application or deleted; notices can be paused or cleared.
 - Notices take the [panel theme](themes.md): they share the surface, gradient, scan lines, rim, shadow or glow and text colors of the notch, capsule, indicator and open panel. A glowing theme flashes once as a notice arrives. An application's color only marks a small dot, the progress ring and its initial, adjusted to read clearly on the theme.
 
+## Arrival motion
+
+Once a notice has grown to size, its surface moves like a viscous liquid for a moment and settles back to its shape:
+
+- **Capsule**: both ends throw droplets and take them back as they refill; the glow along the top and bottom edges lights twice. The necks and droplets still joined to the body share its one continuous boundary (the rim, the gradient and the glass edge all follow it, with no line inside); a droplet that has parted has a boundary of its own.
+- **Notch**: the two lower corners swell and the bulges run round the outline (always within 5 DIPs of it); the bulges are part of the body's outline, and the glow lights twice along that outline, thinning towards the shoulders.
+- **Indicator bar**: no extra layer. The line first draws back a little (at most 5 DIPs), like a spring being loaded, and then grows into the card on the panel's opening spring; on the way back, once the card has returned to the line's place, it carries on a little past the line's length (at most 7 DIPs) and settles back. The size of the draw-back and the carry follows the weight of the notice.
+
+The capsule's and the notch's motion follows the weight of the notice: an ordinary notice plays as designed; a high priority one longer and with more droplets; an alarm, a call or an error stronger, in the warning or danger color; what only informs (a summary, an application set to low priority) lights briefly and throws a few droplets. The glow's and the droplets' colors and edges follow the [panel theme](themes.md); the pixel theme uses blocks. With animations off (BrimDeck's setting or Windows' own "animation effects") or in high contrast it does not play, and the notice is as it was; the capsule's and the notch's motion takes the display's frames only while it plays, about two seconds, and the indicator's is the panel's own animation; nothing otherwise. Quota alerts and track-change prompts are drawn by the island itself and do not play it.
+
+Notices follow the "Scale" setting (100% / 150%): their size, corners, droplets, glow and the indicator's draw-back and carry grow with it, as the collapsed form and the open panel do.
+
+The capsule's and the notch's liquid motion is the design "胶囊通知动效" provided for BrimDeck by the maintainer MoFeng2223 (<https://claude.ai/artifact/JU9bvJp5PPNY85vpGgUX6C>); the indicator bar's motion (the draw-back and the carry) and the adaptation to every kind of notice and every theme are BrimDeck's own implementation.
+
 ## Sources
 
 | Source | What it is | Default |
 |---|---|---|
 | Windows app notifications | The current user's notifications in Windows' notification center: source, icon, time and text. Messages inside applications are not read, and the notification center is never cleared or changed. | On |
+| brim-notify | `BrimDeck.Notify.exe` on Windows and `brim-notify` in WSL send notices directly. | On |
+| WSL desktop notifications | Standard desktop notifications (freedesktop D-Bus, such as `notify-send`) in the chosen distributions. | Off, per distribution |
 
 ### Windows: event log mode and polling
 
-As an ordinary desktop program BrimDeck gets no change events from Windows. Windows' push notification platform writes an entry to its log (Applications and Services Logs › Microsoft › Windows › PushNotification-Platform › Operational) for every notification delivered to the current user, and any user may subscribe to that log, so BrimDeck uses **event log mode** by default: about 0.1 s after each entry it reads the notification list; otherwise it reads it only every 60 seconds, with practically no idle cost. A new notice usually appears within 0.03–1 second (the log service hands entries over in batches about once a second).
+As an ordinary desktop program BrimDeck gets no change events from Windows. Windows' push notification platform writes an entry to its log (Applications and Services Logs › Microsoft › Windows › PushNotification-Platform › Operational) for every notification delivered to the current user, and any user may subscribe to that log, so BrimDeck uses **event log mode** by default: about 0.1 s after an entry (a batch of entries is taken together) BrimDeck reads the one notification it names by its id, checks that the id and the application match, and shows it at once. This does not wait for a reading of the whole list, not even the first one after starting or waking (after waking, an entry logged before that reading begins counts as arrived during sleep). An entry without a usable id or application, or a notification that cannot be read or belongs to another application, is left to a full reading instead. The whole list is read in the background: after starting, being granted access or waking (notices already there are not shown again; those that arrived during sleep are recorded as missed), every 60 seconds as a safety check, and to learn which notices were cleared. A clear entry does not say which notice went, so that reading comes at most every 30 seconds; after an entry or a lookup that could not be trusted it comes within about a second. A lookup Windows does not answer within 5 seconds (seen after waking) counts as a failure: BrimDeck takes the notification listener again and reads the whole list.
 
 When that log is turned off (by group policy, say), cannot be subscribed to or keeps failing, BrimDeck **polls** instead: every 2.5 seconds it checks for a new notification (about 2.5 ms of CPU) and reads the whole list every 15 seconds; a new notice usually appears within 0.2–2.6 seconds, at an idle cost of about 0.36% of one core. The status line in the settings shows which mode is in use.
 
@@ -51,6 +67,47 @@ The application id in a Windows notification does not always say which applicati
 - **Replaced notifications**: when an application updates its notification (QQ gathering new messages into one, for example), Windows removes the old one and adds a new one. If both come from the same application with the same title in the same reading, BrimDeck updates the existing notice instead of keeping two.
 - **Emoji**: WPF draws no color fonts, so emoji are monochrome; sequences joined from several emoji (a family, the rainbow flag) may show as a box, and flags as two letters. This is a platform limit; the text itself is unaffected.
 
+### WSL
+
+When you switch a distribution on under "WSL (off by default)", BrimDeck:
+
+- copies its notice agent to `~/.local/share/brimdeck/brimdeck-agent` of the distribution's default user, with `bridge.json` and a version stamp. The agent is built for x64 and ARM64, each with glibc (Ubuntu, Debian, Fedora and most others) and with musl (Alpine); BrimDeck picks the build by the distribution's `uname -m` and program loader. A distribution none of them runs on (32-bit ARM, RISC-V, or a C library at another place) is shown as not supported in the settings and is not tried again for 30 minutes;
+- adds `~/.local/bin/brim-notify`. It is updated only while its content is exactly what BrimDeck wrote; any other file of that name, or a symbolic link, is left alone and shown as a conflict in the settings (then use `~/.local/share/brimdeck/brimdeck-agent notify`). Every file is written to a new temporary file and renamed into place, so nothing is written through a link;
+- starts the agent through `wsl.exe` only while the distribution **already runs**. A distribution is never started for notices, WSL's configuration is not changed and the system's `notify-send` is not replaced. WSL 1 and WSL 2 distributions both work;
+- the agent is itself a `wsl.exe` session, and while it runs WSL does not stop the distribution or its virtual machine. So the agent looks once a minute: once the user has had no process in the distribution for 5 minutes other than the agent, WSL's init and relay processes and the session plumbing (`systemd --user`, `(sd-pam)`, `dbus-daemon`/`dbus-broker`) — terminals and background jobs both count — it ends by itself, and WSL stops the distribution and frees its memory as usual. The settings show that the agent ended. It connects again when the distribution has stopped and runs again; if the distribution keeps running for another reason, BrimDeck starts the agent again at most once every 30 minutes, never in a loop.
+
+The agent looks for the session bus in this order: `DBUS_SESSION_BUS_ADDRESS`, `$XDG_RUNTIME_DIR/bus`, `/run/user/<uid>/bus` (both only when owned by the user), and `~/.dbus/session-bus/<machine-id>-<display>` (a bus X11 autolaunched where there is no systemd). While there is none it looks again every 3 seconds.
+
+The agent adapts to the session bus:
+
+| Situation | What happens |
+|---|---|
+| No notification service | The agent becomes the session's standard notification service; the application's buttons appear in the details and are passed back to it |
+| Another service, watching allowed | The agent watches without replacing it; that service's buttons are not offered |
+| Another service, watching not allowed | Shown as a limitation; `brim-notify` still works |
+| No session bus | Shown as a limitation; `brim-notify` still works |
+
+As the notification service the agent says `body-markup`: markup in a body shows as plain text (tags removed, `&lt;` and the like decoded), while titles always show as sent. Notifications with an `x-canonical-private-synchronous`, `synchronous` or `x-dunst-stack-tag` hint (volume, brightness) update one notice per application and tag; those with the `transient` hint show as usual but are not kept with the saved notices. An icon that is a symbolic link within `/usr/share/icons` or `/usr/share/pixmaps`, leading only within them, shows as the file it leads to (Debian and Ubuntu install many theme icons that way); any other link is still not read.
+
+To remove it: switch the distribution off in settings, then delete `~/.local/share/brimdeck` and `~/.local/bin/brim-notify` in the distribution.
+
+## brim-notify
+
+```text
+# show a notice
+brim-notify "Build finished" --body "Tests passed"
+# run a command, then show its result (exit code and time)
+brim-notify run -- dotnet test
+# the same -r key updates the same notice (task progress)
+brim-notify "Deploying" -r deploy --progress 40
+# check that BrimDeck receives notices
+brim-notify status
+```
+
+Options: `-b/--body`, `-s/--source` (the source's name), `-c/--category` (message, task, success, warning, error, info), `-p/--priority` (low, normal, high — a hint; only "High" chosen by you for the application raises it), `-i/--icon` (a local icon file; a relative path is from the current folder, and in WSL a name without `/` that is no file in the current folder is looked up as an icon name), `--id` (shown once however often it is retried). On Windows the program is `BrimDeck.Notify.exe` in BrimDeck's folder.
+
+Exit codes: 0 delivered (or kept quiet by your rules), 1 usage error (a message over 64 KB even with its texts cut to BrimDeck's limits included), 2 refused (a `stop` that finds no timer, stopwatch or event with that key included), 3 BrimDeck is not running, live notices are off, or it did not answer in time (the notice may still show); `run` returns the program's own exit code. Titles and bodies are cut to BrimDeck's limits before they are sent.
+
 ## Time notices
 
 Alarms, timers, countdowns, mail and event reminders are recognized and shown by kind:
@@ -58,21 +115,45 @@ Alarms, timers, countdowns, mail and event reminders are recognized and shown by
 | Kind | From | Shown |
 |---|---|---|
 | Alarm | Windows Clock's notifications for alarms, finished timers and finished focus sessions | High priority; "Open app" returns to Clock |
+| Timer running (stopwatch) | `brim-notify stopwatch` | "Running 12:03", live; can be stopped |
+| Countdown | `brim-notify timer` | "24:59 left" with a ring, live; shows again when it ends (high priority); can be cancelled or reminded again in 5 minutes |
 | Alarm | Microsoft To Do reminders | As above |
-| Mail | New-mail notifications of Outlook (new and classic), Mail and Calendar, Thunderbird, Foxmail and others; notifications of web mail in a browser (Gmail, Outlook on the web, QQ Mail, NetEase Mail and others) | Ordinary notice |
-| Event | Reminders of Microsoft 365 Calendar and Mail and Calendar; Outlook notifications that read as reminders ("In 15 minutes", "Now", or a line starting with "3:00 PM - 3:30 PM"); Teams meeting reminders and "meeting started"; Google Calendar reminders in a browser and web mail notifications that read as reminders | High priority, "Starts in 14 min", "In progress" |
+| Mail | New-mail notifications of Outlook (new and classic), Mail and Calendar, Thunderbird, Foxmail and others; notifications of web mail in a browser (Gmail, Outlook on the web, QQ Mail, NetEase Mail and others); WSL desktop notifications with the `email` category | Ordinary notice |
+| Event | Reminders of Microsoft 365 Calendar and Mail and Calendar; Outlook notifications that read as reminders ("In 15 minutes", "Now", or a line starting with "3:00 PM - 3:30 PM"); Teams meeting reminders and "meeting started"; Google Calendar reminders in a browser and web mail notifications that read as reminders; `brim-notify event` | High priority, "Starts in 14 min", "In progress"; for `brim-notify event` BrimDeck itself reminds before the start |
 
 - Notices are sorted by the application's id (AUMID) and the notice's text, in memory on this PC; the original notification is not kept, and no mailbox or calendar is read. The sorting is heuristic: Outlook's and Teams' reminder wording varies by version and language, and what is not recognized shows as an ordinary notice.
 - Settings › Live notices › Time notices lists which of these applications this PC has (only whether they are installed; nothing is read from them). They remind through Windows notifications, so "Windows app notifications" needs to be on.
-- Alarms, ended countdowns and event reminders are high priority and are not held back by the "at most 3 in 10 seconds" limit, but at most 3 ring per minute from one source (each Windows application on its own); the rest wait their turn, so a script that sets many timers at once does not hold back another application's alarm. An application you set to muted or low priority stays quiet as usual. While locked, presenting or paused they only count toward the summary. An event entered more than 10 minutes after its start is recorded as an ordinary notice. Windows notifications that arrived while the PC slept are recorded, not shown, on waking, except reminders raised in the last 10 minutes or for an event starting within 10 minutes either way, which still alert. At most 200 events still to remind are kept; beyond that, the one BrimDeck received first is dropped from the source holding the most (and the log says so), so other applications' reminders are not affected.
+- Alarms, ended countdowns and event reminders are high priority and are not held back by the "at most 3 in 10 seconds" limit, but at most 3 ring per minute from one source (each Windows application on its own; brim-notify, and WSL applications, each share one); the rest wait their turn, so a script that sets many timers at once does not hold back another application's alarm. An application you set to muted or low priority stays quiet as usual. While locked, presenting or paused they only count toward the summary. An event entered more than 10 minutes after its start is recorded as an ordinary notice. Windows notifications that arrived while the PC slept are recorded, not shown, on waking, except reminders raised in the last 10 minutes or for an event starting within 10 minutes either way, which still alert. At most 200 timers, events still to remind and running stopwatches are kept; beyond that, the one BrimDeck received first is dropped from the source holding the most (and the log says so), so other applications' reminders are not affected.
 - The live words follow one shared second tick, which runs only while a running timer shows on the island or on the notice history page. Countdowns and events are worked out from the clock, again at once after waking or a change of the system time. A reminder missed by more than 10 minutes (asleep, BrimDeck not running) does not pop up; the list says "Ended at 15:30".
-- Limits: Windows does not share the Clock app's running timers, stopwatch or alarm list, nor the snooze and dismiss buttons of its notifications, so a Clock alarm shows only when it rings and cannot be snoozed from BrimDeck. Calendar sync (reading Outlook's or Windows' calendar directly) is not supported yet; the applications' own reminder notifications are used.
+- Limits: Windows does not share the Clock app's running timers, stopwatch or alarm list, nor the snooze and dismiss buttons of its notifications, so a Clock alarm shows only when it rings and cannot be snoozed from BrimDeck; for a timer on the island use `brim-notify timer`. Calendar sync (reading Outlook's or Windows' calendar directly) is not supported yet; the applications' own reminder notifications are used.
+
+```text
+# count down 25 minutes, then remind (also 1h30m, 90s)
+brim-notify timer 25m "Focus"
+# count down to 15:30
+brim-notify timer --at 15:30 "Meeting"
+# a stopwatch showing the time elapsed
+brim-notify stopwatch "Build" -r build
+# stop the stopwatch, or cancel a countdown or event (same -s source as sent)
+brim-notify stop build
+# an event: reminds 10 minutes before and at its start
+brim-notify event "Weekly" --at 15:00 --remind 10m --ends 16:00
+# mark a plain notice as mail (or alarm)
+brim-notify "New mail" --kind mail
+```
+
+- Times: `15:30` (the next 15:30) or a date and time such as `YYYY-MM-DD 15:30`, read in **Windows' time zone** (also from a WSL distribution set to another zone); or ISO 8601 with an offset, such as `YYYY-MM-DDT15:30:00+08:00`. A local time skipped by a daylight saving change moves to just after the change; a local time it repeats means the earlier of the two.
+- Durations: `90s`, `25m`, `1h30m`, `2d`; countdowns from 1 second to 31 days, reminders at most 7 days ahead of the start, times from 1 day ago to 1 year ahead. A duration counts from when BrimDeck receives it, whatever the WSL clock says.
+- Without `-r` a key is made up and printed on standard output, for `brim-notify stop KEY`; sending again with the same `-r` starts it over.
+- Countdowns and events still running continue after a restart while "Keep notice history" is on; an event not reminded yet is not removed by the retention.
 
 ## How notices show
 
 - A notice never takes the keyboard focus, and never pops up over the open panel or details you are using; while the panel is open, the bell only gets its red dot.
 - It stays 6 seconds, 8 for high priority; hovering, opening the details or working it from the keyboard pauses the time.
 - Notices from one application within 0.8 seconds become one notice with a count; at most 3 notices pop up per 10 seconds, the rest go to the notice history; a normal notice that waited over 30 seconds is not shown late; a merged notice stays at most twice its duration.
+- Notices from brim-notify and WSL are judged by when their sender wrote them: a message that had already waited over 30 seconds (5 minutes for high priority) when it was sent only goes to the notice history, unviewed, and does not pop up. The sender measures the wait by its own clock, so a WSL clock that differs from Windows' does not mislead it; time-kind notices follow their own reminder times. The same message (same event id) delivered again after BrimDeck restarts is neither recorded twice nor shown while the notice history still hold it.
+- A notice updated with `-r` takes the time of the latest message: it pops up as "Just now", not with the time of the notice it replaced.
 - A notice that arrives under a resting pointer does not open its details by itself: move away and back, or click.
 - Order: what you are working with > high priority notices > other notices > quota alerts > track changes. Alarms, ended countdowns and event reminders are high priority (see "Time notices").
 - Nothing is shown while the session is locked or switched, while the panels are hidden or hidden by a full-screen rule. During a Windows focus session, presentation mode and BrimDeck's own pause nothing pops up; afterwards one summary shows how many arrived. Windows' separate "Do not disturb" switch has no public interface and is not detected; use BrimDeck's pause instead.
@@ -83,19 +164,21 @@ Alarms, timers, countdowns, mail and event reminders are recognized and shown by
 
 - Notice history is kept for 24 hours, at most 500, encrypted with Windows' per-user data protection (DPAPI) in the `notices` folder of BrimDeck's install folder (opened to the current user only; `%LOCALAPPDATA%\BrimDeck\notices` when the install folder cannot be written to). Keeping them can be switched off (memory only: then no application icons are kept on disk either), and the period and folder changed; they can be cleared at any time, or automatically on exit, daily or weekly (daily and weekly clearing keep timers and events still to remind and running stopwatches). A reminder that rang or a stopwatch that stopped is kept for the retention from that moment.
 - Changing the folder adds the notices already in the new folder to the list, writes it there, and only then removes the old file. A folder that is a link, belongs to another account, or lets other accounts change its files is neither read nor written, and the settings say why; for the last, "Make it mine only" in the settings opens the folder to the current user and the system only. A folder on a network location (a NAS, a Samba share) is only checked for being a link, since its owner is an account of the server. The folder is checked once when it is chosen or changed, in the background, so a network location that does not answer never holds up the settings; before every read and write BrimDeck checks again that neither the folder nor `notices.dat` is a link, and a `notices.dat` that is a link is never read. When the saved file cannot be reached for now (in use, its drive or network location not available), BrimDeck tries again later and writes nothing until then, so the full list is never overwritten; notices deleted or cleared meanwhile do not come back once the file is read. A file that is actually damaged offers to be cleared; one this account may not read (made by BrimDeck running as administrator, say) offers both trying again and clearing. Every save is on the disk itself before it replaces the old file, so a power cut does not leave a damaged file.
-- Deleting or clearing removes BrimDeck's own records only and tells no source. Switching notices off or clearing also cancels what shows and everything waiting to show.
+- Deleting or clearing removes BrimDeck's own records only and tells no source. Only closing a notice (its close button or Esc) reports a WSL desktop notification as dismissed by the user, as closing a desktop notification bubble does. Switching notices off or clearing also cancels what shows and everything waiting to show.
 - Raw notification content, attachments and pictures are never saved. Icons come only from Windows or local files; nothing is downloaded. Network paths, links and shortcuts as icons are refused.
 - The diagnostic log `notices.log` holds only error types, codes and code locations, never titles or bodies.
-- A notice's content is only ever shown as text: it is never run and its links are never opened.
+- The local channel accepts only the current user on this PC (a named pipe that refuses network access). A notice's content is only ever shown as text: it is never run and its links are never opened.
 - Each application can be set to Off, Muted (notice history only), Normal or High, and to show "Title and summary", "Title only" or "App only" on arrival.
 
 ## Compatibility (tested)
 
 | Case | Result |
 |---|---|
-| Windows 11 (26300) | Snapshot readable; change events unavailable, so event log mode, end to end 0.03–1 s; polling while the log is off, end to end 0.2–2.3 s |
+| Windows 11 (26300) | Snapshot readable; change events unavailable; event log mode reads by TrackingId and reconciles the full list periodically and after dismissals; polling remains the fallback |
 | Icons of Windows notifications | Packaged apps give their icon; otherwise the application's initial |
 | Opening the source application | Packaged apps through the app list; desktop apps by the id registered with their Start menu shortcut; otherwise the details say so |
+| WSL Ubuntu 26.04 (systemd session bus, no notification service) | The agent serves; gdbus/notify-send notices show; buttons send `ActionInvoked` and `NotificationClosed` back |
+| WSL with another notification service | Watched, with correct notification ids and closes |
 | Several monitors (negative coordinates, 125% secondary) | Shows on the foreground window's monitor, placed and scaled correctly |
 | 8 built-in themes × notch, capsule, indicator | Each checked by eye |
 

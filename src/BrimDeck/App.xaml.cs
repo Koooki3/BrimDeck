@@ -38,11 +38,13 @@ public partial class App : Application
     internal LyricsService Lyrics { get; private set; } = null!;
     // A window being dragged by its title bar or edge; the panels do not open on it (see MainWindow.TrackPointer).
     internal WindowDrags WindowDrags { get; private set; } = null!;
-    private readonly HashSet<MainWindow> _presentingMedia = [];
+    private readonly HashSet<MainWindow> _presentingMedia = [], _presentingSystemAudio = [];
     // The system monitor page's readings, shared by every panel; created when a panel first shows the page.
     internal SystemSampler? Monitor { get; private set; }
     internal event Action<MonitorSnapshot>? MonitorUpdated;
     private readonly HashSet<MainWindow> _presentingMonitor = [], _stripMonitor = [];
+    // The panels whose open monitor page shows the power line (PresentMonitor): the power is read for those, and for a row that chose it.
+    private readonly HashSet<MainWindow> _presentingPower = [];
     public CancellationTokenSource Lifetime { get; } = new();
     public bool Exiting { get; private set; }
 
@@ -84,6 +86,8 @@ public partial class App : Application
         RecordCrashes();
         var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
         Store = new SettingsStore(folder); Settings = Store.Load();
+        // Before anything is read: a reading left unanswered when the last run ended stops now (SensorGuard).
+        SensorGuard.Start(folder);
         UseLanguage();
         PanelTheme.Use(Settings);
         ScheduleDaylight();
@@ -112,6 +116,9 @@ public partial class App : Application
         Notices.ApplySettings();
         InitializeHotkeys();
         StartBackgroundUpdates();
+        // Only for a user who has the monitor page with its power line: the rest never open it.
+        if (Settings.MonitorPage && Settings.MonitorPower) PowerWarm.Start(Dispatcher);
+        WarmSettingsWriter();
         DisplayPower.Install(Dispatcher);
         _save.Tick += (_, _) => FlushSettings();
         _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden)
@@ -290,21 +297,27 @@ public partial class App : Application
     internal void StartMedia()
     {
         bool wanted = Settings.MediaWanted;
-        if (wanted && Media is null) { Media = new MediaSessions(Dispatcher); Media.Changed += RaiseMediaChanged; _ = Media.StartAsync(); }
+        if (wanted && Media is null) { Media = new MediaSessions(Dispatcher); Media.Changed += RaiseMediaChanged; Media.SetPresentationActive(_presentingMedia.Count > 0, _presentingSystemAudio.Count > 0); _ = Media.StartAsync(); }
         else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
+        // Switching the setting off leaves full control on until BrimDeck restarts.
+        if (Settings.AppleMusicFullControl && Media is { AppleMusicFullControl: false } media) media.EnableAppleMusicFullControl();
+        if (Media is not null) Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl;
     }
     private void RaiseMediaChanged() => MediaChanged?.Invoke();
-    // Audio levels are read while any panel shows music.
-    internal void PresentMedia(MainWindow deck, bool active)
+    // Audio levels are read while any panel shows music: the player's while it shows a song's bars, the whole system's while
+    // it shows collapsed bars at all times and no song plays.
+    internal void PresentMedia(MainWindow deck, bool active, bool system)
     {
         if (active) _presentingMedia.Add(deck); else _presentingMedia.Remove(deck);
-        Media?.SetPresentationActive(_presentingMedia.Count > 0);
+        if (system) _presentingSystemAudio.Add(deck); else _presentingSystemAudio.Remove(deck);
+        Media?.SetPresentationActive(_presentingMedia.Count > 0, _presentingSystemAudio.Count > 0);
     }
     // The system is read while any panel shows the monitor page open (and briefly after; see SystemSampler) or shows readings in
     // its collapsed row. Processes are listed only for an open page.
-    internal void PresentMonitor(MainWindow deck, bool page, bool strip)
+    internal void PresentMonitor(MainWindow deck, bool page, bool strip, bool power = false)
     {
         if (page) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
+        if (power) _presentingPower.Add(deck); else _presentingPower.Remove(deck);
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
         bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
         if (Exiting || Monitor is null && !wanted) return;
@@ -316,8 +329,9 @@ public partial class App : Application
             // A choice saved under an older key is kept under the adapter's key from now on (GpuChoice.Resolve).
             Monitor.GpuKeyUpgraded += (old, key) => { if (Settings.MonitorGpu == old) { Settings.MonitorGpu = key; QueueSave(); } };
         }
-        Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
+        // What is read besides the usage is set before the sampler starts, so its first collection already holds it.
         UpdateMonitorExtras();
+        Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
     }
     // Temperatures and drives are read for an open page with them on; also for a collapsed row showing them: the processor's and
     // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
@@ -332,7 +346,26 @@ public partial class App : Application
         bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
         Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
             page && Settings.MonitorStorage || stripDrives,
-            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage));
+            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage),
+            // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
+            // alone also for the row's charge reading.
+            _presentingPower.Count > 0 && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
+            (shown & CompactMonitorItems.Charge) != 0);
+    }
+    // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
+    // source nor a battery (a desktop with nothing), so such a page does not keep asking.
+    private bool PowerKnownToExist => Monitor is null || Monitor.PowerSensor != SensorState.None || Monitor.BatterySensor != SensorState.None || Native.BatteryProvider.SystemHasBattery;
+    // The first save of a session took about 115 ms on the UI thread (the serializer's first use), which landed 400 ms after the first opening
+    // of a page (the last page is saved then) as a stall in its animation. Once the app is idle a pool thread serializes a copy of the
+    // settings once, so the first real save finds the serializer ready.
+    private void WarmSettingsWriter()
+    {
+        var copy = Settings.Copy();
+        Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try { copy.Normalize(); System.Text.Json.JsonSerializer.SerializeToNode(copy); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine(ex); }
+        }));
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
@@ -381,7 +414,7 @@ public partial class App : Application
     {
         // The notices save their last state before the settings are written for the last time.
         Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Monitor?.Dispose(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        Media?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

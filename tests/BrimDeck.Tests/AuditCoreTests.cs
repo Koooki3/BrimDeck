@@ -29,12 +29,8 @@ internal static class AuditCoreTests
         finally { Loc.Use(language); }
     }
 
-    // A notice from a sender that names itself, with the sender's own event id, as a message gives it.
-    private static NoticeInput Cli(string name, string? eventId, string title = "t", NoticeTiming? timing = null) => new()
-    {
-        Origin = NoticeOrigin.Cli, AppKey = NoticeKeys.Cli(null, name), AppName = name, InstanceKey = $"cli::{name}:{eventId ?? Guid.NewGuid().ToString("N")}",
-        EventId = eventId, Title = title, Timing = timing
-    };
+    private static NoticeInput Cli(string name, string? eventId, string title = "t", NoticeTiming? timing = null) => NoticeIntake.FromPipe(
+        new NoticeMessage { AppName = name, EventId = eventId, Title = title }, T0) with { Timing = timing };
 
     private static NoticeInput Wsl(string app, string native, string title = "t") => new()
     {
@@ -65,6 +61,11 @@ internal static class AuditCoreTests
         var a = hub.Receive(Cli("A", "job1", "构建完成"), T0).Notice!;
         var b = hub.Receive(Cli("B", "job1", "部署失败"), T0.AddSeconds(1));
         check("core-M1: the same --id from another -s is another notice", b is { Receipt: NoticeReceipt.Accepted } && a.Title == "构建完成" && a.AppKey == "cli:A" && hub.Notices.Count == 2);
+        var blank1 = NoticeIntake.FromPipe(new NoticeMessage { AppName = "A", EventId = "" });
+        var blank2 = NoticeIntake.FromPipe(new NoticeMessage { AppName = "A", EventId = " " });
+        check("core-M1: a blank --id is no id: each notice is its own", blank1.InstanceKey != blank2.InstanceKey && blank1.EventId is null && blank2.EventId is null);
+        hub.Receive(blank1, T0.AddSeconds(2)); hub.Receive(blank2, T0.AddSeconds(3));
+        check("core-M1: notices with blank ids do not replace each other", hub.Notices.Count == 4);
 
         var wsl = new NoticeHub();
         var thunderbird = wsl.Receive(Wsl("Thunderbird", "1", "昨天的邮件"), T0).Notice!;
@@ -77,17 +78,16 @@ internal static class AuditCoreTests
         restarted.Load(wsl.Notices.Select(n => n.Copy()), [], T0.AddMinutes(3));
         var again = restarted.Receive(Wsl("Thunderbird", "1", "今天的邮件"), T0.AddMinutes(4));
         check("core-H2: after a restart the same number names a new notification", again.Receipt == NoticeReceipt.Accepted && restarted.Notices.Count(n => n.AppName == "Thunderbird") == 2);
+
+        var pipe = NoticeIntake.FromPipe(new NoticeMessage { Title = "x", Distro = @"..\server" });
+        check("sec-L4: a pipe sender's distribution label must be a WSL name", pipe.Distro is null && pipe.AppKey == "cli:brim-notify");
     }
 
     private static void LateAndMissed(Action<string, bool> check)
     {
         var hub = new NoticeHub();
         var china = TimeZoneInfo.CreateCustomTimeZone("Test/China2", TimeSpan.FromHours(8), "Test", "Test");
-        var past = new NoticeInput
-        {
-            Origin = NoticeOrigin.Cli, AppKey = "cli:brim-notify", AppName = "brim-notify", InstanceKey = "cli::brim-notify:past", Title = "站会",
-            Timing = NoticeTimeIntake.Resolve(new NoticeMessage { Kind = "event", Title = "站会", At = "2026-10-24 09:00" }, T0.AddHours(6), china)
-        };
+        var past = NoticeIntake.FromPipe(new NoticeMessage { Kind = "event", Title = "站会", At = "2026-10-24 09:00" }, T0.AddHours(6), china);
         var outcome = hub.Receive(past, T0.AddHours(6));
         check("core-L1: an event entered long after its start is an ordinary notice", outcome.Notice!.Priority == NoticePriority.Normal
             && !NoticeClock.Alerting(outcome.Notice.Timing, T0.AddHours(6)) && NoticeClock.Alerting(outcome.Notice.Timing, outcome.Notice.Timing!.StartsAt!.Value.AddMinutes(5)));
@@ -175,6 +175,8 @@ internal static class AuditCoreTests
         check("sec-L4: emoji sequences keep their joiner; plain text is unchanged", NoticeText.Clean("👩\u200D💻") == "👩\u200D💻" && NoticeText.Clean("普通 text") == "普通 text");
         var words = NoticeHub.Words(new NoticeInput { Origin = NoticeOrigin.Cli, AppKey = "cli:x", AppName = "x", InstanceKey = "i", Title = "Out\u2028look\u200B", Body = "b" });
         check("sec-L4: a title cannot be stretched to fake lines", words.Title == "Out look");
+        check("sec-L4: application names are cleaned", NoticeIntake.FromPipe(new NoticeMessage { AppName = "Out\u200Blook" }).AppName == "Outlook"
+            && NoticeIntake.FromPipe(new NoticeMessage { AppName = "\u200B" }).AppName == "brim-notify");
     }
 
     private static void HistoryFile(string root, Action<string, bool> check)

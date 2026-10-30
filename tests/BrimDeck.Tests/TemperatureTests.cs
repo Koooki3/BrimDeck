@@ -136,7 +136,13 @@ static class TemperatureTests
         var copy = saved.CompactReadings.Single(r => r.Item == Cpu).Copy();
         copy.Figures!.Clear();
         check("Compact figures: a copied reading has its own choice", saved.CompactReadings.Single(r => r.Item == Cpu).Figures!.Count == 2);
+        var inLine = SettingsMigrations.Read("""{"AppVersion":"1.2.0","CompactReadings":[{"Item":2,"FiguresInLine":true},{"Item":4,"FiguresInLine":true},{"Item":128}]}""");
+        check("Compact figures: one above the other by default, side by side kept where a reading has figures", saved.CompactReadings.All(r => !r.FiguresInLine)
+            && inLine.CompactReadings.Single(r => r.Item == Cpu).FiguresInLine && !inLine.CompactReadings.Single(r => r.Item == CompactMonitorItems.Memory).FiguresInLine
+            && !inLine.CompactReadings.Single(r => r.Item == Storage_).FiguresInLine);
         var off = SettingsMigrations.Read("""{"AppVersion":"1.2.0","MonitorTemperatures":false}""");
         check("Temperatures setting: saved off stays off", !off.MonitorTemperatures);
+        var on = SettingsMigrations.Read("""{"AppVersion":"1.2.0","MonitorTemperatures":true}""");
+        check("Temperatures setting: off by default, saved on stays on", !new DeckSettings().MonitorTemperatures && on.MonitorTemperatures);
     }
 }

@@ -30,6 +30,9 @@ internal static class EqualizerSignalTests
         var flowing = new EqualizerSignal(Rate);
         var played = Play(flowing, t => Sine(t, 220, .3) + Hits(t, 60, .5, .7, .08), 4);
         double now = played[^1].Time;
+        var levels = new double[CompactMusicLayout.MaximumBars];
+        flowing.Fill(levels, now);
+        check("Every one of the most bars has a value while audio plays, the last one too", levels.All(level => level > 0));
         for (int n = 1; n <= 100; n++) flowing.Advance(now + n / 100d);
         check("The bars fall when the player stops sending audio", played.Max(h => h.Head) > .2 && flowing.Head < .05);
     }

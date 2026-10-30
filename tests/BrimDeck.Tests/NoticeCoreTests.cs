@@ -10,12 +10,13 @@ internal static class NoticeCoreTests
     public static void Run(string root, Action<string, bool> check)
     {
         Hub(check);
+        LateAndRestart(root, check);
         Coordinator(check);
         History(root, check);
         Geometry(check);
         Motion(check);
         Routing(check);
-        IconRefs(check);
+        Intake(check);
         Pages(check);
         SettingsValues(root, check);
         AuditCoreTests.Run(root, check);
@@ -104,6 +105,65 @@ internal static class NoticeCoreTests
     }
 
     // A Claude Code hook in WSL: brim-notify with one replace key per session, through the distribution's agent.
+    private static NoticeMessage Hook(string eventId, string body, DateTimeOffset created, long? ageMs, string category = "success") => new()
+    {
+        Origin = "cli", AppName = "Claude Code", Title = "Claude Code · demo", Body = body, Category = category, ReplaceId = "claude-code:s1",
+        EventId = eventId, CreatedAt = created, AgeMs = ageMs
+    };
+
+    // BrimDeck restarted: the saved notices come back, then the WSL hook keeps sending, early or late.
+    private static void LateAndRestart(string root, Action<string, bool> check)
+    {
+        var before = new NoticeHub();
+        var first = before.Receive(NoticeIntake.FromAgent(Hook("ev1", "done", T0, 0), "Ubuntu", false), T0);
+        check("A fresh hook notice is shown and keeps its event id", first.Present && first.Notice!.EventId == "ev1");
+        var history = new NoticeHistory(Path.Combine(root, "notices-restart"), new NoticeHistory.PlainProtector());
+        history.Save(before.Notices, before.KnownApps);
+        history.Load(out var saved, out var apps);
+        check("A notice's event id is saved with it", saved.Single().EventId == "ev1");
+        history.Delete();
+
+        var now = T0.AddMinutes(38);
+        var hub = new NoticeHub();
+        hub.Load(saved, apps, now);
+        hub.MarkAllViewed();
+        var again = hub.Receive(NoticeIntake.FromAgent(Hook("ev1", "done", T0, 0), "Ubuntu", false), now);
+        check("A message recorded before the restart is a duplicate after it", again.Receipt == NoticeReceipt.Duplicate && !again.Present
+            && hub.Notices.Count == 1 && hub.UnviewedCount == 0);
+
+        var late = hub.Receive(NoticeIntake.FromAgent(Hook("ev2", "waiting", T0, 38 * 60_000L, "info"), "Ubuntu", false), now);
+        check("A message that waited 38 minutes is recorded, unviewed, but not shown", late.Receipt == NoticeReceipt.Updated && !late.Present && late.Reason == "late"
+            && hub.Notices.Single().Body == "waiting" && hub.UnviewedCount == 1);
+
+        // The distribution's clock is 10 minutes behind Windows': its own age says the message is fresh.
+        now = now.AddMinutes(1);
+        var fresh = hub.Receive(NoticeIntake.FromAgent(Hook("ev3", "done again", now.AddMinutes(-10), 0), "Ubuntu", false), now);
+        check("A fresh message is shown even when the distribution's clock is off", fresh.Present && fresh.Receipt == NoticeReceipt.Updated);
+        check("An update shown now reads as just arrived, not as old as the notice it replaced", fresh.Notice!.ReceivedAt == now
+            && fresh.Notice.EventId == "ev3" && NoticeText.Relative(fresh.Notice.ReceivedAt, now) == Loc.T("刚刚", "Just now"));
+        var oldAgent = hub.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", Title = "x", EventId = "ev4", CreatedAt = now.AddHours(-2) }, "Ubuntu", false), now);
+        check("A distribution's creation time alone is not trusted to hold a notice back", oldAgent.Present);
+
+        var windowsCli = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { Title = "late", EventId = "w1", CreatedAt = now.AddMinutes(-38) }), now);
+        check("A late message from a sender on Windows' clock is judged by its creation time", windowsCli.Receipt == NoticeReceipt.Accepted && !windowsCli.Present
+            && hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { Title = "now", EventId = "w2", CreatedAt = now.AddSeconds(-2) }), now).Present);
+
+        var input = NoticeIntake.FromAgent(Hook("ev5", "x", now, 2 * 60_000L), "Ubuntu", false);
+        check("A high priority message may be later than a normal one", NoticeHub.Late(input, NoticePriority.Normal, now) && !NoticeHub.Late(input, NoticePriority.High, now)
+            && NoticeHub.Late(input with { Age = TimeSpan.FromMinutes(6) }, NoticePriority.High, now));
+        check("Time-kind notices and Windows' notices keep their own rules", !NoticeHub.Late(input with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Countdown } }, NoticePriority.Normal, now)
+            && NoticeHub.Late(input with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Mail } }, NoticePriority.Normal, now)
+            && !NoticeHub.Late(Input("w") with { CreatedAt = now.AddHours(-1) }, NoticePriority.Normal, now));
+
+        var message = new NoticeMessage { Title = "t", CreatedAt = now.AddSeconds(-90) };
+        NoticeProtocol.Stamp(message, now);
+        var stamped = new NoticeMessage { Title = "t" };
+        NoticeProtocol.Stamp(stamped, now);
+        check("A sender stamps a message's age by its own clock", message.AgeMs == 90_000 && stamped.CreatedAt == now && stamped.AgeMs == 0
+            && NoticeProtocol.Deserialize(NoticeProtocol.Serialize(message))!.AgeMs == 90_000);
+        check("A negative age is refused", NoticeProtocol.Validate(new NoticeMessage { Title = "t", AgeMs = -1 }) == "bad-age");
+    }
+
     private static AttentionItem Item(string lane, AttentionKind kind, string key, string group = "", NoticePriority priority = NoticePriority.Normal, double seconds = 6, bool refresh = false)
         => new() { Lane = lane, Kind = kind, Key = key, Group = group, Priority = priority, Duration = TimeSpan.FromSeconds(seconds), Refresh = refresh };
 
@@ -325,6 +385,25 @@ internal static class NoticeCoreTests
         var nan = NoticeGeometry.Frame(notch, monitor, work, NoticeForm.Toast, double.NaN, double.PositiveInfinity);
         check("Unknown sizes fall back to the range", double.IsFinite(nan.Rect.Width) && double.IsFinite(nan.Rect.Height));
         check("The collapsed frame is the surface itself", NoticeGeometry.Collapsed(notch).Rect == notch.Surface);
+        // At the panel's scale (150%) the island is drawn larger and the notice with it: its range, the card's corners and the margin to the
+        // screen's edge are those of 100% times the scale, and it still grows and shrinks about the island's middle.
+        const double big = 1.5;
+        var notch15 = CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Notch, monitor, work, panelScale: big);
+        var tiny15 = NoticeGeometry.Frame(notch15, monitor, work, NoticeForm.Toast, 10, 10, big);
+        var huge15 = NoticeGeometry.Frame(notch15, monitor, work, NoticeForm.Toast, 5000, 500, big);
+        check("At 150% a toast's range is the 100% range times 1.5", tiny15.Rect.Width == 280 * big && huge15.Rect.Width == 420 * big && huge15.Rect.Height == 64 * big);
+        check("At 150% a notch toast keeps the scaled island's shoulders and its middle", huge15.Shoulder == notch15.Shoulder && huge15.Rect.Y == 0
+            && Math.Abs(huge15.Rect.X + huge15.Rect.Width / 2 - (notch15.Surface.X + notch15.Surface.Width / 2)) < .001 && huge15.BottomRadius == 20 * big);
+        var detail15 = NoticeGeometry.Frame(notch15, monitor, work, NoticeForm.Detail, 100, 2000, big);
+        check("At 150% the details keep to their range times 1.5, with corners times 1.5", detail15.Rect.Width == NoticeGeometry.DetailMinWidth * big
+            && detail15.Rect.Height == NoticeGeometry.DetailMaxHeight * big && detail15.BottomRadius == NoticeGeometry.DetailRadius * big);
+        var narrow15 = NoticeGeometry.Frame(notch15, new DipRect(0, 0, 300, 600), new DipRect(0, 0, 300, 560), NoticeForm.Detail, 460 * big, 200 * big, big);
+        check("At 150% the margin to the screen's edge is scaled too", narrow15.Rect.Width == 300 - 2 * 8 * big && narrow15.Rect.X >= 8 * big - .001);
+        var low15 = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 4000 }, CompactStyle.Capsule, monitor, work, panelScale: big);
+        var lowDetail15 = NoticeGeometry.Frame(low15, monitor, work, NoticeForm.Detail, 400 * big, 300 * big, big);
+        check("At 150% a card near the bottom still grows upward within the scaled margin", lowDetail15.Rect.Y + lowDetail15.Rect.Height <= work.Height - NoticeGeometry.ScreenMargin * big + .001);
+        check("A scale that is not a number is taken as 100%", NoticeGeometry.Frame(notch, monitor, work, NoticeForm.Toast, 10, 10, double.NaN).Rect.Width == 280
+            && NoticeGeometry.ToastLimits(CompactStyle.Capsule, 0).MaxWidth == 400);
         // A notice ends exactly on the island it returns to, in every collapsed form, so the island takes over without a jump.
         foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Capsule, CompactStyle.Line })
         {
@@ -366,8 +445,23 @@ internal static class NoticeCoreTests
         check("No panels, no lane", NoticeRouting.Choose([], 1, NoticeScreen.Foreground) is null);
     }
 
-    private static void IconRefs(Action<string, bool> check)
+    private static void Intake(Action<string, bool> check)
     {
+        var pipe = NoticeIntake.FromPipe(new NoticeMessage { Title = "x", AppName = " make ", Icon = "https://example.com/a.png", EventId = "e", Category = "error", Priority = "high", Distro = "Ubuntu" });
+        check("A pipe message is a command-line notice; web icons are ignored", pipe.Origin == NoticeOrigin.Cli && pipe.AppKey == "cli:Ubuntu:make" && pipe.IconRef is null
+            && pipe.Category == NoticeCategory.Error && pipe.PriorityHint == NoticePriority.High && pipe.Capabilities == NoticeCapabilities.None && pipe.EventId == "e");
+        var dbus = new NoticeMessage { Origin = "dbus", AppName = "Thunderbird", NativeId = "4", Session = "server", Title = "Mail", Actions = [new() { Key = "open", Label = "Open" }], Icon = "/usr/share/icons/a.png", Distro = "Spoofed" };
+        var server = NoticeIntake.FromAgent(dbus, "Ubuntu", agentIsServer: true);
+        check("A desktop notice from a serving agent can be acted on and dismissed", server.Origin == NoticeOrigin.Wsl && server.AppKey == "wsl:Ubuntu:Thunderbird" && server.Distro == "Ubuntu"
+            && server.InstanceKey == "wsl:Ubuntu:server:4" && server.Capabilities == (NoticeCapabilities.Actions | NoticeCapabilities.ReportDismissal) && server.Actions.Count == 1
+            && server.IconRef == "wsl:Ubuntu:/usr/share/icons/a.png");
+        var watched = NoticeIntake.FromAgent(dbus, "Ubuntu", agentIsServer: false);
+        check("A watched desktop notice offers nothing that cannot be done", watched.Capabilities == NoticeCapabilities.None && watched.Actions.Count == 0);
+        var cli = NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", Title = "t" }, "Debian", true);
+        check("brim-notify through the agent is keyed by the agent's distribution", cli.Origin == NoticeOrigin.Cli && cli.AppKey == "cli:Debian:brim-notify" && cli.Distro == "Debian");
+        check("Distribution names are WSL's own characters only", NoticeIntake.IsDistroName("Ubuntu-24.04") && NoticeIntake.IsDistroName("my_distro")
+            && !NoticeIntake.IsDistroName("..") && !NoticeIntake.IsDistroName(@"..\server") && !NoticeIntake.IsDistroName("a/b") && !NoticeIntake.IsDistroName("Ubuntu 24")
+            && !NoticeIntake.IsDistroName("") && !NoticeIntake.IsDistroName(new string('a', 65)));
         check("File URLs become paths", NoticeIntake.IconRef("file:///C:/icons/a.png", NoticeOrigin.Cli, null) == @"file:C:\icons\a.png");
     }
 
@@ -388,21 +482,21 @@ internal static class NoticeCoreTests
     private static void SettingsValues(string root, Action<string, bool> check)
     {
         var defaults = new DeckSettings();
-        check("Notices are off by default", !defaults.NoticesEnabled && defaults.NoticeWindowsSource
+        check("Notices are off by default, with no WSL distribution", !defaults.NoticesEnabled && defaults.NoticeWslDistros.Count == 0 && defaults.NoticeWindowsSource
             && defaults.NoticeHistory && defaults.NoticeHistoryHours == 24 && defaults.NoticeHotkey == "" && defaults.NoticeDuration == 6 && defaults.NoticeHighDuration == 8);
         var odd = new DeckSettings
         {
             NoticeScreen = (NoticeScreen)42, NoticeDuration = 0, NoticeHistoryHours = 100_000, NoticesWidth = double.PositiveInfinity,
-            NoticeHistoryFolder = @"relative\notices",
+            NoticeWslDistros = ["Ubuntu", " ubuntu ", "", "Debian", @"..\..\server\share", "a b"], NoticeHistoryFolder = @"relative\notices",
             NoticeApps = [new() { Key = "a", AccentColor = "ff0000", Priority = (NoticePriority)9, Privacy = (NoticePrivacy)9 }, new() { Key = "a" }, new() { Key = " " }]
         };
         odd.Normalize();
         check("Notice settings are normalized", odd.NoticeScreen == NoticeScreen.Foreground && odd.NoticeDuration == 2 && odd.NoticeHistoryHours == 168
-            && odd.NoticesWidth == 460 && odd.NoticeHistoryFolder == "" && odd.NoticeApps.Count == 1 && odd.NoticeApps[0].AccentColor == "#FF0000"
+            && odd.NoticesWidth == 460 && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeHistoryFolder == "" && odd.NoticeApps.Count == 1 && odd.NoticeApps[0].AccentColor == "#FF0000"
             && odd.NoticeApps[0].Priority == NoticePriority.Normal && odd.NoticeApps[0].Privacy is null);
         var copy = odd.Copy();
-        copy.NoticeApps[0].Muted = true;
-        check("Copies do not share notice rules", !odd.NoticeApps[0].Muted);
+        copy.NoticeApps[0].Muted = true; copy.NoticeWslDistros.Add("Arch");
+        check("Copies do not share notice rules or distributions", !odd.NoticeApps[0].Muted && odd.NoticeWslDistros.Count == 2);
         var store = new SettingsStore(Path.Combine(root, "notice-settings"), "1.2.0");
         var saved = new DeckSettings { NoticesEnabled = true, NoticePrivacy = NoticePrivacy.TitleOnly, LastPage = DeckPage.Notices, NoticesPausedUntil = T0, NoticeApps = [new() { Key = "windows:X", Name = "X", Priority = NoticePriority.High }] };
         store.Save(saved);

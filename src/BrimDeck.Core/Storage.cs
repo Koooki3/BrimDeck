@@ -27,9 +27,9 @@ public sealed record StorageDrive(int Number, string Model, IReadOnlyList<Storag
 // What Windows says of a physical drive: its model, its bus (STORAGE_BUS_TYPE) and whether its media is removable.
 public sealed record StorageDisk(string Model, int Bus, bool Removable);
 
-// One line of the page's storage block: a drive, or (Others) the drives that did not fit, together. Segments are the volumes'
-// shares of the line's bar: each its size against the line's total and its own used share, in order.
-public sealed record StorageRow(string Label, ulong Total, ulong Used, IReadOnlyList<(double Width, double Used)> Segments, double? Celsius, MemoryLevel Level, IReadOnlyList<StorageDrive> Drives, bool Others)
+// One entry of the page's storage block: a volume with its drive's temperature, or (Others) the volumes that did not fit,
+// together. Drives: the physical drives its volumes lie on.
+public sealed record StorageRow(string Label, ulong Total, ulong Used, double? Celsius, MemoryLevel Level, IReadOnlyList<StorageDrive> Drives, bool Others)
 {
     public double UsedFraction => Total > 0 ? Math.Clamp((double)Used / Total, 0, 1) : 0;
 }
@@ -41,6 +41,8 @@ public static class Storage
 {
     // STORAGE_BUS_TYPE values that are not internal drives.
     public const int BusUsb = 7, BusSd = 12, BusMmc = 13, BusVirtual = 14, BusFileBackedVirtual = 15;
+    // A drive behind a RAID controller (Intel Rapid Storage Technology, a vendor's RAID mode).
+    public const int BusRaid = 8;
     public const ulong SmallestVolume = 1UL << 30;
     // The letter of the volume holding Windows, "C:".
     public static string? WindowsLetter { get; } = Path.GetPathRoot(Environment.SystemDirectory)?.TrimEnd('\\', '/') is { Length: > 0 } root ? root : null;
@@ -48,6 +50,11 @@ public static class Storage
     // A file-backed virtual disk that is not removable stays: a Dev Drive (Windows 11) is a VHDX the user keeps as a drive of its
     // own, as is a VHD mounted for good. Its space is also part of the drive that holds its file.
     public static bool Internal(StorageDisk disk) => !disk.Removable && disk.Bus is not (BusUsb or BusSd or BusMmc or BusVirtual);
+
+    // A drive behind a RAID controller is never asked for its temperature: the controller's driver answers for it, and Intel Rapid
+    // Storage Technology on one laptop never answered at all, which froze the whole machine. Windows' own settings show no
+    // temperature for such a drive either. Its space is listed as any other drive's.
+    public static bool AsksTemperature(StorageDisk disk) => disk.Bus != BusRaid;
 
     // The drives from the volumes and the physical drive each lies on (null when it spans drives or its drive is unknown), the
     // drives Windows describes, the temperatures by drive number and the solid-state drives' numbers. A volume on a drive that is
@@ -70,30 +77,35 @@ public static class Storage
         static string Letter(StorageVolume volume) => volume.Letter.ToUpperInvariant();
     }
 
-    // The lines for room lines: each drive, or, with more drives than lines, the first room − 1 and a last line for the others
-    // ("+2"), their sizes summed and their hottest temperature. temperatures: whether the lines carry temperatures.
+    // The volumes on all drives.
+    public static int VolumeCount(IReadOnlyList<StorageDrive> drives) => drives.Sum(drive => drive.Volumes.Count);
+
+    // The entries for room places: each volume in letter order, with the temperature of the drive it lies on (so C: and D: on one
+    // drive show the same), or, with more volumes than places, the first room − 1 and a last entry for the others ("+2"), their
+    // sizes summed and their drives' hottest temperature. temperatures: whether the entries carry temperatures.
     public static List<StorageRow> Rows(IReadOnlyList<StorageDrive> drives, int room, bool temperatures = true)
     {
         room = Math.Max(1, room);
+        var volumes = drives.SelectMany(drive => drive.Volumes.Select(volume => (Volume: volume, Drive: drive)))
+            .OrderBy(item => item.Volume.Letter.ToUpperInvariant(), StringComparer.Ordinal).ToList();
         var rows = new List<StorageRow>();
-        bool fold = drives.Count > room;
-        foreach (var drive in fold ? drives.Take(room - 1) : drives) rows.Add(Row(drive.Letters, [drive], temperatures, false));
-        // With a single line it names the first drive and counts the rest: "C: +1".
-        string others = "+" + (drives.Count - room + (room == 1 ? 0 : 1)).ToString(CultureInfo.InvariantCulture);
-        if (fold) rows.Add(Row(room == 1 ? drives[0].Letters + " " + others : others, [.. drives.Skip(room - 1)], temperatures, true));
+        bool fold = volumes.Count > room;
+        foreach (var (volume, drive) in fold ? volumes.Take(room - 1) : volumes) rows.Add(Row(volume.Letter, [volume], [drive], temperatures, false));
+        // With a single place it names the first volume and counts the rest: "C: +1".
+        string others = "+" + (volumes.Count - room + (room == 1 ? 0 : 1)).ToString(CultureInfo.InvariantCulture);
+        if (fold)
+        {
+            var rest = volumes.Skip(room - 1).ToList();
+            rows.Add(Row(room == 1 ? volumes[0].Volume.Letter + " " + others : others, [.. rest.Select(item => item.Volume)], [.. rest.Select(item => item.Drive).Distinct()], temperatures, true));
+        }
         return rows;
     }
 
-    private static StorageRow Row(string label, IReadOnlyList<StorageDrive> drives, bool temperatures, bool others)
+    private static StorageRow Row(string label, IReadOnlyList<StorageVolume> volumes, IReadOnlyList<StorageDrive> drives, bool temperatures, bool others)
     {
-        var volumes = drives.SelectMany(drive => drive.Volumes).ToList();
         ulong total = volumes.Aggregate(0UL, (sum, volume) => sum + volume.Total), used = volumes.Aggregate(0UL, (sum, volume) => sum + volume.Used);
-        // Others take one bar: their volumes are on different drives.
-        IReadOnlyList<(double, double)> segments = others || volumes.Count == 1 || total == 0
-            ? [(1, total > 0 ? Math.Clamp((double)used / total, 0, 1) : 0)]
-            : volumes.Select(volume => ((double)volume.Total / total, volume.UsedFraction)).ToList();
         var hottest = temperatures ? drives.Select(drive => drive.Temperature).OfType<DiskTemperature>().OrderByDescending(heat => (int)Temperatures.OfDisk(heat)).ThenByDescending(heat => heat.Celsius).FirstOrDefault() : null;
-        return new StorageRow(label, total, used, segments, hottest?.Celsius, hottest is null ? MemoryLevel.Normal : Temperatures.OfDisk(hottest), drives, others);
+        return new StorageRow(label, total, used, hottest?.Celsius, hottest is null ? MemoryLevel.Normal : Temperatures.OfDisk(hottest), drives, others);
     }
 
     // The drive holding the Windows folder (its letter, "C:"), for the collapsed row's reading: its used share. Null without one.
@@ -114,7 +126,7 @@ public static class Storage
         return null;
     }
 
-    // A line's figures in one unit chosen by its size: binary gigabytes, whole from 10 GB ("212", "477", "GB"), or terabytes with
+    // An entry's figures in one unit chosen by its size: binary gigabytes, whole from 10 GB ("212", "477", "GB"), or terabytes with
     // one decimal from 1000 GB ("0.4", "1.8", "TB").
     public static (string Used, string Total, string Unit) Sizes(ulong used, ulong total)
     {

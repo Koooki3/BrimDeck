@@ -95,6 +95,8 @@ Works with players that use Windows media controls, with extra support for some 
 - Lists the busiest apps by CPU or memory; click an app for its details.
 - Shows the space in use on each physical drive, one line per drive, with a segment per letter for a drive split into several; only internal drives are listed, not USB sticks, SD cards, external or network drives.
 - Shows CPU, GPU and solid-state drive temperatures (you can turn them off in settings; the CPU, GPU and drive readings in the notch or capsule can show them too). No administrator rights or drivers are needed; sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it.
+- Shows the whole machine's power draw in watts, with the last minute as a curve and the peak since the page was opened; the tooltip adds the mean and what the figure is made of (Settings › System monitor › Show power; the notch or capsule can show it too). The figure comes from the PC's own power meter if it has one, else from the battery's discharge while a laptop runs on battery, else it is an estimate (the tooltip says so) from the processor's power and an NVIDIA graphics card's board power, which leaves out the display, storage, fans and power-supply loss. It is read only while the page or the notch or capsule shows it, and the NVIDIA card is asked only while it is working. No administrator rights or drivers are needed.
+- On a laptop or tablet, also shows this PC's own battery: the charge as a battery drawn in the theme's style (with a plug in it while the PC is plugged in), followed by the time left or to full where Windows gives one; it sits at the right end of the power line. Its tooltip has the rate in watts, the Windows power mode, Battery saver and the battery's health (full-charge capacity against design capacity). The notch or capsule can show the charge too (Settings › System monitor › the readings table). At 25% or less the charge takes the warning color and at 15% or less the critical color while the PC runs on battery; a normal charge, charging or Battery saver never takes either color. PCs without a battery show nothing of it.
 - Colors follow the panel theme by default; several preset color schemes are offered, and you can make your own.
 
 The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT License), a system monitor for macOS.
@@ -108,8 +110,8 @@ The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT
 
 ### Live notices
 
-- When a notification arrives, the notch, capsule or indicator grows out of its place with the application's icon, title and summary; hover for the details or open the application, and it returns to its shape. Notices take the panel theme.
-- Receives Windows app notifications; alarms, mail and event reminders among them are recognized and shown by kind.
+- When a notification arrives, the notch, capsule or indicator grows out of its place with the application's icon, title and summary; hover for the details, open the application or use the notice's buttons, and it returns to its shape. Notices take the panel theme.
+- Receives Windows app notifications, desktop notifications in WSL (off by default, per distribution) and notices sent with `brim-notify`, such as `brim-notify run -- dotnet test`, which reports the result when the command ends.
 - Never takes the focus or interrupts the open panel; nothing pops up while locked, in full screen, in a focus session or presenting, with one summary afterwards; notice history is kept encrypted on this PC for 24 hours, which can be switched off. Off by default; see [Live notices](docs/en-US/notices.md).
 
 ## Install
@@ -121,7 +123,7 @@ Requires Windows 11 (x64). Windows 10 (version 2004 or later) has limited suppor
    - Portable: `BrimDeck-<version>-Portable-x64.zip`. Extract it and run `BrimDeck.exe` in the `BrimDeck` folder.
 2. If Windows shows "Windows protected your PC", select "More info", then "Run anyway".
 
-Both versions update from within the app, and both keep settings and data in `%LOCALAPPDATA%\BrimDeck`. When the portable version is in a folder that needs administrator rights to change, such as `C:\Program Files`, the update asks for administrator approval. To stop using the portable version, turn off starting with Windows in settings if it is on, then delete its folder; to remove settings and data as well, also delete `%LOCALAPPDATA%\BrimDeck`.
+Both versions update from within the app, and both keep settings and data in `%LOCALAPPDATA%\BrimDeck`. The app offers releases only; turn on "Receive beta updates" on the About page of settings to be offered betas too. When the portable version is in a folder that needs administrator rights to change, such as `C:\Program Files`, the update asks for administrator approval. To stop using the portable version, turn off starting with Windows in settings if it is on, then delete its folder; to remove settings and data as well, also delete `%LOCALAPPDATA%\BrimDeck`.
 
 ## Quick start
 
@@ -153,7 +155,9 @@ No. Costs come from the amounts reported by each service or from public model pr
 
 You are welcome to report problems, suggest features or ask for more tools and players in [Issues](https://github.com/MoFeng2223/BrimDeck/issues), and to contribute through pull requests.
 
-- Open pull requests against the `dev` branch, not `main`.
+- Do not open pull requests against `main`:
+  - Open new features and general fixes against the `dev` branch.
+  - When a version enters testing, it gets a `release/<version>` branch (for example `release/1.3.0`). Open fixes for that version against that branch. It accepts fixes only, not new features.
 - Upcoming work is listed in the [BrimDeck roadmap](https://github.com/MoFeng2223/BrimDeck/discussions/57). Suggest features under that post, and reply there when you want to take on one of its items. Other topics are welcome in [Discussions](https://github.com/MoFeng2223/BrimDeck/discussions).
 
 ## License

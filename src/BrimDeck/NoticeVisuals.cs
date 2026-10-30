@@ -58,6 +58,10 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public static readonly DependencyProperty BottomRadiusProperty = Register(nameof(BottomRadius), 0d);
     public static readonly DependencyProperty ShoulderProperty = Register(nameof(Shoulder), 0d);
     public static readonly DependencyProperty IslandOpacityProperty = Register(nameof(IslandOpacity), 0d);
+    // How far each end of the outline is drawn in from the surface's bounds, while the capsule's ends give way to the droplets
+    // leaving them (NoticeLiquid). The surface keeps its size and place; only its outline, and so its clip, draws in.
+    public static readonly DependencyProperty InsetLeftProperty = Register(nameof(InsetLeft), 0d);
+    public static readonly DependencyProperty InsetRightProperty = Register(nameof(InsetRight), 0d);
     public static readonly DependencyProperty IslandColorProperty = DependencyProperty.Register(nameof(IslandColor), typeof(Color), typeof(NoticeSurface),
         new FrameworkPropertyMetadata(Colors.Black, FrameworkPropertyMetadataOptions.AffectsRender));
     private static DependencyProperty Register(string name, double value) => DependencyProperty.Register(name, typeof(double), typeof(NoticeSurface),
@@ -67,6 +71,8 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public double BottomRadius { get => (double)GetValue(BottomRadiusProperty); set => SetValue(BottomRadiusProperty, value); }
     public double Shoulder { get => (double)GetValue(ShoulderProperty); set => SetValue(ShoulderProperty, value); }
     public double IslandOpacity { get => (double)GetValue(IslandOpacityProperty); set => SetValue(IslandOpacityProperty, value); }
+    public double InsetLeft { get => (double)GetValue(InsetLeftProperty); set => SetValue(InsetLeftProperty, value); }
+    public double InsetRight { get => (double)GetValue(InsetRightProperty); set => SetValue(InsetRightProperty, value); }
     public Color IslandColor { get => (Color)GetValue(IslandColorProperty); set => SetValue(IslandColorProperty, value); }
     // Drawn with the look's material, or only its fill (Shadow: the black copy that casts a shadow behind the notice).
     public NoticeLook? Look { get => _look; set { _look = value; _fill = null; _rim = null; InvalidateVisual(); } }
@@ -77,16 +83,50 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     private Brush? _fill, _fillOverride;
     private Pen? _rim;
     private SolidColorBrush? _islandBrush;
-    private (Size, double, double, double)? _key;
-    private Geometry _outline = Geometry.Empty;
+    private (Size, double, double, double, double, double)? _key;
+    private Geometry _body = Geometry.Empty, _outline = Geometry.Empty;
+    private Geometry? _attachments, _attachedTo;
+
+    // What is joined to the surface while the liquid motion plays (NoticeFxShape): the necks and the droplets they have not parted
+    // from, or the notch's bulges, in the surface's own coordinates. The surface's outline is then the union of its own and these,
+    // one outline for the fill, the rim, the material and the clip, so no line runs inside it and the rim follows the motion. A parted
+    // droplet is not part of it and has an outline of its own.
+    public Geometry? Attachments
+    {
+        get => _attachments;
+        set { if (ReferenceEquals(_attachments, value)) return; _attachments = value; InvalidateArrange(); InvalidateVisual(); }
+    }
 
     public Geometry Outline()
     {
-        var key = (RenderSize, TopRadius, BottomRadius, Shoulder);
-        if (_key == key) return _outline;
-        _key = key;
-        return _outline = IslandBorder.BuildOutline(RenderSize.Width, RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius));
+        double left = Math.Max(0, InsetLeft), right = Math.Max(0, InsetRight);
+        var key = (RenderSize, TopRadius, BottomRadius, Shoulder, left, right);
+        if (_key != key)
+        {
+            _key = key; _attachedTo = null;
+            if (left <= 0 && right <= 0) _body = IslandBorder.BuildOutline(RenderSize.Width, RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius));
+            else
+            {
+                // Drawn in at its ends: the outline of the narrower body, moved to where the left end now is.
+                var drawn = IslandBorder.BuildOutline(Math.Max(1, RenderSize.Width - left - right), RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius)).Clone();
+                drawn.Transform = new TranslateTransform(left, 0);
+                drawn.Freeze();
+                _body = drawn;
+            }
+            _outline = _body;
+        }
+        if (_attachments is null) { if (!ReferenceEquals(_outline, _body)) _outline = _body; _attachedTo = null; return _outline; }
+        if (ReferenceEquals(_attachedTo, _attachments)) return _outline;
+        _attachedTo = _attachments;
+        // The surface and the shadow copy behind it have the same body: the union is made once for both.
+        if (s_joined is { } joined && ReferenceEquals(joined.Attachments, _attachments) && joined.Key == key) return _outline = joined.Outline;
+        var union = Geometry.Combine(_body, _attachments, GeometryCombineMode.Union, null, .5, ToleranceType.Absolute);
+        union.Freeze();
+        s_joined = (_attachments, key, union);
+        return _outline = union;
     }
+
+    private static (Geometry Attachments, (Size, double, double, double, double, double) Key, Geometry Outline)? s_joined;
 
     protected override Geometry GetLayoutClip(Size layoutSlotSize) => Outline();
 

@@ -68,9 +68,18 @@ public sealed class NoticeHub
     private Notice? SameInstance(string instanceKey, NoticeInput input)
         => _notices.FirstOrDefault(n => n.InstanceKey == instanceKey && n.AppKey == input.AppKey && (n.Origin != NoticeOrigin.Wsl || n.SourcePresent));
 
-    // The notice a replace key (or a stop) names: the application's notice with that key.
+    // Whether two command-line notices came over the same link. Any Windows process can name a distribution on the pipe
+    // (NoticeIntake.FromPipe), so its notices share that distribution's application rules but never its --id, -r or stop
+    // keys with what the distribution's agent delivered (S3).
+    private static bool SameLink(Notice notice, NoticeInput input) => NoticeIntake.ViaPipe(notice.InstanceKey) == NoticeIntake.ViaPipe(input.InstanceKey);
+
+    // The notice -r or stop names: one from the same link first. The distribution's agent also reaches what came over the pipe
+    // under its name, which is where WSL's brim-notify turns while the agent is down (M2); never the other way round, since a
+    // pipe sender cannot be told from any Windows process naming the distribution (S3).
     private Notice? Replacing(NoticeInput input, string key)
-        => _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key);
+        => _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key && SameLink(n, input))
+            ?? (input.Distro is null || NoticeIntake.ViaPipe(input.InstanceKey) ? null
+                : _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key && NoticeIntake.ViaPipe(n.InstanceKey)));
 
     public static NoticePriority EffectivePriority(NoticeAppRule? rule, NoticePriority hint)
     {
@@ -91,10 +100,10 @@ public sealed class NoticeHub
         if (input.EventId is { Length: > 0 } eventId)
         {
             ForgetEvents(now);
-            var key = input.AppKey + "\n" + eventId;
+            var key = (NoticeIntake.ViaPipe(input.InstanceKey) ? "pipe\n" : "") + input.AppKey + "\n" + eventId;
             // A retry of a message already recorded, also one recorded before BrimDeck restarted (the saved notice keeps its id,
             // whatever form its instance key had then: C-L4).
-            if (_events.ContainsKey(key) || _notices.Any(n => n.EventId == eventId && n.AppKey == input.AppKey)) return new(NoticeReceipt.Duplicate, null, false);
+            if (_events.ContainsKey(key) || _notices.Any(n => n.EventId == eventId && n.AppKey == input.AppKey && SameLink(n, input))) return new(NoticeReceipt.Duplicate, null, false);
             _events[key] = now;
         }
         if (input.StopTiming) return StopByKey(input, now);
@@ -103,8 +112,25 @@ public sealed class NoticeHub
         var priority = NoticeClock.Alerting(input.Timing, now) || input.Call ? AlertPriority(rule, input.PriorityHint) : EffectivePriority(rule, input.PriorityHint);
         bool quiet = rule?.Muted == true || priority == NoticePriority.Low;
         bool late = Late(input, priority, now);
-        var existing = SameInstance(input.InstanceKey, input)
-            ?? (input.Replaces is { Length: > 0 } replaced ? SameInstance(replaced, input) : null)
+        var sameInstance = SameInstance(input.InstanceKey, input);
+        var replaced = input.Replaces is { Length: > 0 } replacedKey ? SameInstance(replacedKey, input) : null;
+        if (input.Redelivery && sameInstance is null)
+        {
+            // The notice was handed over as it arrived and the user deleted it (or cleared the list) before a full reading
+            // found the one it took the place of. Neither comes back as unviewed; the replaced one is gone from its source.
+            if (replaced is not null) SourceRemoved(replaced.InstanceKey);
+            return new(NoticeReceipt.Duplicate, null, false, "removed");
+        }
+        Notice? existing;
+        if (input.Origin == NoticeOrigin.Windows && sameInstance is { Origin: NoticeOrigin.Windows } && replaced is { Origin: NoticeOrigin.Windows } && sameInstance.AppKey == input.AppKey && replaced.AppKey == input.AppKey && !ReferenceEquals(sameInstance, replaced))
+        {
+            // A fast source may deliver the new instance before its full-list read can confirm the replacement. Keep the
+            // already-delivered row, and remove the superseded row so the later Replaces update does not leave two entries.
+            _notices.Remove(replaced); _byId.Remove(replaced.Id);
+            if (_trackRemovals) _deleted.Add(replaced.Id);
+            existing = sameInstance;
+        }
+        else existing = sameInstance ?? replaced
             ?? (input.ReplaceKey is { Length: > 0 } replace ? Replacing(input, replace) : null);
         if (existing is not null)
         {

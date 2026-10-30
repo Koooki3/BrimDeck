@@ -1,7 +1,8 @@
 using BrimDeck.Core;
 
 // The system monitor's drives: which volumes are listed and on which physical drive, a drive split into several letters, the
-// lines the page shows and the drives folded into the last one, their figures, their temperatures (the drive's, not a volume's),
+// entries the page shows (one per volume, in one or two columns) and the volumes folded into the last one, their figures, their
+// temperatures (the drive's, shown on each of its volumes),
 // and every combination of missing temperatures, which must leave no gap, zero or dash.
 static class StorageTests
 {
@@ -52,6 +53,8 @@ static class StorageTests
         check("Storage: internal buses", Storage.Internal(new("", 17, false)) && Storage.Internal(new("", 11, false)) && Storage.Internal(new("", 16, false))
             && !Storage.Internal(new("", 17, true)) && !Storage.Internal(new("", Storage.BusUsb, false)) && !Storage.Internal(new("", Storage.BusVirtual, false))
             && Storage.Internal(new("", Storage.BusFileBackedVirtual, false)) && !Storage.Internal(new("", Storage.BusFileBackedVirtual, true)) && !Storage.Internal(new("", Storage.BusSd, false)) && !Storage.Internal(new("", Storage.BusMmc, false)));
+        check("Storage: a drive behind a RAID controller is listed but not asked for its temperature", Storage.Internal(new("", Storage.BusRaid, false))
+            && !Storage.AsksTemperature(new("", Storage.BusRaid, false)) && Storage.AsksTemperature(new("", 17, false)) && Storage.AsksTemperature(new("", 11, false)));
         check("Storage: exactly 1 GB is listed", Storage.Group([(new StorageVolume("C:", "", G, 0), 0)], Disks).Count == 1 && Storage.Group([(new StorageVolume("C:", "", G - 1, 0), 0)], Disks).Count == 0);
     }
 
@@ -70,30 +73,42 @@ static class StorageTests
         check("Storage lines: the core columns keep their least height with the drives' lines", new[] { 110.0, 140, 160, 200, 249, 250, 290, 330, 400 }.All(height =>
         {
             var layout = MonitorLayout.For(700, height, true, 3);
-            return layout.StorageLines == MonitorLayout.StorageRoom(height, layout.Metrics, layout.Figure, layout.Body, layout.RowHeight)
+            return layout.StorageLines == MonitorLayout.StorageRoom(height, layout.Metrics, layout.Figure, layout.Body)
                 && layout.StorageLines is >= 0 and <= 3;
         }));
+        // Readings StorageTwoColumns wide or wider put the volumes in two columns, filled line by line; narrower ones keep one.
+        check("Storage columns: two where the readings are wide, so the lines are halved", MonitorLayout.For(1320, 290, true, 2) is { StorageLines: 1, StorageColumns: 2 }
+            && MonitorLayout.For(1320, 330, true, 5) is { StorageLines: 3, StorageColumns: 2 } && MonitorLayout.For(1320, 330, true, 9) is { StorageLines: 3, StorageColumns: 2 }
+            && MonitorLayout.For(600, 330, false, 4) is { StorageLines: 2, StorageColumns: 2 } && MonitorLayout.For(880, 290, true, 2) is { StorageLines: 1, StorageColumns: 2 });
+        check("Storage columns: one for a single volume or narrow readings", MonitorLayout.For(1320, 290, true, 1) is { StorageLines: 1, StorageColumns: 1 }
+            && MonitorLayout.For(700, 330, true, 5) is { StorageLines: 3, StorageColumns: 1 } && MonitorLayout.For(440, 380, true, 3) is { StorageColumns: 1 });
+        check("Storage columns: none without lines", MonitorLayout.For(1320, 110, true, 4) is { StorageLines: 0, StorageColumns: 0 } && MonitorLayout.For(1320, 330, true) is { StorageColumns: 0 });
         var one = Storage.Group([(Volume("C:", 300, 50), 0)], Disks);
-        check("Storage lines: one drive, one line", Storage.Rows(one, 3) is [{ Label: "C:", Others: false }]);
+        check("Storage lines: one volume, one entry", Storage.Rows(one, 3) is [{ Label: "C:", Others: false }]);
         var split = Storage.Group([(Volume("C:", 300, 50), 0), (Volume("D:", 100, 50), 0)], Disks);
-        var line = Storage.Rows(split, 3).Single();
-        check("Storage lines: a split drive is one line with a segment per volume, each its share of the drive",
-            line.Label == "C: D:" && line.Segments.Count == 2 && Math.Abs(line.Segments[0].Width - .75) < 1e-9 && Math.Abs(line.Segments[1].Width - .25) < 1e-9
-            && Math.Abs(line.Segments[0].Used - 250d / 300) < 1e-9 && Math.Abs(line.Segments[1].Used - .5) < 1e-9);
+        var entries = Storage.Rows(split, 3);
+        check("Storage lines: a split drive gives an entry per volume, each with its own figures",
+            entries is [{ Label: "C:" }, { Label: "D:" }] && entries[0].Total == 300 * G && entries[0].Used == 250 * G && entries[1].Total == 100 * G && Math.Abs(entries[1].UsedFraction - .5) < 1e-9
+            && entries.All(row => row.Drives.Single().Number == 0));
+        var mixed = Storage.Group([(Volume("E:", 100, 50), 0), (Volume("C:", 300, 50), 0), (Volume("D:", 100, 50), 1)], Disks);
+        check("Storage lines: volumes in letter order across drives", Storage.Rows(mixed, 6).Select(row => row.Label).SequenceEqual(["C:", "D:", "E:"]));
         var two = Storage.Rows(Machine(3).Where(drive => drive.Number < 2).ToList(), 3);
-        check("Storage lines: two drives, two lines", two.Count == 2 && two.All(row => !row.Others));
+        check("Storage lines: two volumes, two entries", two.Count == 2 && two.All(row => !row.Others));
         var three = Storage.Rows(Machine(3), 3);
-        check("Storage lines: three drives fill three lines", three.Count == 3 && three.All(row => !row.Others && row.Segments.Count == 1));
+        check("Storage lines: three volumes fill three places", three.Count == 3 && three.All(row => !row.Others));
         var five = Storage.Group(Enumerable.Range(0, 5).Select(i => (Volume(((char)('C' + i)).ToString() + ":", 100, 50), (int?)(10 + i))),
             Enumerable.Range(10, 5).ToDictionary(i => i, i => new StorageDisk("", 17, false)));
         var folded = Storage.Rows(five, 3);
-        check("Storage lines: the last line holds the others, counted", folded.Count == 3 && folded[2] is { Label: "+3", Others: true } && folded[2].Drives.Count == 3
-            && folded[2].Total == 300 * G && folded[2].Segments.Count == 1);
-        check("Storage lines: more drives than lines fold into the last; two lines of room show one drive and the rest", Storage.Rows(five, 2) is [{ Label: "C:" }, { Label: "+4", Others: true }]);
-        check("Storage lines: one line names the first drive and counts the rest", Storage.Rows(five, 1) is [{ Label: "C: +4", Others: true }] && Storage.Rows(five, 0).Count == 1);
-        check("Storage lines: no drives, no lines", Storage.Rows([], 3).Count == 0);
+        check("Storage lines: the last entry holds the others, counted", folded.Count == 3 && folded[2] is { Label: "+3", Others: true } && folded[2].Drives.Count == 3
+            && folded[2].Total == 300 * G);
+        check("Storage lines: more volumes than places fold into the last; two places show one volume and the rest", Storage.Rows(five, 2) is [{ Label: "C:" }, { Label: "+4", Others: true }]);
+        check("Storage lines: one place names the first volume and counts the rest", Storage.Rows(five, 1) is [{ Label: "C: +4", Others: true }] && Storage.Rows(five, 0).Count == 1);
+        var splitFold = Storage.Rows(Storage.Group([(Volume("C:", 300, 50), 0), (Volume("D:", 100, 50), 0), (Volume("E:", 100, 50), 0)], Disks), 2);
+        check("Storage lines: the others on one drive count that drive once", splitFold[1] is { Label: "+2", Others: true } && splitFold[1].Drives.Count == 1);
+        check("Storage lines: no drives, no entries", Storage.Rows([], 3).Count == 0);
         var empty = Storage.Rows([new StorageDrive(0, "", [new StorageVolume("C:", "", 0, 0)])], 3).Single();
-        check("Storage lines: a drive of no size draws an empty bar", empty.UsedFraction == 0 && empty.Segments is [(1, 0)]);
+        check("Storage lines: a volume of no size draws an empty bar", empty.UsedFraction == 0);
+        check("Storage lines: the volumes counted for the page", Storage.VolumeCount(mixed) == 3 && Storage.VolumeCount([]) == 0);
     }
 
     private static void Figures(Action<string, bool> check)
@@ -113,7 +128,7 @@ static class StorageTests
         var drives = Storage.Group([(Volume("C:", 300, 50), 0), (Volume("D:", 100, 50), 0), (Volume("E:", 900, 100), 1)], Disks, heat);
         check("Storage temperatures: the drive's, shared by its volumes' line", drives[0].Temperature?.Celsius == 44 && drives[1].Temperature is null);
         var rows = Storage.Rows(drives, 3);
-        check("Storage temperatures: on the drive's line only", rows[0].Celsius == 44 && rows[1].Celsius is null);
+        check("Storage temperatures: each volume shows its drive's", rows is [{ Label: "C:", Celsius: 44 }, { Label: "D:", Celsius: 44 }, { Label: "E:", Celsius: null }]);
         check("Storage temperatures: left off when temperatures are off", Storage.Rows(drives, 3, temperatures: false).All(row => row.Celsius is null));
         var hot = new Dictionary<int, DiskTemperature> { [10] = new("A", 50, 80, 85), [11] = new("B", 82, 80, 85), [12] = new("C", 75, 70, 90) };
         var five = Storage.Group(Enumerable.Range(0, 3).Select(i => (Volume(((char)('C' + i)).ToString() + ":", 100, 50), (int?)(10 + i))),
@@ -166,7 +181,8 @@ static class StorageTests
         CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
         check("Compact drive: Brief hides it", !readings.Single(r => r.Item == Storage_).Visible);
         var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, _ => 30, 14, 20, 50, 40);
-        var every = CompactMonitor.Every;
+        // The machine's power and battery are left out: they leave before both.
+        var every = CompactMonitor.Every & ~CompactMonitorItems.Power & ~CompactMonitorItems.Charge;
         double full = CompactMonitor.Width(every, width, 10);
         check("Compact drive: its own width; it leaves first when the row is short", width(Storage_) == 40 && CompactMonitor.Fit(every, width, 10, full) == every
             && CompactMonitor.Fit(every, width, 10, full - 1) == CompactMonitorItems.All && CompactMonitor.Fit(every, width, 10, full - 55) == (CompactMonitorItems.All & ~CompactMonitorItems.Upload));

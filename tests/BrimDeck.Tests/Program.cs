@@ -15,6 +15,11 @@ try
 {
     ModelUsageTests.Run(Check);
     await NoticeProtocolTests.Run(Check);
+    AuditWslTests.Run(Check);
+    await AuditWsl2Tests.Run(Check);
+    await NoticeWslOpsTests.Run(Check);
+    await NoticeWsl2OpsTests.Run(Check);
+    NoticeArchTests.Run(Check);
     NoticeCoreTests.Run(root, Check);
     NoticeWindowsAppTests.Run(Check);
     NoticeTimeTests.Run(Check);
@@ -24,6 +29,7 @@ try
     NoticeEventLogTests.Run(Check);
     NoticeBannerTests.Run(root, Check);
     NoticeOpsTests.Run(Check);
+    NoticeLiquidTests.Run(Check);
     NoticeGlyphTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
@@ -31,6 +37,7 @@ try
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
     CompactSpacingTests.Run(Check);
+    CompactDragTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     PanelThemeEditorTests.Run(root, Check);
     PixelBlocksTests.Run(root, Check);
@@ -46,7 +53,9 @@ try
     CompactReadingTests.Run(Check);
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);
+    SensorStopTests.Run(Check);
     StripAdmissionTests.Run(Check);
+    PowerTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
     MotionReviewTests.Run(Check);
@@ -64,12 +73,14 @@ try
     await InstallerUpdateTests.Run(root, Check);
     await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
+    OffPeakTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);
     LanguageTests.Run(root, Check);
     await ConfiguredProviderTests.Run(Check);
     await ZCodeUsageTests.Run(root, Check);
     await DshUsageTests.Run(root, Check);
     await KimiUsageTests.Run(root, Check);
+    await ClaudeRateLimitTests.Run(root, Check);
     await OpenCodeUsageTests.Run(root, Check);
     await OfficialPriceTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
@@ -178,6 +189,9 @@ try
     Check("Settings roundtrip keeps order and colors", loaded.Apps.Select(app => app.QuotaSource).SequenceEqual(moved.Apps.Select(app => app.QuotaSource)) && loaded.Apps[0].ThemeColor == "#FF8800");
     File.WriteAllText(store.FilePath, "broken json");
     Check("Corrupt settings recover visibly", store.Load().Style == CompactStyle.Notch && store.LoadWarning is not null);
+    var unreadableCopies = Directory.GetFiles(store.DirectoryPath, "settings.unreadable-*.json");
+    Check("Corrupt settings are copied aside before defaults replace them", unreadableCopies.Length == 1 && File.ReadAllText(unreadableCopies[0]) == "broken json" &&
+        store.LoadWarning!.Contains(Path.GetFileName(unreadableCopies[0])));
 
     var now = DateTimeOffset.Now;
     var locations = DataLocations.Resolve(Path.Combine(root, "home"), Path.Combine(root, "roaming"), Path.Combine(root, "local"), null, "");
@@ -205,6 +219,12 @@ try
     Check("A marked folder that another install still keeps its config in remains a profile",
         locations.ClaudeDesktopProfiles() is { Count: 3 } shared && shared.Contains(storeProfile) && shared[0] == movedProfile);
     File.Delete(Path.Combine(storeProfile, "config.json"));
+    var publisherStoreProfile = Path.Combine(locations.Local, "Packages", "AnthropicPBC.Claude_fnn82j28hfe8t", "LocalCache", "Roaming", "Claude");
+    Directory.CreateDirectory(publisherStoreProfile);
+    File.WriteAllText(Path.Combine(publisherStoreProfile, "config.json"), "{}");
+    File.WriteAllText(Path.Combine(Path.GetDirectoryName(publisherStoreProfile)!, ".user-data-leaving.anthropicpbc.claude_fnn82j28hfe8t"), "");
+    Check("Publisher-prefixed Claude Store profile is discovered while its config remains during migration",
+        locations.ClaudeDesktopProfiles() is { Count: 3 } withPublisher && withPublisher.Contains(publisherStoreProfile) && withPublisher.Contains(movedProfile));
     var oldSettings = SettingsMigrations.Read("""{"Width":890,"Claude":false,"CodexHome":"obsolete","ClaudeHome":"obsolete","CursorDatabase":"obsolete","OnlineQuota":false}""");
     oldSettings.Normalize();
     var migrated = JsonSerializer.Serialize(oldSettings);
@@ -313,6 +333,8 @@ try
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
         Check("Rate limiting does not cycle every Desktop scope", result.Quotas.Count == 2 && quotaHandler.Requests.Count == 2);
+        // The 429s above started a pause; a rejected login is only learned from a request that goes out.
+        usageClock = usageClock.AddHours(2);
         quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.Unauthorized);
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
@@ -361,6 +383,7 @@ try
         Check("Rate limiting without any earlier reading falls back to the desktop application's local history", result.LiveQuota &&
             result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 37 && result.Quotas.Single(q => q.Minutes == 10080).UsedPercent == 7 && result.Plan == "Max 20x");
         quotaHandler.Override = null;
+        usageClock = usageClock.AddHours(2);
         result = (await Refresh(onlyClaude)).Single();
         Check("A successful account reading replaces the local history sample", result.LiveQuota && result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 9);
         var readingTime = result.QuotaTime;
@@ -398,7 +421,8 @@ try
             Check("After a switch of account, rate limiting does not show the previous account's kept quotas", !limited.Quotas.Any(q => q.Label == "Fable 每周") && File.Exists(quotaFile));
         }
         desktopFixture.State = new(true, desktopCredentials);
-        using (var restarted = new UsageService(desktopFixture, locations, quotaClient, () => usageClock.AddMinutes(5), quotaCache: quotaFile))
+        var restartedAt = usageClock.AddMinutes(5);
+        using (var restarted = new UsageService(desktopFixture, locations, quotaClient, () => restartedAt, quotaCache: quotaFile))
         {
             var limited = (await restarted.RefreshAsync(onlyClaude)).Single();
             Check("After a restart, rate limiting still shows the per-model quota read before it", limited.LiveQuota && limited.Quotas.Any(q => q.Label == "Fable 每周" && q.UsedPercent == 44));
@@ -411,6 +435,7 @@ try
             var readable = (await restarted.RefreshAsync(onlyClaude)).Single();
             Check("After the sign-in was unreadable for a moment, rate limiting shows the kept per-model quotas again",
                 !unreadable.LiveQuota && File.Exists(quotaFile) && readable.Quotas.Any(q => q.Label == "Fable 每周" && q.UsedPercent == 44));
+            restartedAt = restartedAt.AddHours(2);
             quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.Unauthorized);
             await restarted.RefreshAsync(onlyClaude);
             Check("A rejected sign-in removes the kept Claude reading", !File.Exists(quotaFile));
@@ -466,6 +491,7 @@ try
             new AppEntry().QuotaOnline && SettingsMigrations.Read(savedRow.ToJsonString()).Apps.Single().QuotaOnline);
         DeckSettings ClaudeRows(params bool[] online) => new() { Apps = online.Select(o => new AppEntry { Id = ProviderId.Claude, QuotaOnline = o }).ToList() };
         quotaHandler.Override = null;
+        usageClock = usageClock.AddHours(2);
         quotaHandler.Requests.Clear();
         await Refresh(ClaudeRows(true));
         int oneRowRequests = quotaHandler.Requests.Count;
