@@ -24,11 +24,13 @@ try
     NoticeWindowsAppTests.Run(Check);
     NoticeTimeTests.Run(Check);
     NoticeEventLogTests.Run(Check);
+    NoticeLoopFollowupTests.Run(Check);
     NoticeBannerTests.Run(root, Check);
     NoticeLiquidTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     await AppleMusicLyricsTests.Run(root, Check);
+    await KugouTests.Run(Check);
     EqualizerSignalTests.Run(Check);
     CompactMotionTests.Run(Check);
     AuditPerfTests.Run(Check);
@@ -59,6 +61,7 @@ try
     WindowCompositionTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
+    EdgeFrameTests.Run(Check);
     HotkeyTests.Run(Check);
     KeyboardResizeTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);

@@ -47,7 +47,7 @@ public partial class MainWindow
         bool seen = IsVisible && !IsSuppressed && !ScreenOff;
         bool page = _expanded && CurrentPage == DeckPage.Devices && seen;
         // The collapsed reading is read for while it is chosen, before it shows: it joins the row only once a device reports.
-        bool strip = !_expanded && _compactStrip?.ChoosesBattery == true && seen && _alert is null && EffectiveStyle != CompactStyle.Line;
+        bool strip = !_expanded && Strips.Any(reading => reading.ChoosesBattery) && seen && _alert is null && EffectiveStyle != CompactStyle.Line;
         _app.PresentDevices(this, page, strip);
         // Opened again, the page shows the readings as they are now, not as it left them.
         if (page && !_devicesShowing) { _devicesView?.Update(ShownDevices, DevicesSettled, motion: false); _app.Devices?.Refresh(); }
@@ -58,7 +58,7 @@ public partial class MainWindow
     {
         if (!_expanded)
         {
-            if (StripChoosesBattery && !AdmitStrip(_app.Monitor?.Latest)) _compactStrip?.SetBattery(StripBattery());
+            if (StripChoosesBattery && !AdmitStrip(_app.Monitor?.Latest)) SetStripBattery();
             return;
         }
         if (CurrentPage != DeckPage.Devices || _devicesView is null) return;
@@ -66,6 +66,15 @@ public partial class MainWindow
         _devicesView.Update(ShownDevices, DevicesSettled, Soft.Enabled);
     }
 
+    // The strips the collapsed surface shows: the row's one, or the column's (one per reading, MainWindow.CompactColumn.cs).
+    private IEnumerable<MonitorStrip> Strips => _columnStrips.Count > 0 ? _columnStrips : _compactStrip is { } row ? [row] : [];
+    private void SetStripBattery()
+    {
+        var choosing = Strips.Where(reading => reading.ChoosesBattery).ToList();
+        if (choosing.Count == 0) return;
+        var battery = StripBattery();
+        foreach (var strip in choosing) strip.SetBattery(battery);
+    }
     // Whether this surface's collapsed row chooses the battery reading (the system readings are on and the table shows it).
     private bool StripChoosesBattery => Settings.ShowsMonitor(EffectiveStyle) && (CompactMonitor.Shown(Settings.CompactReadings) & CompactMonitorItems.Battery) != 0;
 
