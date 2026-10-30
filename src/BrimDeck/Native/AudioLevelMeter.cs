@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using BrimDeck.Core;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 
@@ -7,7 +8,8 @@ namespace BrimDeck.Native;
 // Audio is a visualization input, never a discoverable media source. Every COM
 // object is created, read, and released on this single worker thread.
 // The level bars prefer the player's captured audio; when process capture is not
-// available they fall back to the session peak meter.
+// available they fall back to the session peak meter. Bars shown at all times read the
+// whole system's sound (every process but BrimDeck) and fall back to the devices' peak meters.
 internal sealed class AudioLevelMeter : IDisposable
 {
     private readonly AutoResetEvent _wake = new(false);
@@ -15,16 +17,18 @@ internal sealed class AudioLevelMeter : IDisposable
     private readonly List<AudioSessionControl> _sessions = [];
     private readonly List<MMDevice> _devices = [];
     private Thread? _thread;
-    private string? _requested;
+    private MediaAppOwner? _requested;
     private int _revision;
     private bool _disposed;
     private float _peak;
     private volatile ProcessLoopbackCapture? _capture;
+    // The target that stands for the whole system; no application has this id or process name.
+    private static readonly MediaAppOwner Everything = new(null, "\0", "\0");
     public float Peak => Volatile.Read(ref _peak);
     public static double Now => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
-    public void SetSource(string? processName, bool enabled)
+    public void SetSource(MediaAppOwner? owner, bool enabled, bool system = false)
     {
-        string? target = enabled ? processName : null;
+        var target = enabled ? owner : system ? Everything : null;
         lock (_gate)
         {
             if (_disposed || _requested == target) return;
@@ -47,7 +51,7 @@ internal sealed class AudioLevelMeter : IDisposable
     private void Run()
     {
         int revision = -1;
-        string? target = null;
+        MediaAppOwner? target = null;
         bool retried = false;
         double nextPeak = 0;
         // A player may create its audio session after it reports playback; look again with growing pauses.
@@ -74,7 +78,11 @@ internal sealed class AudioLevelMeter : IDisposable
                 {
                     nextPeak = now + .033;
                     float peak = 0;
-                    try { foreach (var session in _sessions) peak = Math.Max(peak, session.AudioMeterInformation.MasterPeakValue); }
+                    try
+                    {
+                        if (target == Everything) foreach (var device in _devices) peak = Math.Max(peak, device.AudioMeterInformation.MasterPeakValue);
+                        else foreach (var session in _sessions) peak = Math.Max(peak, session.AudioMeterInformation.MasterPeakValue);
+                    }
                     catch
                     {
                         Clear();
@@ -87,7 +95,7 @@ internal sealed class AudioLevelMeter : IDisposable
                     if (waits?[1] != capture.Ready) waits = [_wake, capture.Ready];
                     WaitHandle.WaitAny(waits, 20);
                 }
-                else if (_sessions.Count > 0) _wake.WaitOne(33);
+                else if (_sessions.Count > 0 || target == Everything && _devices.Count > 0) _wake.WaitOne(33);
                 else if (target is null) _wake.WaitOne();
                 else if (!_wake.WaitOne(searchDelay))
                 {
@@ -98,8 +106,9 @@ internal sealed class AudioLevelMeter : IDisposable
         }
         finally { Clear(); Volatile.Write(ref _peak, 0); _wake.Dispose(); }
     }
-    private void Enumerate(string target)
+    private void Enumerate(MediaAppOwner target)
     {
+        if (target == Everything) { EnumerateEverything(); return; }
         try
         {
             using var enumerator = new MMDeviceEnumerator();
@@ -113,8 +122,7 @@ internal sealed class AudioLevelMeter : IDisposable
                     var session = sessions[i]; bool keep = false;
                     try
                     {
-                        using var process = Process.GetProcessById((int)session.GetProcessID);
-                        if (string.Equals(process.ProcessName, target, StringComparison.OrdinalIgnoreCase)) { _sessions.Add(session); keep = true; }
+                        if (MediaAppTarget.Plays(target, AppIdentity.Describe((int)session.GetProcessID))) { _sessions.Add(session); keep = true; }
                     }
                     catch { }
                     finally { if (!keep) session.Dispose(); }
@@ -125,6 +133,18 @@ internal sealed class AudioLevelMeter : IDisposable
         // Capture the process that owns the playing session; its child processes are included.
         var playing = _sessions.FirstOrDefault(s => s.State == AudioSessionState.AudioSessionStateActive) ?? _sessions.FirstOrDefault();
         if (playing is not null) _capture = ProcessLoopbackCapture.TryStart(playing.GetProcessID);
+    }
+    // Every render device, for their peak meters, and a capture of every process but this one.
+    private void EnumerateEverything()
+    {
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+            for (int d = 0; d < devices.Count; d++) _devices.Add(devices[d]);
+        }
+        catch { Clear(); return; }
+        _capture = ProcessLoopbackCapture.TryStart((uint)Environment.ProcessId, exclude: true);
     }
     private void StopCapture()
     {

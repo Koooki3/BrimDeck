@@ -159,7 +159,7 @@ static class SystemMonitorTests
         check("Monitor layout: tall narrow pages stack the list", MonitorLayout.For(440, 360, true) is { List: ListPlacement.Below, Metrics: MetricsMode.Lines });
         check("Monitor layout: short pages put the figures on one line", MonitorLayout.For(560, 100, true) is { Metrics: MetricsMode.Line, CompactMetrics: true, Figure: 16, List: ListPlacement.Side });
         check("Monitor layout: a switched-off list never shows", MonitorLayout.For(1200, 400, false) is { Processes: false });
-        check("Monitor layout: tall pages give memory and network their blocks", MonitorLayout.For(1200, 300, true) is { Metrics: MetricsMode.Blocks });
+        check("Monitor layout: tall pages give memory its block", MonitorLayout.For(1200, 300, true) is { Metrics: MetricsMode.Blocks });
         check("Monitor layout: nonsense sizes", MonitorLayout.For(double.NaN, -5, true) is { Processes: false });
         check("Monitor layout: steps, not sizes, so dragging within a step keeps the page", MonitorLayout.For(600, 220, true) == MonitorLayout.For(780, 240, true) && MonitorLayout.For(600, 220, true) != MonitorLayout.For(600, 260, true));
         check("Monitor list grid: rows fit the height, a wide list has two columns", MonitorLayout.ListGrid(300, 200, 22) == (7, 1) && MonitorLayout.ListGrid(500, 400, 22) == (14, 2));
@@ -203,15 +203,16 @@ static class SystemMonitorTests
             && DevicePixels.Up(double.NaN, 1.5) == 0 && DevicePixels.Up(10, 0) == 10 && DevicePixels.Down(10, 0) == 0);
         check("Compact rates", MonitorFormat.CompactRate(84_200) == new MonitorFormat.Quantity("84", "K") && MonitorFormat.CompactRate(1_240_000) == new MonitorFormat.Quantity("1.2", "M")
             && MonitorFormat.CompactRate(120_000_000) == new MonitorFormat.Quantity("120", "M") && MonitorFormat.CompactRate(2_500_000_000) == new MonitorFormat.Quantity("2.5", "G")
+            && MonitorFormat.CompactRate(12_340_000) == new MonitorFormat.Quantity("12", "M") && MonitorFormat.CompactRate(9_960_000) == new MonitorFormat.Quantity("10", "M")
             && MonitorFormat.CompactRate(999_600).Unit == "M");
-        // The strip reserves five characters for a rate ("99.9M"); none below a terabyte a second is longer.
-        bool five = true;
+        // The strip reserves four characters for a rate ("999M"); none below a terabyte a second is longer.
+        bool four = true;
         for (double rate = 1; rate < 999_000_000_000; rate *= 1.003)
         {
             var q = MonitorFormat.CompactRate(rate);
-            five &= (q.Number + q.Unit).Length <= 5;
+            four &= (q.Number + q.Unit).Length <= 4;
         }
-        check("Compact rates: at most five characters", five);
+        check("Compact rates: at most four characters", four);
         var alone = CompactMusicLayout.Calculate(300, 1, false, 0, false, 0, 120);
         check("Compact row: readings alone take the row, centred", alone is { MonitorAlone: true, MonitorWidth: 120 });
         var withRings = CompactMusicLayout.Calculate(300, 1, false, 2, false, 0, 120);

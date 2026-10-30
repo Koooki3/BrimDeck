@@ -45,6 +45,13 @@ internal static class MusicTests
         var plain = Lyrics.Parse(null, "甲\n乙", 100, "test");
         check("Plain lyrics retain text without fabricating timestamps", !plain.Synced && plain.Lines.Select(l => l.Text).SequenceEqual(["甲", "乙"]) && plain.Lines.All(l => l.Seconds == 0));
         check("Plain lyrics never select a timed line", !plain.CanSynchronize(track) && plain.At(0).Current == "" && plain.At(60).Current == "");
+        var song = Lyrics.Parse("[00:01]一\n[00:02]二\n[00:03]三\n[00:04]四\n[00:05]五", null, 10, "test");
+        check("The lyric window gives the lines around the current one in the order they are sung, as many as there are",
+            song.Around(3.5, 2, 2) is { Current: "三", Before: ["一", "二"], After: ["四", "五"] }
+            && song.Around(1.5, 2, 3) is { Current: "一", Before: [], After: ["二", "三", "四"] }
+            && song.Around(5.5, 1, 2) is { Current: "五", Before: ["四"], After: [] }
+            && song.Around(0, 2, 1) is { Current: "♪", Before: [], After: ["一"] }
+            && song.At(3.5) == ("二", "三", "四") && song.At(0) == ("", "♪", "一") && plain.Around(0, 2, 2) == LyricWindow.Empty);
         using var handler = new LyricsHandler(); using var http = new HttpClient(handler); using var service = new LyricsService(http);
         check("Lyrics disabled sends no request", (await service.FindAsync(track, false, default)).Lines.Count == 0 && handler.Calls == 0);
         var result = await service.FindAsync(track, true, default);
@@ -113,6 +120,25 @@ internal static class MusicTests
         check("A tall, narrow panel stays one step above the narrow preset", MusicLayout.DensityFor(440, 400) == 1);
         check("Without a timeline the cover takes the progress row's room",
             MusicLayout.Calculate(440, 200, true, false).Cover > standard.Cover && MusicLayout.Calculate(440, 200, true, false).ProgressHeight == 0);
+        // Without the cover (DeckSettings.MusicPageCover) the titles and the lyrics take two columns.
+        var columnsOk = true;
+        foreach (var size in Enum.GetValues<PanelSize>())
+        {
+            var (w, h) = MusicSizes.For(size);
+            foreach (var (width, height) in new[] { (w, h), (1200.0, 400.0), (440.0, 140.0) })
+            {
+                var l = MusicLayout.Calculate(width, height, true, true); var cols = l.Columns(true);
+                double lyricsHeight = cols.CurrentLine + (cols.LyricLines - 1) * l.Metrics.LyricLine;
+                double titles = l.Metrics.TitleLine + (cols.ShowAlbum ? 2 : 1) * l.Metrics.ArtistLine + (cols.ShowEqualizer ? cols.EqualizerGap + l.Metrics.Equalizer : 0);
+                columnsOk &= cols.LyricLines is >= 1 and <= 7 && lyricsHeight <= cols.Height + 1e-9 && titles <= cols.Height + 1e-9
+                    && cols.InfoWidth + 2 * cols.DividerGap + 1 + cols.LyricsWidth == l.BodyWidth && cols.LyricsWidth > cols.InfoWidth
+                    && cols.Before <= cols.After && cols.After - cols.Before <= 1 && cols.CurrentLyric > l.Metrics.Lyric;
+            }
+        }
+        var wideColumns = MusicLayout.Calculate(1200, 400, true, true).Columns(true);
+        check("Without the cover the titles take the left column and the lyrics the rest, as many lines as fit around the larger current one",
+            columnsOk && wideColumns.LyricLines > MusicLayout.Calculate(1200, 400, true, true).LyricLines
+            && MusicLayout.Calculate(440, 200, true, true).Columns(false) is { InfoWidth: 440 - 40, LyricsWidth: 0, LyricLines: 0 });
         check("The standard music preset is 440 wide, as wide as the compact one", MusicSizes.For(PanelSize.Standard) == (440, 200)
             && new DeckSettings().MusicWidth == 440 && new DeckSettings().MusicHeight == 200);
         check("The bottom margin below the transport equals the side margin", standard.Metrics.Bottom == standard.Metrics.Side && spacious.Metrics.Bottom == spacious.Metrics.Side);
@@ -198,6 +224,29 @@ internal static class MusicTests
         check("Rings alone in less than one ring show the first ring cut", ringsOnly.VisibleRings == 0 && ringsOnly.RingWidth == 6 && !ringsOnly.ScrollRings && ringsOnly.TextWidth == 0);
         var alone = CompactMusicLayout.Calculate(20, 1, false, 0, false, 33);
         check("A lone clock has no gap and is cut to the row", alone.ClockAlone && alone.ClockWidth == 20);
+        // The equalizer shown apart from the media.
+        check("The equalizer without media keeps its region, with the gap toward the middle only when something is there",
+            CompactMusicLayout.Calculate(200, 1, false, 0, false, 33, 0, true) is { EqualizerWidth: 18, ClockAlone: false, ClockWidth: 41, CoverWidth: 0 }
+            && CompactMusicLayout.Calculate(200, 1, false, 2, false, 33, 0, true) is { EqualizerWidth: 26 }
+            && CompactMusicLayout.Calculate(200, 1, false, 0, false, 0, 0, true) is { EqualizerWidth: 18 }
+            && CompactMusicLayout.Calculate(200, 1, false, 0, false, 0, 120, true) is { MonitorAlone: false });
+        check("The equalizer's length follows its bars, four by default, and the count stays in its range",
+            CompactMusicLayout.BarsWidth(4, 1) == 18 && CompactMusicLayout.BarsWidth(20, 1) == 98 && CompactMusicLayout.BarsWidth(3, 2) == 26
+            && CompactMusicLayout.BarsWidth(1, 1) == 13 && CompactMusicLayout.BarsWidth(99, 1) == 98 && new DeckSettings { EqualizerBars = 0 }.EqualizerBars == 3
+            && new DeckSettings().EqualizerBars == 4 && new DeckSettings().MusicEqualizerBars == 5 && new DeckSettings { MusicEqualizerBars = 30 }.MusicEqualizerBars == 20 && CompactMusicLayout.Calculate(300, 1, true, 0, true, 0, 0, true, 8) is { EqualizerWidth: 8 + 38, EqualizerSize: 38 }
+            && CompactMusicLayout.NaturalWidth(1, false, 0, false, 0, 0, 0, true, 6) == 28);
+        check("Media without the equalizer has no equalizer region", CompactMusicLayout.Calculate(200, 1, true, 0, true, 33, 0, false) is { EqualizerWidth: 0, CoverWidth: 28 });
+        check("The width the row asks for counts the equalizer apart from the media",
+            CompactMusicLayout.NaturalWidth(1, false, 0, false, 0, 0, 0, true) == 18 && CompactMusicLayout.NaturalWidth(1, false, 0, false, 33, 0, 0, true) == 18 + 8 + 33
+            && CompactMusicLayout.NaturalWidth(1, true, 0, false, 0, 0, 0, false) == 20 + 8
+            && CompactMusicLayout.RequiredWidth(1, false, false, 33, 0, 0, true) == 18 + 8 + 33 && CompactMusicLayout.RequiredWidth(1, true, true, 0, 0, 0, false) == 20 + 8 + 18);
+        // The cover switched off (DeckSettings.MusicCompactCover): the lyric and the equalizer keep the media's place in the row.
+        check("Media without the cover has no cover region, and the lyric keeps the clock from standing alone",
+            CompactMusicLayout.Calculate(200, 1, true, 0, true, 33, 0, true, CompactMusicLayout.DefaultBars, showCover: false) is { CoverWidth: 0, EqualizerWidth: 26, ClockWidth: 41, ClockAlone: false, TextWidth: 200 - 26 - 41 }
+            && CompactMusicLayout.Calculate(200, 1, true, 0, false, 33, 0, false, CompactMusicLayout.DefaultBars, showCover: false) is { CoverWidth: 0, ClockAlone: true }
+            && CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, cover: false) == CompactMusicLayout.TextSlot + 18 + 8
+            && CompactMusicLayout.RequiredWidth(1, true, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, cover: false) == 18 + 8 + 18
+            && new DeckSettings() is { MusicCompactCover: true, MusicPageCover: true });
 
         // Any width, scale and clock width gives finite regions that are never negative and never add up to more than the row.
         double[] widths = [0, .4, 1, 7, 17.9, 18, 36, 54, 84, 91.3, 115, 164, 178, 400, 1e6, double.NaN, -5, double.PositiveInfinity];

@@ -34,11 +34,12 @@ public static class MonitorFormat
         return new(((int)Math.Round(value / 1000)).ToString(CultureInfo.InvariantCulture), "KB/s");
     }
 
-    // A rate in at most four characters and one letter, for the collapsed row: "84" K, "1.2" M, "120" M, as ftop's menu bar.
+    // A rate in at most three digits and one letter, for the collapsed row: "84" K, "1.2" M, "12" M, "120" M. One decimal only
+    // under 10, so the widest is "999M" and not "99.9M".
     public static Quantity CompactRate(double bytesPerSecond)
     {
         double value = double.IsFinite(bytesPerSecond) ? Math.Max(0, bytesPerSecond) : 0;
-        static string Short(double v) => v < 99.95 ? Decimal(v) : ((int)Math.Round(v)).ToString(CultureInfo.InvariantCulture);
+        static string Short(double v) => v < 9.95 ? Decimal(v) : ((int)Math.Round(v)).ToString(CultureInfo.InvariantCulture);
         if (value >= 999_500_000) return new(Short(value / 1_000_000_000), "G");
         if (value >= 999_500) return new(Short(value / 1_000_000), "M");
         return new(((int)Math.Round(value / 1000)).ToString(CultureInfo.InvariantCulture), "K");

@@ -142,5 +142,7 @@ static class TemperatureTests
             && !inLine.CompactReadings.Single(r => r.Item == Storage_).FiguresInLine);
         var off = SettingsMigrations.Read("""{"AppVersion":"1.2.0","MonitorTemperatures":false}""");
         check("Temperatures setting: saved off stays off", !off.MonitorTemperatures);
+        var on = SettingsMigrations.Read("""{"AppVersion":"1.2.0","MonitorTemperatures":true}""");
+        check("Temperatures setting: off by default, saved on stays on", !new DeckSettings().MonitorTemperatures && on.MonitorTemperatures);
     }
 }

@@ -17,6 +17,7 @@ try
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     await AppleMusicLyricsTests.Run(root, Check);
+    await KugouTests.Run(Check);
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
     CompactSpacingTests.Run(Check);
@@ -28,6 +29,7 @@ try
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
+    EdgeFrameTests.Run(Check);
     HotkeyTests.Run(Check);
     KeyboardResizeTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
@@ -36,6 +38,7 @@ try
     CompactReadingTests.Run(Check);
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);
+    SensorStopTests.Run(Check);
     StripAdmissionTests.Run(Check);
     DevicesTests.Run(Check);
     DeviceProtocolTests.Run(Check);
