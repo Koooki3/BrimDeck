@@ -110,6 +110,21 @@ public sealed class WindowsNoticeLogBatch
         lock (_gate) RequestReconcileLocked(immediate);
     }
 
+    // B: an id the log named could not be read (Windows wrote the entry before the listener can return the notification). The
+    // reading that settles it follows within FailedReadReconcileInterval, as for any entry that could not be trusted, unless a
+    // reconciliation is already pending (a clear entry in the same batch: QQ clears its previous toast with every message): it
+    // rides with that one, and a busy chat is not read once a second.
+    public void RequestReconcileForMissing()
+    {
+        lock (_gate) RequestReconcileLocked(immediate: _reconcileVersion == 0);
+    }
+
+    // C: access was lost; what is queued came before the Start baseline that follows, which takes in what is listed.
+    public void Reset()
+    {
+        lock (_gate) { _ids.Clear(); _ambiguous.Clear(); _reconcileVersion = _immediateVersion = 0; }
+    }
+
     private void RequestReconcileLocked(bool immediate)
     {
         _reconcileVersion = ++_nextVersion;
