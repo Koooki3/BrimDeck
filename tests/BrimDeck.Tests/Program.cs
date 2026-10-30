@@ -24,6 +24,7 @@ try
     NoticeWindowsAppTests.Run(Check);
     NoticeTimeTests.Run(Check);
     NoticeEventLogTests.Run(Check);
+    NoticeLoopFollowupTests.Run(Check);
     NoticeBannerTests.Run(root, Check);
     NoticeLiquidTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
