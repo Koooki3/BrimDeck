@@ -16,8 +16,10 @@ internal static class Program
         {
             // "--only power": just the power and battery checks, for a quick look at what this machine reports.
             if (args is ["--only", "power"]) { PowerChecks.Run(Check); return 0; }
+            if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return 0; }
             Console.WriteLine($"Windows native smoke tests: {Environment.OSVersion.Version}");
             CheckWindowChrome();
+            CaptureChecks.Run(Check);
             CheckSettledClip();
             CheckPageToolTips();
             LayoutRetryTests.Run(Check);

@@ -214,8 +214,16 @@ public sealed class WindowsHost : IDisposable
     public static void ConfigureOverlay(Window window)
     {
         var handle = new WindowInteropHelper(window).Handle;
-        var style = GetWindowLongPtr(handle, -20).ToInt64();
-        SetWindowLongPtr(handle, -20, new IntPtr(style | 0x08000000)); // WS_EX_NOACTIVATE: hover must not steal focus.
+        // WS_EX_NOACTIVATE makes WGC CreateForWindow fail with E_INVALIDARG. Keep the
+        // window capturable and reject mouse activation without swallowing the click.
+        // ShowActivated=False separately prevents activation when the window is shown.
+        HwndSource.FromHwnd(handle)?.AddHook(OverlayMessages);
+    }
+    private static IntPtr OverlayMessages(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (message != 0x0021) return IntPtr.Zero; // WM_MOUSEACTIVATE
+        handled = true;
+        return new IntPtr(3); // MA_NOACTIVATE: deliver the click without taking focus.
     }
     public void Dispose() => _timer.Stop();
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
@@ -239,5 +247,4 @@ public sealed class WindowsHost : IDisposable
     [DllImport("dwmapi")] private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
     [DllImport("user32")] private static extern IntPtr GetWindow(IntPtr window, uint command);
     [DllImport("user32", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
-    [DllImport("user32", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
     [DllImport("user32")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);}
