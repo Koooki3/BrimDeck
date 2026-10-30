@@ -26,8 +26,11 @@ public sealed partial class SettingsWindow
         public Action Refresh = () => { };
     }
 
-    private static string DragWidthHint(CompactStyle style) => Loc.T("把鼠标移到" + StyleName(style) + "的左右两端，可以直接拖动调整。",
+    private string DragWidthHint(CompactStyle style) => Loc.T("把鼠标移到" + StyleName(style) + (NotchAcross(style) ? "的上下两端" : "的左右两端") + "，可以直接拖动调整。",
         "Point at either end of the " + StyleName(style).ToLowerInvariant() + " and drag it to adjust.");
+
+    // The notch on a side edge runs down the screen: its width is a length there and its offset vertical.
+    private bool NotchAcross(CompactStyle style) => style == CompactStyle.Notch && S.NotchEdge is ScreenEdge.Left or ScreenEdge.Right;
 
     private void CollapsedSizeOptions(CompactStyle style)
     {
@@ -38,10 +41,18 @@ public sealed partial class SettingsWindow
         {
             case CompactStyle.Notch:
             {
+                bool across = NotchAcross(style);
+                // A new edge builds the page again, for the names below.
+                var edge = MusicChoice(Loc.T("贴靠位置", "Edge"), S.NotchEdge,
+                    [(ScreenEdge.Top, Loc.T("顶部", "Top")), (ScreenEdge.Bottom, Loc.T("底部", "Bottom")), (ScreenEdge.Left, Loc.T("左侧", "Left")), (ScreenEdge.Right, Loc.T("右侧", "Right"))],
+                    value => { if (S.NotchEdge == value) return; Change(s => s.NotchEdge = value); ShowPage(1); },
+                    help: Loc.T("刘海贴靠的屏幕边缘。贴靠底部、左侧或右侧时，刘海挂在任务栏边上，不会盖住任务栏；贴靠左侧或右侧时，内容竖向排列，过长时上下滚动。",
+                        "The screen edge the notch hangs from. At the bottom, left or right it hangs from the taskbar's edge rather than covering it; at the left or right its content stands in a column that scrolls up and down when it is too long."));
                 var auto = AutoWidthRow(style);
-                var width = SizeRow(Loc.T("宽度", "Width"), S.NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, 1, v => ChangeCollapsed(s => { s.NotchWidth = v; s.NotchAutoWidth = false; }));
-                var height = SizeRow(Loc.T("高度", "Height"), S.NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, 1, v => ChangeCollapsed(s => s.NotchHeight = v));
-                var offset = SizeRow(Loc.T("水平偏移", "Horizontal offset"), S.NotchOffsetX, 0, 0, 1, v => ChangeCollapsed(s => s.NotchOffsetX = v), centered: true);
+                var width = SizeRow(across ? Loc.T("长度", "Length") : Loc.T("宽度", "Width"), S.NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, 1, v => ChangeCollapsed(s => { s.NotchWidth = v; s.NotchAutoWidth = false; }));
+                var height = SizeRow(across ? Loc.T("内容大小", "Content size") : Loc.T("高度", "Height"), S.NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, 1, v => ChangeCollapsed(s => s.NotchHeight = v),
+                    help: across ? Loc.T("贴靠左侧或右侧时，此项决定内容的大小；刘海的宽度随内容自动调整。", "At the left or right edge this sets the size of the content; the notch's width follows the content.") : null);
+                var offset = SizeRow(across ? Loc.T("垂直偏移", "Vertical offset") : Loc.T("水平偏移", "Horizontal offset"), S.NotchOffsetX, 0, 0, 1, v => ChangeCollapsed(s => s.NotchOffsetX = v), centered: true, vertical: across);
                 _refreshCollapsedRanges = () =>
                 {
                     double shown = ShownWidth(style);
@@ -50,7 +61,7 @@ public sealed partial class SettingsWindow
                     SetAutoWidth(auto, width, S.NotchAutoWidth);
                     SetCollapsedRange(offset, -Whole(limits.OffsetMax), Whole(limits.OffsetMax), S.NotchOffsetX);
                 };
-                Group(auto, width.Row, height.Row, offset.Row);
+                Group(edge, auto, width.Row, height.Row, offset.Row);
                 break;
             }
             case CompactStyle.Capsule:
@@ -67,7 +78,7 @@ public sealed partial class SettingsWindow
                     var limits = _app.Deck.CurrentCollapsedRanges(style, shown, S.CapsuleHeight);
                     SetCollapsedRange(width, limits.WidthMin, limits.WidthMax, shown);
                     SetAutoWidth(auto, width, S.CapsuleAutoWidth);
-                    // The capsule can move down to the bottom of the work area; the limit follows its height and the display.
+                    // The capsule can move down to the bottom of the monitor, over a bottom taskbar; the limit follows its height and the display.
                     SetCollapsedRange(top, CollapsedLimits.CapsuleTopMin, Whole(limits.TopMax), S.CapsuleTop);
                     SetCollapsedRange(offset, -Whole(limits.OffsetMax), Whole(limits.OffsetMax), S.CapsuleOffsetX);
                 };
@@ -188,8 +199,9 @@ public sealed partial class SettingsWindow
 
     // A slider with a number box and steppers, like SliderRow, with its own step (the indicator's thickness moves by
     // 0.5 DIP) and limits that can change while it is shown. A centered slider fills from zero toward the thumb.
+    // vertical: the offset of a notch on a side edge, which moves it up and down.
     private SizeControl SizeRow(string title, double value, double min, double max, double step, Action<double> changed,
-        string? help = null, bool centered = false, string? hint = null)
+        string? help = null, bool centered = false, string? hint = null, bool vertical = false)
     {
         string format = step < 1 ? "0.#" : "0";
         string Text(double number) => number.ToString(format, CultureInfo.InvariantCulture);
@@ -241,8 +253,11 @@ public sealed partial class SettingsWindow
         {
             if (!centered) return;
             bool left = slider.Maximum > 0 && slider.Value <= slider.Minimum, right = slider.Maximum > 0 && slider.Value >= slider.Maximum;
-            note.Text = left ? Loc.T("已到达屏幕左边缘，不能再向左移动。", "At the left edge of the screen; it cannot move further left.")
-                : right ? Loc.T("已到达屏幕右边缘，不能再向右移动。", "At the right edge of the screen; it cannot move further right.") : "";
+            note.Text = vertical
+                ? left ? Loc.T("已到达屏幕上边缘，不能再向上移动。", "At the top edge of the screen; it cannot move further up.")
+                    : right ? Loc.T("已到达屏幕下边缘，不能再向下移动。", "At the bottom edge of the screen; it cannot move further down.") : ""
+                : left ? Loc.T("已到达屏幕左边缘，不能再向左移动。", "At the left edge of the screen; it cannot move further left.")
+                    : right ? Loc.T("已到达屏幕右边缘，不能再向右移动。", "At the right edge of the screen; it cannot move further right.") : "";
             note.Visibility = note.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         control.Refresh = () => { input.Text = Text(slider.Value); UpdateFill(); UpdateEdge(); };

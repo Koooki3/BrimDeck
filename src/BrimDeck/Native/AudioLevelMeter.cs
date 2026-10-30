@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using BrimDeck.Core;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 
@@ -16,21 +17,21 @@ internal sealed class AudioLevelMeter : IDisposable
     private readonly List<AudioSessionControl> _sessions = [];
     private readonly List<MMDevice> _devices = [];
     private Thread? _thread;
-    private string? _requested;
+    private MediaAppOwner? _requested;
     private int _revision;
     private bool _disposed;
     private float _peak;
     private volatile ProcessLoopbackCapture? _capture;
-    // The target that stands for the whole system; no process has this name.
-    private const string Everything = "\0";
+    // The target that stands for the whole system; no application has this id or process name.
+    private static readonly MediaAppOwner Everything = new(null, "\0", "\0");
     public float Peak => Volatile.Read(ref _peak);
     // How often the captured audio is analysed (ProcessLoopbackCapture.AnalysisMs), for a capture running now and those to come.
     private int _analysisMs = 33;
     public int AnalysisMs { get => Volatile.Read(ref _analysisMs); set { Volatile.Write(ref _analysisMs, value); if (_capture is { } capture) capture.AnalysisMs = value; } }
     public static double Now => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
-    public void SetSource(string? processName, bool enabled, bool system = false)
+    public void SetSource(MediaAppOwner? owner, bool enabled, bool system = false)
     {
-        string? target = enabled ? processName : system ? Everything : null;
+        var target = enabled ? owner : system ? Everything : null;
         lock (_gate)
         {
             if (_disposed || _requested == target) return;
@@ -53,7 +54,7 @@ internal sealed class AudioLevelMeter : IDisposable
     private void Run()
     {
         int revision = -1;
-        string? target = null;
+        MediaAppOwner? target = null;
         bool retried = false;
         double nextPeak = 0;
         // A player may create its audio session after it reports playback; look again with growing pauses.
@@ -108,7 +109,7 @@ internal sealed class AudioLevelMeter : IDisposable
         }
         finally { Clear(); Volatile.Write(ref _peak, 0); _wake.Dispose(); }
     }
-    private void Enumerate(string target)
+    private void Enumerate(MediaAppOwner target)
     {
         if (target == Everything) { EnumerateEverything(); return; }
         try
@@ -124,8 +125,7 @@ internal sealed class AudioLevelMeter : IDisposable
                     var session = sessions[i]; bool keep = false;
                     try
                     {
-                        using var process = Process.GetProcessById((int)session.GetProcessID);
-                        if (string.Equals(process.ProcessName, target, StringComparison.OrdinalIgnoreCase)) { _sessions.Add(session); keep = true; }
+                        if (MediaAppTarget.Plays(target, AppIdentity.Describe((int)session.GetProcessID))) { _sessions.Add(session); keep = true; }
                     }
                     catch { }
                     finally { if (!keep) session.Dispose(); }

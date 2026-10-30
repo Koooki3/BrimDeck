@@ -63,6 +63,10 @@ public static class ProviderCatalog
     // Marks the snapshot of such a source built only from this PC's records, shown by its rows that do not read online.
     public const string LocalQuota = "local";
     public static bool ReadsLocalQuota(AppEntry entry) => HasOnlineSwitch(entry.QuotaSource) && !entry.QuotaOnline;
+    // Sources billed per API call whose account balance comes without a total; their rows can set a target balance
+    // (AppEntry.BalanceTarget) that gives the balance a used share.
+    public static bool HasAccountBalance(ProviderId id) => id is ProviderId.Dsh or ProviderId.DeepSeek or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api;
+    public static bool IsAccountBalance(UsageMetric metric) => metric is { Kind: MetricKind.Balance, Label: "账户余额", Total: null };
     // Rows that allow HTTP are read apart from otherwise identical rows that do not, and so are custom rows with other authorized
     // hosts or another way of getting the key (ProviderNetwork.Fingerprint); the keys of other rows stay as they were.
     public static string ConfigurationKey(AppEntry entry) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, entry.SecretRevision }))

@@ -382,6 +382,8 @@ internal abstract class GlideCarousel : Grid
     // (Unloaded, after the next row took the strip) must not stop or move the next carousel's glide, nor leave its own running
     // on a transform no longer drawn, which kept WPF's frame clock going for nothing.
     private TranslateTransform _shift = new();
+    // The direction the strip moves in: left, or up for the collapsed column (ColumnCarousel).
+    private DependencyProperty _axis = TranslateTransform.XProperty;
     private bool _discrete;
     private bool _enabled, _paused;
     private TimeSpan _elapsed;
@@ -433,6 +435,22 @@ internal abstract class GlideCarousel : Grid
         // The masked content is composited from a layer the size of what is drawn. A transparent background extends that layer
         // to the box, so its resampled edge column falls on empty space instead of repeating the strip's outermost pixels.
         Background = Brushes.Transparent;
+        StartCycle(travel, elapsed, animate);
+    }
+
+    // The collapsed column on a side edge (ColumnCarousel) moves up instead of left: its layout and fades are its own, and it
+    // starts the same cycle on the shift's vertical axis.
+    protected void GlideVertical(FrameworkElement strip, double travel, TimeSpan elapsed, bool animate)
+    {
+        _strip = strip; _axis = TranslateTransform.YProperty;
+        travel = Math.Max(0, travel);
+        Rotates = travel > 0;
+        strip.RenderTransform = _shift;
+        if (Rotates) StartCycle(travel, elapsed, animate);
+    }
+
+    private void StartCycle(double travel, TimeSpan elapsed, bool animate)
+    {
         Travel = travel;
         _discrete = !animate;
         _cycle = new QuotaCycle(Travel);
@@ -460,13 +478,13 @@ internal abstract class GlideCarousel : Grid
         double next;
         if (_discrete)
         {
-            shift.X = at < _cycle.GlideEnd ? 0 : -Travel;
+            shift.SetValue(_axis, at < _cycle.GlideEnd ? 0d : -Travel);
             next = at < _cycle.GlideEnd ? _cycle.GlideEnd - at : _period - at;
         }
         else
         {
-            shift.BeginAnimation(TranslateTransform.XProperty, null); _strip.BeginAnimation(OpacityProperty, null);
-            shift.X = _cycle.Shift(at); _strip.Opacity = _cycle.Opacity(at);
+            shift.BeginAnimation(_axis, null); _strip.BeginAnimation(OpacityProperty, null);
+            shift.SetValue(_axis, _cycle.Shift(at)); _strip.Opacity = _cycle.Opacity(at);
             var (moving, start, end) = _cycle.StretchAt(at);
             next = end - at;
             if (running && moving) Move(start, end, at - start);
@@ -497,7 +515,7 @@ internal abstract class GlideCarousel : Grid
         {
             var glide = new DoubleAnimation(0, -Travel, TimeSpan.FromSeconds(end - start)) { BeginTime = begin, EasingFunction = GlideEase };
             Timeline.SetDesiredFrameRate(glide, GlideRate(VisualTreeHelper.GetDpi(this).PixelsPerDip));
-            shift.BeginAnimation(TranslateTransform.XProperty, glide);
+            shift.BeginAnimation(_axis, glide);
             return;
         }
         static KeyTime Key(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
@@ -508,7 +526,7 @@ internal abstract class GlideCarousel : Grid
         fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, Key(0)));
         fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, Key(Fade)));
         fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, Key(2 * Fade)));
-        shift.BeginAnimation(TranslateTransform.XProperty, back);
+        shift.BeginAnimation(_axis, back);
         _strip.BeginAnimation(OpacityProperty, fade);
     }
 
@@ -592,5 +610,31 @@ internal sealed class ReadingsCarousel : GlideCarousel
         Height = strip.Height;
         strip.Width = strip.PreferredWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
         Glide(strip, window, travel, edge, elapsed, animate, cut);
+    }
+}
+
+// The collapsed column on a side edge (MainWindow.CompactColumn.cs) when it is longer than the notch: it rests with its start in
+// view, glides up until its end is, rests there and fades back, as the readings do sideways. The fades lie over the window's top
+// and bottom edges, outside it (over the notch's ends), so nothing at rest is faded.
+internal sealed class ColumnCarousel : GlideCarousel
+{
+    public ColumnCarousel(FrameworkElement column, double width, double window, double travel, double edge, TimeSpan elapsed, bool animate)
+    {
+        window = Math.Max(0, window); travel = Math.Max(0, travel);
+        bool rotates = travel > 0;
+        edge = rotates ? Math.Max(0, edge) : 0;
+        Width = width; Height = edge + window + edge; ClipToBounds = true;
+        column.VerticalAlignment = VerticalAlignment.Top;
+        Canvas.SetTop(column, edge);
+        // A Canvas measures the column at its full length, as for the rings.
+        var host = new Canvas(); host.Children.Add(column); Children.Add(host);
+        if (rotates && edge > 0)
+        {
+            Margin = new Thickness(0, -edge, 0, -edge);
+            OpacityMask = new LinearGradientBrush(new GradientStopCollection { new(Colors.Transparent, 0), new(Colors.White, edge / Height),
+                new(Colors.White, (Height - edge) / Height), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(0, Height)) { MappingMode = BrushMappingMode.Absolute };
+            Background = Brushes.Transparent;
+        }
+        GlideVertical(column, travel, elapsed, animate);
     }
 }

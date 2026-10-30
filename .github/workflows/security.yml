@@ -1,0 +1,90 @@
+name: Security
+# CodeQL reads the C# source for security problems, and the package audit fails when a package the build restores, direct or
+# transitive, has a published advisory. Neither runs for every pull request: CodeQL could not upload its results for a pull
+# request from a fork (the token is read-only there), so it runs on the branches after a merge and once a week; the audit runs for
+# a pull request only when it changes what is restored, and once a week, since an advisory may be published against a package
+# that did not change.
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main, 'release/**']
+    paths:
+      - '**/*.csproj'
+      - '**/packages.lock.json'
+      - '.github/workflows/security.yml'
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  codeql:
+    # A pull request runs only the package audit.
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - uses: github/codeql-action/init@v4.39.0
+        with:
+          languages: csharp
+          build-mode: manual
+          queries: security-extended
+          # The tests are not shipped; their findings would only hide the application's.
+          config: |
+            paths-ignore:
+              - tests/**
+      - name: Build
+        shell: pwsh
+        run: |
+          dotnet build BrimDeck.sln -c Release -p:RestoreLockedMode=true
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+      - uses: github/codeql-action/analyze@v4.39.0
+        with:
+          category: /language:csharp
+  packages:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: |
+          dotnet restore BrimDeck.sln -p:RestoreLockedMode=true
+          if ($LASTEXITCODE -ne 0) { throw 'Restore failed.' }
+      # JSON, because the text of "dotnet list package" follows the language of the machine.
+      - name: Vulnerable packages
+        run: |
+          $json = dotnet list BrimDeck.sln package --vulnerable --include-transitive --no-restore --format json | Out-String
+          if ($LASTEXITCODE -ne 0) { throw 'The package list could not be read.' }
+          $report = $json | ConvertFrom-Json
+          $found = @()
+          foreach ($project in $report.projects) {
+              foreach ($framework in $project.frameworks) {
+                  foreach ($package in @($framework.topLevelPackages) + @($framework.transitivePackages)) {
+                      if (!$package) { continue }
+                      foreach ($advisory in $package.vulnerabilities) {
+                          $found += "$(Split-Path $project.path -Leaf) ($($framework.framework)): $($package.id) $($package.resolvedVersion) - $($advisory.severity) $($advisory.advisoryurl)"
+                      }
+                  }
+              }
+          }
+          # A source that could not give its advisories is not a clean audit.
+          foreach ($problem in $report.problems) { $found += "Problem: $($problem.text)" }
+          if ($found.Count -gt 0) { $found | ForEach-Object { Write-Host "::error::$_" }; throw "$($found.Count) vulnerable packages or audit problems." }
+          Write-Host 'No known vulnerable packages, direct or transitive.'
