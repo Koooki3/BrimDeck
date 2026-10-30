@@ -23,7 +23,11 @@ internal static class CaptureChecks
             try
             {
                 SetWindowLongPtrW(handle, -20, new IntPtr(style | 0x08000000));
-                check("old overlay style reproduces WGC E_INVALIDARG", CreateItem(handle) == unchecked((int)0x80070057));
+                // Only proves the old style was the cause where the system still rejects it: a Windows build that accepts it
+                // (10.0.26300) has nothing to reproduce, and the checks above are the ones that guard the overlay.
+                int old = CreateItem(handle);
+                if (old == 0) Console.WriteLine("SKIP: this Windows accepts the old overlay style for WGC; the reproduction does not apply.");
+                else check("old overlay style reproduces WGC E_INVALIDARG", old == unchecked((int)0x80070057));
             }
             finally { SetWindowLongPtrW(handle, -20, new IntPtr(style)); }
             check("restoring capturable style restores WGC", CreateItem(handle) == 0);
