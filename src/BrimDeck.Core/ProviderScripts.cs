@@ -12,6 +12,13 @@ public static class ProviderScripts
     // The template a new custom row starts from, in the interface language.
     public static string Example => Loc.IsEnglish ? ExampleEnglish : ExampleChinese;
 
+    // A row with nothing written yet: no script, or the template of either language, whichever language it was made in.
+    public static bool IsBlankOrTemplate(string? script)
+    {
+        var text = (script ?? "").Trim();
+        return text.Length == 0 || text == ExampleChinese.Trim() || text == ExampleEnglish.Trim();
+    }
+
     private const string ExampleChinese = """
         // 定义 fetchUsage(ctx)，返回数组（必填，至少一项）。每项是一条配额，每页两条，点击翻页。
         async function fetchUsage(ctx) {
