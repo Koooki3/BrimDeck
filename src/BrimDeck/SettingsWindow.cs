@@ -898,6 +898,8 @@ public sealed partial class SettingsWindow : Window
                     if (quota)
                     {
                         current.QuotaSource = id; current.Site = ""; current.Script = id == ProviderId.Custom ? ProviderScripts.Example : ""; current.SecretRevision = Guid.Empty;
+                        // The grants belonged to the script that is gone: the new one starts with its site only, and its secret injected.
+                        current.AllowedHosts = []; current.SecretAccess = SecretAccess.Injected; current.NetworkReviewPending = false;
                     }
                     else current.UsageSource = id;
                 });
