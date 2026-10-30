@@ -6,6 +6,8 @@ using System.Text.RegularExpressions;
 namespace BrimDeck.Core;
 
 public enum CompactStyle { Notch, Capsule, Line }
+// The screen edge the notch hangs from (DeckSettings.NotchEdge); see EdgeFrame.
+public enum ScreenEdge { Top, Bottom, Left, Right }
 public enum WindowBehavior { Normal, Line, Hide }
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
 // The monitors that show the panel. Chosen uses DisplayMonitors and falls back to the primary monitor while none of them is connected.
@@ -285,6 +287,12 @@ public sealed class DeckSettings
     public double NotchWidth { get; set; } = CollapsedLimits.NotchWidthDefault;
     public double NotchHeight { get; set; } = CollapsedLimits.NotchHeightDefault;
     public double NotchOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
+    // The edge the notch hangs from. On the other edges it keeps its width (along the edge), height and offset (along the edge
+    // too); see EdgeFrame. The capsule always sits below the top edge.
+    public ScreenEdge NotchEdge { get; set; } = ScreenEdge.Top;
+    // The edge the panel works from: the notch's, or the top for the capsule and the line chosen as the style. A window rule that
+    // turns the notch into the line keeps the notch's edge.
+    [JsonIgnore] public ScreenEdge DockEdge => Style == CompactStyle.Notch ? NotchEdge : ScreenEdge.Top;
     public double CapsuleWidth { get; set; } = CollapsedLimits.CapsuleWidthDefault;
     public double CapsuleHeight { get; set; } = CollapsedLimits.CapsuleHeightDefault;
     public double CapsuleOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
@@ -599,6 +607,7 @@ public sealed class DeckSettings
         NotchWidth = Fit(NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault);
         NotchHeight = Fit(NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault);
         NotchOffsetX = Offset(NotchOffsetX);
+        if (!Enum.IsDefined(NotchEdge)) NotchEdge = ScreenEdge.Top;
         CapsuleWidth = Fit(CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault);
         CapsuleHeight = Fit(CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault);
         CapsuleOffsetX = Offset(CapsuleOffsetX);

@@ -852,7 +852,7 @@ public partial class MainWindow
         // The progress runs along the indicator's own length, whatever length is set.
         double length = double.IsFinite(Collapsed.Surface.Width) ? Math.Max(0, Collapsed.Surface.Width) : 0;
         double progress = track.HasTimeline && track.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / track.Duration.TotalSeconds, 0, 1) : 0;
-        MusicIndicator.Width = length * progress;
+        if (_frame.Across) MusicIndicator.Height = length * progress; else MusicIndicator.Width = length * progress;
     }
     private (string Previous, string Current, string Next) CurrentLyrics(MediaTrack track)
     {
@@ -1077,6 +1077,8 @@ public partial class MainWindow
         bool running = IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && _alert is null;
         _quotaCarousel?.SetRunning(running, _pointerInside);
         _stripCarousel?.SetRunning(running, _pointerInside);
+        _columnCarousel?.SetRunning(running, _pointerInside);
+        foreach (var reading in _columnReadings) reading.SetRunning(running, _pointerInside);
     }
     // With the display off (and the session unlocked), nothing of the music is seen: the bars stop and the audio levels are not read.
     private bool MusicPresentationVisible => IsVisible && !IsSuppressed && !DisplayPower.Off && _mediaTrack is { State: not MediaState.Stopped }
