@@ -641,7 +641,7 @@ public sealed partial class SettingsWindow : Window
                     s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;s.MonitorPower=defaults.MonitorPower;break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
-                case 5:s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.LyricsEnabled=defaults.LyricsEnabled;break;
+                case 5:s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;break;
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;s.NeteaseAutoFullControl=defaults.NeteaseAutoFullControl;s.AppleMusicFullControl=defaults.AppleMusicFullControl;break;
                 // The default theme, with its own colors and suggested clock, the clock reset as the collapsed page resets it; the
                 // other themes keep what was saved for them.

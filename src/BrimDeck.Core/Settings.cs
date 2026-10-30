@@ -337,6 +337,9 @@ public sealed class DeckSettings
     public bool ClockSeconds { get; set; }
     public CompactMusicText MusicText { get; set; }
     public bool MusicTrackNotice { get; set; } = true;
+    // The album cover at the left of the collapsed row and on the music page; some players give no cover, only a placeholder.
+    public bool MusicCompactCover { get; set; } = true;
+    public bool MusicPageCover { get; set; } = true;
     public bool MusicIndicatorProgress { get; set; } = true;
     public bool LyricsEnabled { get; set; } = true;
     // How many bars the music page's equalizer has, beside the title; its bars keep their spacing, so more bars make it longer.

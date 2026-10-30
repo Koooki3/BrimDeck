@@ -211,12 +211,14 @@ public sealed partial class SettingsWindow
     {
         SectionTitle(Loc.T("收起时", "When collapsed"));
         Group(MusicChoice(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) }, v => Change(s => s.MusicText = v)),
-            Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v)));
+            Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v)),
+            Toggle(Loc.T("显示封面", "Show cover"), S.MusicCompactCover, v => Change(s => s.MusicCompactCover = v)));
         SectionTitle(Loc.T("展开时", "When expanded"));
         var bars = SliderRow(Loc.T("律动条长度", "Equalizer length"), S.MusicEqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
             v => Change(s => s.MusicEqualizerBars = (int)v));
         bars.IsEnabled = S.MusicPage;
-        Group(Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars);
+        Group(Toggle(Loc.T("显示封面", "Show cover"), S.MusicPageCover, v => Change(s => s.MusicPageCover = v), S.MusicPage),
+            Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars);
     }
     // Operations only one player supports, grouped under that player's name.
     private void Players()
