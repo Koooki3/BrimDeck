@@ -47,6 +47,8 @@ public sealed record NoticeInput
     public string Title { get; init; } = "";
     public string Body { get; init; } = "";
     public string? IconRef { get; init; }
+    // A picture of who or what the notice is from (a contact's or a group's avatar), shown in place of the icon; same forms as IconRef.
+    public string? Picture { get; init; }
     public DateTimeOffset? CreatedAt { get; init; }
     // How long the message had waited before it was sent, by the sender's clock (NoticeMessage.AgeMs); null when not told.
     public TimeSpan? Age { get; init; }
@@ -92,6 +94,7 @@ public sealed class Notice
     public string Title { get; set; } = "";
     public string Body { get; set; } = "";
     public string? IconRef { get; set; }
+    public string? Picture { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ReceivedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

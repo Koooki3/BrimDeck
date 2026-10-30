@@ -87,6 +87,18 @@ internal static class UI
         block.Height = lineHeight;
         return block;
     }
+    // A single line whose visible ink is centred in a box of the given height. Chinese text falls back to Microsoft YaHei UI inside
+    // a line laid out for Segoe UI, which leaves its ink off centre in a short button; this moves it by the ink's own bounds.
+    public static TextBlock InkCentered(string text, double size, double height, string color, FontWeight? weight = null)
+    {
+        var block = Line(text, size, color, weight);
+        block.FontFamily = PanelFont;
+        block.VerticalAlignment = VerticalAlignment.Top;
+        var ink = new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            new Typeface(PanelFont, FontStyles.Normal, weight ?? FontWeights.Normal, FontStretches.Normal), size, System.Windows.Media.Brushes.Black, 1).BuildGeometry(new Point()).Bounds;
+        block.Margin = new Thickness(0, ink.IsEmpty ? 0 : (height - ink.Height) / 2 - ink.Top, 0, 0);
+        return block;
+    }
     // Whether a single-line text is cut off by its ellipsis at its current width, checked when needed so that resizing and
     // reused rows are always measured afresh.
     public static bool IsCut(TextBlock block)

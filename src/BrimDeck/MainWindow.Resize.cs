@@ -304,7 +304,6 @@ public partial class MainWindow
         height = Math.Clamp(height, minHeight, maxHeight);
         if ((width, height) == DeckPages.Size(Settings, _resizePage)) return;
         _resizeChanged = true;
-        if (_resizePage == DeckPage.Notices) FollowRows();
         DeckPages.SetSize(Settings, _resizePage, width, height);
         _pageWidth = width;
         if (_resizePage == DeckPage.Usage) _usageWidth = width;
@@ -370,9 +369,8 @@ public partial class MainWindow
         bool compact = _resizeCompact, byKey = _resizeByKey;
         _resizeSettling = false; _resizeCompact = false; _resizeByKey = false; _keyEdges = ResizeEdges.None;
         // Saved like any change from the settings window, which applies it to every panel and fits the window again. A press that
-        // moved nothing only fits the window again. The notices page's rows take the exact width again, and the page is not built
-        // anew for what is only a copy of the settings it was fitted to (FitNoticeLayout).
-        ReleaseRows();
+        // moved nothing only fits the window again. The notices page is not built anew for what is only a copy of the
+        // settings it was fitted to (FitNoticeLayout).
         _noticeResizeSaved = !compact && _resizePage == DeckPage.Notices;
         try { if (_resizeChanged) _app.UpdateSettings(Settings.Copy()); else ApplySettings(); }
         finally { _noticeResizeSaved = false; }

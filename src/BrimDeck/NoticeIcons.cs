@@ -154,13 +154,19 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         {
             var info = new FileInfo(path);
             if (!info.Exists || info.Length == 0 || info.Length > 2_000_000) return null;
-            if (info.Extension.ToLowerInvariant() is not (".png" or ".ico" or ".jpg" or ".jpeg" or ".bmp")) return null;
+            // A file without an extension (QQ keeps its avatars so) is taken only when it starts as a PNG, JPEG, GIF or BMP does.
+            string extension = info.Extension.ToLowerInvariant();
+            if (extension.Length > 0 && extension is not (".png" or ".ico" or ".jpg" or ".jpeg" or ".bmp")) return null;
             // Not through a link or junction, which could lead anywhere, a network share included.
             if (info.LinkTarget is not null || (info.Attributes & FileAttributes.ReparsePoint) != 0) return null;
-            return File.ReadAllBytes(path);
+            var bytes = File.ReadAllBytes(path);
+            return extension.Length > 0 || IsPicture(bytes) ? bytes : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
     }
+
+    private static bool IsPicture(byte[] bytes) => bytes is [0x89, (byte)'P', (byte)'N', (byte)'G', ..] or [0xFF, 0xD8, 0xFF, ..]
+        or [(byte)'G', (byte)'I', (byte)'F', (byte)'8', ..] or [(byte)'B', (byte)'M', ..];
 
     private string? StoredPath(string iconRef)
         => Folder.Length == 0 ? null : Path.Combine(Folder, "icons", Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(iconRef)))[..24] + ".png");

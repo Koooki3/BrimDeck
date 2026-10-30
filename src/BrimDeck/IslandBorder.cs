@@ -228,7 +228,7 @@ public sealed class IslandBorder : Border
     }
 
     // The island's smooth outline for a size, shoulder and corners; insetBy draws it that far inside the bounds (Inset). Dynamic
-    // notices draw the same outline (NoticeSurface), so that they start and end exactly on the island. Frozen.
+    // notices draw the same outline (IslandNotice), so that they start and end exactly on the island. Frozen.
     internal static Geometry BuildOutline(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy = 0)
     {
         if (!(w > 0) || !(h > 0)) return Geometry.Empty;

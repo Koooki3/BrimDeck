@@ -33,6 +33,5 @@
     <Compile Include="..\..\src\BrimDeck\IslandBorder.cs" Link="IslandBorder.cs" />
     <Compile Include="..\..\src\BrimDeck\IslandDecor.cs" Link="IslandDecor.cs" />
     <Compile Include="..\..\src\BrimDeck\PageToolTips.cs" Link="PageToolTips.cs" />
-    <Compile Include="..\..\src\BrimDeck\NoticeRowStretch.cs" Link="NoticeRowStretch.cs" />
   </ItemGroup>
 </Project>

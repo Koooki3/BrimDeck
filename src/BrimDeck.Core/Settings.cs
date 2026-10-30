@@ -466,7 +466,6 @@ public sealed class DeckSettings
     // Seconds an arriving notice stays; high priority notices stay NoticeHighDuration.
     public int NoticeDuration { get; set; } = 6;
     public int NoticeHighDuration { get; set; } = 8;
-    public bool NoticeHoverDetails { get; set; } = true;
     public NoticeScreen NoticeScreen { get; set; }
     public NoticePrivacy NoticePrivacy { get; set; }
     // Holds notices back during a Windows focus session or presentation mode.

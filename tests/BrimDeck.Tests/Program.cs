@@ -23,13 +23,12 @@ try
     NoticeCoreTests.Run(root, Check);
     NoticeWindowsAppTests.Run(Check);
     NoticeTimeTests.Run(Check);
-    AuditUiTests.Run(Check);
     AuditFollowupTests.Run(Check);
     AuditWin2Tests.Run(Check);
     NoticeEventLogTests.Run(Check);
     NoticeBannerTests.Run(root, Check);
     NoticeOpsTests.Run(Check);
-    NoticeLiquidTests.Run(Check);
+    IslandLiquidTests.Run(Check);
     NoticeGlyphTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
