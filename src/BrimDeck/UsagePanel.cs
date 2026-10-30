@@ -381,8 +381,8 @@ public partial class MainWindow
                 status.Children.Add(detail);
             }
             var sync = new Button { Style = (Style)FindResource("PanelOutlineButton"), FontFamily = UI.TextFont, Padding = new Thickness(10, 2, 10, 2), Height = 24,
-                HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0), Content = Loc.T("绔嬪嵆鍚屾", "Sync now") };
-            AutomationProperties.SetName(sync, Loc.T("绔嬪嵆鍚屾鐢ㄩ噺", "Sync usage now"));
+                HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0), Content = Loc.T("立即同步", "Sync now") };
+            AutomationProperties.SetName(sync, Loc.T("立即同步用量", "Sync usage now"));
             sync.Click += (_, _) => _ = RefreshAsync();
             status.Children.Add(sync);
             var holder = new Grid { VerticalAlignment = VerticalAlignment.Stretch };
