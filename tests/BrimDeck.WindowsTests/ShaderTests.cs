@@ -7,7 +7,8 @@ using BrimDeck.LiquidGlass;
 // it takes in bytes); and a renderer made quickly.
 internal static class ShaderTests
 {
-    public static void Run(Action<string, bool> check)
+    // hosted: only the checks that need no Direct3D device (a CI runner has no output to duplicate).
+    public static void Run(Action<string, bool> check, bool hosted = false)
     {
         var source = LiquidRenderer.EmbeddedSource();
         check("liquid glass: the shaders compiled ahead are of the embedded source (run FxPreview --compile-liquid after editing Liquid.hlsl)",
@@ -32,6 +33,7 @@ internal static class ShaderTests
                 check($"liquid glass: {id} {key} keeps {least:0.0}:1 over the glass's band ({ratio:0.00})", ratio >= least);
             }
         }
+        if (hosted) { Console.WriteLine("EXCLUDED on a hosted runner: the liquid glass renderer made on a Direct3D device."); return; }
         using var capture = DesktopSource.TryCreate();
         if (capture is null) { Console.WriteLine("SKIP: liquid glass renderer (no Direct3D device on a desktop output)."); return; }
         int compiles = LiquidRenderer.RuntimeCompiles;
