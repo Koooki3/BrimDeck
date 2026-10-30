@@ -328,7 +328,10 @@ public partial class MainWindow
 
     // Before its first reading a quota has its defaults: nothing read, no time, and the label and the detail alike.
     // Only until the first read has ended, whatever it brought: a read that failed or found nothing shows its state, not the skeleton.
-    private bool Awaiting(ProviderSnapshot snapshot) => !_firstReadEnded && snapshot.Metrics.Count == 0 && !snapshot.LiveQuota && snapshot.QuotaTime is null && snapshot.Status == snapshot.StatusLabel;
+    // And only while a read is under way or will come by itself: with the automatic sync off nothing reads at the start, and the
+    // skeleton would wait forever, so the column shows its state and the way to sync now.
+    private bool ReadComing => (_lead ?? this)._refreshing || Settings.UsageAutoSync;
+    private bool Awaiting(ProviderSnapshot snapshot) => !_firstReadEnded && ReadComing && snapshot.Metrics.Count == 0 && !snapshot.LiveQuota && snapshot.QuotaTime is null && snapshot.Status == snapshot.StatusLabel;
 
     private FrameworkElement Column(AppEntry entry, ProviderSnapshot snapshot, ProviderSnapshot usage, QuotaView view, Layout layout, bool inline, bool wide, bool center, bool separator, double innerWidth)
     {
@@ -373,14 +376,32 @@ public partial class MainWindow
         {
             // No readings: what the state is, why, and a way to sync now.
             var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            status.Children.Add(UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold));
-            var detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
-            detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.TextWrapping = TextWrapping.Wrap; detail.ToolTip = snapshot.Status;
-            status.Children.Add(detail);
+            var label = UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold);
+            label.ToolTip = snapshot.Status;
+            status.Children.Add(label);
+            // The detail is dropped when it only repeats the label, and when the column is too short for it (the smallest panel):
+            // the label and the button stay, the full text is in the label's tip.
+            TextBlock? detail = null;
+            if (snapshot.Status != snapshot.StatusLabel)
+            {
+                detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
+                detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.TextWrapping = TextWrapping.Wrap;
+                status.Children.Add(detail);
+            }
             var sync = EmptyAction(Loc.T("立即同步", "Sync now"), 24); sync.HorizontalAlignment = HorizontalAlignment.Left; sync.Margin = new Thickness(0, Space.Tight, 0, 0);
             AutomationProperties.SetName(sync, Loc.T("立即同步用量", "Sync usage now"));
             sync.Click += (_, _) => _ = RefreshAsync();
-            status.Children.Add(sync); body = status;
+            status.Children.Add(sync);
+            var holder = new Grid { VerticalAlignment = VerticalAlignment.Stretch };
+            holder.Children.Add(status);
+            if (detail is not null)
+                holder.SizeChanged += (_, _) =>
+                {
+                    detail.Visibility = Visibility.Visible;
+                    status.Measure(new Size(Math.Max(1, holder.ActualWidth), double.PositiveInfinity));
+                    detail.Visibility = status.DesiredSize.Height > holder.ActualHeight + .5 ? Visibility.Collapsed : Visibility.Visible;
+                };
+            body = holder;
         }
         else if (wide)
         {
