@@ -150,6 +150,8 @@ The answers to the pointer are drawn on the control's own visible shape, never a
 
 Motion colors are kept readable on the surface like any other color chosen outside the theme. The default dark and light themes (and any theme with no `motion` section anywhere in its base chain) draw nothing over the controls, which keep their own hover and press looks. The "system" theme uses Windows' accent color; over a base with answers it gives the quiet Fluent ones (`reveal` and `shade`, keeping a base's `lift` and `sink`), and over the default dark and light it draws nothing either; no ambient light, particles or steps, and its base theme's strengths and pace stay. `Templates/theme-template.json` lists every key with its default.
 
+The panel's own opening and closing (its length is the animation length in Settings) is the same in every theme and has no theme key: the opening passes its final size by about 0.3% of the move (about 1 DIP at the bottom edge of the tallest panel) and settles back, softer than before, so the landing reads as a soft stop rather than a bounce. The corners never bounce, and a move started by a keyboard shortcut lands without any give.
+
 ### Day, dusk and night looks (night, dusk, daylight)
 
 A theme can carry a night look: `night` holds the `colors`, `apps`, `effects`, `motion` and `clock` that change at night, laid over the day look. A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night` ("New from current theme" copies it, with its `dusk` and `daylight`).
