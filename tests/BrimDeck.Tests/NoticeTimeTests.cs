@@ -1,6 +1,7 @@
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Protocol;
+using BrimDeck.Protocol.DBus;
 
 // Time-kind notices: brim-notify's timer, stopwatch and event, the times they carry, BrimDeck's own reminders, the live words,
 // and sorting Windows' Clock, Outlook, calendar and Teams notifications into kinds. Fixed clocks and made-up time zones only.
@@ -97,6 +98,8 @@ internal static class NoticeTimeTests
         var back = NoticeProtocol.Deserialize(NoticeProtocol.Serialize(new NoticeMessage { Kind = "event", At = "15:00", LeadMs = 600000, Until = "16:00", Stop = false }));
         check("Time fields travel in the frame", json.Contains("\"kind\":\"countdown\"", StringComparison.Ordinal) && json.Contains("\"inMs\":5000", StringComparison.Ordinal)
             && back is { Kind: "event", At: "15:00", LeadMs: 600000, Until: "16:00", Stop: false });
+        var mail = FreedesktopNotifications.ToNotice(["thunderbird", 0u, "", "New mail", "From Ann", new List<object>(), new Dictionary<object, object> { ["category"] = new DBusVariant("s", "email.arrived") }, -1], 1);
+        check("A Linux mail client's notice is a mail notice", mail.Kind == NoticeTimes.Mail && mail.Category == "message");
     }
 
     private static void CommandLine(Action<string, bool> check)

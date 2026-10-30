@@ -33,6 +33,17 @@ internal static class NoticeLiquidTests
         var cliError2 = NoticeFx.For(AttentionKind.Notice, cliError.PriorityHint, false, cliError.Call, cliError.Category);
         var cliLow2 = NoticeFx.For(AttentionKind.Notice, cliLow.PriorityHint, false, cliLow.Call, cliLow.Category);
         check("Liquid plans: a brim-notify error plays in the danger color, one marked low plays lightly", cliError2.Tone == NoticeFxTone.Danger && cliLow2.Intensity < normal.Intensity);
+        // A desktop notification from a WSL distribution: its urgency and category hints reach the plan the same way.
+        static NoticeFxPlan Desktop(byte urgency, string category)
+        {
+            var hints = new Dictionary<object, object> { ["urgency"] = new BrimDeck.Protocol.DBus.DBusVariant("y", urgency), ["category"] = new BrimDeck.Protocol.DBus.DBusVariant("s", category) };
+            var wire = BrimDeck.Protocol.DBus.FreedesktopNotifications.ToNotice(["make", 0u, "", "Build", "done", new List<object>(), hints, -1], 1);
+            var input = NoticeIntake.FromPipe(wire);
+            return NoticeFx.For(AttentionKind.Notice, input.PriorityHint, false, input.Call, input.Category);
+        }
+        var wslCritical = Desktop(2, "network.error"); var wslLow = Desktop(0, "im.received"); var wslNormal = Desktop(1, "im.received");
+        check("Liquid plans: a WSL notification's urgency and error category set how strongly it plays (critical stronger, low lighter, an error in the danger color)",
+            wslCritical.Intensity > normal.Intensity && wslCritical.Tone == NoticeFxTone.Danger && wslLow.Intensity < normal.Intensity && wslNormal == NoticeFxPlan.Standard);
         check("Liquid plans: an ordinary notice plays as designed (intensity 5, a separation of 0.6 s, the theme's glow)", normal == NoticeFxPlan.Standard);
         check("Liquid plans: the weight of a notice follows its priority: low, normal, high, urgent",
             low.Intensity < normal.Intensity && normal.Intensity < high.Intensity && high.Intensity < urgent.Intensity

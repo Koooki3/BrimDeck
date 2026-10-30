@@ -442,6 +442,9 @@ public sealed class DeckSettings
     public bool NoticeWindowsSource { get; set; } = true;
     // Turns off other applications' own Windows banners while BrimDeck shows their notices (NoticeBanners); off by default.
     public bool NoticeHideBanners { get; set; }
+    // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
+    // copied into a distribution only once the user chooses it.
+    public List<string> NoticeWslDistros { get; set; } = [];
     // Seconds an arriving notice stays; high priority notices stay NoticeHighDuration.
     public int NoticeDuration { get; set; } = 6;
     public int NoticeHighDuration { get; set; } = 8;
@@ -550,6 +553,7 @@ public sealed class DeckSettings
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
+        copy.NoticeWslDistros = [.. NoticeWslDistros ?? []];
         copy.NoticeApps = (NoticeApps ?? []).Select(rule => rule.Copy()).ToList();
         return copy;
     }
@@ -665,6 +669,7 @@ public sealed class DeckSettings
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
+        NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
         if (!Enum.IsDefined(NoticePrivacy)) NoticePrivacy = NoticePrivacy.Full;
         if (!Enum.IsDefined(NoticeAutoClear)) NoticeAutoClear = NoticeAutoClear.Off;

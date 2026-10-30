@@ -15,6 +15,11 @@ try
 {
     ModelUsageTests.Run(Check);
     await NoticeProtocolTests.Run(Check);
+    AuditWslTests.Run(Check);
+    await AuditWsl2Tests.Run(Check);
+    await NoticeWslOpsTests.Run(Check);
+    await NoticeWsl2OpsTests.Run(Check);
+    NoticeArchTests.Run(Check);
     NoticeCoreTests.Run(root, Check);
     NoticeWindowsAppTests.Run(Check);
     NoticeTimeTests.Run(Check);

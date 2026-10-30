@@ -27,7 +27,7 @@ public sealed partial class SettingsWindow
                 "When a notice arrives, the notch, capsule or indicator briefly opens to show the application's icon, title and summary; hover for details. Windows' own banners and notification center stay as they are. Everything is processed on this PC, without any cloud service.")));
         if (!S.NoticesEnabled)
         {
-            var note = TextLine(Loc.T("开启后可选择接收 Windows 应用通知以及 brim-notify 命令发送的提示。", "Once on, you can receive Windows app notifications and those sent with the brim-notify command."), 12, TextSecondary);
+            var note = TextLine(Loc.T("开启后可选择接收 Windows 应用通知、WSL 中的通知以及 brim-notify 命令发送的提示。", "Once on, you can receive Windows app notifications, notices from WSL and those sent with the brim-notify command."), 12, TextSecondary);
             note.TextWrapping = TextWrapping.Wrap; Target.Children.Add(note);
             return;
         }
@@ -127,14 +127,38 @@ public sealed partial class SettingsWindow
 
         NoticeBannerRow(center);
 
+        // WSL: one switch per distribution; none on by default.
+        var distributions = WslLocations.Distributions();
+        var rows = new List<FrameworkElement>();
+        foreach (var name in distributions)
+        {
+            bool on = S.NoticeWslDistros.Contains(name, StringComparer.OrdinalIgnoreCase);
+            var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = on, VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(toggle, "WSL · " + name);
+            toggle.Checked += (_, _) => Change(s => { if (!s.NoticeWslDistros.Contains(name, StringComparer.OrdinalIgnoreCase)) s.NoticeWslDistros.Add(name); });
+            toggle.Unchecked += (_, _) => Change(s => s.NoticeWslDistros.RemoveAll(d => string.Equals(d, name, StringComparison.OrdinalIgnoreCase)));
+            var status = StatusLine(() => WslStatus(center, name));
+            rows.Add(Row("WSL · " + name, toggle, status));
+        }
+        if (rows.Count == 0)
+        {
+            var none = TextLine(Loc.T("未检测到 WSL 发行版。", "No WSL distribution was found."), 12, TextSecondary);
+            rows.Add(new Border { Child = none, MinHeight = 44, Padding = new Thickness(0, 13, 0, 13) });
+        }
+        SectionTitle(Loc.T("WSL（默认关闭）", "WSL (off by default)"), help: () => Loc.T("开启某个发行版后，BrimDeck 会把通知代理复制到它的 ~/.local/share/brimdeck，并添加 ~/.local/bin/brim-notify。代理只在发行版已运行时启动，不会为接收通知而启动发行版。代理运行时发行版和 WSL 虚拟机不会自动停止，所以发行版中你的程序（终端、后台任务等）全部结束 5 分钟后，代理会自行退出，让 WSL 照常停止发行版并释放内存，发行版下次运行时再自动接入。没有通知服务时，代理作为该会话的标准桌面通知服务（notify-send 等可直接使用）；已有通知服务时改为旁路观察，若总线不允许监视则只支持 brim-notify。",
+            "Once a distribution is on, BrimDeck copies its notice agent to ~/.local/share/brimdeck there and adds ~/.local/bin/brim-notify. The agent starts only while the distribution runs; a distribution is never started for notices. While the agent runs, WSL does not stop the distribution or its virtual machine, so the agent ends by itself 5 minutes after the last of your programs there (terminals, background jobs) ended; WSL then stops the distribution and frees its memory as usual, and the agent connects again the next time it runs. Without a notification service, the agent becomes the session's standard desktop notification service (notify-send and others work as usual); with one, it watches it, and where the bus does not allow watching only brim-notify works."));
+        Note(Loc.T("在 WSL 里运行的程序也能把通知发到这里；开启发行版后可使用 brim-notify 和 notify-send。",
+            "Programs in WSL can send notices here too; once a distribution is on, brim-notify and notify-send work there."));
+        Group([.. rows]);
+
         // The command line, for Windows and for scripts.
-        var helper = System.IO.Path.Combine(AppContext.BaseDirectory, "BrimDeck.Notify.exe");
+        var helper = WslNoticeBridge.HelperPath;
         var copy = ActionButton(Loc.T("复制路径", "Copy path"), () => { try { Clipboard.SetText(helper); } catch (System.Runtime.InteropServices.ExternalException) { } });
         var example = TextLine("BrimDeck.Notify.exe \"" + Loc.T("构建完成", "Build finished") + "\" --body \"" + Loc.T("测试已通过", "Tests passed") + "\"  ·  BrimDeck.Notify.exe run -- dotnet test", 11.5, TextSecondary);
         example.TextWrapping = TextWrapping.Wrap; example.TextTrimming = TextTrimming.None; example.FontFamily = new FontFamily("Cascadia Mono, Consolas");
         Group(Row(Loc.T("命令行 brim-notify", "Command line: brim-notify"), copy, example,
-            () => Loc.T("使用 BrimDeck 安装目录中的 BrimDeck.Notify.exe。run 会运行命令并在结束后提示结果；同一 --replace 键会更新同一条提示。",
-                "Use BrimDeck.Notify.exe in BrimDeck's folder. run runs a command and shows its result when it ends; the same --replace key updates the same notice.")));
+            () => Loc.T("Windows 上使用 BrimDeck 安装目录中的 BrimDeck.Notify.exe；WSL 中开启发行版后使用 brim-notify。run 会运行命令并在结束后提示结果；同一 --replace 键会更新同一条提示。",
+                "On Windows use BrimDeck.Notify.exe in BrimDeck's folder; in WSL use brim-notify once the distribution is on. run runs a command and shows its result when it ends; the same --replace key updates the same notice.")));
         var pipe = StatusLine(() => center.PipeError is { } error ? (Loc.T("本地通道不可用：", "The local channel is unavailable: ") + error, true) : ("", false));
         Target.Children.Add(pipe);
         NoticeTimeSection(center);
@@ -174,9 +198,37 @@ public sealed partial class SettingsWindow
         var native = TextLine("brim-notify timer 25m · stopwatch · event --at 15:00", 11.5, TextSecondary);
         native.FontFamily = new FontFamily("Cascadia Mono, Consolas");
         rows.Add(Row(Loc.T("BrimDeck 计时器", "BrimDeck timers"), TextLine(Loc.T("始终可用", "Always available"), 12, TextSecondary), native,
-            () => Loc.T("用 brim-notify 设倒计时、秒表或日程提醒，由 BrimDeck 自己计时：倒计时到点和日程开始前会提醒，可取消、停止或 5 分钟后再提醒。",
-                "Set a countdown, stopwatch or event reminder with brim-notify; BrimDeck keeps the time itself: it reminds when a countdown ends and before an event starts, and they can be cancelled, stopped or snoozed for 5 minutes.")));
+            () => Loc.T("用 brim-notify 设倒计时、秒表或日程提醒（Windows 和 WSL 都可用），由 BrimDeck 自己计时：倒计时到点和日程开始前会提醒，可取消、停止或 5 分钟后再提醒。",
+                "Set a countdown, stopwatch or event reminder with brim-notify (on Windows and in WSL); BrimDeck keeps the time itself: it reminds when a countdown ends and before an event starts, and they can be cancelled, stopped or snoozed for 5 minutes.")));
         Group([.. rows]);
+    }
+
+    private static (string, bool) WslStatus(NoticeCenter center, string name)
+    {
+        if (!center.WslStates.TryGetValue(name, out var state)) return (Loc.T("未开启", "Off"), false);
+        // The agent ended by itself (W2); said apart from the states below, which are the agent's own.
+        if (state.State == WslAgentState.Idle)
+            return (Loc.T("发行版中已没有你的程序在运行，代理已退出，让 WSL 可以停止它；发行版下次运行时自动接入。", "Nothing of yours runs in the distribution any more, so the agent ended to let WSL stop it; it connects again the next time the distribution runs."), false);
+        var (text, warning) = state.State switch
+        {
+            WslAgentState.NotRunning => (Loc.T("发行版未运行；它运行后自动接入。", "The distribution is not running; it connects once it runs."), false),
+            WslAgentState.NotPackaged => (state.Detail.Length > 0
+                ? Loc.T($"此版本没有附带适用于该发行版（{state.Detail}）的 WSL 代理。", $"This build does not include the WSL agent for this distribution ({state.Detail}).")
+                : Loc.T("此版本没有附带 WSL 代理。", "This build does not include the WSL agent."), true),
+            WslAgentState.Unsupported => (Loc.T($"该发行版的处理器架构或 C 库（{state.Detail}）没有可用的 WSL 代理；brim-notify 在 Windows 上仍可用。",
+                $"No WSL agent runs on this distribution's processor or C library ({state.Detail}); brim-notify still works on Windows."), true),
+            WslAgentState.Installing => (Loc.T("正在安装代理…", "Installing the agent…"), false),
+            WslAgentState.Starting => (Loc.T("正在启动…", "Starting…"), false),
+            WslAgentState.Server => (Loc.T("正在接收：BrimDeck 是该会话的通知服务。", "Receiving: BrimDeck is this session's notification service."), false),
+            WslAgentState.Monitor => (Loc.T("正在接收：旁路观察已有的通知服务（不提供其按钮）。", "Receiving: watching the existing notification service (its buttons are not offered)."), false),
+            WslAgentState.MonitorDenied => (Loc.T("已有通知服务，且总线不允许监视；brim-notify 仍可用。", "Another notification service runs and the bus does not allow watching it; brim-notify still works."), true),
+            WslAgentState.NoBus => (Loc.T("没有可用的会话总线；brim-notify 仍可用。", "No session bus is available; brim-notify still works."), true),
+            WslAgentState.Failed => (Loc.T("连接失败，稍后重试", "Connection failed; trying again later") + (state.Detail.Length > 0 ? Loc.T("（", " (") + state.Detail + Loc.T("）", ")") : ""), true),
+            _ => (Loc.T("未开启", "Off"), false)
+        };
+        if (!state.Conflict) return (text, warning);
+        return (text + Loc.T(" ~/.local/bin/brim-notify 是你自己的文件，BrimDeck 未改动它；可改用 ~/.local/share/brimdeck/brimdeck-agent notify。",
+            " ~/.local/bin/brim-notify is your own file and was left as it is; use ~/.local/share/brimdeck/brimdeck-agent notify instead."), true);
     }
 
     // An explanation set between a section's title and its rows.
