@@ -674,24 +674,13 @@ internal sealed class MediaSessions : IDisposable
     private void UpdateMeter()
     {
         bool player = _visible && Current?.State == MediaState.Playing;
-        _meter.SetSource(Current is not null && _routes.TryGetValue(Current.Id, out var route) ? route.ProcessName : null, player, !player && _systemVisible);
+        _meter.SetSource(CurrentOwner, player, !player && _systemVisible);
     }
 
-    // The application playing the current song, for bringing its window forward.
+    // The application playing the current song, for bringing its window forward and for the bars' sound.
     public MediaAppOwner? CurrentOwner => Current is not null && _routes.TryGetValue(Current.Id, out var route)
         ? new(route.Connection?.ProcessId, route.ProcessName, route.System?.App ?? "") : null;
-    internal static string SourceName(string id)
-    {
-        string lower = id.ToLowerInvariant();
-        if (lower.Contains("cloudmusic") || lower.Contains("netease")) return "网易云音乐";
-        if (lower.Contains("qqmusic")) return "QQ 音乐";
-        if (lower.Contains("msedge")) return "Microsoft Edge";
-        if (lower.Contains("chrome")) return "Google Chrome";
-        if (lower.Contains("spotify")) return "Spotify";
-        if (lower.Contains("itunes") || lower.Contains("applemusic")) return "Apple Music";
-        if (lower.Contains("qiyi")) return "爱奇艺";
-        return Path.GetFileNameWithoutExtension(id.Split('!')[0]);
-    }
+    internal static string SourceName(string id) => MediaAppTarget.DisplayName(id, AppIdentity.RegisteredName);
     public void Dispose()
     {
         _disposed = true; _debounce.Stop(); _poll.Stop(); _recheck.Stop();
