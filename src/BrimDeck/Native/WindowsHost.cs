@@ -59,7 +59,8 @@ public sealed class WindowsHost : IDisposable
     //    once, since no ordinary window has any business over a topmost overlay;
     //  - another topmost window covering the island: often deliberate, a pinned video, a screenshot mask, another
     //    overlay. The panel never fights over it — one recovery attempt per culprit, and only a note afterwards;
-    //    taking the island back by force would flicker against whatever the user chose to keep on top.
+    //    taking the island back by force would flicker against whatever the user chose to keep on top. The taskbar is
+    //    the exception: it raises itself on every use, so a capsule placed over it is put back over it each time.
     private void WatchOrder(IntPtr window)
     {
         if (window == IntPtr.Zero || !IsWindowVisible(window) || IsIconic(window)) return;
@@ -80,7 +81,13 @@ public sealed class WindowsHost : IDisposable
                 if (pid == Environment.ProcessId) continue;
                 bool over = (GetWindowLongPtr(above, -20).ToInt64() & 0x8) != 0;
                 if (!over) { cause = "under " + ProcessName(above); recover = true; break; }
-                if (island is { } strip && Covers(above, strip)) { cause = "covered by topmost " + ProcessName(above); break; }
+                if (island is { } strip && Covers(above, strip))
+                {
+                    // The taskbar puts itself on top whenever it is used, and would then hide a capsule moved down over it
+                    // until the next use of the panel; it is the one topmost window the panel always goes back over.
+                    bool taskbar = IsTaskbar(above);
+                    cause = "covered by topmost " + (taskbar ? "taskbar" : ProcessName(above)); recover = taskbar; break;
+                }
             }
         }
         if (cause is null) { _orderCulprit = null; return; }
@@ -100,6 +107,12 @@ public sealed class WindowsHost : IDisposable
     {
         if (!(island.Width > 0) || !GetWindowRect(above, out var r)) return false;
         return r.Left < island.Right && r.Right > island.Left && r.Top < island.Bottom && r.Bottom > island.Top;
+    }
+    private static bool IsTaskbar(IntPtr window)
+    {
+        var name = new System.Text.StringBuilder(32);
+        GetClassName(window, name, name.Capacity);
+        return name.ToString() is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
     }
     private static string ProcessName(IntPtr window)
     {

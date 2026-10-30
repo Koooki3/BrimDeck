@@ -67,7 +67,7 @@ public sealed partial class SettingsWindow
                     var limits = _app.Deck.CurrentCollapsedRanges(style, shown, S.CapsuleHeight);
                     SetCollapsedRange(width, limits.WidthMin, limits.WidthMax, shown);
                     SetAutoWidth(auto, width, S.CapsuleAutoWidth);
-                    // The capsule can move down to the bottom of the work area; the limit follows its height and the display.
+                    // The capsule can move down to the bottom of the monitor, over a bottom taskbar; the limit follows its height and the display.
                     SetCollapsedRange(top, CollapsedLimits.CapsuleTopMin, Whole(limits.TopMax), S.CapsuleTop);
                     SetCollapsedRange(offset, -Whole(limits.OffsetMax), Whole(limits.OffsetMax), S.CapsuleOffsetX);
                 };

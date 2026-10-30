@@ -399,7 +399,7 @@ public partial class MainWindow : Window
         var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width * _scale, MonitorBoundsDip, WorkDip);
         var (topMin, topMax) = style switch
         {
-            CompactStyle.Capsule => CollapsedGeometry.CapsuleTopRange(surfaceHeight, WorkDip),
+            CompactStyle.Capsule => CollapsedGeometry.CapsuleTopRange(surfaceHeight, MonitorBoundsDip, WorkDip),
             CompactStyle.Line => CollapsedGeometry.LineTopRange(CollapsedGeometry.SnapToDevicePixels(CollapsedGeometry.RoundLineThickness(height) * _scale, _pixelsPerDip), WorkDip),
             _ => (0d, 0d)
         };
@@ -421,8 +421,9 @@ public partial class MainWindow : Window
     // pageHeight is unscaled; the panel's place depends on its height as drawn.
     private PanelPlacement PanelFor(double pageHeight) => CollapsedGeometry.Panel(Collapsed, WorkDip, pageHeight * _scale, PanelBottom);
     // The lowest bottom edge of a panel below a lowered capsule: the work area's bottom, even when that is the monitor's bottom
-    // (no taskbar there), so a capsule pulled all the way down is still covered by its panel. The window may then end at the
-    // monitor's bottom with no room below the panel; SetExpanded does not reserve any for a panel that starts below the top.
+    // (no taskbar there), so a capsule pulled all the way down is still covered by its panel; a capsule moved over a bottom
+    // taskbar stays below the panel. The window may then end at the monitor's bottom with no room below the panel; SetExpanded
+    // does not reserve any for a panel that starts below the top.
     private double PanelBottom => WorkDip.Bottom;
     // While open, the pointer is inside over the panel or over the collapsed surface's hover area, which can be wider than the
     // panel (a wide notch or capsule) or reach the screen edge above it.
