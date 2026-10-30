@@ -16,5 +16,6 @@
     <Compile Include="..\..\src\BrimDeck\Native\NeteaseBridgeScript.cs" Link="NeteaseBridgeScript.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\TcpListeners.cs" Link="TcpListeners.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\QqMediaConnection.cs" Link="QqMediaConnection.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\KugouCdpConnection.cs" Link="KugouCdpConnection.cs" />
   </ItemGroup>
 </Project>

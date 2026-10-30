@@ -19,6 +19,9 @@ namespace BrimDeck;
 // change of its width.
 internal sealed class MonitorStrip : FrameworkElement
 {
+    // The parts of the drive reading a strip draws: the glyph and the letters as in the row, or the letters alone.
+    internal enum DriveParts { All, Letters }
+    private readonly DriveParts _driveParts;
     private readonly StripPresence _presence;
     private readonly CompactMonitorItems _shown, _values;
     private readonly IReadOnlyList<CompactMonitorItems> _order;
@@ -48,9 +51,12 @@ internal sealed class MonitorStrip : FrameworkElement
     // unavailable: readings left out (StripAdmission.Hidden): the drives until their first figures, and for good on a machine
     // without them, so the row never shows a dash for them. admission: which temperatures and letters have given their first
     // figures (StripAdmission.Shows); without it every chosen one shows.
+    // parts: what the drive reading draws. The collapsed column (MainWindow.CompactColumn.cs) gives each drive a line without the
+    // glyph, its letter shown even when it is the only one.
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi,
-        CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null)
+        CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null, DriveParts parts = DriveParts.All)
     {
+        _driveParts = parts;
         _easing = new PromptTimer(Dispatcher, EaseStep);
         _presence = presence; _dpi = dpi; _colors = colors; _centered = centered; _powerStyle = PowerStyle.For(colors.Palette);
         _order = [.. readings.Select(reading => reading.Item)];
@@ -69,7 +75,7 @@ internal sealed class MonitorStrip : FrameworkElement
         bool driveUsage = CompactFigures.Shows(drives, CompactFigures.Usage), driveHeat = CompactFigures.Shows(drives, CompactFigures.Temperature);
         if (drives.FiguresInLine) _inline |= CompactMonitorItems.Storage;
         _letters = [.. admission?.Letters(drives) ?? CompactSources.Of(drives)];
-        _tags = [.. _letters.Select(letter => _letters.Length > 1 ? CompactSources.Tag(letter) : "")];
+        _tags = [.. _letters.Select(letter => _letters.Length > 1 || parts == DriveParts.Letters ? CompactSources.Tag(letter) : "")];
         _letterUsage = [.. _letters.Select(letter => driveUsage && shows(CompactMonitorItems.Storage, letter))];
         _letterHeat = [.. _letters.Select(letter => driveHeat && shows(CompactMonitorItems.Storage, letter + StripAdmission.Heat))];
         if (_letters.Length == 0) unavailable |= CompactMonitorItems.Storage;
@@ -90,11 +96,11 @@ internal sealed class MonitorStrip : FrameworkElement
         // A reading fading out of a narrow row stays within it, off the lyric or the rings beside it.
         ClipToBounds = true;
         // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings. A rate has
-        // at most five characters (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
+        // at most four characters (MonitorFormat.CompactRate): "999M" or "999G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("112W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("999M"), text("999G"))), DrivesWidth(),
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
             BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent));
     }
 
@@ -117,7 +123,7 @@ internal sealed class MonitorStrip : FrameworkElement
     private double EntryGap => Math.Round(5 * _scale);
     private double DrivesWidth()
     {
-        double width = Glyph + Math.Round(3 * _scale);
+        double width = _driveParts == DriveParts.Letters ? 0 : Glyph + Math.Round(3 * _scale);
         for (int i = 0; i < _letters.Length; i++)
             width += (i > 0 ? EntryGap : 0) + (_tags[i].Length > 0 ? FigureWidth(_tags[i]) + TagGap : 0) + Column(CompactMonitorItems.Storage, _letterUsage[i], _letterHeat[i]);
         return width;
@@ -377,8 +383,9 @@ internal sealed class MonitorStrip : FrameworkElement
             if (_letterHeat[i] && CompactSources.Heat(_letters[i], s) is { } heat) { any = true; if (heat.Level > level) level = heat.Level; }
         }
         double size = Glyph, baseline = Math.Round(center + _font * .36);
-        MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Drive, any ? _colors.At(item, level) : UI.Tertiary);
-        double at = x + size + Math.Round(3 * _scale);
+        if (_driveParts != DriveParts.Letters)
+            MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Drive, any ? _colors.At(item, level) : UI.Tertiary);
+        double at = _driveParts == DriveParts.Letters ? x : x + size + Math.Round(3 * _scale);
         for (int i = 0; i < _letters.Length; i++)
         {
             if (i > 0) at += EntryGap;
@@ -430,7 +437,7 @@ internal sealed class MonitorStrip : FrameworkElement
         => MonitorDraw.Baseline(drawing, MonitorDraw.Text(GaugeFigure(share), _font, color, ppd), x, Math.Round(center + _font * .36));
 
     // The whole machine's power: a bolt in the theme's curve color, then the draw in watts, "38W"; a dash
-    // while there is no reading. The room is kept for the widest figure ("112W").
+    // while there is no reading. The room is kept for the widest figure ("999W"; the font's 1 is narrower than its other digits).
     private void Power(DrawingContext drawing, double x, double center, PowerSample? power, double ppd)
     {
         // The bolt is drawn in a square (PowerIcons draws in the shorter side) over the room kept for it; it is narrower than tall.

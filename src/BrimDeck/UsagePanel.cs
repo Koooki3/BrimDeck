@@ -480,7 +480,9 @@ public partial class MainWindow
         number.ToolTip = quota.Kind switch
         {
             MetricKind.Balance => Loc.T("可用 " + quota.ValueText, quota.ValueText + " available")
-                + (quota.Total is { } total ? Loc.T(" · 总额 " + UsageMetric.Money(total, quota.Currency), " · " + UsageMetric.Money(total, quota.Currency) + " total") : ""),
+                + (quota.Total is { } total ? quota.TotalIsTarget
+                    ? Loc.T(" · 目标余额 " + UsageMetric.Money(total, quota.Currency), " · target " + UsageMetric.Money(total, quota.Currency))
+                    : Loc.T(" · 总额 " + UsageMetric.Money(total, quota.Currency), " · " + UsageMetric.Money(total, quota.Currency) + " total") : ""),
             MetricKind.Spend => Loc.T("已用 " + quota.ValueText, quota.ValueText + " used") + (quota.Unlimited ? Loc.T(" · 无上限", " · no limit") : ""),
             MetricKind.Count => CountTooltip(quota),
             _ => MetricPercentTooltip(quota)

@@ -6,6 +6,8 @@ using System.Text.RegularExpressions;
 namespace BrimDeck.Core;
 
 public enum CompactStyle { Notch, Capsule, Line }
+// The screen edge the notch hangs from (DeckSettings.NotchEdge); see EdgeFrame.
+public enum ScreenEdge { Top, Bottom, Left, Right }
 public enum WindowBehavior { Normal, Line, Hide }
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
 // The monitors that show the panel. Chosen uses DisplayMonitors and falls back to the primary monitor while none of them is connected.
@@ -99,6 +101,11 @@ public sealed class AppEntry
     // New API, Sub2API and custom rows: also send requests, and so the API key, over plain HTTP to any address, such as a
     // gateway on a NAS or reached through Tailscale. Off by default; HTTP to this PC is allowed either way.
     public bool AllowHttp { get; set; }
+    // Rows whose source reports an account balance without a total (ProviderCatalog.HasAccountBalance): the balance that counts
+    // as 0% used, in the balance's own currency. The account balance is then drawn as (target − balance) / target used, with
+    // the warning and critical levels of any quota, and 0% while the balance is above the target. New rows start at 100;
+    // null, saved when the field is cleared, shows the bare amount.
+    public decimal? BalanceTarget { get; set; } = 100;
     [JsonIgnore] public string ConfigurationKey => ProviderCatalog.ConfigurationKey(this);
     // Shorthand for QuotaSource in code. The "Id" member of old files is converted by SettingsMigrations.
     [JsonIgnore] public ProviderId Id { get => QuotaSource; set => QuotaSource = value; }
@@ -151,6 +158,7 @@ public sealed class AppEntry
         ThemeColor = AppPresets.NormalizeColor(ThemeColor);
         WarningColor = AppPresets.NormalizeColor(WarningColor);
         CriticalColor = AppPresets.NormalizeColor(CriticalColor);
+        BalanceTarget = BalanceTarget is { } target && decimal.Round(target, 2, MidpointRounding.AwayFromZero) is > 0 and <= AppPresets.MaximumBalanceTarget and var rounded ? rounded : null;
         OffPeak = [.. (OffPeak ?? []).Where(period => period is not null).Take(AppPresets.MaximumOffPeakPeriods).Select(period => period.Normalized())];
         OffPeakColor = AppPresets.NormalizeColor(OffPeakColor);
         OffPeakWarningColor = AppPresets.NormalizeColor(OffPeakWarningColor);
@@ -193,6 +201,7 @@ public static class AppPresets
     public const int MaximumFullscreenExceptions = 32;
     public const string WarningColor = "#E5C890", CriticalColor = "#E78284";
     public const int MaximumOffPeakPeriods = 6;
+    public const decimal MaximumBalanceTarget = 1_000_000_000;
     public const double WarningPercent = 70, CriticalPercent = 90;
     // Each column needs this much width; the panel's minimum width follows the number of enabled applications.
     public const double MinimumColumnWidth = 150;
@@ -280,6 +289,12 @@ public sealed class DeckSettings
     public double NotchWidth { get; set; } = CollapsedLimits.NotchWidthDefault;
     public double NotchHeight { get; set; } = CollapsedLimits.NotchHeightDefault;
     public double NotchOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
+    // The edge the notch hangs from. On the other edges it keeps its width (along the edge), height and offset (along the edge
+    // too); see EdgeFrame. The capsule always sits below the top edge.
+    public ScreenEdge NotchEdge { get; set; } = ScreenEdge.Top;
+    // The edge the panel works from: the notch's, or the top for the capsule and the line chosen as the style. A window rule that
+    // turns the notch into the line keeps the notch's edge.
+    [JsonIgnore] public ScreenEdge DockEdge => Style == CompactStyle.Notch ? NotchEdge : ScreenEdge.Top;
     public double CapsuleWidth { get; set; } = CollapsedLimits.CapsuleWidthDefault;
     public double CapsuleHeight { get; set; } = CollapsedLimits.CapsuleHeightDefault;
     public double CapsuleOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
@@ -313,7 +328,7 @@ public sealed class DeckSettings
     // song's, Custom EqualizerCustomColor. Gradient is not offered and reads as White.
     public ClockColor EqualizerColor { get; set; } = ClockColor.Cover;
     public string EqualizerCustomColor { get; set; } = ClockColors.DefaultCustom;
-    // The notch and the capsule each switch the clock on; its style, color and hour format are shared.
+    // The notch and the capsule each switch the clock on; its style, color, hour format and seconds are shared.
     public bool NotchClock { get; set; }
     public bool CapsuleClock { get; set; }
     public ClockStyle ClockStyle { get; set; }
@@ -321,8 +336,12 @@ public sealed class DeckSettings
     public string ClockCustomColor { get; set; } = ClockColors.DefaultCustom;
     public List<string> ClockGradient { get; set; } = [.. ClockColors.Sunset];
     public bool Clock24Hour { get; set; } = true;
+    public bool ClockSeconds { get; set; }
     public CompactMusicText MusicText { get; set; }
     public bool MusicTrackNotice { get; set; } = true;
+    // The album cover at the left of the collapsed row and on the music page; some players give no cover, only a placeholder.
+    public bool MusicCompactCover { get; set; } = true;
+    public bool MusicPageCover { get; set; } = true;
     public bool MusicIndicatorProgress { get; set; } = true;
     public bool LyricsEnabled { get; set; } = true;
     // How many bars the music page's equalizer has, beside the title; its bars keep their spacing, so more bars make it longer.
@@ -331,6 +350,9 @@ public sealed class DeckSettings
     public bool NeteaseFullControlEntry { get; set; }
     // Restarts a player started the normal way with full control, without asking again; switching it on asks once.
     public bool NeteaseAutoFullControl { get; set; }
+    // KuGou's full control, which the user confirmed when switching it on: its libcef.dll is kept changed, also after a KuGou
+    // update replaces it (a running KuGou then restarts once). Switching it off restores the file.
+    public bool KugouFullControl { get; set; }
     // Enables Apple Music's full control when BrimDeck starts, without the entry and its explanation.
     public bool AppleMusicFullControl { get; set; }
     public DefaultDeckPage DefaultPage { get; set; }
@@ -608,6 +630,7 @@ public sealed class DeckSettings
         NotchWidth = Fit(NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault);
         NotchHeight = Fit(NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault);
         NotchOffsetX = Offset(NotchOffsetX);
+        if (!Enum.IsDefined(NotchEdge)) NotchEdge = ScreenEdge.Top;
         CapsuleWidth = Fit(CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault);
         CapsuleHeight = Fit(CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault);
         CapsuleOffsetX = Offset(CapsuleOffsetX);
