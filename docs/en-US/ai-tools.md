@@ -91,6 +91,7 @@ Choose Zhipu GLM, Z.ai GLM, DeepSeek, Kimi Code API, OpenCode Go, OpenRouter, Ne
 - **Key**: stored on this PC, encrypted by Windows, and never written to the settings file. It is deleted when you remove the column or change its quota source.
 - **Site address**: the home page address is enough. A trailing `/v1`, or the path of a console page you paste, is removed automatically. Requests carry the API key, so the address must use HTTPS; HTTP is only for this PC (`localhost`, `127.0.0.1`, `[::1]`).
 - **Allow HTTP** (New API, Sub2API, Custom): off by default. Turn it on for a source whose site runs on a NAS (such as `http://192.168.x.x`) or is reached through Tailscale. When on, the source's requests, including those of a custom script, may use HTTP to any address, and the API key is sent in plain text, so use it only on a trusted network. When off, a saved HTTP address is not read and the status says "HTTPS required".
+- **Allowed hosts** (Custom): a custom script may send requests only to the source's site address and the hosts listed here. A request to any other host is refused and never sent, and the status says "Host not allowed" and names the refused host. `AllowedHosts` in the settings file holds the list; write `api.example.com`, or `*.example.com` (which does not cover `example.com` itself). Built-in sources reach only their own fixed services, whatever this list says.
 - **Test connection**: reads the source once and shows the result and how long it took.
 - **If a read fails**: the last successful reading stays on screen, and the tooltip on the name explains why.
 
@@ -145,8 +146,8 @@ async function fetchUsage(ctx) {
 
 | Member | Description |
 | --- | --- |
-| `ctx.site`, `ctx.secrets.key` | The site address and API key you entered; empty strings when not filled in |
-| `ctx.http.get(url, options)`, `ctx.http.post(url, options)` | Sends a request. `options` may contain `headers`, `timeout` (milliseconds) and `body` (POST only). Returns `{ status, headers, text(), json() }`. The address must use HTTPS, by the same rules as the site address |
+| `ctx.site`, `ctx.secrets.key` | The site address and API key you entered; empty strings when not filled in. In a new custom source `ctx.secrets.key` is a placeholder and the script never holds the key itself: put it in a header, the body, or the path or query of an address, and the program swaps in the real key when the request goes to an authorized host; a key echoed back in a response is swapped for the placeholder. A script that needs the key itself (to sign, split or hash it) must use the earlier way, in which the script can read the key (`SecretAccess` set to `Script`). Custom sources saved before the upgrade keep the earlier way |
+| `ctx.http.get(url, options)`, `ctx.http.post(url, options)` | Sends a request. `options` may contain `headers`, `timeout` (milliseconds), `body` (POST only) and `auth` (`"bearer"` or `"raw"`: the program writes the `Authorization` header, so the script need not touch the key). Returns `{ status, headers, text(), json() }`. The address must use HTTPS, by the same rules as the site address, and its host must be authorized |
 | `ctx.log(text)` | Writes a log line shown by Test connection |
 | `ctx.language`, `ctx.now` | The interface language (`"zh-CN"` or `"en-US"`) and the time of this read |
 
@@ -161,5 +162,7 @@ Each item of the returned array is one quota, shown in order:
 | `resetAt` | Optional. Shown at the right of the figure's line, as written, such as `"in 2h 13m"` |
 
 Items that do not meet these rules are skipped, and the result explains why. Errors thrown by the script are shown as they are.
+
+A custom source saved before the upgrade is automatically authorized for the hosts its script text writes as `http(s)://host`, and its script still reads the key itself; such a source asks for one confirmation. A host the script builds up at run time is not among them: it is refused and named in the status, and can be added to the allowed hosts when needed.
 
 Scripts run in a sandbox with no access to files, processes or .NET objects. Each read may take up to 10 seconds and send up to 16 requests, with requests and responses of up to 1 MB each.
