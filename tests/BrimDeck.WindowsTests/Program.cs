@@ -17,8 +17,8 @@ internal static class Program
             // "--only power": just the power and battery checks, for a quick look at what this machine reports.
             if (args is ["--only", "power"]) { PowerChecks.Run(Check); return 0; }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
-            // battery or devices, and a speed nobody promises). Everything left out reads this machine's hardware or its
-            // desktop, so its outcome says something about the machine, not the code. Without it every check runs.
+            // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
+            // says something about the machine, not the code. Without the flag every check runs.
             bool hosted = args is ["--hosted"];
             Console.WriteLine($"Windows native smoke tests{(hosted ? " (hosted subset)" : "")}: {Environment.OSVersion.Version}");
             CheckWindowChrome();
