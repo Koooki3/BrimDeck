@@ -79,7 +79,7 @@ public partial class MainWindow
     private Button ModelAction(string text, string name, Action click, bool active = false, bool icon = false,
         string style = "ToolbarActionButton", double height = 24, bool toolTip = true, Func<TextBlock, UIElement>? content = null)
     {
-        var label = UI.Centered(text, icon ? 14 : 12, UI.Secondary, font: icon ? new FontFamily("Segoe MDL2 Assets") : null);
+        var label = UI.Centered(text, icon ? 14 : 12, UI.Secondary, font: icon ? Fonts.IconMdl2 : null);
         label.ClearValue(TextBlock.ForegroundProperty); label.ClearValue(TextBlock.FontWeightProperty);
         var button = new Button { Content = content is null ? label : content(label), Height = height, Padding = new Thickness(icon ? 6 : 9, 0, icon ? 6 : 9, 0),
             Style = (Style)FindResource(style), Tag = active ? "Selected" : null, ToolTip = toolTip ? name : null };
@@ -123,7 +123,7 @@ public partial class MainWindow
         if (!iconOnly)
         {
             var content = new StackPanel { Orientation = Orientation.Horizontal };
-            var icon = UI.Centered("\uE787", 12, UI.Secondary, font: new FontFamily("Segoe MDL2 Assets"));
+            var icon = UI.Centered("\uE787", 12, UI.Secondary, font: Fonts.IconMdl2);
             // The calendar glyph sits slightly above the label; move the glyph, not the label. The top margin centers it
             // 2/3 DIP lower (one device pixel at 150%), and layout rounding keeps it on whole pixels at every scale.
             icon.Margin = new Thickness(0, 4.0 / 3, 0, 0); content.Children.Add(icon);

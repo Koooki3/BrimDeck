@@ -138,7 +138,7 @@ internal sealed class MusicEqualizer : FrameworkElement
 
 internal sealed class MusicMarquee : FrameworkElement
 {
-    private static readonly Typeface Typeface = new(UI.PanelFont, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+    private static Typeface Typeface => Fonts.Face(UiFontRole.Panel);
     // Width of the edge fade, and the scroll speed in DIP per second.
     internal const double Edge = 6, Speed = 24;
     private readonly TranslateTransform _shift = new();

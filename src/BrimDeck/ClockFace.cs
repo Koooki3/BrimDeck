@@ -13,8 +13,10 @@ internal sealed class ClockFace : FrameworkElement
     public const double FaceHeight = 24;
     public static readonly Color White = Color.FromRgb(0xF5, 0xF5, 0xF7);
     private static readonly FontFamily Orbitron = Bundled("Orbitron"), InstrumentSerif = Bundled("Instrument Serif"), Unbounded = Bundled("Unbounded"), BebasNeue = Bundled("Bebas Neue"), Tektur = Bundled("Tektur"), Fredoka = Bundled("Fredoka");
-    internal static FontFamily Bundled(string name) => new(new Uri("pack://application:,,,/BrimDeck;component/"), "./Assets/Fonts/#" + name);
-    private static readonly Typeface Plain = Face(UI.PanelFont), Bold = Face(UI.PanelFont, FontWeights.SemiBold);
+    internal static FontFamily Bundled(string name) => Fonts.Bundled(name);
+    // The plain styles are set in the panel's font (the user's own when one is chosen); the styles with their own face keep it.
+    private static Typeface Plain => Fonts.Face(UiFontRole.Panel);
+    private static Typeface Bold => Fonts.Face(UiFontRole.Panel, FontWeights.SemiBold);
     private static Typeface Face(FontFamily family, FontWeight? weight = null, bool italic = false)
         => new(family, italic ? FontStyles.Italic : FontStyles.Normal, weight ?? FontWeights.Normal, FontStretches.Normal);
 

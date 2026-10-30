@@ -176,7 +176,7 @@ public sealed partial class SettingsWindow
         var helper = WslNoticeBridge.HelperPath;
         var copy = ActionButton(Loc.T("复制路径", "Copy path"), () => { try { Clipboard.SetText(helper); } catch (System.Runtime.InteropServices.ExternalException) { } });
         var example = TextLine("BrimDeck.Notify.exe \"" + Loc.T("构建完成", "Build finished") + "\" --body \"" + Loc.T("测试已通过", "Tests passed") + "\"  ·  BrimDeck.Notify.exe run -- dotnet test", TextSize.Body, TextSecondary);
-        example.TextWrapping = TextWrapping.Wrap; example.TextTrimming = TextTrimming.None; example.FontFamily = new FontFamily("Cascadia Mono, Consolas");
+        example.TextWrapping = TextWrapping.Wrap; example.TextTrimming = TextTrimming.None; example.FontFamily = Fonts.Mono;
         Group(Row(Loc.T("命令行 brim-notify", "Command line: brim-notify"), copy, example,
             () => Loc.T("Windows 上使用 BrimDeck 安装目录中的 BrimDeck.Notify.exe；WSL 中开启发行版后使用 brim-notify。run 会运行命令并在结束后提示结果；同一 --replace 键会更新同一条提示。",
                 "On Windows use BrimDeck.Notify.exe in BrimDeck's folder; in WSL use brim-notify once the distribution is on. run runs a command and shows its result when it ends; the same --replace key updates the same notice.")));
@@ -232,7 +232,7 @@ public sealed partial class SettingsWindow
             rows.Add(Row(source.DisplayName, status, kinds));
         }
         var native = TextLine("brim-notify timer 25m · stopwatch · event --at 15:00", TextSize.Body, TextSecondary);
-        native.FontFamily = new FontFamily("Cascadia Mono, Consolas");
+        native.FontFamily = Fonts.Mono;
         rows.Add(Row(Loc.T("BrimDeck 计时器", "BrimDeck timers"), TextLine(Loc.T("始终可用", "Always available"), TextSize.Body, TextSecondary), native,
             () => Loc.T("用 brim-notify 设倒计时、秒表或日程提醒（Windows 和 WSL 都可用），由 BrimDeck 自己计时：倒计时到点和日程开始前会提醒，可取消、停止或 5 分钟后再提醒。",
                 "Set a countdown, stopwatch or event reminder with brim-notify (on Windows and in WSL); BrimDeck keeps the time itself: it reminds when a countdown ends and before an event starts, and they can be cancelled, stopped or snoozed for 5 minutes.")));

@@ -79,7 +79,7 @@
               <Grid x:Name="Toolbar" Height="{Binding Height.Value, ElementName=ToolbarRow}" VerticalAlignment="Top"
                     KeyboardNavigation.TabNavigation="Local" KeyboardNavigation.TabIndex="0">
                 <!-- The clock is centered on the whole panel; the switches and the settings button sit inside their own insets. -->
-                <TextBlock x:Name="ClockLabel" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="12" Foreground="{DynamicResource PanelTertiary}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                <TextBlock x:Name="ClockLabel" FontFamily="{DynamicResource FontPanel}" FontSize="12" Foreground="{DynamicResource PanelTertiary}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
                 <Border x:Name="PageSwitch" Background="{DynamicResource PanelSwitchFill}" CornerRadius="{DynamicResource PanelRadiusMd}" Padding="2" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,0,0,0">
                  <Grid>
                  <!-- The chosen page's fill glides between the buttons, as the monitor page's sort pill does (MainWindow.PlacePageCapsule). -->
@@ -130,10 +130,10 @@
                           <Path Data="M5.1,10.9 L1.6,14.4" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Stroke="{Binding Foreground, ElementName=MediaSourceButton}"/>
                         </Canvas>
                       </Viewbox>
-                      <TextBlock x:Name="MediaSourceLabel" Grid.Column="1" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="12"
+                      <TextBlock x:Name="MediaSourceLabel" Grid.Column="1" FontFamily="{DynamicResource FontPanel}" FontSize="12"
                                  Foreground="{Binding Foreground, ElementName=MediaSourceButton}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                       <!-- The settings window's chevron: the icon font's small chevron, dropped 1 DIP to meet the label's glyphs. -->
-                      <TextBlock x:Name="MediaSourceChevron" Grid.Column="2" Text="&#xE96E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Margin="4,1,0,-1"
+                      <TextBlock x:Name="MediaSourceChevron" Grid.Column="2" Text="&#xE96E;" FontFamily="{StaticResource FontIcon}" FontSize="12" Margin="4,1,0,-1"
                                  Foreground="{Binding Foreground, ElementName=MediaSourceButton}" VerticalAlignment="Center" Visibility="Collapsed"/>
                     </Grid>
                   </Button>
@@ -155,7 +155,7 @@
                     </Grid></Viewbox>
                     </Grid>
                   </Button>
-                  <Button x:Name="SettingsButton" Style="{StaticResource PanelSettingsButton}" Content="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="16" Click="Settings_Click"/>
+                  <Button x:Name="SettingsButton" Style="{StaticResource PanelSettingsButton}" Content="&#xE713;" FontFamily="{StaticResource FontIconMdl2}" FontSize="16" Click="Settings_Click"/>
                 </StackPanel>
               </Grid>
           </Grid>

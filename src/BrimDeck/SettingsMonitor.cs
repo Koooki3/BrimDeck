@@ -480,7 +480,7 @@ public sealed partial class SettingsWindow
             var line = new DockPanel();
             line.Children.Add(new TextBlock
             {
-                Text = on ? "" : "", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 12, Width = 20,
+                Text = on ? "" : "", FontFamily = Fonts.Icon, FontSize = 12, Width = 20,
                 Foreground = UI.Brush(TextPrimary), VerticalAlignment = VerticalAlignment.Center
             });
             var text = TextLine(label, TextSize.Body, TextPrimary); text.VerticalAlignment = VerticalAlignment.Center; text.TextTrimming = TextTrimming.CharacterEllipsis;

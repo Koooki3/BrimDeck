@@ -286,6 +286,9 @@ public sealed class DeckSettings
     // A first start replaces the default with the Windows display language (SettingsStore.Load); files saved before
     // English existed are Chinese (SettingsMigrations).
     public string Language { get; set; } = Loc.English;
+    // The family the interface's text is drawn in (UiFonts), in front of the app's own fonts; empty is those fonts alone, as before
+    // the setting existed. Icons, figures in code and the clock styles' own faces are not affected. A file without it reads as empty.
+    public string UiFont { get; set; } = "";
     public CompactStyle Style { get; set; } = CompactStyle.Notch;
     // Size and position of each collapsed style in DIPs; limits and defaults are in CollapsedLimits. OffsetX moves the surface
     // from the centre; each monitor narrows the offset to what fits (CollapsedGeometry) without changing the saved value.
@@ -655,6 +658,7 @@ public sealed class DeckSettings
         // Anything but "system" or a valid pair of different times goes back to the theme's own choice.
         ThemeDaylight = PanelThemes.NormalizeDaylightSetting(ThemeDaylight);
         Language = Loc.Normalize(Language);
+        UiFont = UiFonts.Normalize(UiFont);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
         static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
         static double Offset(double value) => Fit(value, -CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetDefault);
