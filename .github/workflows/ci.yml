@@ -1,11 +1,11 @@
 name: Checks
-# Every pull request into dev, main or a release/<version> branch must build and pass the tests that need no installed
+# Every pull request into dev, main, notice or a release/<version> branch must build and pass the tests that need no installed
 # players or accounts, leave releases/ to the maintainer, and label a new settings migration step with the version its
 # target branch builds.
 # The install, in-app update and uninstall test stays in the release workflow: it installs software and takes minutes.
 on:
   pull_request:
-    branches: [dev, main, 'release/**']
+    branches: [dev, main, notice, 'release/**']
   workflow_dispatch:
 permissions:
   contents: read
