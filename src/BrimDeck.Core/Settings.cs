@@ -101,6 +101,15 @@ public sealed class AppEntry
     // New API, Sub2API and custom rows: also send requests, and so the API key, over plain HTTP to any address, such as a
     // gateway on a NAS or reached through Tailscale. Off by default; HTTP to this PC is allowed either way.
     public bool AllowHttp { get; set; }
+    // Custom rows only: the hosts the script may send requests to, besides the row's site (ProviderNetwork). A request to any
+    // other host is refused and recorded. Absent in rows saved by versions that did not authorize hosts; ProviderNetwork.Normalize
+    // then authorizes the hosts the saved script names, so that such a row keeps working. Rows with their own script, and the
+    // rest, are bound to fixed hosts, and this is not read.
+    public List<string>? AllowedHosts { get; set; }
+    // Custom rows only: whether the script is given the API key itself or the host puts the key into its requests.
+    public SecretAccess SecretAccess { get; set; }
+    // Set when a saved custom row was given its hosts by migration, until the user has seen them (ProviderNetwork.ReviewNotice).
+    public bool NetworkReviewPending { get; set; }
     [JsonIgnore] public string ConfigurationKey => ProviderCatalog.ConfigurationKey(this);
     // Shorthand for QuotaSource in code. The "Id" member of old files is converted by SettingsMigrations.
     [JsonIgnore] public ProviderId Id { get => QuotaSource; set => QuotaSource = value; }
@@ -139,6 +148,7 @@ public sealed class AppEntry
         var copy = (AppEntry)MemberwiseClone();
         copy.UsageSource = UsageSource;
         copy.OffPeak = [.. (OffPeak ?? []).Select(period => period.Copy())];
+        copy.AllowedHosts = AllowedHosts is null ? null : [.. AllowedHosts];
         return copy;
     }
     public void Normalize()
@@ -146,6 +156,8 @@ public sealed class AppEntry
         UsageSource = ProviderCatalog.IsUsageSource(UsageSource) ? UsageSource : ProviderId.Claude;
         Site = ProviderCatalog.NormalizeSite(Site ?? "", QuotaSource != ProviderId.Custom);
         Script ??= "";
+        // Decided from the saved text, before a blank script is given the template.
+        ProviderNetwork.Normalize(this);
         // A custom row always starts from the template, which is the only place its return format is described.
         if (QuotaSource == ProviderId.Custom && Script.Trim().Length == 0) Script = ProviderScripts.Example;
         DisplayName = Regex.Replace(DisplayName ?? "", @"\s+", " ").Trim();

@@ -63,11 +63,12 @@ public static class ProviderCatalog
     // Marks the snapshot of such a source built only from this PC's records, shown by its rows that do not read online.
     public const string LocalQuota = "local";
     public static bool ReadsLocalQuota(AppEntry entry) => HasOnlineSwitch(entry.QuotaSource) && !entry.QuotaOnline;
-    // Rows that allow HTTP are read apart from otherwise identical rows that do not; the keys of other rows stay as they were.
+    // Rows that allow HTTP are read apart from otherwise identical rows that do not, and so are custom rows with other authorized
+    // hosts or another way of getting the key (ProviderNetwork.Fingerprint); the keys of other rows stay as they were.
     public static string ConfigurationKey(AppEntry entry) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, entry.SecretRevision }))
-        + (ReadsLocalQuota(entry) ? ":" + LocalQuota : "") + (entry.AllowHttp ? ":" + HttpAllowed : "");
+        + (ReadsLocalQuota(entry) ? ":" + LocalQuota : "") + (entry.AllowHttp ? ":" + HttpAllowed : "") + ProviderNetwork.Fingerprint(entry);
     public static string RequestKey(AppEntry entry, string secret) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, secret }))
-        + (entry.AllowHttp ? ":" + HttpAllowed : "");
+        + (entry.AllowHttp ? ":" + HttpAllowed : "") + ProviderNetwork.Fingerprint(entry);
     private const string HttpAllowed = "http";
     private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     // Console pages people copy from the address bar; everything from the first such segment on is dropped.

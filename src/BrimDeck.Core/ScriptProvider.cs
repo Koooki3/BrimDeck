@@ -22,8 +22,16 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
     private readonly ConcurrentQueue<int> _statuses = new();
     private readonly SemaphoreSlim _requests = new(4);
     private int _requestCount;
+    private readonly ConcurrentQueue<string> _denied = new();
+    private readonly ProviderNetworkPolicy _policy = ProviderNetwork.For(entry);
+    // What a script holds in place of the key when the host injects it; the host swaps it for the key in a request that goes
+    // to an authorized host, and swaps the key back for it in what comes back.
+    private readonly string _placeholder = "brimdeck-key-" + Guid.NewGuid().ToString("N");
+    private bool Injected => _policy.Secret == SecretAccess.Injected && secret.Length > 0;
     public DateTimeOffset? RetryAt { get; private set; }
     public IReadOnlyList<string> Logs => _logs.ToArray();
+    // Hosts the script asked for that it is not authorized for, in the order asked, once each.
+    public IReadOnlyList<string> Denied => _denied.Distinct().ToList();
     public int? FailureStatus => _statuses.FirstOrDefault(code => code >= 400) is > 0 and var value ? value : null;
     public string Redact(string text)
     {
@@ -48,7 +56,7 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
         engine.SetValue("__log", new Action<string>(value => { if (_logs.Count < 30) _logs.Enqueue(Redact(value)); }));
         // Only primitives and native JS objects cross the boundary, never HTTP responses or other CLR objects.
         using var remembered = memory is null ? null : JsonDocument.Parse(memory);
-        var context = JsonSerializer.Serialize(new { site = entry.Site, secrets = new { key = secret }, now = now.ToString("O"), language = Loc.Language, memory = remembered?.RootElement });
+        var context = JsonSerializer.Serialize(new { site = entry.Site, secrets = new { key = Injected ? _placeholder : secret }, now = now.ToString("O"), language = Loc.Language, memory = remembered?.RootElement });
         var script = entry.QuotaSource == ProviderId.Custom ? entry.Script : ProviderScripts.For(entry.QuotaSource);
         if (string.IsNullOrWhiteSpace(script)) throw new InvalidDataException(Loc.T("请填写 fetchUsage(ctx) 函数。", "Write a fetchUsage(ctx) function."));
         if (script.Length > 128_000) throw new InvalidDataException(Loc.T("脚本最多为 128,000 个字符。", "A script can have at most 128,000 characters."));
@@ -99,13 +107,19 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
                 using var input = JsonDocument.Parse(argument);
                 var root = input.RootElement; var options = root.Get("options");
                 var uri = ProviderCatalog.ValidateUrl(root.Get("url").Text(), entry.AllowHttp);
+                // Only an authorized host is ever sent a request, so it is the only one that can be sent the key. The key never goes
+                // into the host name, where a wildcard could carry it to a name of the attacker's choosing under an authorized domain.
+                if (Injected && uri.Host.Contains(_placeholder, StringComparison.OrdinalIgnoreCase)) return Error(Loc.T("密钥不能用在地址的主机名里。", "The key cannot be used in the host name of an address."));
+                if (!_policy.Allows(uri)) return Deny(uri.IdnHost);
+                if (Injected && uri.PathAndQuery.Contains(_placeholder, StringComparison.Ordinal))
+                    uri = new Uri(uri.GetLeftPart(UriPartial.Authority) + uri.PathAndQuery.Replace(_placeholder, Uri.EscapeDataString(secret), StringComparison.Ordinal));
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
                 timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Clamp(options.Get("timeout").Number() ?? 8000, 100, 10000)));
                 using var request = new HttpRequestMessage(method == "POST" ? HttpMethod.Post : HttpMethod.Get, uri);
                 if (method == "POST" && options.Get("body").ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
                 {
                     var body = options.Get("body");
-                    var text = body.ValueKind == JsonValueKind.String ? body.GetString()! : body.GetRawText();
+                    var text = Fill(body.ValueKind == JsonValueKind.String ? body.GetString()! : body.GetRawText());
                     if (Encoding.UTF8.GetByteCount(text) > 1_000_000) return Error(Loc.T("请求正文超过 1 MB。", "The request body exceeds 1 MB."));
                     request.Content = new StringContent(text, Encoding.UTF8, body.ValueKind == JsonValueKind.String ? "text/plain" : "application/json");
                 }
@@ -114,11 +128,18 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
                     {
                         if (header.Value.ValueKind != JsonValueKind.String || header.Name.Equals("Host", StringComparison.OrdinalIgnoreCase) ||
                             header.Name.Equals("Content-Length", StringComparison.OrdinalIgnoreCase)) return Error(Loc.T("请求头无效。", "A request header is not valid."));
-                        var value = header.Value.GetString()!;
+                        var value = Fill(header.Value.GetString()!);
                         if (value.Contains('\r') || value.Contains('\n')) return Error(Loc.T("请求头不能包含换行。", "Request headers cannot contain line breaks."));
                         if (!request.Headers.TryAddWithoutValidation(header.Name, value) && request.Content is not null)
                         { request.Content.Headers.Remove(header.Name); request.Content.Headers.TryAddWithoutValidation(header.Name, value); }
                     }
+                // options.auth lets the host write the Authorization header, so that the script need not touch the key at all.
+                var auth = options.Get("auth").Text();
+                if (auth.Length > 0)
+                {
+                    if (auth is not ("bearer" or "raw")) return Error(Loc.T("auth 必须是 \"bearer\" 或 \"raw\"。", "auth must be \"bearer\" or \"raw\"."));
+                    if (secret.Length > 0) { request.Headers.Remove("Authorization"); request.Headers.TryAddWithoutValidation("Authorization", auth == "bearer" ? "Bearer " + secret : secret); }
+                }
                 using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
                 _statuses.Enqueue((int)response.StatusCode);
                 if (response.StatusCode == HttpStatusCode.TooManyRequests)
@@ -142,8 +163,9 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
                     if (buffer.Length + length > limit) return Error(Loc.T($"响应超过 {limit / 1_000_000} MB。", $"The response exceeds {limit / 1_000_000} MB."));
                     buffer.Write(bytes, 0, length);
                 }
-                var headers = response.Headers.Concat(response.Content.Headers).ToDictionary(h => h.Key.ToLowerInvariant(), h => string.Join(", ", h.Value));
-                var content = pick.ValueKind == JsonValueKind.Object ? Pick(buffer.ToArray(), pick) : Encoding.UTF8.GetString(buffer.ToArray());
+                // A service that echoes the key back does not hand it to the script either.
+                var headers = response.Headers.Concat(response.Content.Headers).ToDictionary(h => h.Key.ToLowerInvariant(), h => Hide(string.Join(", ", h.Value)));
+                var content = Hide(pick.ValueKind == JsonValueKind.Object ? Pick(buffer.ToArray(), pick) : Encoding.UTF8.GetString(buffer.ToArray()));
                 return JsonSerializer.Serialize(new { status = (int)response.StatusCode, headers, body = content });
             }
             finally { _requests.Release(); }
@@ -216,6 +238,16 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
         return new(quotas.Select(UsageMetric.FromQuota).ToList(), "", "plan", [], warnings) { Source = "OpenCode Go" };
     }
     private static string Error(string error) => JsonSerializer.Serialize(new { error });
+    private string Fill(string text) => Injected ? text.Replace(_placeholder, secret, StringComparison.Ordinal) : text;
+    private string Hide(string text) => Injected ? text.Replace(secret, _placeholder, StringComparison.Ordinal) : text;
+    // The script sees the refusal as an error it can handle or let through; either way the refusal is kept here, for the
+    // status of the row and the test log, so that a script that swallows the error does not hide it.
+    private string Deny(string host)
+    {
+        _denied.Enqueue(host);
+        _logs.Enqueue(ProviderNetwork.DeniedMessage(host));
+        return Error(ProviderNetwork.DeniedMessage(host));
+    }
     // pick: { path: "data", fields: ["a", "b"] } keeps only those fields of each object in the array at path; anything else becomes null.
     private static string Pick(byte[] body, JsonElement pick)
     {
@@ -259,6 +291,9 @@ public sealed class ConfiguredProviders : IDisposable
     private readonly ConcurrentDictionary<string, ProviderSnapshot> _lastGood = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _retryAt = new();
     private readonly ConcurrentDictionary<string, string> _memory = new();
+    private readonly ConcurrentQueue<ProviderNetworkDenial> _denials = new();
+    // The most recent requests that scripts made to hosts they are not authorized for, oldest first.
+    public IReadOnlyList<ProviderNetworkDenial> NetworkDenials => _denials.ToArray();
     public ConfiguredProviders(IProviderSecrets? secrets = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null)
     {
         _secrets = secrets; _ownsHttp = http is null;
@@ -322,7 +357,9 @@ public sealed class ConfiguredProviders : IDisposable
                     if (result.Source.Length > 0) snapshot.Source = result.Source;
                     // Warnings follow the state after the separator the settings test reads back (SettingsProviders).
                     snapshot.StatusLabel = Loc.T("已连接", "Connected");
-                    snapshot.Status = result.Warnings.Count == 0 ? snapshot.StatusLabel : snapshot.StatusLabel + Loc.T("；", "; ") + string.Join(Loc.T("；", "; "), result.Warnings);
+                    // A script that handled a refused request and went on is told here what it asked for.
+                    var warnings = result.Warnings.Concat(session.Denied.Select(ProviderNetwork.DeniedMessage)).Concat(ReviewNotes(entry)).ToList();
+                    snapshot.Status = warnings.Count == 0 ? snapshot.StatusLabel : snapshot.StatusLabel + Loc.T("；", "; ") + string.Join(Loc.T("；", "; "), warnings);
                     _lastGood[requestKey] = Clone(snapshot);
                     if (result.Memory is { } kept) _memory[requestKey] = kept; else _memory.TryRemove(requestKey, out _);
                     _retryAt.TryRemove(requestKey, out _);
@@ -333,12 +370,12 @@ public sealed class ConfiguredProviders : IDisposable
                     if (_lastGood.TryGetValue(requestKey, out var previous)) snapshot = Clone(previous);
                     snapshot.Configurations = [entry.ConfigurationKey]; snapshot.LiveQuota = false; snapshot.IsStale = snapshot.Metrics.Count > 0;
                     var code = session.FailureStatus;
-                    snapshot.StatusLabel = ex is ProviderReadException read ? read.Label : code switch
+                    snapshot.StatusLabel = ex is ProviderReadException read ? read.Label : session.Denied.Count > 0 ? ProviderNetwork.DeniedLabel : code switch
                     { 401 => Loc.T("密钥无效", "Invalid key"), 403 => Loc.T("访问受限", "Access denied"), 429 => Loc.T("请求频繁", "Too many requests"), >= 400 => Loc.T("读取失败", "Read failed"),
                         _ => deadline.IsCancellationRequested ? Loc.T("读取超时", "Timed out") : entry.QuotaSource == ProviderId.Custom && ex is not InvalidDataException ? Loc.T("脚本出错", "Script error") : Loc.T("数据不可用", "Data unavailable") };
                     // A reason the script wrote itself is shown as is; only bare "HTTP nnn" messages are replaced by the generic wording.
-                    var message = ScriptMessage(ex);
-                    bool explained = ex is ProviderReadException or InvalidDataException || ex is Jint.Runtime.JavaScriptException or Jint.Runtime.PromiseRejectedException && !System.Text.RegularExpressions.Regex.IsMatch(message, @"^HTTP \d+$");
+                    var message = session.Denied.Count > 0 && ex is not ProviderReadException ? ProviderNetwork.DeniedMessage(session.Denied[0]) : ScriptMessage(ex);
+                    bool explained = session.Denied.Count > 0 || ex is ProviderReadException or InvalidDataException || ex is Jint.Runtime.JavaScriptException or Jint.Runtime.PromiseRejectedException && !System.Text.RegularExpressions.Regex.IsMatch(message, @"^HTTP \d+$");
                     snapshot.Status = explained ? session.Redact(message) : code switch
                     { 401 => Loc.T("站点拒绝了这个密钥，请在设置中更新。", "The site rejected this key. Update it in settings."), 403 => Loc.T("站点拒绝访问，请检查密钥权限。", "The site refused access. Check the key's permissions."),
                         429 => Loc.T("请求频繁，稍后自动重试。", "Too many requests. Retrying automatically later."), _ => deadline.IsCancellationRequested ? Loc.T("读取超时，稍后重试。", "Reading timed out. Retrying later.") : session.Redact(message) };
@@ -346,12 +383,18 @@ public sealed class ConfiguredProviders : IDisposable
                     if (snapshot.IsStale) snapshot.Status += Loc.T($" 显示 {snapshot.QuotaTime?.LocalDateTime:MM-dd HH:mm} 读取的数据。", $" Showing the data read at {snapshot.QuotaTime?.LocalDateTime:MM-dd HH:mm}.");
                 }
                 if (session.RetryAt is { } next) _retryAt[requestKey] = next;
+                foreach (var host in session.Denied)
+                {
+                    _denials.Enqueue(new(entry.InstanceId, entry.Name, host, now));
+                    while (_denials.Count > 100) _denials.TryDequeue(out _);
+                }
                 return new(snapshot, timer.Elapsed.TotalSeconds, session.Logs);
             }
             finally { _parallel.Release(); }
         }
         finally { gate.Release(); }
     }
+    private static IEnumerable<string> ReviewNotes(AppEntry entry) => ProviderNetwork.ReviewNotice(entry) is { Length: > 0 } note ? [note] : [];
     // An error thrown inside the async script arrives as a rejected promise; its own message is what the user should read.
     private static string ScriptMessage(Exception ex)
     {
