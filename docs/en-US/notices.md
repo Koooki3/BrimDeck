@@ -28,6 +28,7 @@ The capsule's and the notch's liquid motion is the design "胶囊通知动效" p
 | Source | What it is | Default |
 |---|---|---|
 | Windows app notifications | The current user's notifications in Windows' notification center: source, icon, time and text. Messages inside applications are not read, and the notification center is never cleared or changed. | On |
+| brim-notify | `BrimDeck.Notify.exe` in BrimDeck's folder sends notices directly. | On |
 
 ### Windows: event log mode and polling
 
@@ -65,6 +66,23 @@ The application id in a Windows notification does not always say which applicati
 - **Replaced notifications**: when an application updates its notification (QQ gathering new messages into one, for example), Windows removes the old one and adds a new one. If both come from the same application with the same title in the same reading, BrimDeck updates the existing notice instead of keeping two.
 - **Emoji**: WPF draws no color fonts, so emoji are monochrome; sequences joined from several emoji (a family, the rainbow flag) may show as a box, and flags as two letters. This is a platform limit; the text itself is unaffected.
 
+## brim-notify
+
+```text
+# show a notice
+brim-notify "Build finished" --body "Tests passed"
+# run a command, then show its result (exit code and time)
+brim-notify run -- dotnet test
+# the same -r key updates the same notice (task progress)
+brim-notify "Deploying" -r deploy --progress 40
+# check that BrimDeck receives notices
+brim-notify status
+```
+
+Options: `-b/--body`, `-s/--source` (the source's name), `-c/--category` (message, task, success, warning, error, info), `-p/--priority` (low, normal, high — a hint; only "High" chosen by you for the application raises it), `-i/--icon` (a local icon file; a relative path is from the current folder), `--id` (shown once however often it is retried). On Windows the program is `BrimDeck.Notify.exe` in BrimDeck's folder.
+
+Exit codes: 0 delivered (or kept quiet by your rules), 1 usage error (a message over 64 KB even with its texts cut to BrimDeck's limits included), 2 refused (a `stop` that finds no timer, stopwatch or event with that key included), 3 BrimDeck is not running, live notices are off, or it did not answer in time (the notice may still show); `run` returns the program's own exit code. Titles and bodies are cut to BrimDeck's limits before they are sent.
+
 ## Time notices
 
 Alarms, timers, countdowns, mail and event reminders are recognized and shown by kind:
@@ -72,21 +90,45 @@ Alarms, timers, countdowns, mail and event reminders are recognized and shown by
 | Kind | From | Shown |
 |---|---|---|
 | Alarm | Windows Clock's notifications for alarms, finished timers and finished focus sessions | High priority; "Open app" returns to Clock |
+| Timer running (stopwatch) | `brim-notify stopwatch` | "Running 12:03", live; can be stopped |
+| Countdown | `brim-notify timer` | "24:59 left" with a ring, live; shows again when it ends (high priority); can be cancelled or reminded again in 5 minutes |
 | Alarm | Microsoft To Do reminders | As above |
 | Mail | New-mail notifications of Outlook (new and classic), Mail and Calendar, Thunderbird, Foxmail and others; notifications of web mail in a browser (Gmail, Outlook on the web, QQ Mail, NetEase Mail and others) | Ordinary notice |
-| Event | Reminders of Microsoft 365 Calendar and Mail and Calendar; Outlook notifications that read as reminders ("In 15 minutes", "Now", or a line starting with "3:00 PM - 3:30 PM"); Teams meeting reminders and "meeting started"; Google Calendar reminders in a browser and web mail notifications that read as reminders | High priority, "Starts in 14 min", "In progress" |
+| Event | Reminders of Microsoft 365 Calendar and Mail and Calendar; Outlook notifications that read as reminders ("In 15 minutes", "Now", or a line starting with "3:00 PM - 3:30 PM"); Teams meeting reminders and "meeting started"; Google Calendar reminders in a browser and web mail notifications that read as reminders; `brim-notify event` | High priority, "Starts in 14 min", "In progress"; for `brim-notify event` BrimDeck itself reminds before the start |
 
 - Notices are sorted by the application's id (AUMID) and the notice's text, in memory on this PC; the original notification is not kept, and no mailbox or calendar is read. The sorting is heuristic: Outlook's and Teams' reminder wording varies by version and language, and what is not recognized shows as an ordinary notice.
 - Settings › Live notices › Time notices lists which of these applications this PC has (only whether they are installed; nothing is read from them). They remind through Windows notifications, so "Windows app notifications" needs to be on.
-- Alarms, ended countdowns and event reminders are high priority and are not held back by the "at most 3 in 10 seconds" limit, but at most 3 ring per minute from one source (each Windows application on its own); the rest wait their turn, so a script that sets many timers at once does not hold back another application's alarm. An application you set to muted or low priority stays quiet as usual. While locked, presenting or paused they only count toward the summary. An event entered more than 10 minutes after its start is recorded as an ordinary notice. Windows notifications that arrived while the PC slept are recorded, not shown, on waking, except reminders raised in the last 10 minutes or for an event starting within 10 minutes either way, which still alert. At most 200 events still to remind are kept; beyond that, the one BrimDeck received first is dropped from the source holding the most (and the log says so), so other applications' reminders are not affected.
+- Alarms, ended countdowns and event reminders are high priority and are not held back by the "at most 3 in 10 seconds" limit, but at most 3 ring per minute from one source (each Windows application on its own; brim-notify shares one); the rest wait their turn, so a script that sets many timers at once does not hold back another application's alarm. An application you set to muted or low priority stays quiet as usual. While locked, presenting or paused they only count toward the summary. An event entered more than 10 minutes after its start is recorded as an ordinary notice. Windows notifications that arrived while the PC slept are recorded, not shown, on waking, except reminders raised in the last 10 minutes or for an event starting within 10 minutes either way, which still alert. At most 200 timers, events still to remind and running stopwatches are kept; beyond that, the one BrimDeck received first is dropped from the source holding the most (and the log says so), so other applications' reminders are not affected.
 - The live words follow one shared second tick, which runs only while a running timer shows on the island or on the notice history page. Countdowns and events are worked out from the clock, again at once after waking or a change of the system time. A reminder missed by more than 10 minutes (asleep, BrimDeck not running) does not pop up; the list says "Ended at 15:30".
-- Limits: Windows does not share the Clock app's running timers, stopwatch or alarm list, nor the snooze and dismiss buttons of its notifications, so a Clock alarm shows only when it rings and cannot be snoozed from BrimDeck. Calendar sync (reading Outlook's or Windows' calendar directly) is not supported yet; the applications' own reminder notifications are used.
+- Limits: Windows does not share the Clock app's running timers, stopwatch or alarm list, nor the snooze and dismiss buttons of its notifications, so a Clock alarm shows only when it rings and cannot be snoozed from BrimDeck; for a timer on the island use `brim-notify timer`. Calendar sync (reading Outlook's or Windows' calendar directly) is not supported yet; the applications' own reminder notifications are used.
+
+```text
+# count down 25 minutes, then remind (also 1h30m, 90s)
+brim-notify timer 25m "Focus"
+# count down to 15:30
+brim-notify timer --at 15:30 "Meeting"
+# a stopwatch showing the time elapsed
+brim-notify stopwatch "Build" -r build
+# stop the stopwatch, or cancel a countdown or event (same -s source as sent)
+brim-notify stop build
+# an event: reminds 10 minutes before and at its start
+brim-notify event "Weekly" --at 15:00 --remind 10m --ends 16:00
+# mark a plain notice as mail (or alarm)
+brim-notify "New mail" --kind mail
+```
+
+- Times: `15:30` (the next 15:30) or a date and time such as `YYYY-MM-DD 15:30`, read in **Windows' time zone**; or ISO 8601 with an offset, such as `YYYY-MM-DDT15:30:00+08:00`. A local time skipped by a daylight saving change moves to just after the change; a local time it repeats means the earlier of the two.
+- Durations: `90s`, `25m`, `1h30m`, `2d`; countdowns from 1 second to 31 days, reminders at most 7 days ahead of the start, times from 1 day ago to 1 year ahead. A duration counts from when BrimDeck receives it.
+- Without `-r` a key is made up and printed on standard output, for `brim-notify stop KEY`; sending again with the same `-r` starts it over.
+- Countdowns and events still running continue after a restart while "Keep notice history" is on; an event not reminded yet is not removed by the retention.
 
 ## How notices show
 
 - A notice never takes the keyboard focus, and never pops up over the open panel or details you are using; while the panel is open, the bell only gets its red dot.
 - It stays 6 seconds, 8 for high priority; hovering, opening the details or working it from the keyboard pauses the time.
 - Notices from one application within 0.8 seconds become one notice with a count; at most 3 notices pop up per 10 seconds, the rest go to the notice history; a normal notice that waited over 30 seconds is not shown late; a merged notice stays at most twice its duration.
+- Notices from brim-notify are judged by when their sender wrote them: a message that had already waited over 30 seconds (5 minutes for high priority) when it was sent only goes to the notice history, unviewed, and does not pop up. The sender measures the wait by its own clock; time-kind notices follow their own reminder times. The same message (same event id) delivered again after BrimDeck restarts is neither recorded twice nor shown while the notice history still hold it.
+- A notice updated with `-r` takes the time of the latest message: it pops up as "Just now", not with the time of the notice it replaced.
 - A notice that arrives under a resting pointer does not open its details by itself: move away and back, or click.
 - Order: what you are working with > high priority notices > other notices > quota alerts > track changes. Alarms, ended countdowns and event reminders are high priority (see "Time notices").
 - Nothing is shown while the session is locked or switched, while the panels are hidden or hidden by a full-screen rule. During a Windows focus session, presentation mode and BrimDeck's own pause nothing pops up; afterwards one summary shows how many arrived. Windows' separate "Do not disturb" switch has no public interface and is not detected; use BrimDeck's pause instead.
@@ -100,7 +142,7 @@ Alarms, timers, countdowns, mail and event reminders are recognized and shown by
 - Deleting or clearing removes BrimDeck's own records only and tells no source. Switching notices off or clearing also cancels what shows and everything waiting to show.
 - Raw notification content, attachments and pictures are never saved. Icons come only from Windows or local files; nothing is downloaded. Network paths, links and shortcuts as icons are refused.
 - The diagnostic log `notices.log` holds only error types, codes and code locations, never titles or bodies.
-- A notice's content is only ever shown as text: it is never run and its links are never opened.
+- The local channel accepts only the current user on this PC (a named pipe that refuses network access). A notice's content is only ever shown as text: it is never run and its links are never opened.
 - Each application can be set to Off, Muted (notice history only), Normal or High, and to show "Title and summary", "Title only" or "App only" on arrival.
 
 ## Compatibility (tested)

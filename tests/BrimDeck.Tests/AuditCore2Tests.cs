@@ -25,12 +25,9 @@ internal static class AuditCore2Tests
         finally { Loc.Use(language); }
     }
 
-    // A running stopwatch BrimDeck keeps the time of, as a sender's message gives it.
-    private static NoticeInput Watch(string name, string key) => new()
-    {
-        Origin = NoticeOrigin.Cli, AppKey = NoticeKeys.Cli(null, name), AppName = name, InstanceKey = $"cli::{name}:{Guid.NewGuid():N}", ReplaceKey = key, Title = key,
-        Timing = new NoticeTiming { Kind = NoticeTimeKind.Stopwatch, StartsAt = T0, Native = true }
-    };
+    private static NoticeInput Watch(string name, string key) => NoticeIntake.FromPipe(
+        new NoticeMessage { AppName = name, ReplaceId = key, Title = key }, T0) with
+    { Timing = new NoticeTiming { Kind = NoticeTimeKind.Stopwatch, StartsAt = T0, Native = true } };
 
     private static void Cleaning(Action<string, bool> check)
     {
@@ -40,7 +37,8 @@ internal static class AuditCore2Tests
         const string England = "\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F";
         check("C-L11: a subdivision flag keeps its tags; stray tags go", NoticeText.Clean(England) == England && NoticeText.Clean("x" + England + "\U000E0041y") == "x" + England + "y"
             && NoticeText.Clean("tag\U000E0041\U000E007F") == "tag" && NoticeProtocol.Clip(England, 100) == England);
-        check("S3: Hangul fillers go", NoticeText.Clean("a\u3164b\uFFA0c\u115Fd\u1160e") == "abcde");
+        check("S3: Hangul fillers go, and a name of nothing but one falls back", NoticeText.Clean("a\u3164b\uFFA0c\u115Fd\u1160e") == "abcde"
+            && NoticeIntake.FromPipe(new NoticeMessage { AppName = "\u3164" }).AppName == "brim-notify");
         string zalgo = "e" + new string('\u0301', 12) + "x";
         check("S3: a letter keeps at most four combining marks", NoticeText.Clean(zalgo) == "e" + new string('\u0301', NoticeProtocol.MaxMarks) + "x"
             && NoticeProtocol.Clip(zalgo, 100) == NoticeText.Clean(zalgo));
@@ -48,8 +46,8 @@ internal static class AuditCore2Tests
             && NoticeText.Clean("नमस्ते") == "नमस्ते");
         check("S3: a single line turns line breaks, tabs and other controls into spaces", NoticeText.Clean("a\nb\r\nc\td\u0085e\u000Bf", singleLine: true) == "a b c d e f"
             && NoticeText.Clean("a\nb") == "a\nb" && NoticeProtocol.Clip("a\nb", 10) == "a\nb");
-        var titled = new NoticeInput { Origin = NoticeOrigin.Cli, AppKey = "cli:pay", AppName = "pay", InstanceKey = "t", Title = "Outlook\n已付款" };
-        check("S3: titles stay on one line", NoticeHub.Words(titled).Title == "Outlook 已付款");
+        var titled = NoticeIntake.FromPipe(new NoticeMessage { Title = "Outlook\n已付款", AppName = "pay\nme" });
+        check("S3: titles and names given over the wire stay on one line", NoticeHub.Words(titled).Title == "Outlook 已付款" && titled.AppName == "pay me");
         var run = new NoticeInput { Origin = NoticeOrigin.Cli, AppKey = "cli:x", AppName = "x", InstanceKey = "r", ExitCode = 0, Command = "ma\u200Bke\u202E\nall" };
         check("C-L11: the run command is cleaned before it words the title", NoticeHub.Words(run).Title == "make all 已完成");
     }

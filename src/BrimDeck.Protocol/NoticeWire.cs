@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -99,6 +100,11 @@ public static class NoticeProtocol
     public const int MaxTitle = 256, MaxBody = 4000, MaxActions = 8, MaxField = 256;
     // A run's duration at most (about 100 years): larger values cannot be turned into a time span.
     public const long MaxDurationMs = 36500L * 24 * 60 * 60 * 1000;
+
+    // The pipe is per user and per logon session: one user's senders never reach another session's BrimDeck.
+    // The user's SID is hashed only to keep the name short and free of characters a pipe name cannot hold.
+    public static string PipeName(int sessionId, string userSid)
+        => $"BrimDeck.Notices.{sessionId}.{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(userSid)))[..16]}";
 
     public static byte[] Serialize(NoticeMessage message) => JsonSerializer.SerializeToUtf8Bytes(message, NoticeJson.Default.NoticeMessage);
     public static NoticeMessage? Deserialize(ReadOnlySpan<byte> json)
@@ -253,4 +259,85 @@ public static class NoticeProtocol
     public const int MaxFlagTags = 8;
 
     private static bool Mark(string text, int index) => char.GetUnicodeCategory(text, index) is UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark;
+}
+
+// Frames on a stream: a 4-byte little-endian length, then that many bytes of UTF-8 JSON.
+public static class NoticeFrames
+{
+    public static async Task WriteAsync(Stream stream, NoticeMessage message, CancellationToken cancellation = default)
+    {
+        var payload = NoticeProtocol.Serialize(message);
+        if (payload.Length > NoticeProtocol.MaxFrame) throw new InvalidDataException("The message is larger than a frame may be.");
+        var frame = new byte[4 + payload.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(frame, payload.Length);
+        payload.CopyTo(frame, 4);
+        await stream.WriteAsync(frame, cancellation).ConfigureAwait(false);
+        await stream.FlushAsync(cancellation).ConfigureAwait(false);
+    }
+
+    // The next frame's payload, or null at the end of the stream. A frame over the limit, or a stream that ends inside a
+    // frame, throws InvalidDataException.
+    public static async Task<byte[]?> ReadAsync(Stream stream, CancellationToken cancellation = default)
+    {
+        var header = new byte[4];
+        if (!await FillAsync(stream, header, cancellation).ConfigureAwait(false)) return null;
+        int length = BinaryPrimitives.ReadInt32LittleEndian(header);
+        if (length < 0 || length > NoticeProtocol.MaxFrame) throw new InvalidDataException("Frame length " + length + " is outside the limit.");
+        var payload = new byte[length];
+        if (length > 0 && !await FillAsync(stream, payload, cancellation).ConfigureAwait(false)) throw new InvalidDataException("The stream ended inside a frame.");
+        return payload;
+    }
+
+    public static async Task<NoticeMessage?> ReadMessageAsync(Stream stream, CancellationToken cancellation = default)
+    {
+        var payload = await ReadAsync(stream, cancellation).ConfigureAwait(false);
+        if (payload is null) return null;
+        return NoticeProtocol.Deserialize(payload) ?? throw new InvalidDataException("A frame did not hold a notice message.");
+    }
+
+    // Hands each message to handle until the stream ends. One that handle throws on is dropped (failed hears why) and the
+    // next is read, so a single message from outside cannot end the reader; a broken frame still throws, as the stream can no
+    // longer be followed after it.
+    public static async Task ReadEachAsync(Stream stream, Action<NoticeMessage> handle, Action<Exception> failed, CancellationToken cancellation = default)
+    {
+        while (await ReadMessageAsync(stream, cancellation).ConfigureAwait(false) is { } message)
+        {
+            try { handle(message); }
+            catch (Exception ex) { failed(ex); }
+        }
+    }
+
+    // One message and its reply, within wait. Reply is null when the exchange failed or ran out of time; Written says whether
+    // the whole message had gone out by then. Once it has, the receiver may act on it even without answering in time, so the
+    // sender must not send it again another way, which would show the notice twice or start a second timer (W3).
+    public static async Task<(NoticeMessage? Reply, bool Written)> ExchangeAsync(Stream stream, NoticeMessage message, TimeSpan wait, CancellationToken cancellation = default)
+    {
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        limit.CancelAfter(wait);
+        bool written = false;
+        try
+        {
+            await WriteAsync(stream, message, limit.Token).ConfigureAwait(false);
+            written = true;
+            return (await ReadMessageAsync(stream, limit.Token).ConfigureAwait(false), true);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or ObjectDisposedException) { return (null, written); }
+    }
+
+    // True when the buffer was filled; false when the stream ended before its first byte.
+    private static async Task<bool> FillAsync(Stream stream, byte[] buffer, CancellationToken cancellation)
+    {
+        int read = 0;
+        while (read < buffer.Length)
+        {
+            int n = await stream.ReadAsync(buffer.AsMemory(read), cancellation).ConfigureAwait(false);
+            if (n == 0)
+            {
+                if (read == 0) return false;
+                throw new InvalidDataException("The stream ended inside a frame.");
+            }
+            read += n;
+        }
+        return true;
+    }
 }

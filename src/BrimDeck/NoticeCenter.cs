@@ -3,6 +3,7 @@ using System.Windows.Threading;
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
+using BrimDeck.Protocol;
 
 namespace BrimDeck;
 
@@ -29,6 +30,7 @@ internal sealed class NoticeCenter : IDisposable
     private int _resumeReading;
     private readonly WindowsNoticeSource _windows = new();
     private readonly NoticeQuiet _quiet;
+    private NoticePipeServer? _pipe;
     private volatile NoticeHistory? _history;
     // Whether notices are kept on disk, for a save finishing on a worker thread (see NoticeHistory.Save).
     private volatile bool _keepHistory;
@@ -55,6 +57,10 @@ internal sealed class NoticeCenter : IDisposable
     // Old files removed in the background (L6), one after another; a reading waits for them, so it never reads a file that
     // is about to go.
     private Task _deleting = Task.CompletedTask;
+    // Messages each link (the pipe) may deliver per window; more are refused until the window moves on.
+    private const int IntakeLimit = 200;
+    private static readonly TimeSpan IntakeWindow = TimeSpan.FromSeconds(10);
+    private readonly Dictionary<string, Queue<DateTimeOffset>> _intake = new(StringComparer.Ordinal);
     // Time-kind notices (NoticeTime.cs). _timeDue waits for the next reminder BrimDeck keeps time for, at most a minute at a
     // time so that sleep and clock changes are noticed; it is off while nothing is due. _liveTick is the one shared second
     // tick for live words ("24:59 left"); it runs only while something that shows such words is on screen.
@@ -70,6 +76,7 @@ internal sealed class NoticeCenter : IDisposable
     public NoticeIcons Icons { get; }
     public NoticeHistoryState HistoryState { get; private set; } = NoticeHistoryState.Empty;
     public NoticeSourceState WindowsState => _enabled && Settings.NoticeWindowsSource ? _windows.State : NoticeSourceState.Off;
+    public string? PipeError => _pipe?.Error;
     public bool Enabled => _enabled;
     public bool Quiet { get; private set; }
     public bool FocusSupported => _quiet.FocusSupported;
@@ -139,6 +146,7 @@ internal sealed class NoticeCenter : IDisposable
         if (!_enabled)
         {
             _windows.Stop();
+            _pipe?.Dispose(); _pipe = null;
             _maintenance.Stop(); _quietCheck.Stop();
             ScheduleDue();
             // Whatever shows ends and nothing waiting shows later; quota alerts and track changes keep working through the
@@ -153,6 +161,7 @@ internal sealed class NoticeCenter : IDisposable
         }
         LoadHistory();
         AutoClear();
+        if (_pipe is null) { _pipe = new NoticePipeServer(HandlePipeAsync) { Failed = Log }; _pipe.Start(); }
         if (settings.NoticeWindowsSource) _windows.Start(); else _windows.Stop();
         _maintenance.Start();
         Hub.Prune(DateTimeOffset.UtcNow);
@@ -258,6 +267,38 @@ internal sealed class NoticeCenter : IDisposable
         long? foreground = NoticeNative.ForegroundMonitor() is var monitor && monitor != IntPtr.Zero ? monitor.ToInt64() : null;
         var panels = _app.Decks.Select(deck => new NoticeRouting.Candidate(deck.NoticeLane, deck.NoticeMonitor, deck == _app.Deck, deck.CanShowNotices)).ToList();
         return NoticeRouting.Choose(panels, foreground, Settings.NoticeScreen);
+    }
+
+    private async Task<NoticeMessage> HandlePipeAsync(NoticeMessage message)
+    {
+        if (NoticeProtocol.Validate(message) is { } problem) return NoticeProtocol.Reply(NoticeResults.Rejected, problem, message.EventId);
+        return await _dispatcher.InvokeAsync(() =>
+        {
+            if (_disposed) return NoticeProtocol.Reply(NoticeResults.Rejected, "shutting-down", message.EventId);
+            if (!_enabled) return NoticeProtocol.Reply(NoticeResults.Rejected, "notices-off", message.EventId);
+            if (message.Type == NoticeTypes.Status) return NoticeProtocol.Reply(NoticeResults.Accepted, StatusLine(), message.EventId);
+            if (message.Type != NoticeTypes.Notify) return NoticeProtocol.Reply(NoticeResults.Rejected, "unknown-type", message.EventId);
+            if (!Admit("pipe")) return NoticeProtocol.Reply(NoticeResults.Rejected, "rate-limited", message.EventId);
+            return Reply(Receive(NoticeIntake.FromPipe(message)), message.EventId);
+        });
+    }
+
+    private static NoticeMessage Reply(NoticeOutcome outcome, string? eventId) => NoticeProtocol.Reply(outcome.Receipt switch
+    {
+        NoticeReceipt.Accepted => NoticeResults.Accepted, NoticeReceipt.Updated => NoticeResults.Updated,
+        NoticeReceipt.Duplicate => NoticeResults.Duplicate, _ => NoticeResults.Filtered
+    }, outcome.Reason, eventId);
+
+    private string StatusLine() => $"Windows: {WindowsState}" + (Quiet ? "; held back" : "");
+
+    private bool Admit(string link)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (!_intake.TryGetValue(link, out var times)) _intake[link] = times = new Queue<DateTimeOffset>();
+        while (times.Count > 0 && now - times.Peek() >= IntakeWindow) times.Dequeue();
+        if (times.Count >= IntakeLimit) return false;
+        times.Enqueue(now);
+        return true;
     }
 
     // ----- Presentation -----
@@ -758,6 +799,7 @@ internal sealed class NoticeCenter : IDisposable
     {
         if (_disposed) return;
         // The sources stop first, so nothing arrives after the last save (core-L3).
+        _pipe?.Dispose(); _pipe = null;
         _windows.Dispose();
         // "Clear on exit": the list is emptied before the last save, so nothing of it is left on disk.
         if (_enabled && Settings.NoticeAutoClear == NoticeAutoClear.OnExit)
