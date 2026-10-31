@@ -44,16 +44,16 @@ public partial class MainWindow
         IslandContent.LayoutTransform = Turn(_frame.Upright);
         // On the top and bottom edges the open page follows the island's width (InitializeScale). On a side edge it keeps the page's
         // size (SetExpanded), centred along the edge, so the header and the page stay together while the island changes its length.
-        // It hangs from the edge, so it is anchored there and recedes toward it as the panel closes.
+        // It hangs from the edge, so it is anchored there and is not scaled as the panel opens or closes (it only fades).
         if (_frame.Across) BindingOperations.ClearBinding(ExpandedContent, WidthProperty);
         else if (BindingOperations.GetBindingExpression(ExpandedContent, WidthProperty) is null)
             ExpandedContent.SetBinding(WidthProperty, new Binding(nameof(ActualWidth)) { Source = Island, Converter = _unscaled });
-        (ExpandedContent.HorizontalAlignment, ExpandedContent.VerticalAlignment, ExpandedContent.RenderTransformOrigin) = edge switch
+        (ExpandedContent.HorizontalAlignment, ExpandedContent.VerticalAlignment) = edge switch
         {
-            ScreenEdge.Bottom => (HorizontalAlignment.Center, VerticalAlignment.Bottom, new Point(.5, 1)),
-            ScreenEdge.Left => (HorizontalAlignment.Left, VerticalAlignment.Center, new Point(0, .5)),
-            ScreenEdge.Right => (HorizontalAlignment.Right, VerticalAlignment.Center, new Point(1, .5)),
-            _ => (HorizontalAlignment.Center, VerticalAlignment.Top, new Point(.5, 0))
+            ScreenEdge.Bottom => (HorizontalAlignment.Center, VerticalAlignment.Bottom),
+            ScreenEdge.Left => (HorizontalAlignment.Left, VerticalAlignment.Center),
+            ScreenEdge.Right => (HorizontalAlignment.Right, VerticalAlignment.Center),
+            _ => (HorizontalAlignment.Center, VerticalAlignment.Top)
         };
         _grips.Upright = Turn(_frame.Upright);
         // The line's playback progress runs along the edge; its length and thickness are set again for it.

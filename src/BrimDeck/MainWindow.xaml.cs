@@ -905,9 +905,9 @@ public partial class MainWindow : Window
         // (GlassBackdrop.Lag), so opening, the content starts no earlier than LiquidLeadMs in (live check 10-26, LG-02).
         if (expanded && duration > 0 && LiquidTheme.Shown(_glass)) content = content with { Start = Math.Max(content.Start, Math.Min(.5, LiquidLeadMs / duration)) };
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
-        // motion-review F13: what leaves eases out as what arrives does; InOut is for what changes in place.
-        Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, easeOut);
-        Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, easeOut);
+        // The content only fades, in and out on the same track and curve (motion-review F13: what leaves eases out as what arrives
+        // does). It used to scale between .96 and 1 as well; text under a scale that is not exactly 1 is drawn unhinted at fractional
+        // places, and snapped onto the pixel grid on the frame the scale reached 1 (W-09b).
         Animate(Island, WidthProperty, width, duration, surface, settle);
         Animate(Island, HeightProperty, height, duration, surface, settle);
         Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? 0 : shape.Shoulder, duration, shoulderTrack, corners);

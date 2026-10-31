@@ -43,6 +43,7 @@ internal static class Program
                 rounds > 0 && rounds + 1 < args.Length ? int.Parse(args[rounds + 1], CultureInfo.InvariantCulture) : 120);
         }
         // The monitor page with the machine's power and battery, and the collapsed row's readings, in every theme (PowerPages): --power-pages <folder> [--scale 150] [--themes ids] [--sizes]
+        if (args.Length > 0 && args[0] == "--expand-jitter") return LiquidPages.RunExpandJitter(args);
         if (args.Length > 0 && args[0] == "--smi-crash") return LiquidPages.RunSmiCrash();
         if (args.Length > 0 && args[0] == "--power-colors") return LiquidPages.RunPowerColors();
         if (args.Length > 1 && args[0] == "--power-open") return LiquidPages.RunPowerOpen(args[1] == "on", args.Length > 2 && args[2] == "warm");
