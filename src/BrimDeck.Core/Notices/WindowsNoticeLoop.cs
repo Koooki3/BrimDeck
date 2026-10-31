@@ -189,7 +189,9 @@ public sealed class WindowsNoticeLoop
             try { result = WindowsNoticeLogReader.Read(id, app, known, host.ReadOne); }
             catch (TimeoutException)
             {
-                // Windows did not answer (seen after waking): the id is left to a full reading with a new listener.
+                // Windows did not answer (seen after waking): the id is left to a full reading with a new listener. One the baseline
+                // absorbed keeps its place for that reading (_unread), as when the lookup finds nothing.
+                if (absorbed) lock (Gate) { if (_current == run) (_unread ??= []).Add(id); }
                 run.Batch.CompleteIds(id);
                 run.Batch.RequestReconcile(immediate: true);
                 throw;
