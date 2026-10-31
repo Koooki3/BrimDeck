@@ -86,6 +86,7 @@ try
     ExpandSnapTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);
+    MusicTitleMarqueeTests.Run(Check);
     DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
     DatePickerMotionTests.Run(Check);
