@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Windows;
 using BrimDeck.Core;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -30,7 +32,7 @@ public sealed partial class SettingsWindow
         if (size != 14) icon.LayoutTransform = new ScaleTransform(size / 14, size / 14);
         // Measured ink: beside a 13pt label the circle's center sat 1 DIP above the center of the label's glyphs.
         if (nudge != 0) icon.RenderTransform = new TranslateTransform(0, nudge);
-        var info = new Border
+        var info = new HelpMark
         {
             Width = size + 8, Height = 24, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent,
             VerticalAlignment = VerticalAlignment.Center, Focusable = true, Cursor = Cursors.Help,
@@ -38,6 +40,15 @@ public sealed partial class SettingsWindow
         };
         AttachSettingHelp(info, title, help);
         return info;
+    }
+
+    // An info mark (ⓘ). A Border has no automation peer, so a screen reader would find the mark's name and description empty:
+    // this one reads as a button named for its setting ("开机自启动说明") with the description as its help text (AttachSettingHelp),
+    // and invoking it opens or closes the description, as hovering or focusing it does.
+    private sealed class HelpMark : Border
+    {
+        protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Button, () => AutomationProperties.GetName(this),
+            () => { if (ToolTip is ToolTip tip) tip.IsOpen = !tip.IsOpen; });
     }
 
     private static void AttachSettingHelp(FrameworkElement info, string title, Func<string> help)
@@ -64,6 +75,21 @@ public sealed partial class SettingsWindow
         info.LostKeyboardFocus += (_, _) => tooltip.IsOpen = false;
         info.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { tooltip.IsOpen = false; e.Handled = true; } };
         info.Unloaded += (_, _) => tooltip.IsOpen = false;
+    }
+
+    // A text field's keyboard focus (SW-02): the field draws no outline of its own (FocusVisualStyle is off in SettingsNumber), so its
+    // frame turns to the accent color and 2 DIP thick while input has the focus, its padding giving the extra DIP back so the text
+    // does not move. rest: the frame's color without focus.
+    private void FieldFocus(Border frame, UIElement input, Func<Brush> rest)
+    {
+        var padding = frame.Padding;
+        void Show(bool focused)
+        {
+            frame.BorderBrush = focused ? UI.Brush(_palette.Accent) : rest();
+            frame.BorderThickness = new Thickness(focused ? 2 : 1);
+            frame.Padding = focused ? new Thickness(Math.Max(0, padding.Left - 1), padding.Top, Math.Max(0, padding.Right - 1), padding.Bottom) : padding;
+        }
+        input.IsKeyboardFocusWithinChanged += (_, _) => Show(input.IsKeyboardFocusWithin);
     }
 
     // Where each segmented control's highlight stood when the user last pressed it, so a page rebuilt by that
@@ -127,8 +153,7 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetName(minus,Loc.T("减少"+title, "Decrease "+title));AutomationProperties.SetName(plus,Loc.T("增加"+title, "Increase "+title));
         line.Children.Add(new Border {Width=1,Background=UI.Brush(Divider),Margin=new Thickness(2,5,3,5)});line.Children.Add(minus);line.Children.Add(plus);
         var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.Border),BorderThickness=new Thickness(1),Padding=new Thickness(7,0,2,0)};
-        input.GotKeyboardFocus+=(_,_)=>chip.BorderBrush=UI.Brush(_palette.Accent);
-        input.LostKeyboardFocus+=(_,_)=>chip.BorderBrush=UI.Brush(_palette.Border);
+        FieldFocus(chip, input, () => UI.Brush(_palette.Border));
         void Set(double number)
         {
             var next=Math.Clamp(Math.Round(number),min,max);
@@ -185,5 +210,87 @@ public sealed partial class SettingsWindow
         dialog.Loaded += (_, _) => cancel.Focus();
         dialog.ShowDialog();
         return confirmed;
+    }
+}
+
+// The settings window's radio groups (segmented controls, theme and style cards, clock tiles and swatches) behave as Windows' radio
+// groups (SW-06): the group is one Tab stop, on its chosen option (or its first), and the arrow keys choose the next or previous
+// option, wrapping at the ends. A group is the radio buttons of one panel with one group name. On for everything under an element
+// with Enabled set (the window's frame), so the panel's own radio buttons keep their behavior.
+internal static class RadioGroups
+{
+    public static readonly DependencyProperty EnabledProperty = DependencyProperty.RegisterAttached(
+        "Enabled", typeof(bool), typeof(RadioGroups), new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.Inherits));
+    public static void SetEnabled(DependencyObject element, bool value) => element.SetValue(EnabledProperty, value);
+
+    static RadioGroups()
+    {
+        // A new option takes its place at its first layout: WPF raises Loaded only to elements with a handler of their own.
+        EventManager.RegisterClassHandler(typeof(RadioButton), FrameworkElement.SizeChangedEvent, new SizeChangedEventHandler((sender, _) => TabStops((RadioButton)sender)));
+        EventManager.RegisterClassHandler(typeof(RadioButton), ToggleButton.CheckedEvent, new RoutedEventHandler((sender, _) => TabStops((RadioButton)sender)));
+        EventManager.RegisterClassHandler(typeof(RadioButton), UIElement.PreviewKeyDownEvent, new KeyEventHandler(Arrow));
+    }
+    // Registers the class handlers; called once before the first settings window is built.
+    public static void Use() { }
+
+    private static List<RadioButton> Group(RadioButton radio) => VisualTreeHelper.GetParent(radio) is Panel panel
+        ? [.. panel.Children.OfType<RadioButton>().Where(option => option.GroupName == radio.GroupName)] : [radio];
+
+    private static void TabStops(RadioButton radio)
+    {
+        if (!(bool)radio.GetValue(EnabledProperty)) return;
+        var group = Group(radio);
+        var chosen = group.FirstOrDefault(option => option.IsChecked == true) ?? group[0];
+        foreach (var option in group) KeyboardNavigation.SetIsTabStop(option, ReferenceEquals(option, chosen));
+    }
+
+    private static void Arrow(object sender, KeyEventArgs e)
+    {
+        var radio = (RadioButton)sender;
+        int step = e.Key is Key.Left or Key.Up ? -1 : e.Key is Key.Right or Key.Down ? 1 : 0;
+        if (step == 0 || e.Handled || !ReferenceEquals(e.OriginalSource, radio) || Keyboard.Modifiers != ModifierKeys.None || !(bool)radio.GetValue(EnabledProperty)) return;
+        var open = Group(radio).Where(option => option.IsEnabled && option.IsVisible).ToList();
+        int at = open.IndexOf(radio);
+        if (at < 0 || open.Count < 2) return;
+        var next = open[(at + step + open.Count) % open.Count];
+        next.Focus(); next.IsChecked = true; e.Handled = true;
+    }
+}
+
+// A drop-down drawn as a button with a popup list (the app rows' quota source and usage app). A button reads as one that only acts;
+// this one reads as a combo box with its chosen value and whether its list is open, and opens or closes it on request (SW-04).
+internal sealed class DropDownButton : System.Windows.Controls.Button
+{
+    public Func<string> Value { get; init; } = () => "";
+    public System.Windows.Controls.Primitives.Popup? Menu
+    {
+        get => _menu;
+        set
+        {
+            _menu = value;
+            if (value is null) return;
+            value.Opened += (_, _) => Changed(ExpandCollapseState.Collapsed, ExpandCollapseState.Expanded);
+            value.Closed += (_, _) => Changed(ExpandCollapseState.Expanded, ExpandCollapseState.Collapsed);
+        }
+    }
+    private System.Windows.Controls.Primitives.Popup? _menu;
+    private void Changed(ExpandCollapseState from, ExpandCollapseState to) =>
+        (UIElementAutomationPeer.FromElement(this) as Peer)?.RaisePropertyChangedEvent(ExpandCollapsePatternIdentifiers.ExpandCollapseStateProperty, from, to);
+
+    protected override AutomationPeer OnCreateAutomationPeer() => new Peer(this);
+
+    private sealed class Peer(DropDownButton owner) : ButtonAutomationPeer(owner), IExpandCollapseProvider, IValueProvider
+    {
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.ComboBox;
+        protected override string GetClassNameCore() => nameof(DropDownButton);
+        public override object GetPattern(PatternInterface pattern) =>
+            pattern is PatternInterface.ExpandCollapse or PatternInterface.Value ? this : base.GetPattern(pattern);
+        public ExpandCollapseState ExpandCollapseState => owner._menu?.IsOpen == true ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+        // Opening goes through the button's own click, which first fits the list to the screen.
+        public void Expand() { if (owner._menu?.IsOpen != true) ((IInvokeProvider)this).Invoke(); }
+        public void Collapse() { if (owner._menu is { IsOpen: true } menu) menu.IsOpen = false; }
+        public string Value => owner.Value();
+        public bool IsReadOnly => true;
+        public void SetValue(string value) => throw new InvalidOperationException();
     }
 }

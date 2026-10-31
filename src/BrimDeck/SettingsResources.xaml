@@ -17,11 +17,12 @@
   <SolidColorBrush x:Key="SettingsFillSelected" Color="#2EFFFFFF"/>
   <!-- Focus outlines are drawn only while moving focus with the keyboard, never after a mouse click. -->
   <Style x:Key="SettingsFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1" CornerRadius="6" Margin="-2"/>
+    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="2" CornerRadius="7" Margin="-3"/>
   </ControlTemplate></Setter.Value></Setter></Style>
-  <!-- Rings the preview card only; the caption row below it (30 + 4 DIP) stays outside. -->
+  <!-- Every keyboard focus outline here is 2 DIP in the accent color, which stands at least 3:1 against the window in both palettes (SW-02).
+       Rings the preview card only; the caption row below it (30 + 4 DIP) stays outside. -->
   <Style x:Key="SettingsCardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1.5" CornerRadius="15" Margin="-3,-3,-3,31"/>
+    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="2" CornerRadius="15" Margin="-3,-3,-3,31"/>
   </ControlTemplate></Setter.Value></Setter></Style>
   <Style x:Key="SettingsRoundFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
     <Ellipse Stroke="{DynamicResource SettingsAccent}" StrokeThickness="2"/>
@@ -29,18 +30,18 @@
   <!-- The switch is docked right in its control, so the outline hugs only the switch.
        No fixed height: an outline taller than its slot is cut off at the top and bottom. -->
   <Style x:Key="SettingsSwitchFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1" CornerRadius="13" Width="42" HorizontalAlignment="Right" Margin="-2"/>
+    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="2" CornerRadius="13" Width="42" HorizontalAlignment="Right" Margin="-2"/>
   </ControlTemplate></Setter.Value></Setter></Style>
   <!-- The steppers sit inside the number box, so their outline stays within the button. -->
   <Style x:Key="SettingsStepperFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1" CornerRadius="4" Margin="0,2"/>
+    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="2" CornerRadius="4" Margin="0,2"/>
   </ControlTemplate></Setter.Value></Setter></Style>
   <!-- Help marks: a circle around the 14 DIP mark in its 22 × 24 target, and around the 12 DIP column mark. -->
   <Style x:Key="SettingsHelpFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-    <Ellipse Stroke="{DynamicResource SettingsAccent}" StrokeThickness="1" Margin="2,3"/>
+    <Ellipse Stroke="{DynamicResource SettingsAccent}" StrokeThickness="2" Margin="2,3"/>
   </ControlTemplate></Setter.Value></Setter></Style>
   <Style x:Key="SettingsSmallHelpFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-    <Ellipse Stroke="{DynamicResource SettingsAccent}" StrokeThickness="1" Margin="-2"/>
+    <Ellipse Stroke="{DynamicResource SettingsAccent}" StrokeThickness="2" Margin="-3"/>
   </ControlTemplate></Setter.Value></Setter></Style>
   <Style x:Key="SettingsButton" TargetType="Button">
     <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocus}"/>
@@ -141,7 +142,7 @@
   <!-- Drawn only while moving focus with the keyboard, never after a mouse click. -->
   <Style x:Key="SettingsGlyphFocus">
     <Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-      <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1" CornerRadius="4"/>
+      <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="2" CornerRadius="4"/>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <!-- A bare icon button: hover brightens the icon instead of filling a box behind it. -->
@@ -263,7 +264,7 @@
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="SettingsTileFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1.5" CornerRadius="13" Margin="-3"/>
+    <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="2" CornerRadius="13" Margin="-3"/>
   </ControlTemplate></Setter.Value></Setter></Style>
   <!-- A clock style: the face on the panel theme's surface, with a check at the top right once chosen. -->
   <Style x:Key="SettingsClockTile" TargetType="RadioButton">
@@ -348,7 +349,7 @@
           </Thumb></Track.Thumb>
           <Track.IncreaseRepeatButton><RepeatButton Style="{StaticResource SettingsTrack}" Background="Transparent" Command="Slider.IncreaseLarge"/></Track.IncreaseRepeatButton>
         </Track>
-        <Border x:Name="Focus" BorderThickness="1" BorderBrush="#800A84FF" CornerRadius="8" IsHitTestVisible="False" Visibility="Collapsed"/>
+        <Border x:Name="Focus" BorderThickness="2" BorderBrush="{DynamicResource SettingsAccent}" CornerRadius="8" IsHitTestVisible="False" Visibility="Collapsed"/>
       </Grid>
       <ControlTemplate.Triggers>
         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
@@ -389,7 +390,7 @@
           </Thumb></Track.Thumb>
           <Track.IncreaseRepeatButton><RepeatButton Style="{StaticResource SettingsTrack}" Background="Transparent" Command="Slider.IncreaseLarge"/></Track.IncreaseRepeatButton>
         </Track>
-        <Border x:Name="Focus" BorderThickness="1" BorderBrush="#800A84FF" CornerRadius="8" IsHitTestVisible="False" Visibility="Collapsed"/>
+        <Border x:Name="Focus" BorderThickness="2" BorderBrush="{DynamicResource SettingsAccent}" CornerRadius="8" IsHitTestVisible="False" Visibility="Collapsed"/>
       </Grid>
       <ControlTemplate.Triggers>
         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
@@ -506,7 +507,7 @@
             </ScrollViewer>
           </Border>
         </Popup>
-        <Border x:Name="Focus" IsHitTestVisible="False" Visibility="Collapsed" BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1" CornerRadius="6"/>
+        <Border x:Name="Focus" IsHitTestVisible="False" Visibility="Collapsed" BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="2" CornerRadius="6"/>
       </Grid>
       <ControlTemplate.Triggers>
         <!-- Keep the time horizontally centred; offset its natural line box to centre the visible digits vertically. -->
@@ -529,7 +530,8 @@
     <Setter Property="FontSize" Value="13"/><Setter Property="Padding" Value="10,7"/><Setter Property="VerticalContentAlignment" Value="Center"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
       <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6"><ScrollViewer x:Name="PART_ContentHost" Style="{x:Null}" Focusable="False" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/></Border>
-      <ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource SettingsAccent}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.6"/></Trigger></ControlTemplate.Triggers>
+      <!-- Focused: a 2 DIP accent frame (SW-02); the text gives the extra DIP back, so it does not move. -->
+      <ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource SettingsAccent}"/><Setter TargetName="Chrome" Property="BorderThickness" Value="2"/><Setter TargetName="PART_ContentHost" Property="Margin" Value="-1,0"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.6"/></Trigger></ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="SettingsScrollPage" TargetType="RepeatButton">
