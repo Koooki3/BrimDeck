@@ -15,9 +15,26 @@ internal static class ExpandStillTests
         var found = new List<string>();
         if (fileName.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
         {
-            foreach (Match element in Regex.Matches(text, @"<(\w+)\s[^>]*x:Name=""ExpandedContent""[^>]*>(?<body>.*?)</\1>", RegexOptions.Singleline))
-                if (Regex.IsMatch(element.Value.Split('>')[0], "RenderTransform=") || Regex.IsMatch(element.Groups["body"].Value, @"^\s*(<!--.*?-->\s*)*<\w+\.RenderTransform>", RegexOptions.Singleline))
-                    found.Add(fileName + ": ExpandedContent has a render transform");
+            foreach (Match element in Regex.Matches(text, @"<(?<name>\w+)\s[^>]*x:Name=""ExpandedContent""[^>]*>"))
+            {
+                // The transform may be an attribute of the element, or a property element among its direct children, whatever comes
+                // before it (Grid.Resources first, say) and however many elements are nested under it; a transform on a nested element
+                // is that element's own and does not count.
+                string start = element.Value;
+                bool transformed = Regex.IsMatch(start, @"\b(RenderTransform|LayoutTransform)=");
+                if (!start.EndsWith("/>"))
+                {
+                    int depth = 0;
+                    foreach (Match tag in Regex.Matches(text[(element.Index + element.Length)..], @"<!--.*?-->|<(?<close>/?)(?<tag>[\w.:]+)(?<rest>[^>]*?)(?<self>/?)>", RegexOptions.Singleline))
+                    {
+                        if (tag.Value.StartsWith("<!--")) continue;
+                        if (tag.Groups["close"].Value.Length > 0) { if (--depth < 0) break; continue; }
+                        if (depth == 0 && Regex.IsMatch(tag.Groups["tag"].Value, @"\.(RenderTransform|LayoutTransform)$")) transformed = true;
+                        if (tag.Groups["self"].Value.Length == 0) depth++;
+                    }
+                }
+                if (transformed) found.Add(fileName + ": ExpandedContent has a render transform");
+            }
             return found;
         }
         foreach (Match m in Regex.Matches(text, @"ExpandedContent\s*\.\s*(RenderTransform|LayoutTransform)\s*=[^=]|\bContentScale\b|Animate\(\s*ExpandedContent[^;]*ScaleTransform"))
@@ -35,6 +52,16 @@ internal static class ExpandStillTests
         check("Expand still: a page that only fades, and a transform on something else, are not found",
             Transforms("new.xaml", """<Grid x:Name="ExpandedContent" Visibility="Hidden" Opacity="0"><Grid x:Name="ContentCanvas"><Grid.RenderTransform><ScaleTransform/></Grid.RenderTransform></Grid></Grid>""").Count == 0
             && Transforms("new.cs", "Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut);").Count == 0);
+
+        // The XAML finder looks at the element's direct children in whatever order they come, and only those.
+        check("Expand still: a transform after Grid.Resources, a transform as an attribute, and one after nested elements are found",
+            Transforms("order.xaml", """<Grid x:Name="ExpandedContent"><Grid.Resources><SolidColorBrush x:Key="B"/></Grid.Resources><Grid.RenderTransform><ScaleTransform/></Grid.RenderTransform><Grid x:Name="ContentCanvas"/></Grid>""").Count == 1
+            && Transforms("attr.xaml", """<Grid x:Name="ExpandedContent" RenderTransform="{StaticResource Shrink}"><Grid x:Name="ContentCanvas"/></Grid>""").Count == 1
+            && Transforms("nested.xaml", """<Grid x:Name="ExpandedContent"><Grid x:Name="A"><Grid x:Name="B"/></Grid><Grid.LayoutTransform><ScaleTransform/></Grid.LayoutTransform></Grid>""").Count == 1);
+        check("Expand still: a transform on a nested element, a comment about one, and a sibling's transform are not found",
+            Transforms("inner.xaml", """<Grid x:Name="ExpandedContent"><Grid.Resources/><!-- <Grid.RenderTransform> --><Grid x:Name="A"><Grid.RenderTransform><ScaleTransform/></Grid.RenderTransform><Grid x:Name="B"/></Grid></Grid>""").Count == 0
+            && Transforms("sibling.xaml", """<Grid><Grid x:Name="ExpandedContent"/><Grid x:Name="Other"><Grid.RenderTransform><ScaleTransform/></Grid.RenderTransform></Grid></Grid>""").Count == 0
+            && Transforms("selfclosing.xaml", """<Grid><Grid x:Name="ExpandedContent" Opacity="0"/><Border><Border.RenderTransform><ScaleTransform/></Border.RenderTransform></Border></Grid>""").Count == 0);
 
         var source = new DirectoryInfo(AppContext.BaseDirectory);
         while (source is not null && !File.Exists(Path.Combine(source.FullName, "BrimDeck.sln"))) source = source.Parent;
