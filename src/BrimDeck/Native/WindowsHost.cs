@@ -28,13 +28,14 @@ public sealed class WindowsHost : IDisposable
     public ScreenContext Current { get; private set; }
     // monitor gives the monitor whose foreground window decides the context. The context is reported with the app it was
     // detected for, and a change of either is a change: two apps can read as the same context with different app rules.
-    public WindowsHost(Func<IntPtr> monitor, Func<IntPtr> window, Func<Rect?> island)
+    public WindowsHost(Func<IntPtr> monitor, Func<IntPtr> window, Func<Rect?> island, Func<bool>? forceTopmost = null)
     {
-        _monitor = monitor; _window = window; _island = island;
+        _monitor = monitor; _window = window; _island = island; _forceTopmost = forceTopmost;
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
     }
     private readonly Func<IntPtr> _window;
+    private readonly Func<bool>? _forceTopmost;
     // The strip the island actually draws in, in screen physical pixels, as of the last layout; null before the first.
     private readonly Func<Rect?> _island;
     private string _raisedName = "", _raisedPath = "";
@@ -58,9 +59,8 @@ public sealed class WindowsHost : IDisposable
     //  - the topmost flag lost, or an ordinary window above the panel: a real anomaly, and the panel is put back at
     //    once, since no ordinary window has any business over a topmost overlay;
     //  - another topmost window covering the island: often deliberate, a pinned video, a screenshot mask, another
-    //    overlay. The panel never fights over it — one recovery attempt per culprit, and only a note afterwards;
-    //    taking the island back by force would flicker against whatever the user chose to keep on top. The taskbar is
-    //    the exception: it raises itself on every use, so a capsule placed over it is put back over it each time.
+    //    overlay. Leave it above the panel unless the user enabled ForceTopmost. The taskbar is always recovered from.
+    //    Recovery keeps keyboard focus unchanged and only runs when an overlapping window is found.
     private void WatchOrder(IntPtr window)
     {
         if (window == IntPtr.Zero || !IsWindowVisible(window) || IsIconic(window)) return;
@@ -84,15 +84,16 @@ public sealed class WindowsHost : IDisposable
                 if (island is { } strip && Covers(above, strip))
                 {
                     // The taskbar puts itself on top whenever it is used, and would then hide a capsule moved down over it
-                    // until the next use of the panel; it is the one topmost window the panel always goes back over.
+                    // until the next use of the panel. Other topmost windows require the explicit setting.
                     bool taskbar = IsTaskbar(above);
-                    cause = "covered by topmost " + (taskbar ? "taskbar" : ProcessName(above)); recover = taskbar; break;
+                    cause = "covered by topmost " + (taskbar ? "taskbar" : ProcessName(above));
+                    recover = taskbar || _forceTopmost?.Invoke() == true;
+                    break;
                 }
             }
         }
         if (cause is null) { _orderCulprit = null; return; }
-        // One recovery per culprit: a topmost window the user keeps over the island would otherwise be fought every
-        // poll. The note stands either way, so the culprit can be told from the panels it covered.
+        // Log repeated obstruction at most every ten seconds, including whether recovery was requested.
         if (recover) SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
         if (cause != _orderCulprit || Environment.TickCount64 - _orderLoggedAt > 10000)
         {
@@ -160,6 +161,13 @@ public sealed class WindowsHost : IDisposable
     // Moves the window without resizing it, in one step and in device pixels.
     public static void MoveTo(Window window, int x, int y)
         => SetWindowPos(new WindowInteropHelper(window).Handle, IntPtr.Zero, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010); // SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+    // Raises a visible panel once, preserving focus and display/hide rules.
+    public static void RaiseOnce(Window window)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero || !IsWindowVisible(handle) || IsIconic(handle)) return;
+        SetWindowPos(handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+    }
     // Puts a window directly beneath another, without moving, sizing or activating it.
     public static void PlaceBelow(IntPtr window, IntPtr above)
         => SetWindowPos(window, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE

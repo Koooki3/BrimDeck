@@ -84,7 +84,8 @@ public partial class MainWindow : Window
     public MainWindow(App app, MainWindow? lead = null)
     {
         _app = app; _lead = lead;
-        _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip);
+        _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
+            () => Settings.ForceTopmost);
         Rect? IslandStrip()
         {
             // The island border is what is drawn, in every style and whether the panel is collapsed or open — its size

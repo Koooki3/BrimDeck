@@ -375,6 +375,7 @@ public sealed class DeckSettings
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;
+    public bool ForceTopmost { get; set; }
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
