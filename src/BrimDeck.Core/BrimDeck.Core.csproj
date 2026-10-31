@@ -19,6 +19,8 @@
     <ProjectReference Include="..\BrimDeck.Protocol\BrimDeck.Protocol.csproj" />
     <!-- NoticeHistory.PlainProtector is for the tests only. -->
     <InternalsVisibleTo Include="BrimDeck.Tests" />
+    <!-- Release notes for the What's new window; see ReleaseHistory. The file name is the version. -->
+    <EmbeddedResource Include="..\..\releases\*.md" LogicalName="BrimDeck.Core.Releases.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

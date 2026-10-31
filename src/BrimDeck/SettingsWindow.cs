@@ -645,7 +645,7 @@ public sealed partial class SettingsWindow : Window
         {
             switch(_page)
             {
-                case 0:s.LaunchAtStartup=false;s.TrimMemoryWhenIdle=defaults.TrimMemoryWhenIdle;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;break;
+                case 0:s.LaunchAtStartup=false;s.TrimMemoryWhenIdle=defaults.TrimMemoryWhenIdle;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
                     s.NotchEqualizer=defaults.NotchEqualizer;s.CapsuleEqualizer=defaults.CapsuleEqualizer;s.EqualizerAlways=defaults.EqualizerAlways;s.EqualizerBars=defaults.EqualizerBars;s.EqualizerColor=defaults.EqualizerColor;s.EqualizerCustomColor=defaults.EqualizerCustomColor;s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;s.ClockSeconds=defaults.ClockSeconds;CopyCollapsedSize(s,defaults);s.HideHotkey=defaults.HideHotkey;
                     s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;s.NotchOrder=defaults.NotchOrder;s.CapsuleOrder=defaults.CapsuleOrder;
@@ -714,7 +714,23 @@ public sealed partial class SettingsWindow : Window
         Group(BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"), S.Maximized, value => Change(s => s.Maximized = value), defaults.Maximized),
             BehaviorRow(Loc.T("有应用处于无边框全屏时", "When an app is in borderless full screen"), S.Borderless, value => Change(s => s.Borderless = value), defaults.Borderless),
             BehaviorRow(Loc.T("有应用处于独占全屏时", "When an app is in exclusive full screen"), S.Exclusive, value => Change(s => s.Exclusive = value), defaults.Exclusive),
+            Toggle(Loc.T("同时检测后方窗口", "Also check windows behind"), S.BackgroundWindows, value => Change(s => s.BackgroundWindows = value),
+                help: Loc.T("开启后，正在使用的窗口后方有窗口最大化或无边框全屏时，也按上面对应的规则处理。关闭后只检测正在使用的窗口。",
+                    "When on, a maximized or borderless full-screen window behind the window you are using also follows the matching rule above. When off, only the window you are using is checked.")),
             ExceptionsRow());
+        SectionTitle(Loc.T("兼容性", "Compatibility"));
+        var raise = ActionButton(Loc.T("立即置顶", "Raise now"), () =>
+        {
+            foreach (var deck in _app.Decks.ToList()) Native.WindowsHost.RaiseOnce(deck);
+        });
+        raise.BorderBrush = UI.Brush(_palette.Border);
+        raise.Background = UI.Brush(_palette.Input);
+        Group(Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost,
+            value => Change(s => s.ForceTopmost = value), help:
+            Loc.T("开启后，面板被其他置顶窗口遮挡时会自动恢复到上方。仍遵循上面的显示与隐藏规则。若其他应用也持续置顶，可能出现闪烁。",
+                "Restores the panel above other always-on-top windows when covered. Display and hide rules above still apply. Apps that repeatedly raise themselves may cause flickering.")),
+            Row(Loc.T("单次置顶", "Raise once"), raise, help: () => Loc.T("每次点击仅置顶一次。若面板再次被其他窗口遮挡，需要重新点击。",
+                "Each click raises the panel once. If another window covers it again, click again.")));
     }
 
     // Each row independently chooses its quota source, statistics source and dashboard name.
@@ -1103,7 +1119,12 @@ public sealed partial class SettingsWindow : Window
         SectionTitle(Loc.T("软件更新", "Software update"));
         _aboutUpdateView = CreateUpdateView(true); Group(_aboutUpdateView.Root);
         SectionTitle(Loc.T("项目信息", "Project"));
-        Group(Row(Loc.T("当前版本", "Current version"),TextLine(_app.Updates.CurrentVersion,TextSize.Body,TextSecondary)),
+        // What's new sits beside the version number, where someone looking for this version's changes looks first.
+        var version = new StackPanel { Orientation = Orientation.Horizontal };
+        var current = TextLine(_app.Updates.CurrentVersion,TextSize.Body,TextSecondary); current.VerticalAlignment = VerticalAlignment.Center; version.Children.Add(current);
+        var notes = ActionButton(Loc.T("更新内容", "What's new"), ShowReleaseNotes); notes.Style = (Style)FindResource("SettingsLink"); notes.Margin = new Thickness(14, 0, 0, 0);
+        version.Children.Add(notes);
+        Group(Row(Loc.T("当前版本", "Current version"),version),
             Row(Loc.T("开源许可证", "License"),TextLine("Apache License 2.0",TextSize.Body,TextSecondary)),
             Row(Loc.T("项目主页", "Homepage"),Link("GitHub ↗","https://github.com/MoFeng2223/BrimDeck")),
             Row(Loc.T("问题与建议", "Issues and suggestions"),Link(Loc.T("提交反馈 ↗", "Send feedback ↗"),"https://github.com/MoFeng2223/BrimDeck/issues")));

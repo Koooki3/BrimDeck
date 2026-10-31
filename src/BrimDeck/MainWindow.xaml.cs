@@ -92,7 +92,7 @@ public partial class MainWindow : Window
     internal MainWindow? TakesOver { get => _takesOver; init { _takesOver = value; _rebuilt = value is not null; } }
     private MainWindow? _takesOver;
     private readonly bool _rebuilt;
-    public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Hide || HiddenByUser);
+    public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Hide || HiddenByUser);
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
     // Set when the first read has ended, with data or without (RefreshAsync); until then the usage page shows its skeleton.
     private bool _firstReadEnded;
@@ -105,7 +105,8 @@ public partial class MainWindow : Window
     public MainWindow(App app, MainWindow? lead = null)
     {
         _app = app; _lead = lead;
-        _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip);
+        _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
+            () => Settings.ForceTopmost, () => Settings.BackgroundWindows);
         Rect? IslandStrip()
         {
             // The island border is what is drawn, in every style and whether the panel is collapsed or open — its size
@@ -180,8 +181,8 @@ public partial class MainWindow : Window
         {
             var context = _host.Current;
             if (context == ScreenContext.Desktop) return;
-            var before = Settings.Behavior(context, previous.Name, previous.Path);
-            var after = Settings.Behavior(context, _host.App.Name, _host.App.Path);
+            var before = Settings.Behavior(context, previous.Name, previous.Path, previous.Kind);
+            var after = Settings.Behavior(context, _host.App.Name, _host.App.Path, _host.BackgroundKind);
             if (before == after) return;
             _context = context;
             ApplySettings(!_expanded);
@@ -701,7 +702,7 @@ public partial class MainWindow : Window
         if (!_expanded) SetExpanded(false);
     }
 
-    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
     // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
     // corners and shoulders, and a rounded clip made every frame of the title and the bars cost a quarter more. The rounded clip
     // comes back before anything changes the surface; the rectangle only once the closing has had its whole length. A theme whose
@@ -1063,7 +1064,12 @@ public partial class MainWindow : Window
         if (_expanded && NearGrips(screenPoint) && Environment.TickCount64 - _leftAt < GripHold) { _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(120); _leave.Start(); return; }
         _leave.Stop(); SetExpanded(false);
     }
-    private void Settings_Click(object sender, RoutedEventArgs e) { if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings(); else _app.OpenSettings(); }
+    private void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings();
+        else if (_app.Updates.UpdatedFrom is not null) _app.OpenReleaseNotes();
+        else _app.OpenSettings();
+    }
     private async Task<IReadOnlyList<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart)
     {
         var settings = Settings.Copy();

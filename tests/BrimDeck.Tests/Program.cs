@@ -13,6 +13,7 @@ var root = Path.Combine(Path.GetTempPath(), "BrimDeck-Tests-" + Guid.NewGuid().T
 Directory.CreateDirectory(root);
 try
 {
+    await PiUsageTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     await NoticeProtocolTests.Run(Check);
     AuditWslTests.Run(Check);
@@ -90,6 +91,7 @@ try
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
     await AppUpdateTests.Run(root, Check);
+    ReleaseHistoryTests.Run(root, Check);
     await InstallerUpdateTests.Run(root, Check);
     await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);

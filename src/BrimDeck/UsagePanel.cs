@@ -123,7 +123,9 @@ public partial class MainWindow
         RenderPageSwitch();
         ClockLabel.Text = DateTime.Now.ToString("HH:mm");
         // The gear shows a tooltip only while it carries the update notice.
-        SettingsButton.ToolTip = _app.Updates.NoticeVersion is { } version ? Loc.T($"新版本 {version} 可用", $"Version {version} is available") : null;
+        var updates = _app.Updates;
+        SettingsButton.ToolTip = updates.NoticeVersion is { } version ? Loc.T($"新版本 {version} 可用", $"Version {version} is available")
+            : updates.UpdatedFrom is not null ? Loc.T($"已更新到 {updates.CurrentVersion}，点击查看更新内容", $"Updated to {updates.CurrentVersion}. Click to see what's new") : null;
     }
 
     // How the next rebuild of the usage page takes over (PageHandover); the action that changes the page's form sets it.

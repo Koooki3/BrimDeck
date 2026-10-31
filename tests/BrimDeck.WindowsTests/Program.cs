@@ -19,13 +19,13 @@ internal static class Program
             if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return 0; }
             if (args is ["--only", "layout"]) { LayoutRetryTests.Run(Check); return 0; }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
-            // battery, devices or players, and no promise about speed). Everything left out reads this machine's hardware or its
-            // desktop, or writes the user's registry, so its outcome says something about the machine, not the code. Without the
-            // flag every check runs.
+            // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
+            // says something about the machine, not the code. Without the flag every check runs.
             bool hosted = args is ["--hosted"];
             Console.WriteLine($"Windows native smoke tests{(hosted ? " (hosted subset)" : "")}: {Environment.OSVersion.Version}");
             CheckWindowChrome();
-            CaptureChecks.Run(Check);
+            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: window capture (not yet known to work on a virtual display).");
+            else CaptureChecks.Run(Check);
             CheckSettledClip();
             CheckIslandTakesClicks();
             NoticeProtectionTests.Run(Check);
@@ -51,7 +51,7 @@ internal static class Program
             BrimDeck.MainWindow.CheckShadowLifetime();
             if (hosted)
             {
-                Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, temperature, power and device readings (they read this machine's hardware).");
+                if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, temperature and power readings, and the application identity the shell resolves (they read this machine or its shell).");
                 DeviceChecks.PathFilters(Check);
             }
             else

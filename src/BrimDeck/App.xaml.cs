@@ -225,7 +225,9 @@ public partial class App : Application
     }
     // The panel's update dot opens the About page with the update dialog.
     internal void OpenUpdateSettings() => ShowSettings(true);
-    private void ShowSettings(bool update)
+    // After an update the gear's dot opens the About page with the What's new window.
+    internal void OpenReleaseNotes() => ShowSettings(false, notes: true);
+    private void ShowSettings(bool update, bool notes = false)
     {
         if (_settingsWindow is null)
         {
@@ -236,7 +238,7 @@ public partial class App : Application
         }
         if (_settingsWindow.WindowState == WindowState.Minimized) _settingsWindow.WindowState = WindowState.Normal;
         _settingsWindow.Activate();
-        _ = update ? _settingsWindow.ShowUpdateNoticeAsync() : _settingsWindow.CheckUpdatesOnOpenAsync();
+        _ = notes ? _settingsWindow.ShowReleaseNotesAsync() : update ? _settingsWindow.ShowUpdateNoticeAsync() : _settingsWindow.CheckUpdatesOnOpenAsync();
     }
     public void UpdateSettings(DeckSettings settings)
     {
