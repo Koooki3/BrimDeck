@@ -33,5 +33,7 @@
     <Compile Include="..\..\src\BrimDeck\IslandBorder.cs" Link="IslandBorder.cs" />
     <Compile Include="..\..\src\BrimDeck\IslandDecor.cs" Link="IslandDecor.cs" />
     <Compile Include="..\..\src\BrimDeck\PageToolTips.cs" Link="PageToolTips.cs" />
+    <!-- The notices page's header, row and fade panels (laid out by WPF in NoticePanelTests). -->
+    <Compile Include="..\..\src\BrimDeck\NoticePanels.cs" Link="NoticePanels.cs" />
   </ItemGroup>
 </Project>
