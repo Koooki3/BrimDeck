@@ -26,7 +26,7 @@ A native Windows app built with C# and WPF, designed for performance and smoothn
 
 - **All quotas in one place**: Quotas for Claude, Codex, Cursor, Antigravity and more are shown in a single panel, so you no longer open each website, command line or app to check them.
 - **Quota checks made simple**: BrimDeck stays collapsed at the top of the screen. Move the pointer over it to open it, and move away to close it.
-- **Media control**: Preview and control the song that is playing inline; the cover, equalizer and lyrics follow the music.
+- **Media control**: Preview and control the song that is playing inline; the cover and lyrics follow the music, and the equalizer shows its real spectrum: the sound is split into pitch bands by an FFT, low on the left and high on the right, at whatever length (3 to 20 bars) you set.
 - **System monitor**: CPU, memory, network speed and other readings stay in the notch or capsule, visible at a glance.
 - **No interruptions in full screen**: Hides automatically while you play full-screen games or watch full-screen video, so it never opens by accident. Adjustable in settings.
 - **Works out of the box**: Detects Claude, Codex, Cursor and other tools already signed in on this PC. No keys to enter and no extra sign-in.

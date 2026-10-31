@@ -112,6 +112,7 @@ internal sealed class MusicEqualizer : FrameworkElement
     private void Redraw(bool force = false)
     {
         var size = RenderSize;
+        Levels.Fit(Bars);
         var levels = Levels.Levels;
         int count = Math.Min(Bars, levels.Length);
         double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip, radius = BarWidth / 2;
