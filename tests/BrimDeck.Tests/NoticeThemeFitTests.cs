@@ -84,8 +84,45 @@ internal static class NoticeThemeFitTests
         check("A custom theme on a dark surface keeps the dark theme's state colors",
             darkCustom["success"] == PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.Dark)!)["success"] && darkCustom["caution"] == PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.Dark)!)["caution"]);
 
+        Sources(check);
+
         // High contrast sets both from the system's colors.
         var contrast = PanelThemes.HighContrast(ThemeColor.Parse("#000000"), ThemeColor.Parse("#FFFFFF"), ThemeColor.Parse("#3FF23F"), ThemeColor.Parse("#1AEBFF"), ThemeColor.Parse("#000000"));
         check("High contrast draws the page's states in the window text", contrast["success"] == ThemeColor.Parse("#FFFFFF") && contrast["caution"] == ThemeColor.Parse("#FFFFFF"));
+    }
+
+    // The page's code takes its colors from the theme: no color literals in the sources that draw the notices page, its letter plate,
+    // its badges and its page in the settings, the states come from their own tokens, and the foot's fade is a mask.
+    private static void Sources(Action<string, bool> check)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "BrimDeck.sln"))) dir = dir.Parent;
+        if (dir is null) { check("The source tree is found for the notices page's sources", false); return; }
+        string Source(string name) => File.ReadAllText(Path.Combine(dir.FullName, "src", "BrimDeck", name));
+        var files = new[] { "MainWindow.Notices.cs", "NoticeLetter.cs", "NoticeBadges.cs", "SettingsNotices.cs", "NoticePanels.cs" };
+        // A color written out: "#RGB", "#RRGGBB", "#AARRGGBB", Color.FromRgb, a named Colors or Brushes member (Transparent aside).
+        var literal = new System.Text.RegularExpressions.Regex(@"""#[0-9A-Fa-f]{3,8}""|\bColor\.FromRgb\(|\bColors\.(White|Black|Red|Green|Blue|Gray|Grey|Yellow|Orange|Purple|Pink|Cyan|Magenta|Brown|Silver|Gold)\b|\bBrushes\.(White|Black|Red|Green|Blue|Gray|Grey|Yellow|Orange|Purple|Pink|Cyan|Magenta|Brown|Silver|Gold)\b");
+        var found = new List<string>();
+        foreach (var file in files)
+        {
+            var text = Source(file);
+            foreach (System.Text.RegularExpressions.Match match in literal.Matches(text))
+                found.Add($"{file}: {match.Value} (line {text[..match.Index].Count(c => c == (char)10) + 1})");
+        }
+        check("The notices page's sources have no color literals" + (found.Count > 0 ? ": " + string.Join(", ", found) : ""), found.Count == 0);
+
+        var page = Source("MainWindow.Notices.cs");
+        check("The page's status colors are the theme's success, caution and danger, and its unread dot the accent",
+            page.Contains("PanelTheme.Hex(\"success\")") && page.Contains("PanelTheme.Hex(\"caution\")") && page.Contains("PanelTheme.Hex(\"danger\")") && page.Contains("UnreadColor => UI.Accent"));
+        check("A row's states take the selected, hover and pressed fills, each its own",
+            page.Contains("selected ? \"fillSelected\"") && page.Contains("\"hover\"") && page.Contains("\"pressed\"") && !page.Contains("selected ? UI.Fill :"));
+        check("Each of the page's four kinds of button goes through Feel, so each state has its own fill",
+            System.Text.RegularExpressions.Regex.Matches(page, @"\bFeel\(button, ").Count == 4 && !page.Contains("face.Background = UI.Brush(UI.FillSelected); };"));
+        check("The foot of the list and of a long text fade by a mask, not by a color laid over them",
+            page.Contains("NoticeFade.Foot(scroll, FadeHeight)") && page.Contains("NoticeFade.Foot(scroll, WordsFadeHeight)") && !page.Contains("LinearGradientBrush"));
+        var settings = Source("SettingsNotices.cs");
+        check("The settings page's error text is the settings palette's, not a literal", settings.Contains("_palette.Negative") && !settings.Contains("F0A6AA") && !settings.Contains("B12E3A"));
+        var letter = Source("NoticeLetter.cs");
+        check("The letter on a plate is made readable on the plate", letter.Contains("EnsureContrast(plateOver"));
     }
 }

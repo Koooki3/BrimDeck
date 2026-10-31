@@ -55,6 +55,13 @@
     <Style x:Key="PanelWideKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
       <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="{DynamicResource PanelR8}"/>
     </ControlTemplate></Setter.Value></Setter></Style>
+    <!-- The notices page's capsule buttons (a 16 DIP corner) and its list rows (10): the ring follows the control's own corner. -->
+    <Style x:Key="PanelPillKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
+      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="{DynamicResource PanelR16}"/>
+    </ControlTemplate></Setter.Value></Setter></Style>
+    <Style x:Key="PanelRowKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
+      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="{DynamicResource PanelR10}"/>
+    </ControlTemplate></Setter.Value></Setter></Style>
     <!-- For a control whose own border already turns blue when selected: the outline stands 2 DIP outside it. -->
     <Style x:Key="PanelOutsetKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
       <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="{DynamicResource PanelR10}" Margin="-2"/>

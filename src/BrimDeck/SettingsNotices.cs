@@ -88,7 +88,7 @@ public sealed partial class SettingsWindow
         line.TextWrapping = TextWrapping.Wrap; line.TextTrimming = TextTrimming.None; line.Margin = new Thickness(0, 2, 0, 0);
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
         // An empty line takes no room, so a line whose state may come later (the local channel failing) can always be on the page.
-        void Update() { var (text, problem) = read(); line.Text = text; line.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed; line.Foreground = UI.Brush(problem ? _palette.Dark ? "#F0A6AA" : "#B12E3A" : TextSecondary); }
+        void Update() { var (text, problem) = read(); line.Text = text; line.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed; line.Foreground = UI.Brush(problem ? _palette.Negative : TextSecondary); }
         Update();
         _noticeStatusLines.Add(Update);
         return line;
@@ -368,7 +368,7 @@ public sealed partial class SettingsWindow
         if (center.HistoryState == NoticeHistoryState.Unreadable
             // A notices file that is a link, in a folder BrimDeck may use: clearing removes the link itself.
             || center.HistoryState == NoticeHistoryState.Refused && center.HistoryRefusal is null)
-            rows.Add(Row(Loc.T("无法读取已保存的通知", "Saved notices unreadable"), Rebuild(), TextLine(Reason(), 11, _palette.Dark ? "#F0A6AA" : "#B12E3A")));
+            rows.Add(Row(Loc.T("无法读取已保存的通知", "Saved notices unreadable"), Rebuild(), TextLine(Reason(), 11, _palette.Negative)));
         // Not reachable for now, not readable by this account, or a folder BrimDeck will not use: said, and only a file this
         // account cannot read may be cleared from here (C-L15); an unreachable one may be fine.
         else if (center.HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Refused or NoticeHistoryState.Denied)

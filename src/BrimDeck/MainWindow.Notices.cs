@@ -317,8 +317,11 @@ public partial class MainWindow
     // incoming call, else the notice the user picked (in the list, or by resting the pointer on it on the island), else the newest.
     // Without any notice, one empty state takes both columns.
 
-    // Status colors of the design: an incoming call, a warning, an error; unread dots.
-    private const string CallColor = "#30D158", WaitColor = "#E5C890", UnreadColor = "#0A84FF";
+    // Status colors of the design: an incoming call (and a success), a warning, an error (danger); unread dots. All from the theme,
+    // which keeps each readable on its surface (PanelThemes.Tokens).
+    private static string CallColor => PanelTheme.Hex("success");
+    private static string WaitColor => PanelTheme.Hex("caution");
+    private static string UnreadColor => UI.Accent;
     // A call stays in front for this long after it arrived.
     private static readonly TimeSpan CallFocus = TimeSpan.FromMinutes(2);
     // The notice put in front (by a click in the list, or from the island); the list shows only unread ones; earlier days are listed.
@@ -409,7 +412,7 @@ public partial class MainWindow
         var glow = new Border
         {
             Height = 300, Margin = new Thickness(-60, -64, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false,
-            Background = new RadialGradientBrush(Color.FromArgb(46, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B))
+            Background = new RadialGradientBrush(Color.FromArgb(NoticeLines.GlowAlpha, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B))
         };
         column.Children.Add(glow);
         var stack = new DockPanel { LastChildFill = true };
@@ -536,18 +539,34 @@ public partial class MainWindow
         return row;
     }
 
+    // A button of the page in its states: paint(over, down) is called as the pointer enters, leaves, presses and releases, so that
+    // each state takes its own color from the theme (hover, pressed, selected) instead of one fill for all of them.
+    private static void Feel(Button button, Action<bool, bool> paint)
+    {
+        bool over = false, down = false;
+        button.MouseEnter += (_, _) => paint(over = true, down);
+        button.MouseLeave += (_, _) => paint(over = false, down = false);
+        button.PreviewMouseLeftButtonDown += (_, _) => paint(over, down = true);
+        button.PreviewMouseLeftButtonUp += (_, _) => paint(over, down = false);
+    }
+
     // A capsule button of the design: 32 high, the main one in the text color with the surface's color on it.
     private static Button PillButton(string text, string name, Action click, bool primary = false)
     {
         string rest = primary ? UI.Primary : UI.Fill;
-        var face = new Border { CornerRadius = new CornerRadius(16), Background = UI.Brush(rest), Padding = new Thickness(16, 0, 16, 0), Height = 32 };
+        var face = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(16)), Background = UI.Brush(rest), Padding = new Thickness(16, 0, 16, 0), Height = 32 };
         var label = UI.InkCentered(text, 12.5, 32, UI.Primary, FontWeights.SemiBold);
         if (primary) label.Foreground = new SolidColorBrush(PanelTheme.ColorOf("surface"));
         face.Child = label;
-        var button = new Button { Content = face, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0), FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
+        var button = new Button { Content = face, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0), FocusVisualStyle = (Style)Application.Current.FindResource("PanelPillKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
         if (primary) button.Margin = new Thickness(0);
-        button.MouseEnter += (_, _) => { if (primary) face.Opacity = .88; else face.Background = UI.Brush(UI.FillSelected); };
-        button.MouseLeave += (_, _) => { face.Opacity = 1; face.Background = UI.Brush(rest); };
+        // Under the pointer the main button dims a little, the others take the selected fill; pressed, the main one dims more and
+        // the others take the pressed fill.
+        Feel(button, (over, down) =>
+        {
+            if (primary) face.Opacity = down ? .76 : over ? .88 : 1;
+            else face.Background = UI.Brush(down ? PanelTheme.Hex("pressed") : over ? UI.FillSelected : rest);
+        });
         button.Click += (_, _) => click();
         AutomationProperties.SetName(button, name);
         return button;
@@ -616,6 +635,8 @@ public partial class MainWindow
         face.Child = UI.InkCentered(text, 11, 18, on ? UI.Primary : UI.Secondary);
         var button = new Button { Content = face, Cursor = Cursors.Hand, FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
         button.Click += (_, _) => { if (!on) click(); };
+        // The chosen segment keeps its fill; the other takes the hover and pressed ones.
+        Feel(button, (over, down) => face.Background = UI.Brush(down ? PanelTheme.Hex("pressed") : on ? UI.FillSelected : over ? PanelTheme.Hex("hover") : "Transparent"));
         AutomationProperties.SetName(button, text);
         return button;
     }
@@ -625,8 +646,7 @@ public partial class MainWindow
         var face = new Border { CornerRadius = new CornerRadius(6), Width = 24, Height = 20, Background = UI.Brush("Transparent") };
         face.Child = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 12, Foreground = UI.Brush(UI.Secondary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var button = new Button { Content = face, Cursor = Cursors.Hand, ToolTip = name, FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
-        button.MouseEnter += (_, _) => face.Background = UI.Brush(UI.Fill);
-        button.MouseLeave += (_, _) => face.Background = UI.Brush("Transparent");
+        Feel(button, (over, down) => face.Background = UI.Brush(down ? PanelTheme.Hex("pressed") : over ? PanelTheme.Hex("hover") : "Transparent"));
         button.Click += (_, _) => click();
         AutomationProperties.SetName(button, name);
         return button;
@@ -670,15 +690,17 @@ public partial class MainWindow
     // A row of the list: the icon with a dot while unread, the title and when, and a line of preview.
     private FrameworkElement Row(Notice notice, DateTimeOffset now, bool selected)
     {
-        var row = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 7, 8, 7), Background = UI.Brush(selected ? UI.Fill : "Transparent"), Cursor = Cursors.Hand };
+        var row = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8, 7, 8, 7), Background = UI.Brush(selected ? UI.FillSelected : "Transparent"), Cursor = Cursors.Hand };
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         row.Child = grid;
         var icon = new Grid { Width = 24, Height = 24, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
         icon.Children.Add(NoticePlate(notice, 24));
+        // The unread dot has a ring in the color of what is behind it, which is the row's own fill (it changes with the row's state).
+        Ellipse? dot = null;
         if (_freshNotices.Contains(notice.Id))
-            icon.Children.Add(new Ellipse { Width = 9, Height = 9, Fill = UI.Brush(notice.Call ? CallColor : UnreadColor), Stroke = new SolidColorBrush(PanelTheme.ColorOf("surface")), StrokeThickness = 2,
+            icon.Children.Add(dot = new Ellipse { Width = 9, Height = 9, Fill = UI.Brush(notice.Call ? CallColor : UnreadColor), StrokeThickness = 2,
                 HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -3, -3, 0), IsHitTestVisible = false });
         grid.Children.Add(icon);
         // The title, the time and a line of preview; the time moves under a title it would leave too short (NoticeRowTexts).
@@ -699,12 +721,24 @@ public partial class MainWindow
         second.Inlines.Add(new System.Windows.Documents.Run(preview));
         IslandNotice.Directed(second);
         texts.Children.Add(second);
-        row.MouseEnter += (_, _) => { if (!selected) row.Background = UI.Brush(UI.Fill); };
-        row.MouseLeave += (_, _) => { if (!selected) row.Background = UI.Brush("Transparent"); };
+        // The row's states: the chosen one has the selected fill, one under the pointer the hover fill, one being pressed the pressed
+        // fill. Its time is drawn in the secondary text on any of them (the tertiary text is not held to 4.5:1 on those fills).
+        bool over = false, down = false;
+        void Paint()
+        {
+            string? fill = down ? "pressed" : selected ? "fillSelected" : over ? "hover" : null;
+            row.Background = UI.Brush(fill is null ? "Transparent" : PanelTheme.Hex(fill));
+            when.Foreground = UI.Brush(fill is null ? UI.Tertiary : UI.Secondary);
+            dot?.Stroke = UI.Brush(RowGround(fill));
+        }
+        Paint();
+        row.MouseEnter += (_, _) => { over = true; Paint(); };
+        row.MouseLeave += (_, _) => { over = false; down = false; Paint(); };
+        row.PreviewMouseLeftButtonDown += (_, _) => { down = true; Paint(); };
         row.MouseLeftButtonUp += (_, e) => { _noticeFocus = notice.Id; RenderNotices(); e.Handled = true; };
         // From the keyboard, once a hotkey gave the panel the keyboard (MainWindow.Hotkeys.cs): Enter or Space puts the notice in front.
         row.Focusable = true;
-        row.FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus");
+        row.FocusVisualStyle = (Style)Application.Current.FindResource("PanelRowKeyboardFocus");
         row.GotKeyboardFocus += (_, e) => { if (e.NewFocus == row) _focusedNotice = notice.Id; };
         row.KeyDown += (_, e) =>
         {
@@ -713,6 +747,13 @@ public partial class MainWindow
         };
         AutomationProperties.SetName(row, notice.AppName + ", " + notice.Title + ", " + NoticeText.Relative(notice.ReceivedAt, now));
         return row;
+    }
+
+    // What a row's fill looks like over the panel, as an opaque color: the color behind the unread dot's ring.
+    private static string RowGround(string? fill)
+    {
+        var surface = PanelTheme.Current.Surface;
+        return (fill is null ? surface : PanelTheme.Current[fill].Over(surface)).ToString();
     }
 
     // Everything a row shows.
@@ -802,8 +843,7 @@ public partial class MainWindow
         var face = new Border { CornerRadius = new CornerRadius(6), Background = UI.Brush(UI.Fill), Padding = new Thickness(9, 0, 9, 0), Height = 22, Margin = new Thickness(4, 0, 0, 0) };
         face.Child = UI.InkCentered(text, 11.5, 22, UI.Secondary);
         var button = new Button { Content = face, Cursor = Cursors.Hand, FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
-        button.MouseEnter += (_, _) => face.Background = UI.Brush(UI.FillSelected);
-        button.MouseLeave += (_, _) => face.Background = UI.Brush(UI.Fill);
+        Feel(button, (over, down) => face.Background = UI.Brush(down ? PanelTheme.Hex("pressed") : over ? UI.FillSelected : UI.Fill));
         button.Click += (_, _) => click();
         AutomationProperties.SetName(button, text);
         return button;
