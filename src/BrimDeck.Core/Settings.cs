@@ -9,7 +9,8 @@ public enum CompactStyle { Notch, Capsule, Line }
 // The screen edge the notch hangs from (DeckSettings.NotchEdge); see EdgeFrame.
 public enum ScreenEdge { Top, Bottom, Left, Right }
 public enum WindowBehavior { Normal, Line, Hide }
-public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
+// BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
+public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen }
 // The monitors that show the panel. Chosen uses DisplayMonitors and falls back to the primary monitor while none of them is connected.
 public enum DisplayPlacement { Primary, Chosen }
 // A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named.
@@ -379,6 +380,9 @@ public sealed class DeckSettings
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
+    // A full-screen window elsewhere on the same monitor: the page is what the user is looking at even while another
+    // app holds the foreground, so the island steps aside — by default to its line, which still shows the quotas.
+    public WindowBehavior BackgroundFullscreen { get; set; } = WindowBehavior.Line;
     // Applications whose windows are not counted as full screen, so that a desktop beautification tool does not hide the
     // panel. Empty by default: every app follows the three rules above.
     public List<FullscreenRule> FullscreenRules { get; set; } = [];
@@ -512,13 +516,17 @@ public sealed class DeckSettings
     }
     // The behavior a context calls for: the app's own rule first, where it chooses one for that context, and the global
     // rules everywhere else. The app is the one the context was detected for; a null app, as on the desktop, has no rule.
-    public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null)
+    // A background full screen is the one context the app is not in itself, so backgroundKind — the way that window fills
+    // the screen — picks which of the app's own choices speaks for it. Without one there is nothing of the app's to ask,
+    // and the global background rule answers.
+    public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null,
+        ScreenContext? backgroundKind = null)
     {
         if (processName is not null || imagePath is not null)
             foreach (var rule in FullscreenRules)
                 if (ScreenPolicy.Matches(rule, processName, imagePath))
                 {
-                    var own = context switch
+                    var own = (context == ScreenContext.BackgroundFullscreen ? backgroundKind ?? ScreenContext.Desktop : context) switch
                     {
                         ScreenContext.Maximized => rule.Maximized, ScreenContext.Borderless => rule.Borderless,
                         ScreenContext.Exclusive => rule.Exclusive, _ => null
@@ -529,7 +537,8 @@ public sealed class DeckSettings
         return context switch
         {
             ScreenContext.Maximized => Maximized, ScreenContext.Borderless => Borderless,
-            ScreenContext.Exclusive => Exclusive, _ => WindowBehavior.Normal
+            ScreenContext.Exclusive => Exclusive, ScreenContext.BackgroundFullscreen => BackgroundFullscreen,
+            _ => WindowBehavior.Normal
         };
     }
     public DeckSettings Copy()
