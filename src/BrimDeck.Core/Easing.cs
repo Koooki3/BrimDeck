@@ -8,7 +8,8 @@ namespace BrimDeck.Core;
 // starting speed stays within what never passes the target, so a bar never overshoots and comes back.
 public struct Eased
 {
-    public const double Seconds = .42, Hover = .16;
+    // Hover: a hover's feedback arriving; HoverOut: leaving, a little quicker (seven tenths), so what the pointer left never trails it.
+    public const double Seconds = .42, Hover = .16, HoverOut = Hover * .7;
     // A move's starting speed as a multiple of its average: 0 is a smoothstep, 3 an ease-out cubic, the most that never overshoots.
     // A change too small to see (a third of a percent; the values are shares, slots or opacities) is taken at once, so an idle
     // core does not keep its graph redrawing.
@@ -23,16 +24,22 @@ public struct Eased
 
     // Returns whether the value moves.
     public bool Set(double target, bool motion) => Set(target, motion, Now);
-    public bool Set(double target, bool motion, double now)
+    public bool Set(double target, bool motion, double now) => Set(target, motion, now, _seconds);
+    // A hover's feedback (0 to 1): in over Hover, out over HoverOut.
+    public bool Fade(bool on, bool motion) => Set(on ? 1 : 0, motion, Now, on ? Hover : HoverOut);
+    // The move takes seconds from here on; one under way goes on from where it is, at its speed.
+    public bool Set(double target, bool motion, double now, double seconds)
     {
         if (!double.IsFinite(target)) target = 0;
         bool moving = Moving(now);
         if (Math.Abs(target - _to) < 1e-6 && !moving) return false;
         if (!motion) { _from = _to = target; _start = _speed = 0; return false; }
         if (Math.Abs(target - _to) < 1e-6) return true;
-        double current = At(now), distance = target - current, d = Duration;
+        double current = At(now), distance = target - current, speed = moving ? Speed(now) : 0;
+        _seconds = seconds;
+        double d = Duration;
         if (Math.Abs(distance) < Unseen && !moving) { _from = _to = target; _start = _speed = 0; return false; }
-        double carried = moving ? Speed(now) * d / distance : 0;
+        double carried = moving ? speed * d / distance : 0;
         _speed = Math.Clamp(Math.Max(Launch, carried), 0, Fastest) * distance / d;
         _from = current; _to = target; _start = now;
         return true;

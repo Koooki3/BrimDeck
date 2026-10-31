@@ -189,15 +189,18 @@ public partial class MainWindow
         ToolbarRow.Height = new GridLength(header.Row);
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
+        // The buttons take the band's height to the pointer, up to HitArea.Target, while they look as tall as before.
         foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton })
         {
-            button.Height = header.ButtonHeight;
+            HitArea.Fit(button, header.ButtonHeight, header.Height);
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
             button.ApplyTemplate();
             if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(PanelTheme.Corner(PanelHeader.ButtonRadius));
         }
         PageCapsule.CornerRadius = new CornerRadius(PanelTheme.Corner(PanelHeader.ButtonRadius));
-        SettingsButton.Height = header.SettingsHeight;
+        HitArea.Fit(SettingsButton, header.SettingsHeight, header.Height);
+        HitArea.Fit(MediaSourceButton, 24, header.Height);
+        HitArea.Fit(SyncButton, 28, header.Height);
         if (SettingsButton.Parent is FrameworkElement right) right.Margin = new Thickness(0, 0, header.RightMargin, 0);
         ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(header.Side), 0, 0, 0);
     }
@@ -391,8 +394,9 @@ public partial class MainWindow
         }
         WatchSourceMenu(menu);
         MediaSourceButton.ContextMenu = menu; menu.PlacementTarget = MediaSourceButton; menu.Placement = PlacementMode.Bottom;
-        // A pop-up is not part of the panel's visual tree, so it takes the panel's scale itself.
-        UI.Scale(menu, _scale); menu.VerticalOffset = 6 * _scale; ResizeSourceMenu(menu); menu.IsOpen = true;
+        // A pop-up is not part of the panel's visual tree, so it takes the panel's scale itself. The offset is 6 DIP under the button as it
+        // looks, not under its taller hit area (HitArea).
+        UI.Scale(menu, _scale); menu.VerticalOffset = (6 - HitArea.GetInset(MediaSourceButton).Bottom) * _scale; ResizeSourceMenu(menu); menu.IsOpen = true;
     }
     // Guidance shown in place of the transport when Netease runs without SMTC. Both sentences stay at every size:
     // what is required and where to switch it on. Only the type size and the entry's label adapt to the row.
@@ -577,6 +581,13 @@ public partial class MainWindow
                 Accent = ((SolidColorBrush)_musicAccent).Color, DurationSeconds = track.Duration.TotalSeconds, Height = c.SeekRow, AnimationsEnabled = animate, IsEnabled = track.CanSeek && track.HasTimeline,
                 VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, layout.ProgressY, 0, 0) };
             AutomationProperties.SetName(_musicSeek, Loc.T("播放进度", "Playback position"));
+            // The bar takes the pointer HitArea.Minimum tall: above it up to the cover's gap, below it over the times, short of
+            // the controls.
+            double seekGrow = Math.Max(0, HitArea.Minimum - c.SeekRow);
+            double seekAbove = Math.Max(0, c.SectionGap - (c.SeekRow - c.Bar) / 2 - 1), seekBelow = Math.Max(0, layout.ControlsY - layout.ProgressY - c.SeekRow - 1);
+            double seekTop = Math.Min(Math.Ceiling(seekGrow / 2), seekAbove);
+            HitArea.Grow(_musicSeek, seekTop, Math.Min(seekGrow - seekTop, seekBelow), c.SeekRow);
+            _musicSeek.Margin = new Thickness(0, layout.ProgressY + _musicSeek.Margin.Top, 0, _musicSeek.Margin.Bottom);
             // Slider handles move-to-point before instance handlers; observe that handled event too.
             _musicSeek.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler((sender, _) =>
             {

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using BrimDeck.Core;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -240,6 +241,8 @@ internal sealed class MusicMarquee : FrameworkElement
         get => _text;
         set { if (_text == value) return; _text = value; ResetText(); AutomationProperties.SetName(this, value); }
     }
+    // For screen readers: the whole line as text, however much of it shows.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => _text);
     public double FontSize
     {
         get => _fontSize;
@@ -631,6 +634,8 @@ internal abstract class GlideCarousel : Grid
 internal sealed class QuotaCarousel : GlideCarousel
 {
     private readonly Canvas _strip;
+    // For screen readers: its name, every ring's tooltip line, rotating or not.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
     // count: the whole rings the window holds (CompactSpacing.Window); gap: the row's gap, which the rings keep between them too.
     // flowing: the window as wide as the room gives it, not whole rings (the surface is being dragged; CompactSpacing.ShareFlowing),
     // with the ring it cuts faded over cut DIPs; nothing glides then.

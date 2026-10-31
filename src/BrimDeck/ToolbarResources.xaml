@@ -9,13 +9,14 @@
     <Setter Property="local:Feedback.Fade" Value="True"/>
     <Setter Property="Template"><Setter.Value>
       <ControlTemplate TargetType="Button">
-        <Grid>
+        <!-- The face is drawn inside the hit area's inset (HitArea); the edge around it only takes the pointer. -->
+        <Grid Background="Transparent"><Grid x:Name="Face" Margin="{TemplateBinding local:HitArea.Inset}">
           <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{Binding CornerRadius, ElementName=Chrome}" Opacity="0"/>
           <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{Binding CornerRadius, ElementName=Chrome}" Opacity="0"/>
           <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource PanelR5}" Padding="{TemplateBinding Padding}">
             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
-        </Grid>
+        </Grid></Grid>
         <ControlTemplate.Triggers>
           <Trigger Property="IsPressed" Value="True"><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/></Trigger>
         </ControlTemplate.Triggers>
@@ -26,13 +27,13 @@
     <Setter Property="Height" Value="24"/>
     <Setter Property="Template"><Setter.Value>
       <ControlTemplate TargetType="Button">
-        <Grid>
+        <Grid Background="Transparent"><Grid x:Name="Face" Margin="{TemplateBinding local:HitArea.Inset}">
           <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{DynamicResource PanelR6}" Opacity="0"/>
           <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{DynamicResource PanelR6}" Opacity="0"/>
           <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelR6}" Padding="{TemplateBinding Padding}">
             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
-        </Grid>
+        </Grid></Grid>
         <ControlTemplate.Triggers>
           <Trigger Property="IsPressed" Value="True"><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/></Trigger>
           <DataTrigger Binding="{Binding ContextMenu.IsOpen, RelativeSource={RelativeSource Self}}" Value="True">
@@ -59,13 +60,13 @@
   <Style x:Key="PanelSettingsButton" TargetType="Button" BasedOn="{StaticResource PanelIconButton}">
     <Setter Property="Width" Value="28"/><Setter Property="Height" Value="24"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-      <Grid>
+      <Grid Background="Transparent"><Grid x:Name="Face" Margin="{TemplateBinding local:HitArea.Inset}">
         <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{DynamicResource PanelR6}" Opacity="0"/>
         <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{DynamicResource PanelR6}" Opacity="0"/>
         <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelR6}">
           <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
         </Border>
-      </Grid>
+      </Grid></Grid>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="MediaSourceMenu" TargetType="ContextMenu">
