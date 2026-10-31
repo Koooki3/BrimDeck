@@ -97,6 +97,7 @@ try
     FullscreenRuleTests.Run(Check);
     LanguageTests.Run(root, Check);
     FontTests.Run(root, Check);
+    ExpandStillTests.Run(Check);
     await ConfiguredProviderTests.Run(Check);
     await ProviderNetworkTests.Run(Check);
     await ZCodeUsageTests.Run(root, Check);
