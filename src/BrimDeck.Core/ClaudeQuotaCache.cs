@@ -16,7 +16,9 @@ namespace BrimDeck.Core;
 // whose account cannot be told is not used either.
 // One account can read several organizations (a personal subscription and a Team, say), each with quotas of its own. The file
 // keeps one reading for each, named by a hash of the organization id ("" when the sign-in did not name one); a file of earlier
-// versions holds a single reading, which counts as the one of the organization "".
+// versions holds a single reading, which counts as the one of the organization "" and, for the first organization read (the one
+// Claude Code uses, which that reading was of), as its reading too: after an upgrade that organization is named by the account
+// record, and without this the reading kept before the upgrade is lost the moment the quota interface cannot be reached.
 public static class ClaudeQuotaCache
 {
     public static readonly TimeSpan MaxAge = TimeSpan.FromDays(7);
@@ -59,11 +61,15 @@ public static class ClaudeQuotaCache
     }
 
     // account is the id of the account signed in now, organization the id of the organization whose reading is wanted.
-    public static ClaudeQuotaSnapshot? Parse(string json, DateTimeOffset now, string account, string organization = "")
+    // earlierReading: the organization is the first one read, so a reading that names no organization (written by an earlier version)
+    // stands for it when none is kept under its own name.
+    public static ClaudeQuotaSnapshot? Parse(string json, DateTimeOffset now, string account, string organization = "", bool earlierReading = false)
     {
         var expected = AccountHash(account);
         var wanted = OrganizationHash(organization);
-        var stored = Entries(json).FirstOrDefault(entry => (entry.Organization ?? "") == wanted);
+        var entries = Entries(json);
+        var stored = entries.FirstOrDefault(entry => (entry.Organization ?? "") == wanted)
+            ?? (earlierReading ? entries.FirstOrDefault(entry => entry.Organization is null) : null);
         if (stored is null || expected.Length == 0 || stored.Account != expected) return null;
         // A reading from the future (a clock set back since) or too old is not shown as the account's quota.
         if (stored.Quotas is null || stored.Time > now.AddMinutes(5) || now - stored.Time > MaxAge) return null;
@@ -74,9 +80,9 @@ public static class ClaudeQuotaCache
         return new(stored.Time, plan, plan.Length > 0 ? ClaudeSources.Plan(stored.PlanFrom, stored.SignIn) : "", ClaudeSources.Quota(stored.SignIn), quotas);
     }
 
-    public static ClaudeQuotaSnapshot? Load(string path, DateTimeOffset now, string account, string organization = "")
+    public static ClaudeQuotaSnapshot? Load(string path, DateTimeOffset now, string account, string organization = "", bool earlierReading = false)
     {
-        try { return File.Exists(path) ? Parse(File.ReadAllText(path), now, account, organization) : null; }
+        try { return File.Exists(path) ? Parse(File.ReadAllText(path), now, account, organization, earlierReading) : null; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 
@@ -89,7 +95,8 @@ public static class ClaudeQuotaCache
         {
             var entry = Entry(snapshot, account, signIn, planFrom, organization);
             var entries = File.Exists(path) ? Entries(File.ReadAllText(path)) : [];
-            entries = [.. entries.Where(old => old.Account == entry.Account && (old.Organization ?? "") != entry.Organization && snapshot.Time - old.Time <= MaxAge), entry];
+            // A reading that names no organization (an earlier version's) is replaced by the first one saved with its name.
+            entries = [.. entries.Where(old => old.Account == entry.Account && old.Organization is not null && old.Organization != entry.Organization && snapshot.Time - old.Time <= MaxAge), entry];
             Write(path, entries);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
@@ -110,7 +117,7 @@ public static class ClaudeQuotaCache
         {
             var entries = organization is null || !File.Exists(path) ? [] : Entries(File.ReadAllText(path));
             var hash = OrganizationHash(organization ?? "");
-            var kept = entries.Where(entry => (entry.Organization ?? "") != hash).ToList();
+            var kept = entries.Where(entry => entry.Organization is not null && entry.Organization != hash).ToList();
             if (kept.Count == 0) File.Delete(path);
             else if (kept.Count < entries.Count) Write(path, kept);
         }

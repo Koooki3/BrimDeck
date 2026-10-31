@@ -116,6 +116,7 @@ try
     await ClaudeRateLimitTests.Run(root, Check);
     await ClaudePlanNameTests.Run(root, Check);
     await ClaudeWeeklyOnlyTests.Run(root, Check);
+    await ClaudeUpgradeCacheTests.Run(root, Check);
     await OpenCodeUsageTests.Run(root, Check);
     await OfficialPriceTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
