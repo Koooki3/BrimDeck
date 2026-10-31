@@ -13,6 +13,7 @@ var root = Path.Combine(Path.GetTempPath(), "BrimDeck-Tests-" + Guid.NewGuid().T
 Directory.CreateDirectory(root);
 try
 {
+    await PiUsageTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
@@ -45,6 +46,9 @@ try
     PowerTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
+    ExpandBounceTests.Run(Check);
+    ExpandStillTests.Run(Check);
+    ExpandSnapTests.Run(Check);
     MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);
@@ -57,6 +61,7 @@ try
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
     await AppUpdateTests.Run(root, Check);
+    ReleaseHistoryTests.Run(root, Check);
     await InstallerUpdateTests.Run(root, Check);
     await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
