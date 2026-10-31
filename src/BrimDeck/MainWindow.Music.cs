@@ -444,13 +444,16 @@ public partial class MainWindow
         bool hasLyrics = playerLyrics ? hasPlayerLyric : (_lyrics.Lines.Count > 0 || _lyrics.Instrumental) && Settings.LyricsEnabled;
         bool logMode = track?.IsNeteaseLog == true;
         bool appleEntry = track is { IsAppleMusic: true } && _media?.AppleMusicFullControl == false;
+        bool kugouEntry = track is { IsKugou: true } && (_media?.CanEnableKugouFullControl == true || _media?.RestartingKugou == true);
         bool showSmtcHint = logMode && track is { CanToggle: false, CanPrevious: false, CanNext: false }
             && _media?.RestartingNetease != true && _media?.Error is null;
-        string message = _media?.RestartingNetease == true ? Loc.T("正在重启网易云…", "Restarting NetEase Cloud Music…") : _media?.Error ?? "";
+        string message = _media?.RestartingNetease == true ? Loc.T("正在重启网易云…", "Restarting NetEase Cloud Music…")
+            : _media?.RestartingKugou == true ? Loc.T("正在重启酷狗…", "Restarting KuGou Music…")
+            : _media?.Error ?? (track is { IsKugou: true } && _media?.KugouError is { } kugouError ? Loc.T("未能启用酷狗完整控制：", "KuGou full control could not be enabled: ") + kugouError : "");
         var modes = track is null ? [] : MusicPlaybackModes.Supported(track);
         // While the timeline is held (MusicTimelineHold) the bar stays in its place, empty and without times.
         bool timeline = track?.HasTimeline == true || track is not null && _timelineHold.Holds(DateTimeOffset.UtcNow);
-        var layout = MusicLayout.Calculate(w, h, hasLyrics, timeline, message.Length > 0, logMode || appleEntry, transport: !showSmtcHint,
+        var layout = MusicLayout.Calculate(w, h, hasLyrics, timeline, message.Length > 0, logMode || appleEntry || kugouEntry, transport: !showSmtcHint,
             lyricsExpected: Settings.LyricsEnabled);
         CurrentMusicLayout = layout;
         var c = layout.Metrics;
@@ -459,7 +462,7 @@ public partial class MainWindow
         bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
         // Without the cover the lyrics, or a message, take a column of their own; with neither the titles have the width.
         bool lyricColumn = !Settings.MusicPageCover && (hasLyrics || message.Length > 0);
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
@@ -736,10 +739,15 @@ public partial class MainWindow
                 _musicFullControl = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(6, 2, 6, 2),
                     Height = 26, HorizontalContentAlignment = HorizontalAlignment.Right };
                 AutomationProperties.SetName(_musicFullControl, MusicLayout.FullControlLabels[0]);
-                _musicFullControl.Click += async (_, _) => { if (_mediaTrack?.IsAppleMusic == true) EnableAppleMusicControl(); else await EnableNeteaseControl(); };
+                _musicFullControl.Click += async (_, _) =>
+                {
+                    if (_mediaTrack?.IsAppleMusic == true) EnableAppleMusicControl();
+                    else if (_mediaTrack?.IsKugou == true) await EnableKugouControl();
+                    else await EnableNeteaseControl();
+                };
                 controls.Children.Add(_musicFullControl);
             }
-            var enable = _musicFullControl; enable.IsEnabled = _media?.RestartingNetease != true;
+            var enable = _musicFullControl; enable.IsEnabled = _media?.RestartingNetease != true && _media?.RestartingKugou != true;
             // The app-wide TextBlock style wraps; pixel snapping must never push the last character to a second line.
             enable.Width = entryWidth;
             enable.Content = new TextBlock { Text = entryLabel, FontFamily = UI.TextFont, FontSize = c.Time, TextWrapping = TextWrapping.NoWrap };
@@ -849,6 +857,23 @@ public partial class MainWindow
         if (dialog.ShowDialog() != true || _media != media) return;
         media.EnableAppleMusicFullControl();
         _musicRenderKey = ""; RenderMusic();
+    }
+    // The button beside the controls does what the settings' switch does: after the explanation, the switch is on and KuGou
+    // restarts with full control. A failure turns the switch off again and stays in the music page's message line.
+    private async Task EnableKugouControl()
+    {
+        if (_media is not { RestartingKugou: false } media || new KugouControlWindow(Settings.Theme) { Owner = this }.ShowDialog() != true
+            || _media != media || media.RestartingKugou) return;
+        var pending = media.EnableKugouFullControlAsync();
+        _musicRenderKey = ""; RenderMusic();
+        if (await pending is null) SetKugouFullControl(true);
+        if (_media != media) return;
+        await media.RefreshAsync(); _musicRenderKey = ""; RenderMusic();
+    }
+    private void SetKugouFullControl(bool on)
+    {
+        if (Settings.KugouFullControl == on) return;
+        var settings = Settings.Copy(); settings.KugouFullControl = on; _app.UpdateSettings(settings);
     }
     private async Task EnableNeteaseControl()
     {

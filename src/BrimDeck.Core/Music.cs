@@ -17,6 +17,7 @@ public sealed record MediaTrack
     public TimeSpan? CurrentLyricStart { get; init; }
     public bool IsQqMusic => Source == "QQ 音乐" || SongId.StartsWith("qq:", StringComparison.Ordinal) || SongId.StartsWith("qqid:", StringComparison.Ordinal);
     public bool IsAppleMusic => Source == "Apple Music";
+    public bool IsKugou => Source == "酷狗音乐" || SongId.StartsWith("kugou:", StringComparison.Ordinal);
     public MediaState State { get; init; }
     public bool IsNeteaseLog { get; init; }
     public bool PreviousRestricted { get; init; }

@@ -41,7 +41,7 @@ Files are stored in `%LOCALAPPDATA%\BrimDeck`, except the notice history, which 
 
 ## Network and security
 
-- Connects only to: each tool's official APIs, sites you enter in settings, the OpenRouter model list and the endpoint lists of the models your records use (model prices; only the model name is sent), lyrics services (LRCLIB, NetEase Cloud Music, QQ Music), the cover addresses players provide, and GitHub Releases (updates).
+- Connects only to: each tool's official APIs, sites you enter in settings, the OpenRouter model list and the endpoint lists of the models your records use (model prices; only the model name is sent), lyrics services (LRCLIB, NetEase Cloud Music, QQ Music, KuGou Music), the cover addresses players provide, and GitHub Releases (updates).
 - Claude desktop data folders include `%APPDATA%\Claude`, the Store paths `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude` and `%LOCALAPPDATA%\Packages\AnthropicPBC.Claude_*\LocalCache\Roaming\Claude`, and `%LOCALAPPDATA%\Claude-Data\<install>`.
 - Sign-in tokens are used only in memory and never written to disk; the sign-in caches of the Claude and Grok Bot desktop apps are decrypted in memory with Windows encryption for the current user.
 - Custom scripts run in a sandbox with no access to files, processes or .NET objects; see the limits in [Supported tools](ai-tools.md#custom-script).
@@ -58,3 +58,12 @@ Files are stored in `%LOCALAPPDATA%\BrimDeck`, except the notice history, which 
 - Through this port, BrimDeck reads the song that is playing, its progress, the playback mode and whether the current song is liked, and has NetEase Cloud Music act only when you select a control. When you select the heart, NetEase Cloud Music itself adds the song to, or removes it from, the liked songs of your account. To show the heart, BrimDeck takes only two results, whether NetEase Cloud Music is signed in and whether the current song is liked; it neither reads nor keeps your account details or your other songs.
 - The port stays open until NetEase Cloud Music is started again the normal way: quitting BrimDeck, or a full control connection that fails (BrimDeck then only reads what is playing), does not close it.
 - Turn it on only in an environment you trust. Starting NetEase Cloud Music the normal way ends full control and closes the port.
+
+## KuGou Music full control
+
+- Full control changes 9 bytes of `libcef.dll` in KuGou's installation folder. After that, KuGou opens a local debugging port at 127.0.0.1:12233 each time it starts.
+- While the port is open, other programs on this PC may use it to control KuGou and read its page content and sign-in state.
+- Before connecting, BrimDeck checks that the port listens only on this PC and belongs to KuGou, but this cannot remove the risk of the port itself.
+- Through this port, BrimDeck reads only the song that is playing, the playback state, progress, length, cover address and the song's hash, and has KuGou act only when you select play, pause, previous or next. It neither reads nor keeps your account details.
+- The song's hash and length are sent to KuGou's lyrics service to look up the song's lyrics.
+- The port stays until KuGou starts again after Full control is turned off in Settings › Players › KuGou Music, or a KuGou update replaces the file; quitting BrimDeck does not close it. Turn it on only in an environment you trust.

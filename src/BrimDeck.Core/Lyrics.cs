@@ -130,8 +130,11 @@ public sealed partial class LyricsService : IDisposable
             {
                 if (track.SongId.StartsWith("netease:", StringComparison.Ordinal))
                     lyrics = await FindNeteaseId(track.SongId[8..], track.Duration.TotalSeconds, token);
+                // KuGou's songs ask KuGou first; for the others it is the last provider asked.
+                if (track.IsKugou) lyrics = await FindKugou(track, token);
                 if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindLrclib(track, token);
                 if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindNetease(track, token);
+                if (lyrics.Lines.Count == 0 && !lyrics.Instrumental && !track.IsKugou) lyrics = await FindKugou(track, token);
             }
             token.ThrowIfCancellationRequested();
             // An empty result can be a temporary provider failure. Do not keep it for the entire app session.
