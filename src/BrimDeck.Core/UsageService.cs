@@ -153,7 +153,6 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         finally { _gate.Release(); }
     }
 
-    // One failing source must not discard the others' results; errors not anticipated below still end as a status.
     private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct, CancellationToken lifetime)
     {
         try { return await FetchCoreAsync(id, usageStart, claudeOnline, ct); }
@@ -235,8 +234,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
         // The reader owns a cache and is accessed serially before the first asynchronous request.
-        var snapshot = id is ProviderId.Claude or ProviderId.Codex
-            ? _logs.Read(id, id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
+        var snapshot = id is ProviderId.Claude or ProviderId.Codex or ProviderId.Pi
+            ? _logs.Read(id, id == ProviderId.Pi ? _locations.PiSessions : id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         var claudeAccount = id == ProviderId.Claude ? ReadClaudeProfile(snapshot) : "";
         var wslRead = _includeWsl && id is ProviderId.Claude or ProviderId.Codex ? StartWsl(snapshot, now, start.LocalDateTime) : null;
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
@@ -248,6 +247,11 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             switch (id)
             {
+                case ProviderId.Pi:
+                    snapshot.UsageNote += Loc.T(" · 费用取自 Pi 记录，非订阅账单", " · Costs recorded by Pi, not subscription charges");
+                    snapshot.StatusLabel = Loc.T("仅本地统计", "Local usage only");
+                    snapshot.Status = Loc.T("Pi 仅统计本机会话的 Token 与费用，无在线额度", "Pi tracks local session tokens and costs; no online quota.");
+                    break;
                 case ProviderId.Codex:
                 {
                     using var auth = ReadJson(Path.Combine(_locations.CodexHome, "auth.json"));

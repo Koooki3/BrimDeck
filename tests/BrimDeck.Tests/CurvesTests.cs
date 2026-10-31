@@ -29,7 +29,8 @@ internal static class CurvesTests
         check("Curves: the opening spring starts at 0 and lands exactly on 1", bounce[0] == 0 && bounce[^1] == 1);
         check("Curves: the opening spring leaves at speed", bounce[100] > .45);
         double peak = bounce.Max();
-        check("Curves: the opening spring passes its target by under 2 percent", peak > 1.01 && peak < 1.025 && Math.Abs(peak - 1 - Curves.BounceOvershoot) < .002);
+        // The give was softened from 1.7 percent to about .3 (ExpandBounceTests holds the exact bounds).
+        check("Curves: the opening spring passes its target only slightly (under half a percent)", peak > 1.001 && peak < 1.005 && Math.Abs(peak - 1 - Curves.BounceOvershoot) < .0005);
         check("Curves: the opening spring has settled before the end", bounce.Skip(900).All(v => Math.Abs(v - 1) < .005));
     }
 }

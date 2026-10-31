@@ -75,8 +75,12 @@ public partial class MainWindow : Window
     private CompactAlertInfo? _alert;
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
-    public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Hide || HiddenByUser);
+    public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Hide || HiddenByUser);
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
+    // Set when the first read has ended, with data or without (RefreshAsync); until then the usage page shows its skeleton.
+    private bool _firstReadEnded;
+    // The page built while it waited is not reused (RenderUsage compares its build key, which a failed read does not change).
+    internal void FirstReadEnded() { if (_firstReadEnded) return; _firstReadEnded = true; _usageBuilt = null; }
     public string? LastRefreshError { get; private set; }
 
     private sealed record CompactAlertInfo(AppEntry Entry, string Name, string Label, double Used, DateTimeOffset? ResetAt);
@@ -84,7 +88,8 @@ public partial class MainWindow : Window
     public MainWindow(App app, MainWindow? lead = null)
     {
         _app = app; _lead = lead;
-        _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip);
+        _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
+            () => Settings.ForceTopmost, () => Settings.BackgroundWindows);
         Rect? IslandStrip()
         {
             // The island border is what is drawn, in every style and whether the panel is collapsed or open — its size
@@ -148,8 +153,8 @@ public partial class MainWindow : Window
         {
             var context = _host.Current;
             if (context == ScreenContext.Desktop) return;
-            var before = Settings.Behavior(context, previous.Name, previous.Path);
-            var after = Settings.Behavior(context, _host.App.Name, _host.App.Path);
+            var before = Settings.Behavior(context, previous.Name, previous.Path, previous.Kind);
+            var after = Settings.Behavior(context, _host.App.Name, _host.App.Path, _host.BackgroundKind);
             if (before == after) return;
             _context = context;
             ApplySettings(!_expanded);
@@ -513,7 +518,7 @@ public partial class MainWindow : Window
     }
     public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots)
     {
-        Snapshots = snapshots; _updatedAt = DateTimeOffset.Now;
+        Snapshots = snapshots; _updatedAt = DateTimeOffset.Now; FirstReadEnded();
         DetectThresholds();
         RenderCompact(); RenderUsage();
     }
@@ -583,7 +588,7 @@ public partial class MainWindow : Window
         if (!_expanded && !IsSuppressed) SetExpanded(false);
     }
 
-    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
     // One animated track: where it starts and ends, as fractions of the configured duration.
     private readonly record struct Track(double Start, double End);
     // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
@@ -737,7 +742,8 @@ public partial class MainWindow : Window
             SetImmediate(Compact, OpacityProperty, 0d);
             SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk);
         }
-        // Opening, the size and place spring past their end by under 2 percent of the move and settle back; the corners never
+        // Opening, the size and place spring past their end by a third of a percent of the move and settle back (softened
+        // from 1.7 percent, so the bottom edge's rebound is felt rather than seen, in every theme alike); the corners never
         // bounce (a radius would pass zero). A panel that has no room in the window for that give opens on the plain curve.
         // Booting does not use that give: Bounce on Margin and Height would bob the whole capsule or line after the round
         // dot has already finished its jumps (the notch sits at the top edge, so the same overshoot is barely seen).
@@ -746,10 +752,14 @@ public partial class MainWindow : Window
         IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Drawer;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
-        // motion-review F13: what leaves eases out as what arrives does; InOut is for what changes in place.
-        Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, easeOut);
-        Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, easeOut);
-        Animate(Island, WidthProperty, width, duration, surface, settle);
+        // The content only fades, in and out on the same track and curve (motion-review F13: what leaves eases out as what arrives
+        // does). It used to scale between .96 and 1 as well; text under a scale that is not exactly 1 is drawn unhinted at fractional
+        // places, and snapped onto the pixel grid on the frame the scale reached 1.
+        // The island's width and left edge move on whole device pixels (SnappedAnimations.cs): rounded each on its own by the layout,
+        // they stepped the page and the surface's edges a pixel to and fro in the tail of the move at display scales above 100 percent.
+        double dpi = VisualTreeHelper.GetDpi(Island).DpiScaleX, fromWidth = Island.Width;
+        if (duration == 0) SetImmediate(Island, WidthProperty, width);
+        else Island.BeginAnimation(WidthProperty, Timed(new SnappedWidthAnimation { To = width, Page = pageWidth, Scale = dpi, EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
         Animate(Island, HeightProperty, height, duration, surface, settle);
         Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? 0 : shape.Shoulder, duration, shoulderTrack, corners);
         // Compact notch and capsule hover over their full bounding box from the screen edge; the open panel uses its own outline.
@@ -773,7 +783,7 @@ public partial class MainWindow : Window
                 SetImmediate(HoverExtension, MarginProperty, from);
                 HoverExtension.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { From = from, To = new Thickness(box.Left - left, boxTop, 0, 0), EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
             }
-            HoverZone.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { To = new Thickness(left, 0, 0, 0), EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
+            HoverZone.BeginAnimation(MarginProperty, Timed(new SnappedLeftAnimation { To = left, FromWidth = fromWidth, ToWidth = width, Page = pageWidth, Scale = dpi, EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
             Island.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { To = new Thickness(0, gap, 0, 0), EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
             Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = radius, EasingFunction = morphing ? Soft.Out : corners }, duration, cornerTrack), HandoffBehavior.SnapshotAndReplace);
         }
@@ -908,7 +918,12 @@ public partial class MainWindow : Window
         if (_expanded && NearGrips(screenPoint) && Environment.TickCount64 - _leftAt < GripHold) { _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(120); _leave.Start(); return; }
         _leave.Stop(); SetExpanded(false);
     }
-    private void Settings_Click(object sender, RoutedEventArgs e) { if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings(); else _app.OpenSettings(); }
+    private void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings();
+        else if (_app.Updates.UpdatedFrom is not null) _app.OpenReleaseNotes();
+        else _app.OpenSettings();
+    }
     private async Task<IReadOnlyList<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart)
     {
         var settings = Settings.Copy();
@@ -936,7 +951,8 @@ public partial class MainWindow : Window
         catch (Exception ex) { LastRefreshError = ex.GetType().Name + "\n" + ex.StackTrace; }
         finally
         {
-            _refreshing = false; RestartSyncCycle(); _app.RequestTrim();
+            _refreshing = false; foreach (var deck in _app.Decks) deck.FirstReadEnded();
+            RestartSyncCycle(); _app.RequestTrim();
             foreach (var deck in _app.Decks) deck.RenderUsage();
             if (_refreshRequested)
             {
