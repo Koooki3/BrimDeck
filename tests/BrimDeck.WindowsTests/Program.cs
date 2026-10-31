@@ -17,21 +17,30 @@ internal static class Program
             // "--only power": just the power and battery checks, for a quick look at what this machine reports.
             if (args is ["--only", "power"]) { PowerChecks.Run(Check); return 0; }
             if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return 0; }
-            Console.WriteLine($"Windows native smoke tests: {Environment.OSVersion.Version}");
+            // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
+            // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
+            // says something about the machine, not the code. Without the flag every check runs.
+            bool hosted = args is ["--hosted"];
+            Console.WriteLine($"Windows native smoke tests{(hosted ? " (hosted subset)" : "")}: {Environment.OSVersion.Version}");
             CheckWindowChrome();
-            CaptureChecks.Run(Check);
+            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: window capture (not yet known to work on a virtual display).");
+            else CaptureChecks.Run(Check);
             CheckSettledClip();
             CheckPageToolTips();
             LayoutRetryTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
-            CheckGpus();
-            var (bounds, work, scale) = WindowsHost.PrimaryScreen();
-            Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
-                && work.Width > 0 && work.Height > 0 && scale > 0);
-            AppIdentityChecks.Run(Check);
-            TemperatureChecks.Run(Check);
-            PowerChecks.Run(Check);
+            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, temperature and power readings, and the application identity the shell resolves (they read this machine or its shell).");
+            else
+            {
+                CheckGpus();
+                var (bounds, work, scale) = WindowsHost.PrimaryScreen();
+                Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
+                    && work.Width > 0 && work.Height > 0 && scale > 0);
+                AppIdentityChecks.Run(Check);
+                TemperatureChecks.Run(Check);
+                PowerChecks.Run(Check);
+            }
             SensorGuardChecks.Run(Check);
 
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348))
