@@ -32,6 +32,12 @@ internal static class ThemeCoverageTests
         new("Secondary text on a hovered page button in an open notice", "textSecondary", ["fillSelected", "fill", "surface"], 4.5),
         new("Error text on the surface", "danger", ["surface"], 4.5),
         new("Error text in pop-ups", "danger", ["popup", "surface"], 4.5),
+        new("Call and success text on the surface", "success", ["surface"], 4.5),
+        new("Call and success text in pop-ups", "success", ["popup", "surface"], 4.5),
+        new("Warning text on the surface", "caution", ["surface"], 4.5),
+        new("Warning text in pop-ups", "caution", ["popup", "surface"], 4.5),
+        new("Tertiary text on a notices page button", "textTertiary", ["fill", "surface"], 4.5),
+        new("Secondary text on a pressed notices page row", "textSecondary", ["pressed", "surface"], 4.5),
         // Text on the accent: the chosen date and a notice's main button.
         new("Text on the accent", "onAccent", ["accent", "popup", "surface"], 4.5),
         new("Text on the accent over the surface", "onAccent", ["accent", "surface"], 4.5),

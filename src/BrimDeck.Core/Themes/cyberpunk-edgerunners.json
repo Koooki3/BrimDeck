@@ -23,6 +23,8 @@
     "accent": "#00F0FF",
     "onAccent": "#0A0613",
     "danger": "#FF4D6A",
+    "success": "#3DFFB0",
+    "caution": "#FCEE0A",
     "liked": "#FF2A6D",
     "clock": "#FCEE0A",
     "equalizer": "#00F0FF",

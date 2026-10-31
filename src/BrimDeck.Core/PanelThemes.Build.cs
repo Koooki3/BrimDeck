@@ -73,7 +73,11 @@ public static partial class PanelThemes
             {
                 "textPrimary" => [colors["fillSelected"].Over(surface), colors["pressed"].Over(surface), colors["input"].Over(popup), colors["rangeFill"].Over(popup),
                     colors["tooltip"], colors["bubble"]],
-                "textSecondary" => [colors["fill"].Over(surface), colors["hover"].Over(surface)],
+                // The notices page's rows put the secondary text (a preview) on a hovered and a pressed row, and its tertiary text (a
+                // time, a category) on the fill of its strip and buttons. A selected, hovered or pressed row draws its time in the
+                // secondary text instead: tertiary text kept at 4.5:1 on those stronger fills would no longer differ from it.
+                "textSecondary" => [colors["fill"].Over(surface), colors["hover"].Over(surface), .. surfaces.Select(stop => colors["pressed"].Over(stop))],
+                "textTertiary" => [.. surfaces.Select(stop => colors["fill"].Over(stop))],
                 _ => []
             };
             needs.AddRange(fills.Select(fill => new ContrastNeed(fill, TextContrast)));

@@ -20,8 +20,8 @@ internal static class PixelBlocksTests
             && PanelThemes.Tokens.Where(token => token.Against is PanelThemeBackdrop.Surface or PanelThemeBackdrop.SurfaceAndPopup)
                 .All(token => pixel[token.Key].MinimumContrast(pixel.SurfaceStops) >= token.Minimum - .001));
         // A dense grain on a mid gray: the tertiary text that reads on the plain surface is moved until it reads on the squares too.
-        var grainFile = new PanelThemeFile { Colors = new() { ["surface"] = "#3A3A3A", ["textTertiary"] = "#B0B0B0" }, Effects = new() { Pixel = 2, Texture = .12 } };
-        var plainFile = new PanelThemeFile { Colors = new() { ["surface"] = "#3A3A3A", ["textTertiary"] = "#B0B0B0" } };
+        var grainFile = new PanelThemeFile { Colors = new() { ["surface"] = "#3A3A3A", ["textTertiary"] = "#B8B8B8" }, Effects = new() { Pixel = 2, Texture = .12 } };
+        var plainFile = new PanelThemeFile { Colors = new() { ["surface"] = "#3A3A3A", ["textTertiary"] = "#B8B8B8" } };
         var grain = PanelThemes.Build("grain", grainFile);
         check("Text is held to its minimum on a texture's squares", PanelThemes.Build("plain", plainFile).Adjustments.All(a => a.Key != "textTertiary")
             && grain["textTertiary"].MinimumContrast(grain.SurfaceStops) >= PanelThemes.TextContrast - .001 && grain.Adjustments.Any(a => a.Key == "textTertiary"));

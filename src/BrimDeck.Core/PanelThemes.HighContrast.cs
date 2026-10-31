@@ -17,7 +17,7 @@ public static partial class PanelThemes
         var colors = new Dictionary<string, string>
         {
             ["surface"] = W, ["popup"] = W, ["input"] = W, ["tooltip"] = W, ["bubble"] = W, ["shadow"] = W,
-            ["textPrimary"] = T, ["textSecondary"] = T, ["textTertiary"] = G, ["menuDetail"] = T, ["clock"] = T, ["danger"] = T,
+            ["textPrimary"] = T, ["textSecondary"] = T, ["textTertiary"] = G, ["menuDetail"] = T, ["clock"] = T, ["danger"] = T, ["success"] = T, ["caution"] = T,
             ["accent"] = H, ["onAccent"] = HT, ["liked"] = H, ["equalizer"] = H, ["indicator"] = H, ["indicatorProgress"] = HT, ["rangeFill"] = highlight.WithAlpha(0x40).ToString(),
             ["rim"] = T, ["outline"] = T, ["popupBorder"] = T, ["tooltipBorder"] = T, ["bubbleBorder"] = T, ["coverOutline"] = T, ["scrollThumb"] = T,
             ["hairline"] = Line(0x40), ["rowDivider"] = Line(0x40), ["track"] = Line(0x40), ["ringTrack"] = Line(0x50), ["seekRail"] = Line(0x50),

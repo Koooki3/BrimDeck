@@ -59,6 +59,12 @@ public static partial class PanelThemes
         new("accent", "强调色（键盘焦点、选中日期）", "Accent (keyboard focus, chosen dates)", GraphicContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("onAccent", "强调色上的文字（选中的日期、通知主按钮）", "Text on the accent (chosen dates, a notice's main button)", TextContrast, PanelThemeBackdrop.Accent),
         new("danger", "错误与暂停同步", "Errors and paused sync", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
+        // The notices page's state colors: an incoming call and a notice that reports success, and a warning. They are small text
+        // and dots on the surface, so both are held to the body-text minimum. The warning is "caution", not "warning": that name is
+        // already the quota warning color among the application colors, and one key for two colors would mix them up in the template
+        // and in the list of adjustments.
+        new("success", "成功与来电", "Success and incoming calls", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
+        new("caution", "警告", "Warnings", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("liked", "已喜欢", "Liked song", GraphicContrast, PanelThemeBackdrop.Surface),
         new("clock", "时间默认色", "Default clock color", TextContrast, PanelThemeBackdrop.Surface),
         new("equalizer", "律动条默认色", "Default equalizer color", GraphicContrast, PanelThemeBackdrop.Surface),
