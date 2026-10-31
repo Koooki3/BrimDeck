@@ -44,7 +44,7 @@ internal sealed class AudioLevelMeter : IDisposable
             _wake.Set();
         }
     }
-    // Fills the flowing bar values when captured audio drives them.
+    // Fills the bars' levels from the captured audio's spectrum, one band of pitch for each of the levels.Length bars.
     public bool TryFill(Span<double> levels)
     {
         if (_capture is not { } capture) return false;

@@ -10,6 +10,9 @@ public sealed class EqualizerBars
     private readonly (double Time, double Peak)[] _history = new (double, double)[64];
     private readonly double[] _levels = new double[Count];
     private int _next, _count;
+    // How many bars the levels were last made for by Show (EqualizerSignal): the levels are then positions along the pitch axis
+    // and not delayed copies of one value, so a row that draws another count (Fit) takes them over by position.
+    private int _shown;
     private double _time;
 
     public float Peak { get; private set; }
@@ -18,7 +21,7 @@ public sealed class EqualizerBars
 
     public void Tick(float peak, bool playing, double seconds = 1d / 30)
     {
-        Peak = float.IsFinite(peak) ? Math.Clamp(peak, 0, 1) : 0; Playing = playing;
+        Peak = float.IsFinite(peak) ? Math.Clamp(peak, 0, 1) : 0; Playing = playing; _shown = 0;
         if (!playing)
         {
             Array.Clear(_levels); _next = _count = 0; _time = 0;
@@ -48,11 +51,23 @@ public sealed class EqualizerBars
         }
     }
 
-    // Bar values already computed from captured audio, leftmost first.
+    // Bar values already computed from captured audio, leftmost first: one for each bar drawn, low pitch to high.
     public void Show(ReadOnlySpan<double> levels, bool playing)
     {
-        Playing = playing;
+        Playing = playing; _shown = playing ? Math.Min(levels.Length, _levels.Length) : 0;
         for (int i = 0; i < _levels.Length; i++) _levels[i] = playing && i < levels.Length ? Math.Clamp(levels[i], 0, 1) : 0;
+    }
+
+    // Before a row that draws bars bars shows the levels: when they were made for another count (the length setting changed, or
+    // the row now has room for more or fewer), each bar takes the level at its place on the pitch axis, so no bar drops to rest
+    // for the frame before the next analysis brings levels for the new count.
+    public void Fit(int bars)
+    {
+        bars = Math.Clamp(bars, 1, _levels.Length);
+        if (_shown == 0 || _shown == bars) return;
+        Span<double> fitted = stackalloc double[Count];
+        EqualizerSignal.Resample(_levels.AsSpan(0, _shown), fitted[..bars]);
+        fitted[..bars].CopyTo(_levels); _levels.AsSpan(bars).Clear(); _shown = bars;
     }
 
     private (double Time, double Peak) Previous(int offset) => _history[(_next - 1 - offset + _history.Length) % _history.Length];
