@@ -739,7 +739,7 @@ internal sealed class MediaSessions : IDisposable
     private static MediaDispatchResult DispatchResult(DesktopCommandResult result) => result switch
     { DesktopCommandResult.Unavailable => MediaDispatchResult.Unavailable, DesktopCommandResult.Sent => MediaDispatchResult.Sent, _ => MediaDispatchResult.Uncertain };
     public float Peak() => _meter.Peak;
-    // Flowing bar values from the player's captured audio; false when only the peak meter is available.
+    // The bars' levels from the spectrum of the player's captured audio, one band for each of the levels.Length bars; false when only the peak meter is available.
     public bool FlowLevels(Span<double> levels) => _meter.TryFill(levels);
     // The playing player's sound while its bars are seen; otherwise the whole system's, while bars shown at all times ask for it.
     private void UpdateMeter()

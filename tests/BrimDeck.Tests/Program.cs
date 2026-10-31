@@ -20,6 +20,7 @@ try
     await AppleMusicLyricsTests.Run(root, Check);
     await KugouTests.Run(Check);
     EqualizerSignalTests.Run(Check);
+    EqualizerSpectrumTests.Run(Check);
     ColorMathTests.Run(Check);
     CompactSpacingTests.Run(Check);
     CompactDragTests.Run(Check);
