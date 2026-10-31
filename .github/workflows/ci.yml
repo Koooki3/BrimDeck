@@ -38,6 +38,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Build
+        id: build
         run: |
           dotnet build BrimDeck.sln -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
@@ -59,7 +60,7 @@ jobs:
       # Started by hand from the Actions tab: every Windows check, to see which of the left-out ones this runner can answer.
       # It never fails the run; the log is the result.
       - name: Windows tests (everything, for information)
-        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.event_name == 'workflow_dispatch' }}
         continue-on-error: true
         timeout-minutes: 8
         run: |
