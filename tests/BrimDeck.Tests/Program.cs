@@ -26,7 +26,7 @@ try
     NoticeEventLogTests.Run(Check);
     NoticeLoopFollowupTests.Run(Check);
     NoticeBannerTests.Run(root, Check);
-    NoticeLiquidTests.Run(Check);
+    IslandLiquidTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     await AppleMusicLyricsTests.Run(root, Check);

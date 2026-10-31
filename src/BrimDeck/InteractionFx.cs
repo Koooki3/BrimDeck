@@ -50,12 +50,12 @@ internal static class InteractionFx
         return surface;
     }
 
-    // Notices and the date range picker's pop-up get the answers too, above their content in the window's own adorner layer,
+    // The date range picker's pop-up gets the answers too, above its content in the window's own adorner layer,
     // over the content presenter, which stays when the content is replaced. The picker's layer is clipped to its rounded face:
     // its window keeps transparent room below it (ModelDateWindow), where nothing may show.
     private static void WindowLoaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not (NoticeWindow or ModelDateWindow) || sender is not Window window || !ReferenceEquals(e.OriginalSource, window) || (bool)window.GetValue(AttachedProperty)) return;
+        if (sender is not ModelDateWindow || sender is not Window window || !ReferenceEquals(e.OriginalSource, window) || (bool)window.GetValue(AttachedProperty)) return;
         var decorator = FindDecorator(window, 4);
         if (decorator?.Child is not UIElement adorned || decorator.AdornerLayer is not { } layer) return;
         window.SetValue(AttachedProperty, true);
@@ -65,7 +65,7 @@ internal static class InteractionFx
         if (window is ModelDateWindow { Picker: var picker }) ClipTo(adorner, picker, adorned);
         layer.Add(adorner);
         window.SetValue(SurfaceProperty, surface);
-        // Whatever it shows ends with the notice, never lingers into the next.
+        // Whatever it shows ends with the pop-up, never lingers into the next.
         window.IsVisibleChanged += (_, _) => surface.Reset();
         Track(window, surface);
     }
@@ -581,7 +581,7 @@ internal sealed partial class FxSurface : FrameworkElement
         for (var node = source; node is not null && !ReferenceEquals(node, _scope); node = Up(node))
         {
             if (node is ScrollBar or TextBoxBase or PasswordBox or RepeatButton or Thumb or Slider) { found = null; break; }
-            if (node is NoticeSurface or IslandBorder) break;
+            if (node is IslandBorder) break;
             if (found is null && node is ButtonBase or ListBoxItem or ComboBox or TabItem) found = (FrameworkElement)node;
         }
         if (found is not null && (!found.IsEnabled || !found.IsVisible)) found = null;

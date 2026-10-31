@@ -138,7 +138,7 @@ public sealed class NoticeHub
                 || existing.Progress is not null && (input.Progress is null || input.Progress >= 1) || existing.Body != body && input.Progress is null;
             existing.InstanceKey = input.InstanceKey;
             existing.AppName = input.AppName; existing.Title = title; existing.Body = body;
-            existing.IconRef = input.IconRef ?? existing.IconRef; existing.Category = input.Category; existing.Priority = priority;
+            existing.IconRef = input.IconRef ?? existing.IconRef; existing.Picture = input.Picture ?? existing.Picture; existing.Category = input.Category; existing.Priority = priority;
             existing.Progress = input.Progress; existing.Actions = [.. input.Actions]; existing.Capabilities = input.Capabilities;
             existing.Timing = input.Timing?.Copy(); existing.Call = input.Call; existing.Transient = input.Transient;
             existing.EventId = input.EventId ?? existing.EventId;
@@ -160,7 +160,7 @@ public sealed class NoticeHub
         var notice = new Notice
         {
             InstanceKey = input.InstanceKey, AppKey = input.AppKey, AppName = input.AppName, AppId = input.AppId, Origin = input.Origin,
-            Distro = input.Distro, ReplaceKey = input.ReplaceKey, EventId = input.EventId, Title = title, Body = body, IconRef = input.IconRef,
+            Distro = input.Distro, ReplaceKey = input.ReplaceKey, EventId = input.EventId, Title = title, Body = body, IconRef = input.IconRef, Picture = input.Picture,
             CreatedAt = input.CreatedAt ?? now, ReceivedAt = now, UpdatedAt = now, Category = input.Category, Priority = priority,
             Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities, Timing = input.Timing?.Copy(), Call = input.Call,
             Transient = input.Transient

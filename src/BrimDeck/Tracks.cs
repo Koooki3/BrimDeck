@@ -5,7 +5,7 @@ using Track = BrimDeck.Core.Notices.NoticeMotion.Track;
 namespace BrimDeck;
 
 // One move of the panel or a notice played on tracks: each animation starts and ends at fractions of the move's duration
-// (NoticeMotion.Track), and replaces what ran on its property before. The panel (MainWindow) and its notices (NoticeWindow)
+// (NoticeMotion.Track), and replaces what ran on its property before. The panel (MainWindow) and its notices (IslandNotice)
 // share these, so the two keep the same clock.
 internal static class Tracks
 {
