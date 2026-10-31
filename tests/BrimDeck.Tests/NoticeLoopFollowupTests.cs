@@ -13,6 +13,7 @@ internal static class NoticeLoopFollowupTests
     internal static void Run(Action<string, bool> check)
     {
         LateLogAfterBaseline(check);
+        LateLogLookupFails(check);
         StopStartBetweenApplyAndPublish(check);
         MissingNotificationReconciliation(check);
         AccessRevokedWithQueuedIds(check);
@@ -68,6 +69,73 @@ internal static class NoticeLoopFollowupTests
         Log(steadyLoop, steadyRun, 60);
         steadyLoop.Step(steadyRun, steady, default);
         check("Loop followup E: a toast a later reading found and showed is not shown again by its entry", Keys(steady.Arrived).SequenceEqual([Key(60)]) && steady.Lookups == 0);
+    }
+
+    // E, when the lookup fails. The entry names a toast the baseline absorbed, but Windows cannot return it yet (or the read fails):
+    // the id keeps its place, so the reading that follows shows the toast instead of taking it for one the baseline already had.
+    private static void LateLogLookupFails(Action<string, bool> check)
+    {
+        var (loop, run, host) = Started(10);
+        host.Listed[50] = Input(50);
+        host.Finish([10u, 50u]);
+        loop.Step(run, host, default);
+        var at = host.Now;
+        host.Lookup = _ => WindowsNoticeNotificationRead.Missing;
+        Log(loop, run, 50);
+        loop.Step(run, host, default);
+        check("Loop followup E (lookup fails): the failed lookup shows nothing", host.Arrived.Count == 0 && host.Lookups == 1);
+        int reads = host.ListReads;
+        host.Now = at + WindowsNoticeLogBatch.FailedReadReconcileInterval;
+        loop.Step(run, host, default);
+        check("Loop followup E (lookup fails): a full reading follows within the failed-read interval", host.ListReads == reads + 1);
+        host.Finish();
+        loop.Step(run, host, default);
+        check("Loop followup E (lookup fails): that reading shows the toast the lookup could not return, once", Keys(host.Arrived).SequenceEqual([Key(50)]) && host.Missed.Count == 0);
+        host.Lookup = null;
+        Log(loop, run, 50);
+        loop.Step(run, host, default);
+        check("Loop followup E (lookup fails): a later entry for it does not show it again", Keys(host.Arrived).SequenceEqual([Key(50)]));
+
+        // A reading that cannot read it either shows nothing and leaves it for the next one.
+        var (laterLoop, laterRun, later) = Started(10);
+        later.Listed[51] = Input(51);
+        later.Finish([10u, 51u]);
+        laterLoop.Step(laterRun, later, default);
+        later.Lookup = _ => WindowsNoticeNotificationRead.Missing;
+        Log(laterLoop, laterRun, 51);
+        laterLoop.Step(laterRun, later, default);
+        laterLoop.Refresh(WindowsNoticeBaseline.None, later.Now);
+        laterLoop.Step(laterRun, later, default);
+        later.Listed.Remove(51);
+        later.Finish([10u, 51u]);
+        laterLoop.Step(laterRun, later, default);
+        check("Loop followup E (lookup fails): a reading that cannot read it shows nothing", later.Arrived.Count == 0);
+        later.Listed[51] = Input(51);
+        laterLoop.Refresh(WindowsNoticeBaseline.None, later.Now);
+        laterLoop.Step(laterRun, later, default);
+        later.Finish();
+        laterLoop.Step(laterRun, later, default);
+        check("Loop followup E (lookup fails): the next reading that can read it shows it", Keys(later.Arrived).SequenceEqual([Key(51)]));
+
+        // The toast leaves Windows before anything could read it: nothing is kept for it.
+        var (goneLoop, goneRun, gone) = Started(10);
+        gone.Listed[52] = Input(52);
+        gone.Finish([10u, 52u]);
+        goneLoop.Step(goneRun, gone, default);
+        gone.Lookup = _ => WindowsNoticeNotificationRead.Missing;
+        Log(goneLoop, goneRun, 52);
+        goneLoop.Step(goneRun, gone, default);
+        gone.Listed.Remove(52);
+        goneLoop.Refresh(WindowsNoticeBaseline.None, gone.Now);
+        goneLoop.Step(goneRun, gone, default);
+        gone.Finish([10u]);
+        goneLoop.Step(goneRun, gone, default);
+        gone.Listed[52] = Input(52);
+        goneLoop.Refresh(WindowsNoticeBaseline.None, gone.Now);
+        goneLoop.Step(goneRun, gone, default);
+        gone.Finish();
+        goneLoop.Step(goneRun, gone, default);
+        check("Loop followup E (lookup fails): a toast that left before it could be read keeps no claim on a later one with the same id", gone.Arrived.Count == 1 && Keys(gone.Arrived).Single() == Key(52));
     }
 
     // F. The step checked that its run is current and applied its result under the loop's lock, then handed the changes over
