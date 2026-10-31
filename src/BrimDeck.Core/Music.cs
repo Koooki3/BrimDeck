@@ -117,7 +117,8 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // The first letter or digit of an application's name, upper case, for the middle of its collapsed quota ring; empty without one.
     public static string RingLetter(string? name)
     {
-        foreach (char c in name ?? "") if (char.IsLetterOrDigit(c)) return char.ToUpperInvariant(c).ToString();
+        // By Unicode scalar (Rune), not UTF-16 unit: a name starting with a supplementary-plane character must give that whole character.
+        foreach (var r in (name ?? "").EnumerateRunes()) if (System.Text.Rune.IsLetterOrDigit(r)) return System.Text.Rune.ToUpperInvariant(r).ToString();
         return "";
     }
     // The gap between any two neighbours in the row, and between two rings or two readings (CompactSpacing).
