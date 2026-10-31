@@ -13,6 +13,7 @@ var root = Path.Combine(Path.GetTempPath(), "BrimDeck-Tests-" + Guid.NewGuid().T
 Directory.CreateDirectory(root);
 try
 {
+    await PiUsageTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
