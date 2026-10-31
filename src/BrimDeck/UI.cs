@@ -210,7 +210,7 @@ internal static class UI
         return Loc.T($"{minutes} 分后", $"in {minutes}m");
     }
     // "Gemini · 5 小时" → group "Gemini", which orders the quota pages. The group stays in the data's words.
-    public static string QuotaGroup(Quota quota) => quota.Label.Contains('·') ? quota.Label.Split('·')[0].Trim() : "";
+    public static string QuotaGroup(Quota quota) => QuotaDisplay.Group(quota.Label);
     // "5 小时额度" → "5 小时"; "Gemini · 5 小时" → "Gemini 5 小时" and "Claude · 每周" → "Claude 每周", written like
     // Claude's "Opus 每周", so a grouped quota names its group in its own row. The shown label is translated.
     public static string QuotaLabel(Quota quota)
@@ -220,8 +220,7 @@ internal static class UI
         if (group.Length == 0) return Loc.Label(period);
         return period == "每周" ? Loc.Label(group + " 每周") : group + " " + Loc.Label(period);
     }
-    public static string DisplayPlan(string plan) => plan.Trim().ToLowerInvariant() switch
-    { "prolite" => "Pro Lite", "pro" or "google ai pro" => "Pro", "google ai ultra" => "Ultra", "plus" => "Plus", "free" => "Free", "max" => "Max", "team" => "Team", "business" => "Business", "enterprise" => "Enterprise", _ => plan.Trim() };
+    public static string DisplayPlan(string plan) => PlanParser.DisplayName(plan);
     public static void OpenUrl(string url) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
 }
 

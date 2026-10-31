@@ -1186,8 +1186,8 @@ public partial class MainWindow
     private (double Used, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
     {
         var snapshot = DashboardUsage.Quota(entry, Snapshots);
-        var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).Select(m => Math.Clamp(m.UsedPercent!.Value, 0, 100)).ToArray();
-        double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
+        var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).ToArray();
+        double used = QuotaDisplay.RingShare(snapshot.Metrics);
         string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
         return (used, PanelTheme.QuotaTheme(entry), tip, QuotaCarousel.Letter(entry.Name));

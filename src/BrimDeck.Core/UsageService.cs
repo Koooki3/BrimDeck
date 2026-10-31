@@ -403,7 +403,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             var oauth = auth?.RootElement.Get("claudeAiOauth") ?? default;
             var token = oauth.Get("accessToken").Text();
             var plan = PlanParser.ClaudeTier(oauth.Get("rateLimitTier").Text(), oauth.Get("subscriptionType").Text());
-            if (plan.Equals("max", StringComparison.OrdinalIgnoreCase) && snapshot.Plan.StartsWith("Max ", StringComparison.Ordinal)) plan = snapshot.Plan;
+            plan = PlanParser.RefineSignInPlan(plan, snapshot.Plan);
             if (token.Length > 0) codeCredential = new(token, plan, ClaudeSignIn.Code, code.Account, code.Organization);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { codeReadFailed = true; }
@@ -601,7 +601,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             snapshot.Status = Loc.T("Claude 桌面版尚未在本机记录额度", "The Claude desktop app has not recorded a quota on this PC yet.");
             return snapshot;
         }
-        snapshot.Quotas = [new Quota("5 小时额度", sample.FiveHour, null, 300), new Quota("每周额度", sample.SevenDay, null, 10080)];
+        snapshot.Quotas = ClaudeUsageHistory.Quotas(sample, null, null);
         snapshot.IsStale = true;
         // The update time is when BrimDeck read the history; the status gives the time of the newest sample in it.
         snapshot.LiveQuota = true; snapshot.QuotaTime = now;
@@ -621,11 +621,16 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var sample = ClaudeUsageHistory.Latest(_locations, organization);
         if (sample is not null && sample.Time <= now.AddMinutes(5) && (kept is null || sample.Time > kept.Time))
         {
-            DateTimeOffset? Reset(int minutes) => kept?.Quotas.FirstOrDefault(quota => quota.Minutes == minutes)?.ResetAt is { } reset && reset > sample.Time ? reset : null;
+            Quota? Known(int minutes) => kept?.Quotas.FirstOrDefault(quota => quota.Minutes == minutes);
             var scoped = kept?.Quotas.Where(q => q.Label is not ("5 小时额度" or "每周额度")).ToList() ?? [];
             var scopedTime = scoped.Count == 0 ? null : kept!.Local ? kept.ScopedTime : kept.Time;
+            var quotas = ClaudeUsageHistory.Quotas(sample, Known(300)?.ResetAt, Known(10080)?.ResetAt);
+            // A sample with no five-hour share does not end a five-hour window the last reading still has ahead of it: the history
+            // only says an account has none when it has not sent one for a while (ClaudeUsageHistory.Parse), and an account
+            // that the account endpoint gave a five-hour window is not one. Without such a window none is made up.
+            if (sample.FiveHour is null && Known(300) is { ResetAt: { } window } five && window > sample.Time && window > now) quotas.Insert(0, five);
             kept = new(sample.Time, kept?.Plan ?? "", kept?.PlanSource ?? "", Loc.T("Claude 桌面版 · 本地用量记录", "Claude desktop app · local usage records"),
-                [new Quota("5 小时额度", sample.FiveHour, Reset(300), 300), new Quota("每周额度", sample.SevenDay, Reset(10080), 10080), .. scoped], true, scopedTime);
+                [.. quotas, .. scoped], true, scopedTime);
             Kept(organization).Retained = kept;
         }
         return kept;

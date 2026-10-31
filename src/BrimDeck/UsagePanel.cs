@@ -277,25 +277,9 @@ public partial class MainWindow
     private QuotaView Quotas(AppEntry entry, ProviderSnapshot snapshot)
     {
         const int capacity = 2;
-        var quotas = snapshot.Metrics.OrderBy(x => x.Window is > 0 ? x.Window.Value : int.MaxValue).ToList();
-        // Antigravity labels its quotas "Gemini · 5 小时", "Claude · 每周" and so on. Each group starts its own page, Gemini first,
-        // so the first page shows rows 1 and 2 (Gemini) and a click on the column shows rows 3 and 4 (Claude), the same rows and
-        // click-to-page as any other app with more than two quotas. Labels without a group come last.
-        // Claude groups by organization when an account reads several ("Pro · 5 小时额度", "Team · 每周额度"): each organization
-        // starts its own page, in the order the service gave them, so Pro's 5-hour and weekly quotas come first, then its Fable
-        // quota, then Team's.
-        string Group(UsageMetric metric) => UI.QuotaGroup(new Quota(metric.Label, 0, null));
-        var order = snapshot.Metrics.Select(Group).Distinct().ToList();
-        var sets = snapshot.Id switch
-        {
-            ProviderId.Antigravity => quotas.GroupBy(Group).OrderBy(x => x.Key == "Gemini" ? 0 : x.Key.Length > 0 ? 1 : 2).Select(x => x.ToList()).ToList(),
-            ProviderId.Claude => quotas.GroupBy(Group).OrderBy(x => order.IndexOf(x.Key)).Select(x => x.ToList()).ToList(),
-            _ => [quotas]
-        };
-        var pages = sets.SelectMany(set => set.Chunk(capacity)).Select(x => x.ToList()).ToList();
-        if (pages.Count == 0) pages.Add([]);
-        // Sized for the fullest page the column can switch to.
-        int slots = Awaiting(snapshot) ? capacity : Math.Clamp(pages.Max(x => x.Count), 1, capacity);
+        // Gemini's and Claude's groups start pages of their own, and a column is sized for the fullest page it can switch to
+        // (QuotaDisplay.Pages). Only the windows an account has become quotas: a plan with a weekly window alone is a page of one.
+        var (pages, slots) = QuotaDisplay.Pages(snapshot.Id, snapshot.Metrics, capacity, Awaiting(snapshot));
         int page = Math.Clamp(_quotaPages.GetValueOrDefault(entry.InstanceId), 0, pages.Count - 1);
         return new QuotaView(pages[page], pages.Count, page, slots);
     }

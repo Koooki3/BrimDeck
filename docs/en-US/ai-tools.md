@@ -49,6 +49,7 @@ Rows whose quota source is Claude or Grok Bot can be expanded, and each row has 
 
 - **On**: the app's sign-in on this PC is used to read the account quota online. If a read fails, the last successful reading or the quota the desktop app recorded on this PC is shown, with its time. For Claude it is still shown after restarting BrimDeck, for the same account. When a Claude account belongs to several organizations (a personal Pro and a Team, for example), the row shows the quotas of each, the personal subscription first; click the column for the next page. When Claude's account API answers that there are too many requests (429), requests pause for the wait it names (a wait over 7 days is taken as invalid), or for 2, 4, 8 and 16 minutes in turn (30 at most) when it names none. No request goes out each minute during the pause, a manual refresh does not go round it, and the status gives the time of the next request.
 - **Off**: no sign-in is read and nothing is sent; only the latest quota the desktop app recorded on this PC is shown. This data is marked as old and does not trigger quota alerts.
+- **Plan name**: the Claude plan name comes from the account, such as Pro, Max 5x, Max 20x, Team or Enterprise; a plan that Anthropic adds is shown by its own name (Ultra, for example). A plan without a 5-hour limit shows its weekly limit alone; no 5-hour limit is made up.
 
 ## Grok Bot
 
