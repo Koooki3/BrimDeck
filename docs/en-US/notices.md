@@ -1,12 +1,12 @@
 # Live notices
 
-When a notification arrives, the notch, capsule or indicator grows out of its place and shows the application's icon, title and summary; hover for about a quarter of a second or click to see the details, and a few seconds later it returns to its shape. By default Windows' own banners and notification center stay as they are and BrimDeck shows its own copy alongside; to see each notification only once, switch on "Turn off other apps' notification banners" (see below). Everything is processed on this PC, without any cloud service.
+When a notification arrives, the island keeps its size: the notch and the capsule show the application's icon (or the contact's picture), title and summary on the island, scrolling them when they are long; the notch, capsule and indicator move along their outline like a liquid and flash; rest the pointer on the island to open the notices page with that notice in front, and a few seconds later it returns to its shape. By default Windows' own banners and notification center stay as they are and BrimDeck shows its own copy alongside; to see each notification only once, switch on "Turn off other apps' notification banners" (see below). Everything is processed on this PC, without any cloud service.
 
 ## Turning them on
 
 Settings › Live notices › Turn on live notices (off by default). Then:
 
-- The open panel gains a "Notice history" page (bell icon, with a red dot while there are notices you have not seen; a notice that popped up but that you did not hover, open or see on the page still counts as unseen). It lists the notices kept, where each can be expanded, opened in its application or deleted; notices can be paused or cleared.
+- The open panel gains a "Notices" page (bell icon, with a red dot while there are notices you have not seen; a notice that popped up but that you did not hover, open or see on the page still counts as unseen): the left column is the focus (an incoming call, the notice you picked or the newest, with messages of one conversation merged; it can open the application, delete the notice and run its own actions), the right column lists today's notices (all or unread, with earlier ones on request); notices can be paused.
 - Notices take the [panel theme](themes.md): they share the surface, gradient, scan lines, rim, shadow or glow and text colors of the notch, capsule, indicator and open panel. A glowing theme flashes once as a notice arrives. An application's color only marks a small dot, the progress ring and its initial, adjusted to read clearly on the theme.
 
 ## Arrival motion
@@ -150,7 +150,7 @@ brim-notify "New mail" --kind mail
 ## How notices show
 
 - A notice never takes the keyboard focus, and never pops up over the open panel or details you are using; while the panel is open, the bell only gets its red dot.
-- It stays 6 seconds, 8 for high priority; hovering, opening the details or working it from the keyboard pauses the time.
+- It stays 6 seconds, 8 for high priority; resting the pointer on the island or working it from the keyboard pauses the time.
 - Notices from one application within 0.8 seconds become one notice with a count; at most 3 notices pop up per 10 seconds, the rest go to the notice history; a normal notice that waited over 30 seconds is not shown late; a merged notice stays at most twice its duration.
 - Notices from brim-notify and WSL are judged by when their sender wrote them: a message that had already waited over 30 seconds (5 minutes for high priority) when it was sent only goes to the notice history, unviewed, and does not pop up. The sender measures the wait by its own clock, so a WSL clock that differs from Windows' does not mislead it; time-kind notices follow their own reminder times. The same message (same event id) delivered again after BrimDeck restarts is neither recorded twice nor shown while the notice history still hold it.
 - A notice updated with `-r` takes the time of the latest message: it pops up as "Just now", not with the time of the notice it replaced.

@@ -40,7 +40,7 @@ internal sealed class IslandNotice : Window
     private CollapsedShape _shape = null!;
     private NoticeLook _look = NoticeLook.Current();
     private Rect _stageRect, _island;
-    private bool _leaving, _arrivedUnderPointer, _held;
+    private bool _leaving, _arrivedUnderPointer, _held, _closed;
     private int _generation;
 
     // The motion: its model, when it started, the factor from its design size to DIPs, and the shapes it draws each frame.
@@ -73,7 +73,7 @@ internal sealed class IslandNotice : Window
         _hit.MouseRightButtonUp += (_, e) => e.Handled = true;
         SourceInitialized += (_, _) => WindowsHost.ConfigureOverlay(this);
         _app.Notices.Icons.Loaded += IconLoaded;
-        Closed += (_, _) => { StopMotion(); _hoverOpen.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; };
+        Closed += (_, _) => { _closed = true; StopMotion(); _hoverOpen.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
         DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };
     }
 
@@ -150,6 +150,7 @@ internal sealed class IslandNotice : Window
     {
         if (_item is null || !ReferenceEquals(_item, item) && _item.Key != item.Key) return;
         _item = null; _leaving = true;
+        WatchLive();
         _hoverOpen.Stop(); Release();
         int generation = ++_generation;
         double fade = Soft.Enabled ? FadeOut : 0;
@@ -170,8 +171,9 @@ internal sealed class IslandNotice : Window
     public void HandOver()
     {
         // Still waiting for the island's own words to fade (FadeIslandContent): they come back at once and the notice never shows.
-        if (!IsVisible) { if (_item is not null) { _item = null; _generation++; _deck.SetIslandCovered(false); } return; }
+        if (!IsVisible) { if (_item is not null) { _item = null; WatchLive(); _generation++; _deck.SetIslandCovered(false); } return; }
         _item = null;
+        WatchLive();
         _hoverOpen.Stop(); Release();
         _generation++;
         Finish();
@@ -318,7 +320,13 @@ internal sealed class IslandNotice : Window
     {
         double dpi = PresentationSource.FromVisual(this) is null ? (WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen()).Scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
         _look = NoticeLook.Current(dpi);
-        _fill = null; _rim = null;
+        _fill = null; _rim = null; _edge = null; _rest = null;
+        _decor = _look.HighContrast ? null : IslandDecor.For(PanelTheme.Current);
+        // As the island's: a pixel theme's text is not smoothed, and over glass ClearType cannot be used (the surface is a tint).
+        RenderOptions.SetClearTypeHint(_content, _look.Glass ? ClearTypeHint.Auto : ClearTypeHint.Enabled);
+        if (_look.Pixel > 0) TextOptions.SetTextRenderingMode(_content, TextRenderingMode.Aliased); else _content.ClearValue(TextOptions.TextRenderingModeProperty);
+        // The content is clipped to the island as it is drawn now (a pixel theme's steps, a cut theme's slants).
+        if (_shape is not null && Form != IslandForm.Line) _content.Clip = Rest().Outline;
         // The island's shadow, from a copy of its body behind it; a see-through surface would show that copy, so it has none.
         _shadow.Effect = _look.ShadowOpacity <= 0 || _look.HighContrast || _look.Surface.A < 255 ? null : new DropShadowEffect
         {
@@ -346,7 +354,7 @@ internal sealed class IslandNotice : Window
         double width = _island.Width / _k, height = _island.Height / _k;
         _liquid = form switch
         {
-            IslandForm.Notch => new IslandLiquid(form, width, height, fury: Fury, corner: _shape.BottomRadius / _k, shoulder: _shape.Shoulder / _k),
+            IslandForm.Notch => new IslandLiquid(form, width, height, fury: Fury, corner: _shape.BottomRadius / _k, shoulder: _shape.Shoulder / _k, cut: _look.Pixel > 0 ? 0 : _look.Cut / _k),
             _ => new IslandLiquid(form, width, height, fury: Fury)
         };
         _start = Eased.Now; _t = 0;
@@ -389,15 +397,31 @@ internal sealed class IslandNotice : Window
             double r = _island.Height / 2;
             return new RectangleGeometry(_island, r, r);
         }
-        var outline = IslandBorder.BuildOutline(_island.Width, _island.Height, _shape.Shoulder, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius)).Clone();
+        var outline = Rest().Outline.Clone();
         outline.Transform = new TranslateTransform(_island.X, _island.Y);
         return outline;
     }
 
+    // The island's outline at the origin as the island draws it (IslandBorder.Shape): stepped for a pixel theme, with its bevel, cut
+    // for a cut theme, smooth otherwise. Made once for the layout and the look.
+    private (Geometry Outline, (Geometry Light, Geometry Shade)? Bevel) Rest()
+    {
+        if (_rest is { } known) return known;
+        double dpi = PresentationSource.FromVisual(this) is null ? (WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen()).Scale : VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        double step = PixelStairs.Step(_look.Pixel, dpi);
+        var shape = IslandBorder.Shape(_island.Width, _island.Height, _shape.Shoulder, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius), 0, step, _look.RimWidth, dpi, _look.Cut);
+        return (_rest = shape).Value;
+    }
+
+    private (Geometry Outline, (Geometry Light, Geometry Shade)? Bevel)? _rest;
+    private IslandDecor? _decor;
+    private Pen[]? _edge;
+
     // The island's body at this frame: its outline pushed out by the ripples (the notch's top edge stays against the screen).
     private Geometry BodyOutline()
     {
-        if (_liquid is not { } liquid || Form == IslandForm.Line) return RestOutline();
+        // A pixel theme's island is drawn in steps; its outline stays on them, and its liquid is the glow and the words alone.
+        if (_liquid is not { } liquid || Form == IslandForm.Line || _look.Pixel > 0) return RestOutline();
         var geometry = new StreamGeometry();
         using (var g = geometry.Open())
         {
@@ -427,8 +451,31 @@ internal sealed class IslandNotice : Window
         var body = BodyOutline();
         drawing.DrawGeometry(Fill, null, body);
         if (_look.Gradient is { } gradient) drawing.DrawGeometry(gradient, null, body);
+        if (_decor is { } decor)
+        {
+            // The theme's motifs at the island's size, over the island's own place and under the displaced outline.
+            drawing.PushClip(body);
+            drawing.PushTransform(new TranslateTransform(_island.X, _island.Y));
+            decor.Draw(drawing, _island.Size, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius), _shape.Shoulder, Rest().Outline);
+            drawing.Pop(); drawing.Pop();
+        }
         if (_look.Pattern is { } pattern) drawing.DrawGeometry(pattern, null, body);
-        if (_look.RimWidth > 0)
+        if (_look.Edge is { } edge)
+        {
+            // Glass: the light gathered along the inside of the outline; clipped to the body, the pens' outer halves go.
+            drawing.PushClip(body);
+            IslandBorder.DrawEdge(drawing, _edge ??= IslandBorder.EdgePens(edge), body);
+            drawing.Pop();
+        }
+        if (_look.RimWidth > 0 && Rest().Bevel is { } bevel && _look.Bevel is { } shade)
+        {
+            // A pixel theme's rim is its bevel: the light side in the rim's brush, the shade side in the bevel's.
+            drawing.PushTransform(new TranslateTransform(_island.X, _island.Y));
+            drawing.DrawGeometry(_look.Rim, null, bevel.Light);
+            drawing.DrawGeometry(shade, null, bevel.Shade);
+            drawing.Pop();
+        }
+        else if (_look.RimWidth > 0)
         {
             // Clipped to the body, the outer half of the stroke goes, so the pen is twice the rim's width (as IslandBorder's).
             _rim ??= Freeze(_look.Rim.Clone());
@@ -441,7 +488,7 @@ internal sealed class IslandNotice : Window
     // The beads that trail some ripples, in the island's own color.
     private void DrawParts(DrawingContext drawing)
     {
-        if (_liquid is not { } liquid || Form == IslandForm.Line) return;
+        if (_liquid is not { } liquid || Form == IslandForm.Line || _look.Pixel > 0) return;
         liquid.Beads(_t, _circles);
         if (_circles.Count == 0) return;
         var parts = new StreamGeometry { FillRule = FillRule.Nonzero };
@@ -582,12 +629,43 @@ internal sealed class IslandNotice : Window
 
     private TextBlock? _announced;
 
+    // ----- Live words -----
+    //
+    // A time notice's words about its time ("还剩 24:59", "14 分钟后开始") follow NoticeCenter's shared second tick while it shows, and
+    // change only those words; nothing ticks once it ends.
+    private Run? _liveRun;
+    private bool _watchingLive;
+
+    private void WatchLive()
+    {
+        bool live = _liveRun is not null && _item is not null && !_leaving && !_closed;
+        if (live == _watchingLive) return;
+        _watchingLive = live;
+        if (live) Center.LiveTick += LiveStep; else Center.LiveTick -= LiveStep;
+    }
+
+    private void LiveStep()
+    {
+        if (_liveRun is not { } run || _item is null || _leaving) { WatchLive(); return; }
+        string words = "  " + Texts().Summary;
+        // Words that grew (a stopwatch passing an hour, an event that started) may no longer fit: laid out again. Shorter ones stay.
+        if (words.Length > run.Text.Length) BuildContent(); else run.Text = words;
+        // Ended (the countdown reached its end, the event started): the last words stay; the tick is let go.
+        if (_item is not null && !NoticeClock.IsLive(Notice?.Timing, DateTimeOffset.UtcNow)) { _liveRun = null; WatchLive(); }
+    }
+
     // The icon and the words, laid out inside the island's content area at the island's scale. Words longer than the area scroll
     // through once they have been read from the start, and start again; without animations they end in an ellipsis.
     private void BuildContent()
     {
+        BuildContentCore();
+        WatchLive();
+    }
+
+    private void BuildContentCore()
+    {
         _content.Children.Clear();
-        _announced = null;
+        _announced = null; _liveRun = null;
         if (_item is null || Form == IslandForm.Line) return;
         double scale = _shape.Scale, inset = _shape.Inset, available = Math.Max(0, _island.Width - 2 * inset);
         double plate = Math.Round(20 * scale), gap = Math.Round(8 * scale);
@@ -597,7 +675,12 @@ internal sealed class IslandNotice : Window
         _content.Children.Add(icon);
         var line = new TextBlock { FontFamily = UI.PanelFont, FontSize = 12.5 * scale, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center };
         line.Inlines.Add(new Run(title) { FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary) });
-        if (summary.Length > 0) line.Inlines.Add(new Run("  " + summary) { Foreground = UI.Brush(_look.Secondary), FontSize = 12 * scale });
+        if (summary.Length > 0)
+        {
+            var words = new Run("  " + summary) { Foreground = UI.Brush(_look.Secondary), FontSize = 12 * scale };
+            line.Inlines.Add(words);
+            if (Notice is { } timed && NoticeClock.IsLive(timed.Timing, DateTimeOffset.UtcNow)) _liveRun = words;
+        }
         Directed(line, title + summary);
         string spoken = (Notice?.AppName is { Length: > 0 } app ? app + ": " : "") + (summary.Length > 0 ? title + ", " + summary : title);
         AutomationProperties.SetName(line, spoken);
@@ -636,10 +719,18 @@ internal sealed class IslandNotice : Window
         {
             var picture = new Image { Source = image, Width = size, Height = size, Stretch = Stretch.Uniform };
             RenderOptions.SetBitmapScalingMode(picture, BitmapScalingMode.HighQuality);
-            return picture;
+            if (notice is null) return picture;
+            // The state and source badges on the plate's corners (NoticeBadges).
+            var framed = new Grid { Width = size, Height = size };
+            framed.Children.Add(picture);
+            NoticeBadges.Decorate(framed, notice, size, _look.Glow, null);
+            return framed;
         }
         var accent = notice is null ? PanelTheme.ColorOf("accent") : _look.AppColor(Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
-        return NoticeLetter.Plate(notice?.AppName, size, accent, bell: notice is null);
+        // Without an icon, BrimDeck's own glyph (a device's) or one for the kind of application, else the initial.
+        var plate = NoticeLetter.Plate(notice?.AppName, size, accent, bell: notice is null, icon: notice is null ? null : NoticeBadges.AppGlyph(notice, size, accent));
+        if (notice is not null && plate is Panel panel) NoticeBadges.Decorate(panel, notice, size, _look.Glow, NoticeGlyphs.Plate(notice));
+        return plate;
     }
 
     private void IconLoaded(string iconRef)
