@@ -739,8 +739,8 @@ internal sealed class MediaSessions : IDisposable
     private static MediaDispatchResult DispatchResult(DesktopCommandResult result) => result switch
     { DesktopCommandResult.Unavailable => MediaDispatchResult.Unavailable, DesktopCommandResult.Sent => MediaDispatchResult.Sent, _ => MediaDispatchResult.Uncertain };
     public float Peak() => _meter.Peak;
-    // The bars' levels from the spectrum of the player's captured audio, one band for each of the levels.Length bars; false when only the peak meter is available.
-    public bool FlowLevels(Span<double> levels) => _meter.TryFill(levels);
+    // The bars' levels from the player's captured audio, flowing along the bars or as the spectrum, one band for each of the levels.Length bars; false when only the peak meter is available.
+    public bool FlowLevels(Span<double> levels, EqualizerMode mode) => _meter.TryFill(levels, mode);
     // How often the bars move, so the captured audio is analysed no more often (AudioLevelMeter.AnalysisMs).
     public void SetBarsInterval(int milliseconds) => _meter.AnalysisMs = milliseconds;
     // The playing player's sound while its bars are seen; otherwise the whole system's, while bars shown at all times ask for it.

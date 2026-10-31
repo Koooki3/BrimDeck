@@ -97,8 +97,6 @@ internal static class MusicCostTests
         var signal = new EqualizerSignal(rate);
         var block = new float[441 * 2];
         double peak = 0, time = 0;
-        var heard = new double[5];
-        signal.Fill(heard, 0);
         for (int n = 0; n < 400; n++)
         {
             time = n / 100d;
@@ -109,10 +107,9 @@ internal static class MusicCostTests
                 block[i * 2] = block[i * 2 + 1] = v;
             }
             signal.Push(block, 2, time + .01);
-            if (n % 3 == 0) { signal.Advance(time + .01); signal.Fill(heard, time + .01); peak = Math.Max(peak, heard.Max()); }
+            if (n % 3 == 0) { signal.Advance(time + .01); peak = Math.Max(peak, signal.Head); }
         }
         for (int n = 1; n <= 30; n++) signal.Advance(time + .01 + n / 30d);
-        signal.Fill(heard, time + 1.01);
-        check("analysed 30 times a second, the bars still rise with the music and fall in silence", peak > .2 && heard.Max() < .05);
+        check("analysed 30 times a second, the bars still rise with the music and fall in silence", peak > .2 && signal.Head < .05);
     }
 }

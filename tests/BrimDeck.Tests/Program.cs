@@ -37,6 +37,8 @@ try
     CompactMotionTests.Run(Check);
     AuditPerfTests.Run(Check);
     MemoryFootprintTests.Run(Check);
+    EqualizerRebuildTests.Run(Check);
+    EqualizerModeTests.Run(root, Check);
     ColorMathTests.Run(Check);
     CompactSpacingTests.Run(Check);
     CompactDragTests.Run(Check);

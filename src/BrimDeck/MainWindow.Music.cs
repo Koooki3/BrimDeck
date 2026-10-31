@@ -1317,13 +1317,14 @@ public partial class MainWindow
         _app.PresentMedia(this, playerVisible, systemVisible);
         bool levels = playerVisible || systemVisible;
         float peak = levels ? _media?.Peak() ?? 0 : 0;
-        // Captured audio drives the bars, one frequency band for each bar drawn (so the bars asked for are as many as the equalizer on
-        // show has, at whatever length it is set to); the session peak is the fallback.
+        // Captured audio drives the bars, as many values as the equalizer on show has bars (at whatever length it is set to), flowing
+        // along them or one frequency band for each bar, as the setting chooses; the session peak is the fallback.
         var shown = _expanded ? IsMusicPage ? _musicEqualizer : null : _alert is null ? _compactEqualizer : null;
         var bandLevels = shown is null ? default : _flowLevels.AsSpan(0, Math.Clamp(shown.Bars, 1, _flowLevels.Length));
-        bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels) == true;
-        if (_expanded && IsMusicPage) { if (flowing) _musicEqualizer?.Show(bandLevels, playing); else _musicEqualizer?.Tick(peak, playing, seconds); }
-        if (!_expanded && _alert is null) { if (flowing) _compactEqualizer?.Show(bandLevels, compactPlaying); else _compactEqualizer?.Tick(peak, compactPlaying, seconds); }
+        bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, Settings.EqualizerMode) == true;
+        bool pitchAxis = Settings.EqualizerMode == EqualizerMode.Spectrum;
+        if (_expanded && IsMusicPage) { if (flowing) _musicEqualizer?.Show(bandLevels, playing, pitchAxis); else _musicEqualizer?.Tick(peak, playing, seconds); }
+        if (!_expanded && _alert is null) { if (flowing) _compactEqualizer?.Show(bandLevels, compactPlaying, pitchAxis); else _compactEqualizer?.Tick(peak, compactPlaying, seconds); }
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }

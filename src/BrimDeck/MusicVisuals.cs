@@ -101,8 +101,8 @@ internal sealed class MusicEqualizer : FrameworkElement
     private readonly DrawingGroup _drawing = new();
     private Size _drawnSize;
     public void Tick(float peak, bool playing, double seconds = 1d / 30) { Levels.Tick(peak, playing, seconds); Redraw(); }
-    // Bar values already computed from captured audio, leftmost first.
-    public void Show(ReadOnlySpan<double> levels, bool playing) { Levels.Show(levels, playing); Redraw(); }
+    // Bar values already computed from captured audio, leftmost first (pitchAxis: EqualizerBars.Show).
+    public void Show(ReadOnlySpan<double> levels, bool playing, bool pitchAxis = true) { Levels.Show(levels, playing, pitchAxis); Redraw(); }
     protected override void OnRender(DrawingContext dc) { Redraw(force: true); dc.DrawDrawing(_drawing); }
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi) { base.OnDpiChanged(oldDpi, newDpi); _bars = null; InvalidateVisual(); }
     // The bars stand on half device pixels (EqualizerLayout): a level that moves none of them draws nothing new, and one that

@@ -160,10 +160,17 @@ public sealed partial class SettingsWindow
             v => Change(s => s.EqualizerAlways = v), help: Loc.T("始终显示时，没有音乐播放也会显示，读取系统的全部声音。", "When always shown, it also shows while no music plays, reading all system sound.")), when));
         options.Children.Add(Lighter(SliderRow(length, S.EqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
             v => Change(s => s.EqualizerBars = (int)v)), length));
+        string way = Loc.T("方式", "Mode");
+        options.Children.Add(Lighter(EqualizerModeChoice(way), way));
         options.Children.Add(Lighter(Row(color, EqualizerSwatches(style)), color));
         return OptionsPartRow(style, CompactPart.Equalizer, rows, Loc.T("律动条", "Equalizer"), Loc.T("律动条设置", "Equalizer settings"), S.ShowsEqualizer(style),
             on => Change(s => { if (notch) s.NotchEqualizer = on; else s.CapsuleEqualizer = on; }), options);
     }
+    // How the equalizers show the sound, one choice for the collapsed and the expanded equalizer.
+    private FrameworkElement EqualizerModeChoice(string title, bool enabled = true) => MusicChoice(title, S.EqualizerMode,
+        [(EqualizerMode.Flow, Loc.T("流动", "Flow")), (EqualizerMode.Spectrum, Loc.T("频谱", "Spectrum"))], v => Change(s => s.EqualizerMode = v), enabled,
+        help: Loc.T("流动：声音的整体起伏从一端流向另一端。频谱：按音高拆成频段，每根条各取一段。",
+            "Flow: the sound's overall rise and fall runs from one end of the bars to the other. Spectrum: the sound is split into bands by pitch, and each bar takes one."));
     // The clock's swatches but the gradient: the theme's equalizer color, the presets, a custom color and the cover's.
     private StackPanel EqualizerSwatches(CompactStyle compact)
     {
@@ -218,7 +225,8 @@ public sealed partial class SettingsWindow
             v => Change(s => s.MusicEqualizerBars = (int)v));
         bars.IsEnabled = S.MusicPage;
         Group(Toggle(Loc.T("显示封面", "Show cover"), S.MusicPageCover, v => Change(s => s.MusicPageCover = v), S.MusicPage),
-            Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars);
+            Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars,
+            EqualizerModeChoice(Loc.T("律动方式", "Equalizer mode"), S.MusicPage));
     }
     // Operations only one player supports, grouped under that player's name.
     private void Players()

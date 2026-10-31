@@ -10,8 +10,9 @@ public sealed class EqualizerBars
     private readonly (double Time, double Peak)[] _history = new (double, double)[64];
     private readonly double[] _levels = new double[Count];
     private int _next, _count;
-    // How many bars the levels were last made for by Show (EqualizerSignal): the levels are then positions along the pitch axis
-    // and not delayed copies of one value, so a row that draws another count (Fit) takes them over by position.
+    // How many bars the levels were last made for by Show when they are positions along the pitch axis (the spectrum of
+    // EqualizerSignal) and not delayed copies of one value, so a row that draws another count (Fit) takes them over by position.
+    // 0 for the flowing bars, which the signal makes again for any count at once, and for the session peak.
     private int _shown;
     private double _time;
 
@@ -51,10 +52,11 @@ public sealed class EqualizerBars
         }
     }
 
-    // Bar values already computed from captured audio, leftmost first: one for each bar drawn, low pitch to high.
-    public void Show(ReadOnlySpan<double> levels, bool playing)
+    // Bar values already computed from captured audio, leftmost first: one for each bar drawn. pitchAxis is whether they are low
+    // pitch to high (the spectrum), whose levels a row of another count takes over by position (Fit); flowing levels are not.
+    public void Show(ReadOnlySpan<double> levels, bool playing, bool pitchAxis = true)
     {
-        Playing = playing; _shown = playing ? Math.Min(levels.Length, _levels.Length) : 0;
+        Playing = playing; _shown = playing && pitchAxis ? Math.Min(levels.Length, _levels.Length) : 0;
         for (int i = 0; i < _levels.Length; i++) _levels[i] = playing && i < levels.Length ? Math.Clamp(levels[i], 0, 1) : 0;
     }
 
