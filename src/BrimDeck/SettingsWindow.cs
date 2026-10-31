@@ -685,6 +685,9 @@ public sealed partial class SettingsWindow : Window
         Group(BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"), S.Maximized, value => Change(s => s.Maximized = value)),
             BehaviorRow(Loc.T("有应用处于无边框全屏时", "When an app is in borderless full screen"), S.Borderless, value => Change(s => s.Borderless = value)),
             BehaviorRow(Loc.T("有应用处于独占全屏时", "When an app is in exclusive full screen"), S.Exclusive, value => Change(s => s.Exclusive = value)),
+            Toggle(Loc.T("同时检测后方窗口", "Also check windows behind"), S.BackgroundWindows, value => Change(s => s.BackgroundWindows = value),
+                help: Loc.T("开启后，正在使用的窗口后方有窗口最大化或无边框全屏时，也按上面对应的规则处理。关闭后只检测正在使用的窗口。",
+                    "When on, a maximized or borderless full-screen window behind the window you are using also follows the matching rule above. When off, only the window you are using is checked.")),
             ExceptionsRow());
         SectionTitle(Loc.T("兼容性", "Compatibility"));
         var raise = ActionButton(Loc.T("立即置顶", "Raise now"), () =>

@@ -43,14 +43,17 @@ public sealed class WindowsHost : IDisposable
     public ScreenContext Current { get; private set; }
     // monitor gives the monitor whose foreground window decides the context. The context is reported with the app it was
     // detected for, and a change of either is a change: two apps can read as the same context with different app rules.
-    public WindowsHost(Func<IntPtr> monitor, Func<IntPtr> window, Func<Rect?> island, Func<bool>? forceTopmost = null)
+    // backgroundWindows says whether a full-screen window behind the foreground one counts; off, only the foreground is read.
+    public WindowsHost(Func<IntPtr> monitor, Func<IntPtr> window, Func<Rect?> island, Func<bool>? forceTopmost = null,
+        Func<bool>? backgroundWindows = null)
     {
-        _monitor = monitor; _window = window; _island = island; _forceTopmost = forceTopmost;
+        _monitor = monitor; _window = window; _island = island; _forceTopmost = forceTopmost; _backgroundWindows = backgroundWindows;
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
     }
     private readonly Func<IntPtr> _window;
     private readonly Func<bool>? _forceTopmost;
+    private readonly Func<bool>? _backgroundWindows;
     // The strip the island actually draws in, in screen physical pixels, as of the last layout; null before the first.
     private readonly Func<Rect?> _island;
     private string _raisedName = "", _raisedPath = "";
@@ -222,13 +225,14 @@ public sealed class WindowsHost : IDisposable
         var foreground = GetForegroundWindow();
         _backgroundName = ""; _backgroundPath = ""; _backgroundKind = ScreenContext.Desktop;
         // Nothing but the desktop: a full-screen window elsewhere on this monitor still owns the screen, so the answer is
-        // BackgroundFullscreen rather than Desktop. Looked up once, and only where it can matter.
+        // BackgroundFullscreen rather than Desktop. Looked up once, only where it can matter, and only while the settings ask
+        // for windows behind the foreground one to count.
         ScreenContext? background = null;
         ScreenContext Desktop()
         {
             if (background is null)
             {
-                var filled = BackgroundFilled(monitor, foreground);
+                var filled = _backgroundWindows?.Invoke() == false ? IntPtr.Zero : BackgroundFilled(monitor, foreground);
                 background = filled == IntPtr.Zero ? ScreenContext.Desktop : ScreenContext.BackgroundFullscreen;
                 if (filled != IntPtr.Zero)
                 {

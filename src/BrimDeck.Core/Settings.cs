@@ -380,11 +380,11 @@ public sealed class DeckSettings
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
-    // A full-screen window elsewhere on the same monitor: the page is what the user is looking at even while another
-    // app holds the foreground, so the island steps aside — by default to its line, which still shows the quotas.
-    public WindowBehavior BackgroundFullscreen { get; set; } = WindowBehavior.Line;
+    // Whether a window behind the foreground one counts too: maximized or borderless across the panel's monitor, it calls for
+    // the same rule as if it were in front. Off, only the foreground window is read, as before the background was looked at.
+    public bool BackgroundWindows { get; set; } = true;
     // Applications whose windows are not counted as full screen, so that a desktop beautification tool does not hide the
-    // panel. Empty by default: every app follows the three rules above.
+    // panel. Empty by default: every app follows the rules above.
     public List<FullscreenRule> FullscreenRules { get; set; } = [];
     // Read only to carry the exceptions of a file saved before app rules existed; Normalize moves them across and the
     // member then disappears from the saved file.
@@ -516,17 +516,18 @@ public sealed class DeckSettings
     }
     // The behavior a context calls for: the app's own rule first, where it chooses one for that context, and the global
     // rules everywhere else. The app is the one the context was detected for; a null app, as on the desktop, has no rule.
-    // A background full screen is the one context the app is not in itself, so backgroundKind — the way that window fills
-    // the screen — picks which of the app's own choices speaks for it. Without one there is nothing of the app's to ask,
-    // and the global background rule answers.
+    // A background full screen has no rules of its own: backgroundKind, the way the window behind the foreground one fills
+    // the screen (Maximized or Borderless), picks the rule, the app's own first and the global one after it, as if that
+    // window were in front. Without a kind nothing fills the screen, and the panel stays as it is.
     public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null,
         ScreenContext? backgroundKind = null)
     {
+        var kind = context == ScreenContext.BackgroundFullscreen ? backgroundKind ?? ScreenContext.Desktop : context;
         if (processName is not null || imagePath is not null)
             foreach (var rule in FullscreenRules)
                 if (ScreenPolicy.Matches(rule, processName, imagePath))
                 {
-                    var own = (context == ScreenContext.BackgroundFullscreen ? backgroundKind ?? ScreenContext.Desktop : context) switch
+                    var own = kind switch
                     {
                         ScreenContext.Maximized => rule.Maximized, ScreenContext.Borderless => rule.Borderless,
                         ScreenContext.Exclusive => rule.Exclusive, _ => null
@@ -534,11 +535,10 @@ public sealed class DeckSettings
                     if (own is { } choice) return choice;
                     break;
                 }
-        return context switch
+        return kind switch
         {
             ScreenContext.Maximized => Maximized, ScreenContext.Borderless => Borderless,
-            ScreenContext.Exclusive => Exclusive, ScreenContext.BackgroundFullscreen => BackgroundFullscreen,
-            _ => WindowBehavior.Normal
+            ScreenContext.Exclusive => Exclusive, _ => WindowBehavior.Normal
         };
     }
     public DeckSettings Copy()
