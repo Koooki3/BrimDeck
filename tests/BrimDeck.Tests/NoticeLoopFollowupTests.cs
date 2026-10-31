@@ -117,6 +117,23 @@ internal static class NoticeLoopFollowupTests
         laterLoop.Step(laterRun, later, default);
         check("Loop followup E (lookup fails): the next reading that can read it shows it", Keys(later.Arrived).SequenceEqual([Key(51)]));
 
+        // Windows does not answer the lookup at all (seen after waking): the same, the reading that follows shows the toast.
+        var (slowLoop, slowRun, slow) = Started(10);
+        slow.Listed[53] = Input(53);
+        slow.Finish([10u, 53u]);
+        slowLoop.Step(slowRun, slow, default);
+        var slowAt = slow.Now;
+        slow.Lookup = _ => throw new TimeoutException();
+        Log(slowLoop, slowRun, 53);
+        bool timedOut = false;
+        try { slowLoop.Step(slowRun, slow, default); } catch (TimeoutException) { timedOut = true; }
+        slow.Lookup = null;
+        slow.Now = slowAt + WindowsNoticeLogBatch.FailedReadReconcileInterval;
+        slowLoop.Step(slowRun, slow, default);
+        slow.Finish();
+        slowLoop.Step(slowRun, slow, default);
+        check("Loop followup E (lookup fails): a lookup Windows did not answer in time is shown by the reading that follows, once", timedOut && Keys(slow.Arrived).SequenceEqual([Key(53)]));
+
         // The toast leaves Windows before anything could read it: nothing is kept for it.
         var (goneLoop, goneRun, gone) = Started(10);
         gone.Listed[52] = Input(52);
