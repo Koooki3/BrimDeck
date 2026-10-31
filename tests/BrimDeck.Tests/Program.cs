@@ -36,6 +36,7 @@ try
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
+    MonitorSpeechTests.Run(Check);
     CompactReadingTests.Run(Check);
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);

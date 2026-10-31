@@ -458,7 +458,12 @@ public partial class MainWindow
             // over the column's foot, so neither takes the other's room; side by side, both grow evenly.
             double grow = Math.Max(0, HitArea.Minimum - layout.FootRow);
             if (inline) { HitArea.Grow(today, Math.Floor(grow / 2), Math.Ceiling(grow / 2)); HitArea.Grow(week, Math.Floor(grow / 2), Math.Ceiling(grow / 2)); }
-            else { HitArea.Grow(today, Math.Min(grow, layout.FootBottom), 0); HitArea.Grow(week, 0, grow); }
+            else
+            {
+                // Today's room above is the gap under the hairline, the hairline, and the gap over it, up to the quotas' foot.
+                var (up, down) = HitArea.Stacked(layout.FootRow, layout.FootBottom + 1 + layout.FootTop);
+                HitArea.Grow(today, up, 0); HitArea.Grow(week, 0, down);
+            }
             if (inline)
             {
                 // Side by side, each period is one tight group: today at the left edge, the week at the right edge.

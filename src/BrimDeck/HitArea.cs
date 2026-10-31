@@ -27,6 +27,15 @@ internal static class HitArea
         Grow(element, top, grow - top, height);
     }
 
+    // Two rows drawn row tall, one under the other, each given Minimum tall for the pointer: the lower grows down over the room below
+    // it, the upper up over roomAbove (the space between it and whatever lies over it, not its neighbour's), so neither takes the
+    // other's room. Up is less than Minimum - row only where roomAbove is.
+    public static (double Up, double Down) Stacked(double row, double roomAbove)
+    {
+        double grow = Math.Max(0, Minimum - row);
+        return (Math.Min(grow, Math.Max(0, roomAbove)), grow);
+    }
+
     // Grows a control by top above and bottom below what it draws; look: its drawn height, for a control of fixed height.
     public static void Grow(FrameworkElement element, double top, double bottom, double look = double.NaN)
     {
