@@ -106,7 +106,7 @@ public sealed class EqualizerSignal
         double dt = double.IsNaN(_last) ? 1d / 60 : Math.Clamp(now - _last, .001, .1);
         _last = now;
         int requested = Volatile.Read(ref _requested), bars = requested <= 0 ? DefaultBars : Math.Min(requested, MaxBars);
-        if (bars != _bars) Rebuild(bars);
+        if (bars != _bars) Rebuild(bars, now);
         // Without input for a while the player has gone quiet, and nothing but silence needs no analysis at all: let the bars fall.
         bool heard = !double.IsNaN(_lastInput) && now - _lastInput < IdleSeconds && Analyse(now, dt);
         if (!heard) Fall(dt);
@@ -155,7 +155,9 @@ public sealed class EqualizerSignal
     }
 
     // Makes the bars for a new count the way they would be had they been that many all along: from the narrow bands kept.
-    private void Rebuild(int bars)
+    // Only frames still within RangeSeconds are used, and when the newest is older than IdleSeconds (the player has gone quiet) the bars
+    // start at rest, as Fall had left them: a count that changes in silence must not bring back the level of the last sound.
+    private void Rebuild(int bars, double now)
     {
         _bars = bars;
         for (int i = 0; i < bars; i++)
@@ -166,8 +168,10 @@ public sealed class EqualizerSignal
         for (int n = 0; n < _frameCount; n++)
         {
             int slot = (_frameOldest + n) % HistoryCapacity;
+            if (now - _frameTime[slot] > RangeSeconds) continue;
             Step(_frames[slot], _frameTime[slot], _frameStep[slot]);
         }
+        if (_frameCount == 0 || now - _frameTime[(_frameOldest + _frameCount - 1) % HistoryCapacity] >= IdleSeconds) Array.Clear(_state, 0, bars);
     }
 
     // False when the window holds nothing to analyse.
