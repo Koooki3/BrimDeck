@@ -37,6 +37,8 @@
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.band.cso" LogicalName="BrimDeck.LiquidGlass.Frost.band.cso" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.stats.cso" LogicalName="BrimDeck.LiquidGlass.Frost.stats.cso" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl.sha256" />
+    <Compile Include="..\..\src\BrimDeck\Native\FrameRates.cs" Link="FrameRates.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\Displays.cs" Link="Displays.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\GpuProvider.cs" Link="GpuProvider.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Hid.cs" Link="Hid.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\HidBatteries.cs" Link="HidBatteries.cs" />
@@ -52,8 +54,10 @@
     <Compile Include="..\..\src\BrimDeck\LayoutRetry.cs" Link="LayoutRetry.cs" />
     <Compile Include="..\..\src\BrimDeck\MainWindow.PageSwitch.cs" Link="MainWindow.PageSwitch.cs" />
     <Compile Include="..\..\src\BrimDeck\PageHandover.cs" Link="PageHandover.cs" />
+    <Compile Include="..\..\src\BrimDeck\RadioGroups.cs" Link="RadioGroups.cs" />
+    <Compile Include="..\..\src\BrimDeck\RowFocus.cs" Link="RowFocus.cs" />
+    <Compile Include="..\..\src\BrimDeck\DrawnAutomation.cs" Link="DrawnAutomation.cs" />
     <Compile Include="..\..\src\BrimDeck\Soft.cs" Link="Soft.cs" />
-    <Compile Include="..\..\src\BrimDeck\HitArea.cs" Link="HitArea.cs" />
     <!-- The island itself: the shadow observes its properties, and the settled clip is checked on its drawing. -->
     <Compile Include="..\..\src\BrimDeck\IslandBorder.cs" Link="IslandBorder.cs" />
     <Compile Include="..\..\src\BrimDeck\IslandDecor.cs" Link="IslandDecor.cs" />

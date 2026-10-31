@@ -2,11 +2,13 @@ using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using BrimDeck.Core;
+using static BrimDeck.Tracks;
 
 namespace BrimDeck;
 
-// The edge the panel hangs from (DeckSettings.DockEdge). Everything is laid out in the edge's frame (EdgeFrame), as if the panel
+// The edge the panel hangs from (DeckSettings.Dock, for the style shown). Everything is laid out in the edge's frame (EdgeFrame), as if the panel
 // hung from the top: MonitorBoundsDip and WorkDip are the frame's, the collapsed shape, the hover area, the open panel and the
 // resize grips are computed in it, and Stage draws them through the frame's mapping (its layout transform). The island's content is
 // turned back upright (IslandContent), so text reads as usual on every edge and its pop-ups, tooltips and screen points need no
@@ -39,6 +41,8 @@ public partial class MainWindow
         var edge = _frame.Edge;
         if (_framedEdge == edge) return false;
         bool changed = _framedEdge is not null;
+        // Between the top and the bottom, or the left and the right, the row stays as it was built and keeps the width it asked for.
+        bool turned = _framedEdge is not { } before || (before is ScreenEdge.Left or ScreenEdge.Right) != _frame.Across;
         _framedEdge = edge;
         Stage.LayoutTransform = Turn(_frame.Matrix);
         IslandContent.LayoutTransform = Turn(_frame.Upright);
@@ -60,8 +64,9 @@ public partial class MainWindow
         MusicIndicator.ClearValue(WidthProperty); MusicIndicator.ClearValue(HeightProperty);
         MusicIndicator.HorizontalAlignment = _frame.Across ? HorizontalAlignment.Center : HorizontalAlignment.Left;
         MusicIndicator.VerticalAlignment = _frame.Across ? VerticalAlignment.Top : VerticalAlignment.Center;
+        _compactRendered = null; _alertRendered = null;
         // The row was built for the other orientation.
-        _compactRendered = null; _alertRendered = null; _compactWanted = double.NaN; _compactColumn = double.NaN;
+        if (turned) { _compactWanted = double.NaN; _compactColumn = double.NaN; }
         return changed;
     }
 
@@ -73,10 +78,63 @@ public partial class MainWindow
         return transform;
     }
 
-    // The panel moved to another edge while it was on show: it comes in there with a short fade rather than jumping.
-    private void FadeInOnNewEdge()
+    // The capsule floats below the top of the screen, but sitting by the bottom it is docked with it, as the notch on the bottom edge
+    // is: within CollapsedHover.BridgeMaxGap above the work area's bottom it hangs its panel from there, and below it, over a bottom
+    // taskbar, from the screen's bottom edge; the panel's corners on that edge are square, as they are under a capsule near the top.
+    // Its place stays a place on the screen (ShapeFor). _screenMonitor and _screenWork are this display's, relative to its corner.
+    private DipRect _screenMonitor = FallbackMonitor, _screenWork = FallbackWork;
+    private (ScreenEdge Edge, bool OverTaskbar)? CapsuleBottomDock()
     {
-        if (_bootWaiting || _bootDot || _poweringOff || !Soft.Enabled || Settings.AnimationDuration <= 0) return;
-        HoverZone.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(Math.Max(120, Settings.AnimationDuration * .6))) { EasingFunction = Soft.Out, FillBehavior = FillBehavior.Stop });
+        var surface = CollapsedGeometry.Resolve(Settings, CompactStyle.Capsule, _screenMonitor, _screenWork, _pixelsPerDip, null, 0, _scale).Surface;
+        if (surface.Y - _screenWork.Y <= CollapsedHover.BridgeMaxGap) return null;
+        if (surface.Bottom > _screenWork.Bottom + .5) return (ScreenEdge.Bottom, true);
+        return _screenWork.Bottom - surface.Bottom <= CollapsedHover.BridgeMaxGap ? (ScreenEdge.Bottom, false) : null;
+    }
+
+    // Moving to another edge or anchor moves and resizes the window, and Windows shows a layered window's last picture at its new
+    // place and size before WPF draws again: the island flashed where the old picture put it (at the other end of the screen,
+    // or in its middle for the side edges). As HideBlank does, the island is cleared first, and the window moves once that empty
+    // frame has been drawn (ApplySettings runs again then). Returns whether ApplySettings waits for it. While the surface is dragged
+    // the island is hidden already (MainWindow.Move.cs).
+    private (ScreenEdge Edge, bool OverTaskbar)? _framedDock;
+    private bool _edgeClearing, _edgeCleared, _edgeArriving;
+    private bool ClearBeforeMoving(bool animatePage)
+    {
+        if (_edgeClearing) return true;
+        if (_framedDock is not { } framed || Dock(EffectiveStyle) == framed || !IsVisible || IsSuppressed || _hiding || _moveOverlay is not null || !(HoverZone.Opacity > 0)) return false;
+        _edgeClearing = true;
+        SetImmediate(HoverZone, OpacityProperty, 0d);
+        int frames = 0;
+        void Rendered(object? sender, EventArgs e)
+        {
+            if (PresentationSource.FromVisual(this) is null) { CompositionTarget.Rendering -= Rendered; _edgeClearing = false; return; }
+            // Rendering comes before each frame: by the third, the empty frame has been drawn.
+            if (++frames < 3) return;
+            CompositionTarget.Rendering -= Rendered;
+            _edgeClearing = false; _edgeCleared = true;
+            ApplySettings(animatePage);
+        }
+        CompositionTarget.Rendering += Rendered;
+        return true;
+    }
+
+    // The panel moved to another edge while it was on show: it comes in there with a short fade rather than jumping, once its
+    // content has been laid out for the edge (FitCompactToContent, queued at the same priority, runs first and resizes the surface
+    // at once meanwhile), so it arrives at the size it keeps. cleared: the island was cleared before the move and shows again here.
+    private void FadeInOnNewEdge(bool cleared)
+    {
+        // While the surface is dragged the island stays hidden; it is laid out on the edge being dragged to (MainWindow.Move.cs).
+        if (_moveOverlay is not null) return;
+        if (_bootWaiting || _bootDot || _poweringOff || !Soft.Enabled || Settings.AnimationDuration <= 0) { if (cleared) SetImmediate(HoverZone, OpacityProperty, 1d); return; }
+        SetImmediate(HoverZone, OpacityProperty, 0d);
+        _edgeArriving = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            _edgeArriving = false;
+            // Hidden meanwhile: showing again brings the island back (ApplySettings).
+            if (!IsVisible || _hiding || _moveOverlay is not null) return;
+            SetImmediate(HoverZone, OpacityProperty, 1d);
+            HoverZone.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(Math.Max(120, Settings.AnimationDuration * .6))) { EasingFunction = Soft.Out, FillBehavior = FillBehavior.Stop });
+        });
     }
 }

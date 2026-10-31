@@ -264,12 +264,12 @@ static class PowerTests
     private static void Readings(Action<string, bool> check)
     {
         var table = CompactMonitor.Normalize(null);
-        check("Readings: Power and Charge are in the table, hidden, before the devices' battery (which stays last)",
-            table.Select(reading => reading.Item).TakeLast(3).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Charge, CompactMonitorItems.Battery]) && table.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
+        check("Readings: Power and Charge are last in the table but for the frame rate and the devices' battery (which stays last), hidden",
+            table.Select(reading => reading.Item).TakeLast(4).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Charge, CompactMonitorItems.Frames, CompactMonitorItems.Battery]) && table.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
         check("Readings: they are readings of the system, not of the devices",
             CompactMonitor.Order.Contains(CompactMonitorItems.Power) && CompactMonitor.Order.Contains(CompactMonitorItems.Charge) && CompactMonitorItems.Power != CompactMonitorItems.Battery
             && (CompactMonitor.Every & CompactMonitorItems.Power) != 0 && (CompactMonitor.Every & CompactMonitorItems.Charge) != 0);
-        check("Readings: they leave a short row early, the machine's battery after the drives", CompactMonitor.LeaveOrder.Take(4).SequenceEqual([CompactMonitorItems.Battery, CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge]) && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
+        check("Readings: they leave a short row early, after the devices' battery and the frame rate, the machine's battery after the drives", CompactMonitor.LeaveOrder.Take(5).SequenceEqual([CompactMonitorItems.Battery, CompactMonitorItems.Frames, CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge]) && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
 
         // The presets keep to the readings they had: Full does not turn the new ones on, Brief turns them off.
         var full = CompactMonitor.Normalize(null);

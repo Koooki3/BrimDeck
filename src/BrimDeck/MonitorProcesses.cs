@@ -97,7 +97,7 @@ internal sealed class ProcessListView : FrameworkElement
         _cores = Math.Max(1, cores);
         var (rows, columns) = Grid;
         int capacity = Math.Max(rows * columns, MonitorLayout.MaximumRows * MonitorLayout.MaximumColumns);
-        if (!reading.TryGet(out var list)) { _rows = []; _message = Loc.T("正在读取进程…", "Reading processes…"); _motion.Clear(); InvalidateVisual(); return; }
+        if (!reading.TryGet(out var list)) { _rows = []; _message = Loc.T("正在读取进程…", "Reading processes…"); _motion.Clear(); InvalidateVisual(); DrawnPeer.Refresh(this); return; }
         var ranked = list.Ranked(_sort).Take(capacity).ToList();
         _message = ranked.Count == 0 ? Loc.T("没有进程", "No processes") : "";
         bool moving = false;
@@ -125,6 +125,8 @@ internal sealed class ProcessListView : FrameworkElement
         _rows = ranked;
         if (_hover is not null) moving |= Highlight(_hover, motion);
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
+        // Once per reading, not per frame: the rows a screen reader lists are these.
+        DrawnPeer.Refresh(this);
     }
     private bool Step(double now)
     {

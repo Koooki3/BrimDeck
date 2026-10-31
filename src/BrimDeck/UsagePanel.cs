@@ -138,9 +138,10 @@ public partial class MainWindow
     // What the quota columns were last built from: their form and the data, page and settings they show, not the panel's exact
     // size. As the monitor page is built once per layout step and stretches within it, a render with the same key keeps the
     // page instead of building it again: a drag that stays within a size step, a return from another page, the sync button.
+    // The screen's and the panel's scales are part of it, as the title rows are placed on the screen's pixels (TitlePlaces).
     private UsageBuild? _usageBuilt;
     private PanelHeader _usageHeaderBuilt = PanelHeader.For(36, 20);
-    private sealed record UsageBuild(string Form, object Snapshots, object Settings, int ApplicationPage, string QuotaPages, int Theme, string Language, long Minute);
+    private sealed record UsageBuild(string Form, object Snapshots, object Settings, int ApplicationPage, string QuotaPages, int Theme, string Language, long Minute, double Dpi, double Scale);
 
     private UsageBuild? ColumnsBuild()
     {
@@ -150,7 +151,7 @@ public partial class MainWindow
         var fit = FitColumns(columns, ContentCanvas.Width, ContentCanvas.Height);
         return new UsageBuild($"{fit.Layout.Tier}|{fit.Layout.Footer}|{fit.Inline}|{fit.Wide}|{fit.Count}", Snapshots, Settings, _applicationPage,
             string.Join(",", _quotaPages.OrderBy(page => page.Key).Select(page => $"{page.Key:N}:{page.Value}")), PanelTheme.Generation, Loc.Language,
-            DateTime.Now.Ticks / TimeSpan.TicksPerMinute);
+            DateTime.Now.Ticks / TimeSpan.TicksPerMinute, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
     }
 
     public void RenderUsage()
@@ -280,9 +281,17 @@ public partial class MainWindow
         // Antigravity labels its quotas "Gemini · 5 小时", "Claude · 每周" and so on. Each group starts its own page, Gemini first,
         // so the first page shows rows 1 and 2 (Gemini) and a click on the column shows rows 3 and 4 (Claude), the same rows and
         // click-to-page as any other app with more than two quotas. Labels without a group come last.
-        var sets = snapshot.Id == ProviderId.Antigravity
-            ? quotas.GroupBy(x => UI.QuotaGroup(new Quota(x.Label, 0, null))).OrderBy(x => x.Key == "Gemini" ? 0 : x.Key.Length > 0 ? 1 : 2).Select(x => x.ToList()).ToList()
-            : [quotas];
+        // Claude groups by organization when an account reads several ("Pro · 5 小时额度", "Team · 每周额度"): each organization
+        // starts its own page, in the order the service gave them, so Pro's 5-hour and weekly quotas come first, then its Fable
+        // quota, then Team's.
+        string Group(UsageMetric metric) => UI.QuotaGroup(new Quota(metric.Label, 0, null));
+        var order = snapshot.Metrics.Select(Group).Distinct().ToList();
+        var sets = snapshot.Id switch
+        {
+            ProviderId.Antigravity => quotas.GroupBy(Group).OrderBy(x => x.Key == "Gemini" ? 0 : x.Key.Length > 0 ? 1 : 2).Select(x => x.ToList()).ToList(),
+            ProviderId.Claude => quotas.GroupBy(Group).OrderBy(x => order.IndexOf(x.Key)).Select(x => x.ToList()).ToList(),
+            _ => [quotas]
+        };
         var pages = sets.SelectMany(set => set.Chunk(capacity)).Select(x => x.ToList()).ToList();
         if (pages.Count == 0) pages.Add([]);
         // Sized for the fullest page the column can switch to.
@@ -355,15 +364,17 @@ public partial class MainWindow
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
+        var (nameTop, chipTop, chipLift) = TitlePlaces(layout, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
         var name = UI.Centered(entry.Name, layout.Name, off ? UI.Secondary : UI.Primary, FontWeights.SemiBold);
         name.HorizontalAlignment = HorizontalAlignment.Left;
+        name.VerticalAlignment = VerticalAlignment.Top; name.Margin = new Thickness(0, nameTop, 0, 0);
         name.ToolTip = QuotaTooltip(snapshot);
         AutomationProperties.SetAutomationId(name, "quota-title-" + entry.InstanceId.ToString("N"));
         head.Children.Add(name);
         double occupied = 0;
         if (snapshot.Plan.Length > 0)
         {
-            var chip = PlanChip(snapshot, layout);
+            var chip = PlanChip(snapshot, layout, chipTop, chipLift);
             Grid.SetColumn(chip, 1); head.Children.Add(chip);
             chip.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += chip.DesiredSize.Width;
         }
@@ -376,10 +387,11 @@ public partial class MainWindow
         FrameworkElement body;
         if (off)
         {
-            // No readings: what the state is, why, and a way to sync now.
+            // No readings: what the state is, why, and a way to sync now, centered in the column. Left-aligned, the button's text sat
+            // inside its outline and padding, so it looked further right than the lines above it.
             var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             var label = UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold);
-            label.ToolTip = snapshot.Status;
+            label.TextAlignment = TextAlignment.Center; label.ToolTip = snapshot.Status;
             status.Children.Add(label);
             // The detail is dropped when it only repeats the label, and when the column is too short for it (the smallest panel):
             // the label and the button stay, the full text is in the label's tip.
@@ -388,9 +400,10 @@ public partial class MainWindow
             {
                 detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
                 detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.TextWrapping = TextWrapping.Wrap;
+                detail.TextAlignment = TextAlignment.Center;
                 status.Children.Add(detail);
             }
-            var sync = EmptyAction(Loc.T("立即同步", "Sync now"), 24); sync.HorizontalAlignment = HorizontalAlignment.Left; sync.Margin = new Thickness(0, Space.Tight, 0, 0);
+            var sync = EmptyAction(Loc.T("立即同步", "Sync now"), 24); sync.HorizontalAlignment = HorizontalAlignment.Center; sync.Margin = new Thickness(0, Space.Tight, 0, 0);
             AutomationProperties.SetName(sync, Loc.T("立即同步用量", "Sync usage now"));
             sync.Click += (_, _) => _ = RefreshAsync();
             status.Children.Add(sync);
@@ -461,11 +474,6 @@ public partial class MainWindow
             // Both captions take the wider one's width, so they start and end on the same vertical lines.
             double captionWidth = Math.Max(JustifiedText.NaturalWidth(todayLabel, layout.Foot), JustifiedText.NaturalWidth(weekLabel, layout.Foot));
             var today = TotalRow(entry, usage, todayLabel, 1, layout, captionWidth, inline); var week = TotalRow(entry, usage, weekLabel, 7, layout, captionWidth, inline);
-            // Each row takes the pointer HitArea.Minimum tall: stacked, today grows up over the hairline's gap and the week down
-            // over the column's foot, so neither takes the other's room; side by side, both grow evenly.
-            double grow = Math.Max(0, HitArea.Minimum - layout.FootRow);
-            if (inline) { HitArea.Grow(today, Math.Floor(grow / 2), Math.Ceiling(grow / 2)); HitArea.Grow(week, Math.Floor(grow / 2), Math.Ceiling(grow / 2)); }
-            else { HitArea.Grow(today, Math.Min(grow, layout.FootBottom), 0); HitArea.Grow(week, 0, grow); }
             if (inline)
             {
                 // Side by side, each period is one tight group: today at the left edge, the week at the right edge.
@@ -494,14 +502,38 @@ public partial class MainWindow
         return surface;
     }
 
-    private static Border PlanChip(ProviderSnapshot snapshot, Layout layout)
+    // Where the name and the plan chip go in the title row, from its top. Centered on their own line boxes and rounded to pixels
+    // apart, the smaller plan ended up as much as two pixels above the name; instead the chip goes where its capitals' middle
+    // comes closest to the name's as drawn. Positions fall on the layout's pixels (1 / dpi), text baselines on the screen's
+    // (the panel's scale applied), and the border is a whole number of pixels thick. At 150 % a layout pixel is one and a half
+    // screen pixels, too coarse to reach the name's line: the chip's text then also moves by whole screen pixels (Lift), which
+    // keeps it sharp. At 100 % it never moves.
+    private static (double Name, double Chip, double Lift) TitlePlaces(Layout layout, double dpi, double scale)
+    {
+        double pixel = 1 / dpi, screen = dpi * scale;
+        double Snap(double value) => Math.Round(value / pixel) * pixel;
+        double Capitals(double top, double size) => Math.Round((top + UI.Baseline(size)) * screen) / screen - UI.CapHeight(size) / 2;
+        double name = Snap((layout.Head - UI.LineBox(layout.Name)) / 2), border = Snap(1);
+        double target = Capitals(name, layout.Name), ideal = target - border - UI.Baseline(layout.Plan) + UI.CapHeight(layout.Plan) / 2;
+        // Of equally close places, the one nearest the ideal.
+        double Miss(double top) => Math.Abs(Capitals(top + border, layout.Plan) - target) + 1e-6 * Math.Abs(top - ideal);
+        var chip = Enumerable.Range(-3, 7).Select(step => Snap(ideal) + step * pixel).MinBy(Miss);
+        double lift = Math.Round((target - Capitals(chip + border, layout.Plan)) * screen) / screen;
+        return (name, chip, lift);
+    }
+
+    // top and lift: from TitlePlaces. The text sits right below the border: centered, it moved by a pixel where the rounded
+    // border leaves the chip half a pixel short of or over the text.
+    private static Border PlanChip(ProviderSnapshot snapshot, Layout layout, double top, double lift)
     {
         var text = UI.Centered(UI.DisplayPlan(snapshot.Plan), layout.Plan, UI.Tertiary);
+        text.VerticalAlignment = VerticalAlignment.Top;
+        if (lift != 0) text.RenderTransform = new TranslateTransform(0, lift);
         return new Border
         {
             Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Sm)),
-            Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(Space.Tight, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center
+            Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0),
+            Margin = new Thickness(Space.Tight, top, 0, 0), VerticalAlignment = VerticalAlignment.Top
         };
     }
 

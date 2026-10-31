@@ -471,7 +471,7 @@ public partial class App : Application
         else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
         // Switching the setting off leaves full control on until BrimDeck restarts.
         if (Settings.AppleMusicFullControl && Media is { AppleMusicFullControl: false } media) media.EnableAppleMusicFullControl();
-        if (Media is not null) { Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl; Media.KugouFullControlWanted = Settings.KugouFullControl; }
+        if (Media is not null) { Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl; Media.NeteaseFileControlWanted = Settings.NeteaseFullControl; Media.KugouFullControlWanted = Settings.KugouFullControl; }
     }
     private void RaiseMediaChanged() => MediaChanged?.Invoke();
     // Audio levels are read while any panel shows music: the player's while it shows a song's bars, the whole system's while
@@ -533,7 +533,7 @@ public partial class App : Application
     }
     // Temperatures and drives are read for an open page with them on, the drives' temperatures only there; the processor's and the
     // graphics adapter's temperatures, and the drives, also for a collapsed row showing those readings.
-    private void UpdateMonitorExtras()
+    internal void UpdateMonitorExtras()
     {
         bool page = _presentingMonitor.Count > 0;
         bool strip = _stripMonitor.Count > 0;
@@ -547,7 +547,9 @@ public partial class App : Application
             // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
             // alone also for the row's charge reading.
             _presentingPower.Count > 0 && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
-            (shown & CompactMonitorItems.Charge) != 0);
+            (shown & CompactMonitorItems.Charge) != 0,
+            // The frame rate for a row that shows it, or an open page with room for its line.
+            (shown & CompactMonitorItems.Frames) != 0 || Settings.MonitorFrames && _presentingMonitor.Any(deck => deck.PageShowsFrames));
     }
     // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
     // source nor a battery (a desktop with nothing), so such a page does not keep asking.

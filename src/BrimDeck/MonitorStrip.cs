@@ -9,7 +9,8 @@ namespace BrimDeck;
 // when chosen, the drives' space with a drive glyph, in the order and the colors set in the settings' table (CompactReading);
 // the rings alone sit closer together. CPU, GPU and the drives show their share in use, their temperature, or both one above the
 // other in two smaller lines, or side by side when so chosen (CompactFigures); the drives show each chosen letter after one glyph, each after its letter when
-// there are several (CompactSources). It asks for the width of everything chosen (PreferredWidth); when its region is narrower,
+// there are several (CompactSources); the frame rate shows the program in front's frames a second after its icon or a screen glyph
+// (CompactFrames). It asks for the width of everything chosen (PreferredWidth); when its region is narrower,
 // the row draws it at that width and scrolls it through a window of whole readings (ReadingsCarousel, CompactSpacing.Window).
 // Each reading keeps the width of the widest figures it can show, so the window and the readings in it never move with the
 // figures; the readings keep their own close spacing (Gap), which the row does not widen. It draws itself once per reading; the
@@ -48,6 +49,8 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly CompactMonitorItems _usage, _heat, _inline;
     private readonly string[] _letters, _tags;
     private readonly bool[] _letterUsage, _letterHeat;
+    // Whether the frame rate shows its program's icon in place of the glyph (CompactFrames).
+    private readonly bool _framesIcon;
 
     // unavailable: readings left out (StripAdmission.Hidden): the drives until their first figures, and for good on a machine
     // without them, so the row never shows a dash for them. admission: which temperatures and letters have given their first
@@ -81,6 +84,8 @@ internal sealed class MonitorStrip : FrameworkElement
         _letterHeat = [.. _letters.Select(letter => driveHeat && shows(CompactMonitorItems.Storage, letter + StripAdmission.Heat))];
         if (_letters.Length == 0) unavailable |= CompactMonitorItems.Storage;
         _chosen = CompactMonitor.Shown(readings);
+        var frames = readings.FirstOrDefault(reading => reading.Item == CompactMonitorItems.Frames) ?? new CompactReading { Item = CompactMonitorItems.Frames };
+        _framesIcon = CompactFrames.Shows(frames, CompactFrames.Icon);
         _shown = _chosen & ~unavailable;
         // A ring set to show only its temperature, on a machine that has none, shows its dial alone.
         _values = CompactMonitor.Values(readings) & (_usage | _heat);
@@ -102,10 +107,14 @@ internal sealed class MonitorStrip : FrameworkElement
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("999M"), text("999G"))), DrivesWidth(), DeviceWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent));
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
+            FramesSlot + Math.Round(3 * _scale) + FigureWidth(WidestFrames) + Math.Round(2 * _scale) + SmallWidth(FramesUnit));
     }
 
     private const string WidestDegrees = "125°", WidestPercent = "100%";
+    // Monitors run up to 500 Hz and more, so three digits; the unit follows in the smaller type.
+    private const string WidestFrames = "999", FramesUnit = "FPS";
+    private double FramesSlot => _framesIcon ? Math.Round(14 * _scale) : Glyph;
     // The figures after a ring or a drive letter: the share alone, the temperature alone, or both stacked in the smaller type or
     // side by side in the row's type, at the widest each can show.
     private double Column(CompactMonitorItems item, bool usage, bool heat)
@@ -234,6 +243,7 @@ internal sealed class MonitorStrip : FrameworkElement
                         + (device.Charging ? Loc.T("，充电", ", charging") : "") + LevelWords(device.Level)); break;
                 case CompactMonitorItems.Power when s?.Power.OrDefault is { } power:
                     parts.Add(Loc.T("整机功耗 ", "System power ") + PowerText.Watts(power.Watts) + Loc.T("，", ", ") + (power.Estimated ? Loc.T("估算", "estimated") : Loc.T("实测", "measured"))); break;
+                case CompactMonitorItems.Frames when FrameOf(s) is { } frames: parts.Add(Loc.T("帧率 ", "Frame rate ") + FramesFigure(frames.PerSecond) + " FPS" + Loc.T("，", ", ") + frames.Program); break;
                 case CompactMonitorItems.Charge when s?.Battery.OrDefault is { } own:
                     parts.Add(Loc.T("本机电池 ", "This PC's battery ") + PowerText.Percent(own.Percent) + Loc.T("，", ", ") + PowerText.State(own) + LevelWords(BatteryModel.Level(own, _low))); break;
             }
@@ -324,6 +334,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Battery: Battery(drawing, left, center, _battery, color, level, ppd); break;
                 case CompactMonitorItems.Power: Power(drawing, left, center, s?.Power.OrDefault, ppd); break;
                 case CompactMonitorItems.Charge: Charge(drawing, left, center, s?.Battery.OrDefault, _charge.At(now), level, ppd); break;
+                case CompactMonitorItems.Frames: Frames(drawing, left, center, FrameOf(s), color, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
         }
@@ -482,6 +493,27 @@ internal sealed class MonitorStrip : FrameworkElement
         string figure = power is { } p ? PowerFormat.Compact(p.Watts) + "W" : "—";
         MonitorDraw.Baseline(drawing, MonitorDraw.Text(figure, _font, UI.Primary, ppd), x + slot + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
+
+    // The frame rate: the program's icon (when chosen and it has one) or a screen glyph in the reading's color, then the whole frames
+    // a second and "FPS" in the smaller type, "60 FPS"; a dash while there is no reading.
+    private void Frames(DrawingContext drawing, double x, double center, FrameSample? frames, string color, double ppd)
+    {
+        double slot = FramesSlot, baseline = Math.Round(center + _font * .36);
+        if (_framesIcon && ProcessIcons.For(frames?.Path) is { } icon)
+            drawing.DrawImage(icon, new Rect(x, Math.Round(center - slot / 2), slot, slot));
+        else
+        {
+            double size = Glyph;
+            MonitorDraw.Arrow(drawing, new Point(x + (slot - size) / 2, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Screen, frames is null ? UI.Tertiary : color);
+        }
+        double at = x + slot + Math.Round(3 * _scale);
+        var figure = MonitorDraw.Text(FramesFigure(frames?.PerSecond), _font, UI.Primary, ppd);
+        MonitorDraw.Baseline(drawing, figure, at, baseline);
+        MonitorDraw.Baseline(drawing, MonitorDraw.Text(FramesUnit, _small, UI.Tertiary, ppd), at + Math.Ceiling(figure.WidthIncludingTrailingWhitespace) + Math.Round(2 * _scale), baseline);
+    }
+    private static FrameSample? FrameOf(MonitorSnapshot? s) => s?.Frames.OrDefault;
+    private static readonly string[] FrameFigures = [.. Enumerable.Range(0, 1000).Select(count => count.ToString(System.Globalization.CultureInfo.InvariantCulture))];
+    private static string FramesFigure(double? perSecond) => perSecond is { } rate && double.IsFinite(rate) ? FrameFigures[(int)Math.Clamp(Math.Round(rate, MidpointRounding.AwayFromZero), 0, 999)] : "—";
 
     private double BatteryWidth => Math.Round(17 * _scale);
     // The machine's own battery in the shape of the theme's look (PowerGlyphs.Battery), filled to the charge, with the plug in its tip

@@ -13,7 +13,7 @@ namespace BrimDeck;
 // see ThirdPartyNotices.txt). The page and the collapsed strip lead their figures alike: CPU, memory and GPU with a dial
 // carrying the reading's letter (Dial), the rates with an arrow, the temperatures with a thermometer and the drives with a drive
 // (Arrow).
-internal enum MonitorGlyph { Down, Up, Thermometer, Drive }
+internal enum MonitorGlyph { Down, Up, Thermometer, Drive, Screen }
 
 internal static partial class MonitorDraw
 {
@@ -26,6 +26,8 @@ internal static partial class MonitorDraw
         // A drive seen from its edge: the case, a seam across it and the activity light under the seam. The seam keeps it from being read as a
         // battery lying on its side (a rounded body with a mark at its end), which a drive's "83%" was taken for.
         [MonitorGlyph.Drive] = Frozen("M3.5,4.5 H12.5 A1.5,1.5 0 0 1 14,6 V10 A1.5,1.5 0 0 1 12.5,11.5 H3.5 A1.5,1.5 0 0 1 2,10 V6 A1.5,1.5 0 0 1 3.5,4.5 Z M2,7.6 H14 M10.6,9.6 H11.6"),
+        // A monitor on its stand, for the frame rate.
+        [MonitorGlyph.Screen] = Frozen("M3.5,2.5 H12.5 A1.5,1.5 0 0 1 14,4 V10 A1.5,1.5 0 0 1 12.5,11.5 H3.5 A1.5,1.5 0 0 1 2,10 V4 A1.5,1.5 0 0 1 3.5,2.5 Z M8,11.5 V14 M5.5,14 H10.5"),
     };
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
     // The same glyphs on a plate: curves as straight edges (IconStyle), the thermometer's bulb and the drive's case chamfered.

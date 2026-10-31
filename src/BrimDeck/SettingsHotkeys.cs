@@ -30,8 +30,8 @@ public sealed partial class SettingsWindow
 
     private void HideHotkeySection()
     {
-        SectionTitle(Loc.T("快捷键", "Shortcut"));
-        Group(HotkeyRow(HotkeyKind.Hide));
+        SectionTitle(Loc.T("快捷操作", "Shortcuts"));
+        Group(HotkeyRow(HotkeyKind.Hide), GripDoubleClickRow());
     }
 
     private static string HotkeyName(HotkeyKind kind) => kind switch

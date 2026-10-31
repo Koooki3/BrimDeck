@@ -65,37 +65,27 @@ internal static class KugouInstall
     }
 
     // Whether full control can be switched on or off here: the installation's state, null when KuGou is not installed.
-    public static KugouPatchState? State() => Find() is { } location ? State(location) ?? KugouPatchState.Unsupported : null;
+    public static LibcefPatchState? State() => Find() is { } location ? State(location) ?? LibcefPatchState.Unsupported : null;
 
-    public static KugouPatchState? State(Location location)
-    {
-        CleanUp(location.Library);
-        try
-        {
-            using var file = new FileStream(location.Library, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            return KugouPatch.Classify(file);
-        }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
-    }
+    public static LibcefPatchState? State(Location location) => LibcefFile.State(location.Library, KugouPatch.Profile);
 
     // Changes or restores the file and leaves KuGou as it is; a running KuGou takes the change at its next start.
     // Throws with a short message for the user, as EnableAsync does.
     public static async Task ChangeFileAsync(bool patch, CancellationToken token) =>
-        await WriteAsync(Changeable().Library, patch, token).ConfigureAwait(false);
+        await LibcefFile.WriteAsync(Changeable().Library, KugouPatch.Profile, patch, ElevatedSwitch, token).ConfigureAwait(false);
     // Enables full control: closes KuGou, changes the file and starts KuGou again when it was running, or when start asks.
     public static async Task EnableAsync(bool start, CancellationToken token)
     {
         var location = Changeable();
         bool running = RunningPaths().Any();
         await CloseAsync(location, token).ConfigureAwait(false);
-        await WriteAsync(location.Library, true, token).ConfigureAwait(false);
+        await LibcefFile.WriteAsync(location.Library, KugouPatch.Profile, true, ElevatedSwitch, token).ConfigureAwait(false);
         if (start || running) Start(location);
     }
     private static Location Changeable()
     {
         var location = Find() ?? throw new InvalidOperationException(Loc.T("未找到酷狗音乐", "KuGou Music was not found"));
-        return State(location) is KugouPatchState.Original or KugouPatchState.Patched or KugouPatchState.Partial ? location
+        return State(location) is LibcefPatchState.Original or LibcefPatchState.Patched or LibcefPatchState.Partial ? location
             : throw new InvalidOperationException(Loc.T("不支持这个版本的酷狗音乐", "This version of KuGou Music is not supported"));
     }
 
@@ -149,81 +139,8 @@ internal static class KugouInstall
         }
     }
 
-    // A file KuGou has only just released can still be locked for a moment; a write without rights is done elevated.
-    private static async Task WriteAsync(string library, bool patch, CancellationToken token)
-    {
-        for (int attempt = 0; ; attempt++)
-        {
-            try { Write(library, patch); return; }
-            catch (UnauthorizedAccessException) { await WriteElevatedAsync(library, patch, token).ConfigureAwait(false); return; }
-            catch (IOException) when (attempt < 20 && File.Exists(library)) { await Task.Delay(250, token).ConfigureAwait(false); }
-        }
-    }
-
-    private static void Write(string library, bool patch, bool elevated = false)
-    {
-        try
-        {
-            using var file = new FileStream(library, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
-            KugouPatch.Write(file, patch);
-        }
-        catch (IOException ex) when ((ex.HResult & 0xFFFF) == SharingViolation) { Replace(library, patch, elevated); }
-    }
-    // KuGou holds the file: a changed copy is made and put in its place, and the held file is renamed until it can go.
-    private static void Replace(string library, bool patch, bool elevated)
-    {
-        string copy = library + ".brimdeck-new", held = library + ".brimdeck-old-" + Environment.TickCount64.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        File.Copy(library, copy, overwrite: true);
-        try
-        {
-            using (var file = new FileStream(copy, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) KugouPatch.Write(file, patch);
-            File.Move(library, held);
-            File.Move(copy, library);
-        }
-        finally { if (File.Exists(copy)) File.Delete(copy); }
-        // Without administrator rights later, the held file in a protected folder would stay; Windows removes it at restart.
-        if (elevated) MoveFileEx(held, null, MoveFileDelayUntilReboot);
-    }
-    private static void CleanUp(string library)
-    {
-        try
-        {
-            foreach (var held in Directory.EnumerateFiles(Path.GetDirectoryName(library)!, Path.GetFileName(library) + ".brimdeck-old-*"))
-                try { File.Delete(held); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-    }
-    private const int SharingViolation = 32;
-    private const uint MoveFileDelayUntilReboot = 4;
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private static extern bool MoveFileEx(string existing, string? replacement, uint flags);
-
-    private static async Task WriteElevatedAsync(string library, bool patch, CancellationToken token)
-    {
-        var info = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true, Verb = "runas" };
-        info.ArgumentList.Add(ElevatedSwitch); info.ArgumentList.Add(patch ? "apply" : "restore"); info.ArgumentList.Add(library);
-        Process? process;
-        try { process = Process.Start(info); }
-        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
-        { throw new InvalidOperationException(Loc.T("未取得管理员权限", "Administrator rights were not given")); }
-        using (process)
-        {
-            if (process is null) throw new InvalidOperationException(Loc.T("无法以管理员身份修改文件", "The file could not be changed as administrator"));
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token); timeout.CancelAfter(TimeSpan.FromSeconds(60));
-            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-            if (process.ExitCode != 0) throw new InvalidOperationException(Loc.T("修改文件失败，文件保持原样", "The file could not be changed and was left as it was"));
-        }
-    }
-
-    // The elevated instance: writes the one file named on its command line, which must be a libcef.dll that KugouPatch
-    // recognizes, and exits with 0 on success.
-    public static int RunElevated(string mode, string library)
-    {
-        if (mode is not ("apply" or "restore") || !string.Equals(Path.GetFileName(library), "libcef.dll", StringComparison.OrdinalIgnoreCase)) return 2;
-        try { Write(library, mode == "apply", elevated: true); return 0; }
-        catch { return 1; }
-    }
+    // The elevated instance started for a write without rights (LibcefFile), dispatched from Program.cs by ElevatedSwitch.
+    public static int RunElevated(string mode, string library) => LibcefFile.RunElevated(KugouPatch.Profile, mode, library);
 
     private static IEnumerable<string> RunningPaths()
     {

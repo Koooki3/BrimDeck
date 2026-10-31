@@ -417,7 +417,7 @@ public partial class MainWindow
         // The status line: what kind of notice is in front, and how many of the same conversation it stands for.
         var group = center.Hub.Notices.Where(n => n.AppKey == notice.AppKey && n.Title.Length > 0 && n.Title == notice.Title).ToList();
         var meta = new DockPanel { Height = 20 };
-        DockPanel.SetDock(meta, Dock.Top); stack.Children.Add(meta);
+        DockPanel.SetDock(meta, System.Windows.Controls.Dock.Top); stack.Children.Add(meta);
         var (status, color) = StatusOf(notice, center);
         if (color is not null)
         {
@@ -433,7 +433,7 @@ public partial class MainWindow
         var hero = new Grid { Margin = new Thickness(0, 12, 0, 0) };
         hero.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         hero.ColumnDefinitions.Add(new ColumnDefinition());
-        DockPanel.SetDock(hero, Dock.Top); stack.Children.Add(hero);
+        DockPanel.SetDock(hero, System.Windows.Controls.Dock.Top); stack.Children.Add(hero);
         var plate = NoticePlate(notice, 56);
         plate.VerticalAlignment = VerticalAlignment.Center;
         hero.Children.Add(plate);
@@ -448,7 +448,7 @@ public partial class MainWindow
 
         // The buttons, at the foot of the column.
         var buttons = FocusButtons(notice, center);
-        DockPanel.SetDock(buttons, Dock.Bottom); stack.Children.Add(buttons);
+        DockPanel.SetDock(buttons, System.Windows.Controls.Dock.Bottom); stack.Children.Add(buttons);
 
         // The words, scrolling within the column when they are long; the other messages of the same conversation under them.
         var words = new StackPanel();
@@ -467,7 +467,7 @@ public partial class MainWindow
             foreach (var other in group.Where(n => !ReferenceEquals(n, notice)).Take(20))
             {
                 var line = new DockPanel { Height = 22 };
-                var when = UI.Fixed(NoticeText.Relative(other.ReceivedAt, now), TextSize.Caption, 22, UI.Tertiary); DockPanel.SetDock(when, Dock.Right); when.Margin = new Thickness(8, 0, 0, 0);
+                var when = UI.Fixed(NoticeText.Relative(other.ReceivedAt, now), TextSize.Caption, 22, UI.Tertiary); DockPanel.SetDock(when, System.Windows.Controls.Dock.Right); when.Margin = new Thickness(8, 0, 0, 0);
                 line.Children.Add(when);
                 var text = UI.Fixed(privacy == NoticePrivacy.Full ? NoticeText.Summary(other.Body) : other.AppName, TextSize.Body, 22, UI.Secondary); text.TextTrimming = TextTrimming.CharacterEllipsis;
                 line.Children.Add(IslandNotice.Directed(text));
@@ -494,7 +494,7 @@ public partial class MainWindow
     {
         double done = Math.Clamp(progress, 0, 1);
         var row = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
-        var label = UI.Fixed(Loc.T($"{done:P0}", $"{done:P0}"), TextSize.Caption, 16, UI.Tertiary); DockPanel.SetDock(label, Dock.Right); label.Margin = new Thickness(10, 0, 0, 0);
+        var label = UI.Fixed(Loc.T($"{done:P0}", $"{done:P0}"), TextSize.Caption, 16, UI.Tertiary); DockPanel.SetDock(label, System.Windows.Controls.Dock.Right); label.Margin = new Thickness(10, 0, 0, 0);
         row.Children.Add(label);
         var track = new Grid { Height = 3, VerticalAlignment = VerticalAlignment.Center };
         track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 3 });
@@ -524,7 +524,7 @@ public partial class MainWindow
         {
             string open = notice.Call ? Loc.T($"打开 {notice.AppName} 接听", $"Answer in {notice.AppName}") : Loc.T("打开应用", "Open app");
             var main = PillButton(open, open, () => _ = OpenFromPage(notice), primary: true);
-            DockPanel.SetDock(main, Dock.Right);
+            DockPanel.SetDock(main, System.Windows.Controls.Dock.Right);
             row.Children.Insert(0, main);
         }
         return row;
@@ -554,7 +554,7 @@ public partial class MainWindow
         var column = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
         var border = new Border { BorderBrush = UI.Brush(UI.Hairline), BorderThickness = new Thickness(1, 0, 0, 0), Padding = new Thickness(14, 0, 0, 0), Child = column };
         var head = new DockPanel { Height = 20, LastChildFill = false };
-        DockPanel.SetDock(head, Dock.Top); column.Children.Add(head);
+        DockPanel.SetDock(head, System.Windows.Controls.Dock.Top); column.Children.Add(head);
         head.Children.Add(UI.Fixed(Loc.T("通知", "Notices"), TextSize.Title, 20, UI.Primary, FontWeights.SemiBold));
         int today = center.Hub.Notices.Count(Today);
         string count = Loc.T($"今天 {today} 条", $"{today} today");
@@ -563,7 +563,7 @@ public partial class MainWindow
         var countText = UI.Fixed(count, TextSize.Body, 20, UI.Tertiary); countText.Margin = new Thickness(6, 1, 0, 0);
         head.Children.Add(countText);
         var tools = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        DockPanel.SetDock(tools, Dock.Right); head.Children.Insert(0, tools);
+        DockPanel.SetDock(tools, System.Windows.Controls.Dock.Right); head.Children.Insert(0, tools);
         var pause = IconToggle(center.Paused ? "" : "", center.Paused ? Loc.T("恢复提醒", "Resume") : Loc.T("暂停提醒 1 小时", "Pause for 1 h"),
             () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); RenderNotices(); });
         tools.Children.Add(pause);
@@ -680,7 +680,7 @@ public partial class MainWindow
         var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin is NoticeOrigin.Test or NoticeOrigin.BrimDeck ? 1 : .78 };
         Grid.SetColumn(texts, 1); grid.Children.Add(texts);
         var first = new DockPanel();
-        var when = UI.Fixed(NoticeText.Relative(notice.ReceivedAt, now), TextSize.Caption, 18, UI.Tertiary); when.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(when, Dock.Right);
+        var when = UI.Fixed(NoticeText.Relative(notice.ReceivedAt, now), TextSize.Caption, 18, UI.Tertiary); when.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(when, System.Windows.Controls.Dock.Right);
         first.Children.Add(when);
         var title = IslandNotice.Directed(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, TextSize.Body, 18, UI.Primary, FontWeights.SemiBold));
         title.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -730,7 +730,7 @@ public partial class MainWindow
     {
         if (NoticesContent.Children.OfType<Grid>().FirstOrDefault()?.Children.OfType<DockPanel>().FirstOrDefault() is not { } column) return;
         var hint = UI.Line(text, TextSize.Caption, PanelTheme.Hex("danger")); hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0, 6, 0, 0);
-        DockPanel.SetDock(hint, Dock.Bottom);
+        DockPanel.SetDock(hint, System.Windows.Controls.Dock.Bottom);
         column.Children.Insert(0, hint);
     }
 

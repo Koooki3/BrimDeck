@@ -9,6 +9,9 @@ namespace BrimDeck.Core;
 public enum CompactStyle { Notch, Capsule, Line }
 // The screen edge the notch hangs from (DeckSettings.NotchEdge); see EdgeFrame.
 public enum ScreenEdge { Top, Bottom, Left, Right }
+// What the notch or the line hangs from on its edge where a taskbar is: the screen's edge, over the taskbar, or the taskbar's inner
+// edge. Without a taskbar on that edge the two are the same line. See DeckSettings.Dock.
+public enum EdgeAnchor { Screen, Taskbar }
 public enum WindowBehavior { Normal, Line, Hide }
 // BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen }
@@ -42,6 +45,9 @@ public enum DeckPage { Usage, Music, Monitor, Notices, Devices }
 public enum DefaultDeckPage { Last, Usage, Music, Monitor, Notices, Devices }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
+// What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
+// (MainWindow.Move.cs); moving is the default. Saved as numbers, so new members go at the end.
+public enum GripDoubleClick { AutoWidth, Move }
 public enum CompactMusicText { None, Title, Lyrics }
 // The monitor an arriving notice is shown on: the one with the foreground window, or always the main panel's.
 public enum NoticeScreen { Foreground, Main }
@@ -316,9 +322,24 @@ public sealed class DeckSettings
     // The edge the notch hangs from. On the other edges it keeps its width (along the edge), height and offset (along the edge
     // too); see EdgeFrame. The capsule always sits below the top edge.
     public ScreenEdge NotchEdge { get; set; } = ScreenEdge.Top;
-    // The edge the panel works from: the notch's, or the top for the capsule and the line chosen as the style. A window rule that
-    // turns the notch into the line keeps the notch's edge.
-    [JsonIgnore] public ScreenEdge DockEdge => Style == CompactStyle.Notch ? NotchEdge : ScreenEdge.Top;
+    // What the notch hangs from on that edge; null until chosen, which is the screen's edge at the top and the taskbar's elsewhere,
+    // as before the choice existed.
+    public EdgeAnchor? NotchAnchor { get; set; }
+    // The edge and the anchor of the line, as the notch's; the line keeps to the taskbar's side by default. A window rule that turns
+    // the notch or the capsule into the line shows it where the line's own settings put it.
+    public ScreenEdge LineEdge { get; set; } = ScreenEdge.Top;
+    public EdgeAnchor? LineAnchor { get; set; }
+    // Where a style works from: the edge and whether it hangs from the screen's edge over a taskbar there (EdgeFrame.For). The
+    // capsule floats below the top of the screen.
+    public (ScreenEdge Edge, bool OverTaskbar) Dock(CompactStyle style) => style switch
+    {
+        CompactStyle.Notch => (NotchEdge, Anchor(style, NotchEdge, NotchAnchor) == EdgeAnchor.Screen),
+        CompactStyle.Line => (LineEdge, Anchor(style, LineEdge, LineAnchor) == EdgeAnchor.Screen),
+        _ => (ScreenEdge.Top, true)
+    };
+    public static EdgeAnchor Anchor(CompactStyle style, ScreenEdge edge, EdgeAnchor? chosen)
+        => chosen ?? (style == CompactStyle.Notch && edge == ScreenEdge.Top ? EdgeAnchor.Screen : EdgeAnchor.Taskbar);
+    public ScreenEdge CompactEdge(CompactStyle style) => style == CompactStyle.Line ? LineEdge : style == CompactStyle.Notch ? NotchEdge : ScreenEdge.Top;
     public double CapsuleWidth { get; set; } = CollapsedLimits.CapsuleWidthDefault;
     public double CapsuleHeight { get; set; } = CollapsedLimits.CapsuleHeightDefault;
     public double CapsuleOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
@@ -372,10 +393,19 @@ public sealed class DeckSettings
     public int MusicEqualizerBars { get => _musicEqualizerBars; set => _musicEqualizerBars = CompactMusicLayout.SafeBars(value); }
     // How the collapsed and the music page's equalizers show the sound (one choice for both); Flow keeps the original look.
     public EqualizerMode EqualizerMode { get => _equalizerMode; set => _equalizerMode = Enum.IsDefined(value) ? value : EqualizerMode.Flow; }
+    // The music page's equalizer and current lyric each take their own color, chosen as the collapsed equalizer's is
+    // (EqualizerColor): White is the theme's equalizer color for the bars and its primary text color for the lyric.
+    public ClockColor MusicPageEqualizerColor { get; set; } = ClockColor.Cover;
+    public string MusicPageEqualizerCustomColor { get; set; } = ClockColors.DefaultCustom;
+    public ClockColor MusicLyricColor { get; set; } = ClockColor.Cover;
+    public string MusicLyricCustomColor { get; set; } = ClockColors.DefaultCustom;
     // Offers "网易云音乐 · 完整控制" in the source menu, or alone in its place when nothing plays.
     public bool NeteaseFullControlEntry { get; set; }
     // Restarts a player started the normal way with full control, without asking again; switching it on asks once.
     public bool NeteaseAutoFullControl { get; set; }
+    // NetEase Cloud Music's full control, which the user confirmed when switching it on: its libcef.dll is kept changed, also after
+    // an update replaces it (a running player then restarts once), so every start opens the port. Switching it off restores the file.
+    public bool NeteaseFullControl { get; set; }
     // KuGou's full control, which the user confirmed when switching it on: its libcef.dll is kept changed, also after a KuGou
     // update replaces it (a running KuGou then restarts once). Switching it off restores the file.
     public bool KugouFullControl { get; set; }
@@ -384,6 +414,8 @@ public sealed class DeckSettings
     public DefaultDeckPage DefaultPage { get; set; }
     // A right click on the expanded panel opens the settings window.
     public bool RightClickSettings { get; set; } = true;
+    // A notch or capsule wider than every page opens its panel under the pointer when hovered, instead of at its middle.
+    public bool ExpandAtPointer { get; set; }
     // What the mouse wheel does while the panel is expanded; scrolling parts of a page keep their wheel.
     public MouseWheelAction MouseWheel { get; set; } = MouseWheelAction.Pages;
     // Read only to carry the switch of a file saved before MouseWheel existed; Normalize moves it across and the member
@@ -463,6 +495,10 @@ public sealed class DeckSettings
     // through the dynamic notices, so it shows only while those are on.
     public bool DeviceLowNotice { get; set; } = true;
     public int DeviceLowPercent { get; set; } = Devices.DefaultLowPercent;
+    // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
+    // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
+    // events (the Performance Log Users group, or BrimDeck elevated).
+    public bool MonitorFrames { get; set; }
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
@@ -478,6 +514,7 @@ public sealed class DeckSettings
     // by default: the memory is read back in when the panel next opens, which can stutter.
     public bool TrimMemoryWhenIdle { get; set; }
     public bool CapsuleAutoWidth { get; set; } = true;
+    public GripDoubleClick GripDoubleClick { get; set; } = GripDoubleClick.Move;
     // What the collapsed readings showed before their table (CompactReadings). Kept to read older files and, written to match the
     // table (the preset it matches and the readings shown), for older versions.
     public CompactMonitorMode CompactMonitor { get; set; }
@@ -694,6 +731,10 @@ public sealed class DeckSettings
         NotchHeight = Fit(NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault);
         NotchOffsetX = Offset(NotchOffsetX);
         if (!Enum.IsDefined(NotchEdge)) NotchEdge = ScreenEdge.Top;
+        if (!Enum.IsDefined(LineEdge)) LineEdge = ScreenEdge.Top;
+        if (NotchAnchor is { } notchAnchor && !Enum.IsDefined(notchAnchor)) NotchAnchor = null;
+        if (LineAnchor is { } lineAnchor && !Enum.IsDefined(lineAnchor)) LineAnchor = null;
+        if (!Enum.IsDefined(GripDoubleClick)) GripDoubleClick = GripDoubleClick.Move;
         CapsuleWidth = Fit(CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault);
         CapsuleHeight = Fit(CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault);
         CapsuleOffsetX = Offset(CapsuleOffsetX);

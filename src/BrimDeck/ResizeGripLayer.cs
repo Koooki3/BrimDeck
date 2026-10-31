@@ -13,9 +13,11 @@ namespace BrimDeck;
 // the edge under the pointer lights in the accent color with a soft glow, its handle grows, and a corner lights its arc. At an end
 // of the collapsed surface a glowing bar shows beside it. While dragging, a small label gives the size. All of it eases in and
 // out (Motion), and nothing is drawn while the pointer is away.
+// In move mode (MainWindow.Move.cs) the whole collapsed surface takes the pointer instead: its outline lights in the accent color
+// and a move icon covers its content (MoveLook).
 internal sealed class ResizeGripLayer : FrameworkElement
 {
-    public enum Form { None, Panel, Compact }
+    public enum Form { None, Panel, Compact, Move }
 
     private static readonly Brush Catch = Frozen(new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)));
     private Form _form;
@@ -43,6 +45,29 @@ internal sealed class ResizeGripLayer : FrameworkElement
         if (formChanged) { _armed = ResizeEdges.None; Light(ResizeEdges.None, false, ""); Near(0); }
         InvalidateVisual();
     }
+
+    // Move mode: the surface's box, its outline (at the box's top-left corner), whether it hangs from the edge at the box's top
+    // (the notch), whose line along the screen edge is then not lit, and whether it is the line, too thin to hold the icon, which
+    // then shows just past it. The highlight eases in.
+    private Geometry _moveOutline = Geometry.Empty;
+    private bool _moveHangs, _moveThin;
+    private Eased _moveShown = new(0, Eased.Hover);
+    public void ShowMove(DipRect rect, Geometry outline, bool hangs, bool thin)
+    {
+        if (_form == Form.Move && rect == _rect && ReferenceEquals(outline, _moveOutline) && hangs == _moveHangs && thin == _moveThin) return;
+        if (_form != Form.Move)
+        {
+            Show(Form.Move, rect, 0, 0, false);
+            _moveShown = new(0, Eased.Hover);
+            if (_moveShown.Set(1, Motion.Enabled)) Motion.Start(this, Step);
+        }
+        _rect = rect; _moveOutline = outline; _moveHangs = hangs; _moveThin = thin;
+        InvalidateVisual();
+    }
+
+    // Where move mode takes the pointer: the surface and a little around it.
+    private const double MoveCatch = 6;
+    public bool OverMove(Point point) => _form == Form.Move && point.X >= _rect.X - MoveCatch && point.X <= _rect.Right + MoveCatch && point.Y >= _rect.Y - MoveCatch && point.Y <= _rect.Bottom + MoveCatch;
 
     public ResizeEdges EdgeAt(Point point) => _form switch
     {
@@ -84,13 +109,14 @@ internal sealed class ResizeGripLayer : FrameworkElement
     private bool Step(double now)
     {
         InvalidateVisual();
-        return _near.Moving(now) || _left.Moving(now) || _right.Moving(now) || _bottom.Moving(now) || _badge.Moving(now);
+        return _near.Moving(now) || _left.Moving(now) || _right.Moving(now) || _bottom.Moving(now) || _badge.Moving(now) || _moveShown.Moving(now);
     }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
 
     protected override HitTestResult? HitTestCore(PointHitTestParameters parameters)
     {
+        if (_form == Form.Move) return OverMove(parameters.HitPoint) || IsMouseCaptured ? new PointHitTestResult(this, parameters.HitPoint) : null;
         var edge = EdgeAt(parameters.HitPoint);
         if (edge == ResizeEdges.None) return null;
         if (_form == Form.Compact && edge != _armed && !IsMouseCaptured) return null;
@@ -101,6 +127,19 @@ internal sealed class ResizeGripLayer : FrameworkElement
     {
         if (_form == Form.None) return;
         double now = Eased.Now;
+        if (_form == Form.Move)
+        {
+            var r = _rect;
+            drawing.DrawRectangle(Catch, null, new Rect(r.X - MoveCatch, r.Y - MoveCatch, Math.Max(0, r.Width) + 2 * MoveCatch, Math.Max(0, r.Height) + 2 * MoveCatch));
+            double shown = Lit(_moveShown, now);
+            drawing.PushTransform(new TranslateTransform(r.X, r.Y));
+            MoveLook.Surface(drawing, _moveOutline, shown, veil: true);
+            MoveLook.Outline(drawing, _moveOutline, shown, _moveHangs);
+            double size = MoveLook.IconSize(_moveThin ? 28 : Math.Min(r.Width, r.Height));
+            MoveLook.Icon(drawing, new Point(r.Width / 2, _moveThin ? r.Height + 4 + size / 2 : r.Height / 2), size, shown);
+            drawing.Pop();
+            return;
+        }
         if (_form == Form.Panel)
         {
             foreach (var strip in ResizeGrips.PanelStrips(_rect, _header)) drawing.DrawRectangle(Catch, null, Box(strip));
@@ -160,8 +199,8 @@ internal sealed class ResizeGripLayer : FrameworkElement
 
     // The theme's accent, unless it would hardly show on the panel's surface (a theme whose accent is its surface color);
     // then its primary text color. Light themes glow less, where a soft glow reads as a smudge, and lean on the line instead.
-    private static string Accent => ColorMath.Distance(PanelTheme.Hex("accent"), PanelTheme.Hex("surface")) < 60 ? PanelTheme.Hex("textPrimary") : PanelTheme.Hex("accent");
-    private static double GlowStrength => PanelTheme.Current.IsDark ? 1 : .55;
+    internal static string Accent => ColorMath.Distance(PanelTheme.Hex("accent"), PanelTheme.Hex("surface")) < 60 ? PanelTheme.Hex("textPrimary") : PanelTheme.Hex("accent");
+    internal static double GlowStrength => PanelTheme.Current.IsDark ? 1 : .55;
     // A thin rim of the surface color keeps a bar apart from what is under it: the panel's content, or whatever is behind the
     // window beside the collapsed surface.
     private static Pen Rim => _rim is { } rim && rim.Color == PanelTheme.Hex("surface") ? rim.Pen : (_rim = (PanelTheme.Hex("surface"), Frozen(new Pen(UI.Brush(PanelTheme.Hex("surface")), 1)))).Value.Pen;

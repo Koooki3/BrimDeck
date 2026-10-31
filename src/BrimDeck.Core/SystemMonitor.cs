@@ -230,6 +230,17 @@ public sealed record ProcessList(IReadOnlyList<ProcessSample> Top, IReadOnlyList
 // DownHistory and UpHistory are the last network readings, oldest first, bytes per second; empty until there are two.
 // CpuHistory and GpuHistory are the last processor and graphics usage readings in the same way, 0 to 1. Gpus is every graphics
 // adapter read; Gpu is the one shown (GpuChoice), and GpuHistory its history.
+// The frame rate of the program in front (FrameRates): the frames it presented each second, read from Windows' event tracing, and
+// its name; a game shows its own rate, above the refresh rate too. Refresh: the refresh rate of the display the program is on, in
+// hertz, null where unknown. History: the rates before, oldest first, one per reading, this one last. Path: the program's
+// executable, for its icon; null for the desktop, or where it cannot be read.
+public sealed record FrameSample(double PerSecond, string Program)
+{
+    public string? Path { get; init; }
+    public double? Refresh { get; init; }
+    public IReadOnlyList<double> History { get; init; } = [];
+}
+
 public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors, Reading<CpuSample> Cpu, Reading<MemorySample> Memory,
     Reading<NetworkSample> Network, Reading<GpuSample> Gpu, Reading<ProcessList> Processes)
 {
@@ -250,6 +261,8 @@ public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors,
     // The processor's and the graphics' own power over the same readings, for the page's power line when it shows one of them.
     public PowerTrack CpuPower { get; init; } = PowerTrack.None;
     public PowerTrack GpuPower { get; init; } = PowerTrack.None;
+    // The frame rate of the program in front, read only while something shows it (SystemSampler.SetExtras).
+    public Reading<FrameSample> Frames { get; init; } = Reading<FrameSample>.Unavailable(Loc.T("正在读取", "Reading"));
     public static MonitorSnapshot Empty(int logicalProcessors, string reason) => new(DateTimeOffset.Now, logicalProcessors,
         Reading<CpuSample>.Unavailable(reason), Reading<MemorySample>.Unavailable(reason), Reading<NetworkSample>.Unavailable(reason),
         Reading<GpuSample>.Unavailable(reason), Reading<ProcessList>.Unavailable(reason));

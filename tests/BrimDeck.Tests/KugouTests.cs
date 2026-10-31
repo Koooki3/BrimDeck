@@ -6,53 +6,70 @@ internal static class KugouTests
 {
     internal static async Task Run(Action<string, bool> check)
     {
-        Patch(check);
+        Engine(check);
+        Profile(check, "KuGou", KugouPatch.Profile, 12233);
+        Profile(check, "NetEase", NeteasePatch.Profile, 21631);
         await LyricsLookup(check);
         check("KuGou's session is shown under its name and found by its process",
             MediaAppTarget.DisplayName("kugou", _ => null) == "酷狗音乐" && new MediaTrack { Source = "酷狗音乐" }.IsKugou && new MediaTrack { SongId = "kugou:" + new string('a', 32) }.IsKugou
             && MediaAppTarget.Plays(new MediaAppOwner(null, MediaAppTarget.ProcessName("kugou"), "kugou"), new MediaAppProcess(1, "KuGou", null, "kugou")));
     }
 
-    // The nine places, as KugouPatch writes them, in a file as long as KuGou 20.1's libcef.dll.
-    private static readonly (long Offset, string Original, string Patched)[] Places =
-    [
-        (0x58C63EB, "C706AAAAAAAA", "C706C92F0000"), (0x58C6415, "E896A9E9FC", "9090909090"), (0x58C6420, "0F8796010000", "909090909090"),
-        (0x58C6428, "0F848E010000", "909090909090"), (0x4BC180E, "8B957C010000", "BAC92F000090"), (0x4BEDE41, "0F8470010000", "909090909090"),
-        (0x4BEDE4C, "41C707AAAAAAAA", "41C707C92F0000"), (0x4BEDEB5, "E8F62EB7FD", "9090909090"), (0x4BEDED0, "0F44DA", "909090"),
-    ];
-    private static void Patch(Action<string, bool> check)
+    // Three sites with prefix and suffix context, placed far apart in an otherwise empty file, so each window is found by its
+    // bytes wherever it sits. The core is the only part written.
+    private static LibcefPatch H(params (string Prefix, string Original, string Patched, string Suffix)[] sites) => new(12233,
+        [.. sites.Select(s => new LibcefPatch.Site(Convert.FromHexString(s.Prefix), Convert.FromHexString(s.Original), Convert.FromHexString(s.Patched), Convert.FromHexString(s.Suffix)))]);
+    private static readonly LibcefPatch Sample = H(
+        ("1122", "AABBCCDD", "90909090", "3344"), ("5566", "EE01", "9091", "7788"), ("", "FEDCBA98", "11223344", "99"));
+
+    // Places each site's original or patched window at a spaced-out offset; the bytes between stay zero.
+    private static SparseStream Library(LibcefPatch patch, bool patched, bool[]? perSite = null)
     {
-        SparseStream Library(bool patched)
-        {
-            var file = new SparseStream(145_902_560);
-            foreach (var (offset, original, written) in Places) { file.Position = offset; file.Write(Convert.FromHexString(patched ? written : original)); }
-            file.Position = 0x100; file.Write([1, 2, 3]);
-            file.Writes = 0; return file;
-        }
-        var library = Library(false);
-        check("An unchanged KuGou libcef.dll is recognized", KugouPatch.Classify(library) == KugouPatchState.Original);
-        KugouPatch.Write(library, true);
-        check("Patching changes the nine places and nothing else", KugouPatch.Classify(library) == KugouPatchState.Patched && library.Writes == Places.Length
-            && library.Equivalent(Library(true)) && library.ReadAt(0x100, 3).SequenceEqual(new byte[] { 1, 2, 3 }));
-        KugouPatch.Write(library, true);
-        check("Patching a patched file writes nothing", library.Writes == Places.Length);
-        KugouPatch.Write(library, false);
-        check("Restoring writes the original bytes back", KugouPatch.Classify(library) == KugouPatchState.Original && library.Equivalent(Library(false)));
-
-        var partial = Library(false);
-        foreach (var (offset, _, written) in Places.Take(4)) { partial.Position = offset; partial.Write(Convert.FromHexString(written)); }
-        partial.Writes = 0;
-        check("A file another tool patched in part is recognized", KugouPatch.Classify(partial) == KugouPatchState.Partial);
-        KugouPatch.Write(partial, true);
-        check("Patching a part-patched file writes only the places still original", KugouPatch.Classify(partial) == KugouPatchState.Patched
-            && partial.Writes == Places.Length - 4 && partial.Equivalent(Library(true)));
-
-        var mixed = Library(false); mixed.Position = Places[3].Offset; mixed.Write([0x90]); mixed.Writes = 0;
-        bool refused = false;
-        try { KugouPatch.Write(mixed, true); } catch (InvalidDataException) { refused = true; }
-        check("A file another build or tool changed is left alone", KugouPatch.Classify(mixed) == KugouPatchState.Unsupported && refused && mixed.Writes == 0);
-        check("A file too short for the places is not a known build", KugouPatch.Classify(new SparseStream(0x4BC1000)) == KugouPatchState.Unsupported);
+        var file = new SparseStream(0x10000L * (patch.Sites.Count + 2));
+        for (int i = 0; i < patch.Sites.Count; i++)
+        { file.Position = 0x10000L * (i + 1); file.Write(patch.Sites[i].Window(perSite?[i] ?? patched)); }
+        file.Writes = 0; return file;
     }
+
+    private static void Engine(Action<string, bool> check)
+    {
+        var library = Library(Sample, false);
+        check("An unpatched file is recognized", Sample.Classify(library) == LibcefPatchState.Original);
+        Sample.Write(library, true);
+        check("Patching writes one core per site and nothing else", Sample.Classify(library) == LibcefPatchState.Patched && library.Writes == Sample.Sites.Count
+            && library.Equivalent(Library(Sample, true)));
+        Sample.Write(library, true);
+        check("Patching a patched file writes nothing", library.Writes == Sample.Sites.Count);
+        Sample.Write(library, false);
+        check("Restoring writes the original bytes back", Sample.Classify(library) == LibcefPatchState.Original && library.Equivalent(Library(Sample, false)));
+
+        var partial = Library(Sample, false, [true, false, false]);
+        check("A file patched in part is recognized", Sample.Classify(partial) == LibcefPatchState.Partial);
+        partial.Writes = 0; Sample.Write(partial, true);
+        check("Patching a part-patched file writes only the sites still original", Sample.Classify(partial) == LibcefPatchState.Patched
+            && partial.Writes == Sample.Sites.Count - 1 && partial.Equivalent(Library(Sample, true)));
+
+        // A site whose window is neither form present (one byte of its core changed) is not a known build.
+        var mixed = Library(Sample, false); mixed.Position = 0x10000L + Sample.Sites[0].Prefix.Length; mixed.Write([0x55]); mixed.Writes = 0;
+        bool refused = false;
+        try { Sample.Write(mixed, true); } catch (InvalidDataException) { refused = true; }
+        check("A file a different build left unmatched is left alone", Sample.Classify(mixed) == LibcefPatchState.Unsupported && refused && mixed.Writes == 0);
+        check("An empty file is not a known build", Sample.Classify(new SparseStream(0x40000)) == LibcefPatchState.Unsupported);
+    }
+
+    // Each real profile round-trips on a synthetic file built from its own site windows, and names the port it writes.
+    private static void Profile(Action<string, bool> check, string name, LibcefPatch patch, int port)
+    {
+        var library = Library(patch, false);
+        check($"{name}: an unpatched file is Original and patches to Patched", patch.Port == port
+            && patch.Classify(library) == LibcefPatchState.Original);
+        patch.Write(library, true);
+        check($"{name}: patching sets every site and restoring puts it back", patch.Classify(library) == LibcefPatchState.Patched
+            && library.Writes == patch.Sites.Count && Patched(patch, library));
+        patch.Write(library, false);
+        check($"{name}: restored file matches the original", patch.Classify(library) == LibcefPatchState.Original && library.Equivalent(Library(patch, false)));
+    }
+    private static bool Patched(LibcefPatch patch, SparseStream library) => library.Equivalent(Library(patch, true));
 
     private static async Task LyricsLookup(Action<string, bool> check)
     {

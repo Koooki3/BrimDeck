@@ -118,6 +118,15 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
     // normal way is restarted once; one that comes back without the port is left as it is.
     private bool _autoFullControl;
     private string? _autoRestarted;
+    // The setting NeteaseFullControl: the libcef.dll is kept changed so every start opens the fixed port on its own. While it is
+    // on, a running player not yet exposing the port is restarted once (as with the automatic setting), and a file left original
+    // by an update is changed again. State is read off the UI thread, throttled; _filePatching guards the one write at a time.
+    private volatile bool _fileFullControl;
+    private LibcefPatchState? _fileState;
+    private DateTime _fileStamp;
+    private long _fileCheckedAt = -FileCheckInterval;
+    private int _filePatching;
+    private const long FileCheckInterval = 60_000;
     // A player that has only just started is given time to finish starting before it is asked to quit.
     private const long AutoRestartAge = 3_000;
     // Installation rarely changes while the app runs, and a running player already counts as installed.
@@ -136,8 +145,19 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
         get => Volatile.Read(ref _autoFullControl);
         set { if (Volatile.Read(ref _autoFullControl) == value) return; Volatile.Write(ref _autoFullControl, value); if (value) Signal(); }
     }
-    // While a restart may be due the player is looked for every second instead of every five.
-    private bool AutoPending => AutoFullControl && (_process is null || _process.DebugPort is null && _autoRestarted != _process.Identity);
+    // The file-patch setting (NeteaseFullControl). Turning it on keeps the file changed and connects the running player;
+    // turning it off restores the file and leaves the player as it is until its next start.
+    public bool FileFullControl
+    {
+        get => _fileFullControl;
+        set { if (_fileFullControl == value) return; _fileFullControl = value; _fileCheckedAt = -FileCheckInterval; Signal(); }
+    }
+    // The file's patch state as last read, for the settings switch; null until it has been read.
+    public LibcefPatchState? FilePatchState => _fileState;
+    // A restart may be due when either full-control setting is on and the running player has no debugging port yet.
+    private bool AutoPending => (AutoFullControl || FileFullControl) && (_process is null || _process.DebugPort is null && _autoRestarted != _process.Identity);
+    // The file-patched player opens the port a moment after it starts, so a port-less player is looked for every second.
+    private bool FilePending => FileFullControl && _process is { DebugPort: null };
     // A running player counts as installed even when neither registry entry is present.
     public bool Installed => _process is not null || Volatile.Read(ref _installed) is not null;
     internal bool LogWatching => _log?.Watching == true;
@@ -151,7 +171,7 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
             try { await RefreshAsync().ConfigureAwait(false); }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }
             catch { Error = Loc.T("网易云来源暂时不可用。", "The NetEase Cloud Music source is temporarily unavailable."); }
-            try { await _wake.WaitAsync(TimeSpan.FromSeconds(AutoPending ? 1 : 5), _stop.Token).ConfigureAwait(false); }
+            try { await _wake.WaitAsync(TimeSpan.FromSeconds(AutoPending || FilePending ? 1 : 5), _stop.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
     }
@@ -167,6 +187,7 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
                 var installed = NeteaseProcess.FindInstalled();
                 if (Interlocked.Exchange(ref _installed, installed) is null != installed is null) Changed?.Invoke();
             }
+            MaintainFile();
             if (_process?.IsAlive() != true)
             {
                 Clear();
@@ -182,6 +203,9 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
                 if (_process is null) return;
                 _cdpFailed = false; Error = null;
             }
+            // A file-patched player opens the fixed port without a switch; adopt it once the port is up so no restart is needed.
+            if (_process is { DebugPort: null } waiting && NeteaseCdpConnection.OwnsPort(waiting with { DebugPort = NeteasePatch.Port }))
+                _process = waiting with { DebugPort = NeteasePatch.Port };
             if (AutoPending && _process is { } normal && !Restarting && Environment.TickCount64 - normal.StartTick >= AutoRestartAge)
             {
                 _autoRestarted = normal.Identity;
@@ -310,6 +334,61 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
             settled = DateTimeOffset.UtcNow.AddSeconds(2);
         }
     }
+    // Reads the libcef.dll's patch state off the UI thread, throttled, so the settings switch can show it whether the setting is
+    // on or off (as KuGou does); the 150 MB file is re-read only when it has changed since the last read. While the setting is on,
+    // a file an update left original is changed again. One write or read runs at a time.
+    private void MaintainFile()
+    {
+        if (_filePatching != 0) return;
+        long interval = FileFullControl && _fileState is not LibcefPatchState.Patched ? 5_000 : FileCheckInterval;
+        if (Environment.TickCount64 - _fileCheckedAt < interval || Interlocked.CompareExchange(ref _filePatching, 1, 0) != 0) return;
+        _fileCheckedAt = Environment.TickCount64;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (NeteaseInstall.Find() is not { } location) { if (_fileState is not null) { _fileState = null; Changed?.Invoke(); } return; }
+                var stamp = File.GetLastWriteTimeUtc(location.Library);
+                if (stamp != _fileStamp || _fileState is null)
+                {
+                    _fileStamp = stamp;
+                    var previous = _fileState; _fileState = NeteaseInstall.State(location);
+                    if (_fileState != previous) Changed?.Invoke();
+                }
+                if (FileFullControl && _fileState is LibcefPatchState.Original or LibcefPatchState.Partial)
+                {
+                    await NeteaseInstall.ChangeFileAsync(true, _stop.Token).ConfigureAwait(false);
+                    _fileStamp = File.GetLastWriteTimeUtc(location.Library); _fileState = NeteaseInstall.State(location);
+                }
+            }
+            catch { }
+            finally { Interlocked.Exchange(ref _filePatching, 0); if (!_stop.IsCancellationRequested) { Changed?.Invoke(); Signal(); } }
+        });
+    }
+
+    // The user confirmed this. Changes the file so every start opens the port, then connects a running player: one without the
+    // port started before the change, so it is restarted once. Null when done, otherwise a short message for the user.
+    public async Task<string?> EnableFileControlAsync()
+    {
+        FileFullControl = true;
+        try { await Task.Run(() => NeteaseInstall.ChangeFileAsync(true, _stop.Token)).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return null; }
+        catch (Exception ex) { return ex.Message; }
+        _fileState = LibcefPatchState.Patched; _fileCheckedAt = Environment.TickCount64;
+        if (_process?.IsAlive() == true && _cdp?.Ready != true && !await EnableFullControlAsync().ConfigureAwait(false))
+            return Error ?? Loc.T("未能建立完整控制连接。", "The full control connection could not be made.");
+        Signal(); return null;
+    }
+    // Restores the file; a running player keeps the port until its next start, as its explanation says.
+    public async Task<string?> DisableFileControlAsync()
+    {
+        FileFullControl = false;
+        try { await Task.Run(() => NeteaseInstall.ChangeFileAsync(false, _stop.Token)).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return null; }
+        catch (Exception ex) { return ex.Message; }
+        _fileState = LibcefPatchState.Original; _fileCheckedAt = Environment.TickCount64; Signal(); return null;
+    }
+
     public void Dispose()
     {
         _stop.Cancel();

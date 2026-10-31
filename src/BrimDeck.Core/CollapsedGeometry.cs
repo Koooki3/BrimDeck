@@ -81,8 +81,10 @@ public static class CollapsedGeometry
     // edges. The monitor and the work area are then those of the edge's frame (EdgeFrame), and the notch's width runs along the
     // edge. Its depth is the column's with ColumnPad on either side, at least its height setting; the height setting still sets the
     // content's scale.
+    // lineOverTaskbar: the line hangs from the screen's edge over a taskbar there (DeckSettings.Dock); its offset and distance from
+    // the edge are then measured on the monitor's frame rather than within the work area.
     public static CollapsedShape Resolve(DeckSettings settings, CompactStyle style, DipRect monitor, DipRect work, double pixelsPerDip = 1, double? contentWanted = null, double contentRequired = 0,
-        double panelScale = 1, double? column = null)
+        double panelScale = 1, double? column = null, bool lineOverTaskbar = false)
     {
         double s = ValidScale(panelScale);
         bool auto = contentWanted is not null;
@@ -105,6 +107,7 @@ public static class CollapsedGeometry
             }
             case CompactStyle.Line:
             {
+                if (lineOverTaskbar) area = screen;
                 double length = Math.Min(Value(settings.LineLength, CollapsedLimits.LineLengthMin, CollapsedLimits.LineLengthMax, CollapsedLimits.LineLengthDefault) * s, area.Width);
                 double thickness = Math.Min(SnapToDevicePixels(RoundLineThickness(settings.LineThickness) * s, pixelsPerDip), area.Height);
                 var (topMin, topMax) = TopRange(thickness, area.Height, CollapsedLimits.LineTopMax);

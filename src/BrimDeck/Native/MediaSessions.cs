@@ -95,18 +95,37 @@ internal sealed class MediaSessions : IDisposable
         Changed?.Invoke();
         return enabled;
     }
+    // NetEase Cloud Music's full control through its changed libcef.dll (NeteaseFullControl), kept like KuGou's: once on, every
+    // start opens the port on its own. The state is read off the UI thread by the source; the settings switch reads it here, or
+    // from NeteaseInstall directly when media is off.
+    public LibcefPatchState? NeteasePatchState => Netease?.FilePatchState;
+    public bool NeteaseFileControlWanted { set { if (Netease is { } source) source.FileFullControl = value; } }
+    public async Task<string?> EnableNeteaseFileControlAsync()
+    {
+        if (Netease is not { } source) return null;
+        var error = await source.EnableFileControlAsync();
+        if (!_disposed) { await RefreshAsync(); Changed?.Invoke(); }
+        return error;
+    }
+    public async Task<string?> DisableNeteaseFileControlAsync()
+    {
+        if (Netease is not { } source) return null;
+        var error = await source.DisableFileControlAsync();
+        if (!_disposed) { await RefreshAsync(); Changed?.Invoke(); }
+        return error;
+    }
     // KuGou's full control. Once its libcef.dll is changed, every start of KuGou opens the debugging port, so full control is a
     // lasting state: the setting KugouFullControl. The file's state is read off the UI thread, at most once a minute, or every
     // few seconds while the setting is on; while it is on, a file found unchanged (as after a KuGou update) is changed again
     // and a running KuGou restarts, once for each start of KuGou.
     private KugouCdpConnection? Kugou => _connections.OfType<KugouCdpConnection>().FirstOrDefault();
     public bool RestartingKugou { get; private set; }
-    public KugouPatchState? KugouState { get; private set; }
+    public LibcefPatchState? KugouState { get; private set; }
     public bool KugouInstalled => KugouState is not null;
     public bool KugouFullControl => Kugou?.Ready == true;
     // Why the last attempt to enable full control failed; cleared by the next attempt.
     public string? KugouError { get; private set; }
-    public bool CanEnableKugouFullControl => KugouState is KugouPatchState.Original or KugouPatchState.Patched or KugouPatchState.Partial
+    public bool CanEnableKugouFullControl => KugouState is LibcefPatchState.Original or LibcefPatchState.Patched or LibcefPatchState.Partial
         && Current is { IsKugou: true } current && _routes.TryGetValue(current.Id, out var route) && route.Connection is null;
     public bool KugouFullControlWanted
     {
@@ -128,8 +147,8 @@ internal sealed class MediaSessions : IDisposable
             if (state != KugouState) { KugouState = state; Changed?.Invoke(); }
             // An unchanged file is changed again at once; a KuGou with the debugging port is connected within a few seconds of its
             // start, so one that runs longer without it started before the change and restarts.
-            bool unchanged = state is KugouPatchState.Original or KugouPatchState.Partial;
-            bool stale = state is KugouPatchState.Patched && !KugouFullControl && started is { } at && DateTime.UtcNow - at > TimeSpan.FromSeconds(8);
+            bool unchanged = state is LibcefPatchState.Original or LibcefPatchState.Partial;
+            bool stale = state is LibcefPatchState.Patched && !KugouFullControl && started is { } at && DateTime.UtcNow - at > TimeSpan.FromSeconds(8);
             if (_kugouAuto && !RestartingKugou && (unchanged || stale) && _kugouAttempted != processes)
             {
                 _kugouAttempted = processes;

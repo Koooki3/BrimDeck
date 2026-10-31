@@ -52,6 +52,8 @@ internal sealed class SystemSampler : IDisposable
     private PowerSource? _powerSource;
     // The processor's and the graphics' own power, read with the whole machine's, for the page's power line when it shows one of them.
     private readonly PowerTrail _cpuPower = new(HistoryLength), _gpuPower = new(HistoryLength);
+    // The frame rate of the program in front, while a collapsed row or an open page shows it (SetExtras; FrameRates).
+    private readonly FrameRates _frames = new();
     private readonly NetworkProvider _network = new();
     private readonly ProcessProvider _processes = new();
     private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
@@ -125,9 +127,10 @@ internal sealed class SystemSampler : IDisposable
     // Called on the UI thread with what the panels show: temperatures, the processor's and the graphics adapter's (the expanded page
     // with temperatures on, or the collapsed row's temperature); storage, the drives (the page with storage on, or the collapsed
     // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
-    // page knows early how many lines it needs for them.
-    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false)
+    // page knows early how many lines it needs for them. frames: a collapsed row or an open page shows the frame rate.
+    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false, bool frames = false)
     {
+        if (!_disposed) _frames.Want(frames);
         bool newly = power && !_powerWanted;
         _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power; _batteryWanted = power || battery;
         // Power asked for while the sampler already runs (the collapsed row's readings kept it going): the counters are read at once and again
@@ -145,6 +148,8 @@ internal sealed class SystemSampler : IDisposable
     // Whether the machine gives a power reading and has a battery of its own; Unknown until read.
     public SensorState PowerSensor => _power?.State ?? SensorState.Unknown;
     public SensorState BatterySensor => _battery?.State ?? SensorState.Unknown;
+    // Whether frame rates can be read: Found while they are, None without permission, Unknown before they are asked for.
+    public SensorState FramesSensor => _frames.State;
 
     // generation: the thread's own; a thread replaced (Replace) leaves its providers to the thread stuck in them.
     private void Run(int generation)
@@ -275,6 +280,10 @@ internal sealed class SystemSampler : IDisposable
             _cpuPower.Clear(); _gpuPower.Clear();
             _power!.Sample(false, false, now, [], default, false);
         }
+        // Unavailable while nothing shows the frame rate, so one shown again starts from a dash, not an old rate.
+        var frames = _frames.Sample(now);
+        // The program's icon, read here as the process list's are (the shell's lookup wants this thread's apartment).
+        if (frames.TryGet(out var drawing) && drawing.Path is { } program) ProcessIcons.Prepare(program);
         var snapshot = new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network,
             Reading<GpuSample>.Unavailable(gpus.Reason), _lastProcesses)
         {
@@ -282,7 +291,8 @@ internal sealed class SystemSampler : IDisposable
             CpuHistory = _cpuHistory.ToArray(), Gpus = adapters, Storage = storage,
             Power = power, Battery = battery, PowerHistory = _powerHistory.ToArray(),
             PowerSummary = _powerStats.Summary(now),
-            CpuPower = _cpuPower.Track(now), GpuPower = _gpuPower.Track(now)
+            CpuPower = _cpuPower.Track(now), GpuPower = _gpuPower.Track(now),
+            Frames = frames
         };
         var shown = WithGpu(snapshot, _autoGpu, out bool automatic);
         if (automatic && shown.Gpu.TryGet(out var gpu)) Volatile.Write(ref _autoGpu, gpu.Luid);
@@ -358,6 +368,7 @@ internal sealed class SystemSampler : IDisposable
     {
         if (_disposed) return;
         _disposed = true; _wanted = false; _linger.Stop();
+        _frames.Dispose();
         _wake.Set();
         // The thread may be inside a reading; it ends on its own as a background thread if it does not stop in time.
         if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _zonesPdh?.Dispose(); _meterPdh?.Dispose(); _power?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures?.Dispose(); _wake.Dispose(); }

@@ -18,20 +18,65 @@ public sealed partial class SettingsWindow
         var label = TextLine(title, TextSize.Strong, TextPrimary, FontWeights.SemiBold);
         label.VerticalAlignment = VerticalAlignment.Center;
         if (help is null) return label;
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
-        heading.Children.Add(label);
-        heading.Children.Add(HelpIcon(title, help, 14));
-        return heading;
+        return new HelpHeading(label, HelpIcon(title, help, 14)) { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
+    }
+
+    // A label followed by its info icon. The label is centered in the height the panel is given, and the icon's center goes on
+    // the middle of the label's glyphs. The settings window draws text in Display mode, which snaps the baseline to device
+    // pixels, so the glyphs sit at a different height in the label's box at each display scale and a fixed offset cannot
+    // follow them: at 150% a 1 DIP nudge measured at another scale left the icon 1.5 pixels low.
+    private sealed class HelpHeading : Panel
+    {
+        // The middle of a capital letter and of an ideograph above the baseline, the same for Segoe UI Variable and
+        // Microsoft YaHei UI; measured from rendered glyphs at 11 to 13 DIP and 100% to 200% scale.
+        private const double GlyphMiddle = 0.36;
+        private readonly TextBlock _label;
+        private readonly FrameworkElement _icon;
+        private readonly TranslateTransform _shift = new();
+
+        public HelpHeading(TextBlock label, FrameworkElement icon)
+        {
+            _label = label; _icon = icon;
+            label.VerticalAlignment = VerticalAlignment.Top; icon.VerticalAlignment = VerticalAlignment.Top; icon.RenderTransform = _shift;
+            Children.Add(label); Children.Add(icon);
+        }
+
+        protected override Size MeasureOverride(Size available)
+        {
+            var free = new Size(double.PositiveInfinity, available.Height);
+            _label.Measure(free); _icon.Measure(free);
+            return new Size(_label.DesiredSize.Width + _icon.DesiredSize.Width, Math.Max(_label.DesiredSize.Height, _icon.DesiredSize.Height));
+        }
+
+        protected override Size ArrangeOverride(Size final)
+        {
+            double scale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            // Rounded as layout rounding would round it, so the baseline below is measured from where the label really is.
+            double top = Math.Round((final.Height - _label.DesiredSize.Height) / 2 * scale) / scale;
+            _label.Arrange(new Rect(0, top, _label.DesiredSize.Width, _label.DesiredSize.Height));
+            var text = new FormattedText(_label.Text, CultureInfo.CurrentUICulture, _label.FlowDirection,
+                new Typeface(_label.FontFamily, _label.FontStyle, _label.FontWeight, _label.FontStretch), _label.FontSize, Brushes.Black, null,
+                TextOptions.GetTextFormattingMode(_label), scale);
+            double middle = top + _label.Margin.Top + _label.Padding.Top + text.Baseline - GlyphMiddle * _label.FontSize;
+            _icon.Arrange(new Rect(_label.DesiredSize.Width, middle - _icon.DesiredSize.Height / 2, _icon.DesiredSize.Width, _icon.DesiredSize.Height));
+            // Layout rounding moves the icon's box, and again the mark inside it, to whole device pixels; at 150% the two
+            // together left the mark half a pixel low. The shift takes the remainder back.
+            var mark = (_icon as Decorator)?.Child as FrameworkElement ?? _icon;
+            double center = VisualTreeHelper.GetOffset(_icon).Y + mark.TranslatePoint(new Point(0, mark.RenderSize.Height / 2), _icon).Y;
+            _shift.Y = middle - center;
+            return final;
+        }
+
+        // The baseline moves with the display scale even when the label's size in DIPs stays the same.
+        protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi) => InvalidateArrange();
     }
 
     // The info icon that shows a setting's or a section's description on hover or focus.
-    private FrameworkElement HelpIcon(string title, Func<string> help, double size, double nudge = 1)
+    private FrameworkElement HelpIcon(string title, Func<string> help, double size)
     {
         // The geometry is drawn for a 14 DIP box; smaller icons scale it so the circle stays centered and unclipped.
         var icon = Stroke("M 7,1 A 6,6 0 1 1 6.99,1 M 7,6.5 V 10 M 7,4 V 4.1", 14, 14, TextTertiary);
         if (size != 14) icon.LayoutTransform = new ScaleTransform(size / 14, size / 14);
-        // Measured ink: beside a 13pt label the circle's center sat 1 DIP above the center of the label's glyphs.
-        if (nudge != 0) icon.RenderTransform = new TranslateTransform(0, nudge);
         var info = new HelpMark
         {
             Width = size + 8, Height = 24, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent,
@@ -77,23 +122,10 @@ public sealed partial class SettingsWindow
         info.Unloaded += (_, _) => tooltip.IsOpen = false;
     }
 
-    // A text field's keyboard focus (SW-02): the field draws no outline of its own (FocusVisualStyle is off in SettingsNumber), so its
-    // frame turns to the accent color and 2 DIP thick while input has the focus, its padding giving the extra DIP back so the text
-    // does not move. rest: the frame's color without focus.
-    private void FieldFocus(Border frame, UIElement input, Func<Brush> rest)
-    {
-        var padding = frame.Padding;
-        void Show(bool focused)
-        {
-            frame.BorderBrush = focused ? UI.Brush(_palette.Accent) : rest();
-            frame.BorderThickness = new Thickness(focused ? 2 : 1);
-            frame.Padding = focused ? new Thickness(Math.Max(0, padding.Left - 1), padding.Top, Math.Max(0, padding.Right - 1), padding.Bottom) : padding;
-        }
-        input.IsKeyboardFocusWithinChanged += (_, _) => Show(input.IsKeyboardFocusWithin);
-        // The whole frame is the field's click target, not only the 16 DIP line of text in it (SW-08). The steppers and the text
-        // itself take their own clicks first.
-        if (input is TextBox box) frame.MouseLeftButtonDown += (_, e) => { box.Focus(); box.CaretIndex = box.Text.Length; e.Handled = true; };
-    }
+    // A text field's keyboard focus: the field draws no outline of its own (FocusVisualStyle is off in SettingsNumber), so its frame
+    // turns to the accent color while input has the focus. rest: the frame's color without focus.
+    private void FieldFocus(Border frame, UIElement input, Func<Brush> rest) =>
+        input.IsKeyboardFocusWithinChanged += (_, _) => frame.BorderBrush = input.IsKeyboardFocusWithin ? UI.Brush(_palette.Accent) : rest();
 
     // Where each segmented control's highlight stood when the user last pressed it, so a page rebuilt by that
     // choice (theme, quick size) can still slide the highlight from the old option instead of jumping.
@@ -189,8 +221,9 @@ public sealed partial class SettingsWindow
         return panel;
     }
 
-    // A question before an action that cannot be undone, in a small dialog over the settings: Cancel (Esc) or the action, in red.
-    private bool Confirm(string title, string message, string action)
+    // A question before an action that cannot be undone, in a small dialog over the settings: Cancel (Esc) or the action, in red
+    // (in the accent color when it is not a danger).
+    private bool Confirm(string title, string message, string action, bool danger = true)
     {
         var dialog = new Window { Title = title, Owner = this, Width = 400, SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false, FontFamily = UI.PanelFont,
@@ -204,7 +237,7 @@ public sealed partial class SettingsWindow
         var text = TextLine(message, TextSize.Body, TextSecondary); text.TextWrapping = TextWrapping.Wrap; panel.Children.Add(text);
         bool confirmed = false;
         var cancel = ActionButton(Loc.T("取消", "Cancel"), dialog.Close); cancel.Style = (Style)dialog.FindResource("SettingsOutlineButton"); cancel.IsCancel = true;
-        var confirm = ActionButton(action, () => { confirmed = true; dialog.Close(); }); confirm.Style = (Style)dialog.FindResource("SettingsDangerButton");
+        var confirm = ActionButton(action, () => { confirmed = true; dialog.Close(); }); confirm.Style = (Style)dialog.FindResource(danger ? "SettingsDangerButton" : "SettingsPrimaryButton");
         foreach (var button in new[] { cancel, confirm }) { button.MinWidth = 84; button.Padding = new Thickness(14, Space.Tight, 14, Space.Tight); }
         confirm.Margin = new Thickness(Space.S8, 0, 0, 0);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 20, 0, 0) };
@@ -216,50 +249,6 @@ public sealed partial class SettingsWindow
         dialog.Loaded += (_, _) => cancel.Focus();
         dialog.ShowDialog();
         return confirmed;
-    }
-}
-
-// The settings window's radio groups (segmented controls, theme and style cards, clock tiles and swatches) behave as Windows' radio
-// groups (SW-06): the group is one Tab stop, on its chosen option (or its first), and the arrow keys choose the next or previous
-// option, wrapping at the ends. A group is the radio buttons of one panel with one group name. On for everything under an element
-// with Enabled set (the window's frame), so the panel's own radio buttons keep their behavior.
-internal static class RadioGroups
-{
-    public static readonly DependencyProperty EnabledProperty = DependencyProperty.RegisterAttached(
-        "Enabled", typeof(bool), typeof(RadioGroups), new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.Inherits));
-    public static void SetEnabled(DependencyObject element, bool value) => element.SetValue(EnabledProperty, value);
-
-    static RadioGroups()
-    {
-        // A new option takes its place at its first layout: WPF raises Loaded only to elements with a handler of their own.
-        EventManager.RegisterClassHandler(typeof(RadioButton), FrameworkElement.SizeChangedEvent, new SizeChangedEventHandler((sender, _) => TabStops((RadioButton)sender)));
-        EventManager.RegisterClassHandler(typeof(RadioButton), ToggleButton.CheckedEvent, new RoutedEventHandler((sender, _) => TabStops((RadioButton)sender)));
-        EventManager.RegisterClassHandler(typeof(RadioButton), UIElement.PreviewKeyDownEvent, new KeyEventHandler(Arrow));
-    }
-    // Registers the class handlers; called once before the first settings window is built.
-    public static void Use() { }
-
-    private static List<RadioButton> Group(RadioButton radio) => VisualTreeHelper.GetParent(radio) is Panel panel
-        ? [.. panel.Children.OfType<RadioButton>().Where(option => option.GroupName == radio.GroupName)] : [radio];
-
-    private static void TabStops(RadioButton radio)
-    {
-        if (!(bool)radio.GetValue(EnabledProperty)) return;
-        var group = Group(radio);
-        var chosen = group.FirstOrDefault(option => option.IsChecked == true) ?? group[0];
-        foreach (var option in group) KeyboardNavigation.SetIsTabStop(option, ReferenceEquals(option, chosen));
-    }
-
-    private static void Arrow(object sender, KeyEventArgs e)
-    {
-        var radio = (RadioButton)sender;
-        int step = e.Key is Key.Left or Key.Up ? -1 : e.Key is Key.Right or Key.Down ? 1 : 0;
-        if (step == 0 || e.Handled || !ReferenceEquals(e.OriginalSource, radio) || Keyboard.Modifiers != ModifierKeys.None || !(bool)radio.GetValue(EnabledProperty)) return;
-        var open = Group(radio).Where(option => option.IsEnabled && option.IsVisible).ToList();
-        int at = open.IndexOf(radio);
-        if (at < 0 || open.Count < 2) return;
-        var next = open[(at + step + open.Count) % open.Count];
-        next.Focus(); next.IsChecked = true; e.Handled = true;
     }
 }
 
