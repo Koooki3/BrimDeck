@@ -114,6 +114,12 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // Any scale is accepted; non-numbers and non-positive values mean the default size.
     public static double SafeScale(double scale) => double.IsFinite(scale) && scale > 0 ? Math.Clamp(scale, .25, 8) : 1;
     private static double Safe(double width) => double.IsFinite(width) && width > 0 ? width : 0;
+    // The first letter or digit of an application's name, upper case, for the middle of its collapsed quota ring; empty without one.
+    public static string RingLetter(string? name)
+    {
+        foreach (char c in name ?? "") if (char.IsLetterOrDigit(c)) return char.ToUpperInvariant(c).ToString();
+        return "";
+    }
     // The gap between any two neighbours in the row, and between two rings or two readings (CompactSpacing).
     public static double Gap(double scale) => Whole(8 * SafeScale(scale));
 

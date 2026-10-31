@@ -44,7 +44,7 @@ public partial class MainWindow
                 if (text.Length == 0) text = _mediaTrack!.Caption;
             }
         }
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
+        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? [.. Settings.EnabledApps.Where(HasQuotaReading)] : new List<AppEntry>();
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, 0, equalizer, Settings.EqualizerBars); CurrentCompactLayout = layout;
         // One strip per reading, each alone on its line and centred in it. The drives show no glyph here: each drive has a line with its
@@ -156,7 +156,7 @@ public partial class MainWindow
         {
             int line = i / perLine, inLine = Math.Min(perLine, rings.Length - line * perLine);
             double start = (column - (inLine * layout.RingSize + (inLine - 1) * gap)) / 2;
-            var ring = UI.Ring(rings[i].Used, rings[i].Color, layout.RingSize, layout.RingThickness);
+            var ring = QuotaCarousel.Ring(rings[i], layout.RingSize, layout.RingThickness, layout.Scale);
             Canvas.SetLeft(ring, Math.Round(start + (i % perLine) * (layout.RingSize + gap)));
             Canvas.SetTop(ring, line * (layout.RingSize + gap));
             canvas.Children.Add(ring);
