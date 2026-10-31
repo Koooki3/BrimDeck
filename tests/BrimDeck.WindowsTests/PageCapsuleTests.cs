@@ -66,6 +66,35 @@ public partial class MainWindow
         finally { window.Close(); }
     }
 
+    // The header changes size tier: the capsule follows the buttons' new drawn height at once (ApplyHeader), not at the next refresh.
+    internal static void CheckPageCapsuleFit(Action<string, bool> check)
+    {
+        var window = new MainWindow { Width = 260, Height = 100, Left = -20000, Top = -20000, ShowActivated = false, WindowStyle = WindowStyle.None };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton);
+        window.PageCapsule.RenderTransform = window.PageCapsuleShift;
+        window.PageSwitch.Children.Add(window.PageCapsule); window.PageSwitch.Children.Add(buttons);
+        window.Content = window.PageSwitch;
+        try
+        {
+            window.Show();
+            var tall = PanelHeader.For(36, 20); var short_ = PanelHeader.For(30, 20);
+            window.FitPageButtons(tall); window.UpdateLayout(); window.PlacePageCapsule();
+            check("page capsule is as tall as the buttons draw in the tall header", window.PageCapsule.Height == tall.ButtonHeight && tall.ButtonHeight == 24);
+
+            // What ApplyHeader did before: the buttons are fitted to the shorter header and the capsule is left as the last
+            // PlacePageCapsule (run by RefreshStatus before ApplyHeader) set it, for the old tier.
+            foreach (var button in new[] { window.AIUsageButton, window.MonitorPageButton, window.MusicPageButton }) HitArea.Fit(button, short_.ButtonHeight, short_.Height);
+            check("without the capsule step the capsule stays at the old tier's height after the buttons change", window.PageCapsule.Height == tall.ButtonHeight && short_.ButtonHeight != tall.ButtonHeight);
+            check("a button's drawn height read before the next layout pass is still stale, so the capsule cannot be placed from it", HitArea.Look(window.AIUsageButton) != short_.ButtonHeight);
+            window.FitPageButtons(short_);
+            check("the capsule takes the new tier's drawn height as the buttons change", window.PageCapsule.Height == short_.ButtonHeight);
+            window.UpdateLayout(); window.PlacePageCapsule();
+            check("after layout the capsule and the buttons agree", window.PageCapsule.Height == HitArea.Look(window.AIUsageButton));
+        }
+        finally { window.Close(); }
+    }
+
     private static void PumpCapsule(Action arrange, Action<string, bool> check)
     {
         var dispatcher = Dispatcher.CurrentDispatcher;

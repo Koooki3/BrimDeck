@@ -146,6 +146,7 @@ public sealed partial class SettingsWindow
             if (from < 0) return;
             if (to < 0 || to >= items.Length) { Announce(to < 0 ? Loc.T("已在最前", "Already first") : Loc.T("已在最后", "Already last")); return; }
             starting?.Invoke();
+            RowFocus.Keep(row, handle);
             var other = items[to];
             rows.Children.Remove(row);
             rows.Children.Insert(rows.Children.IndexOf(other) + (delta > 0 ? 1 : 0), row);

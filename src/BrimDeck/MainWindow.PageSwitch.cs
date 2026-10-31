@@ -30,6 +30,14 @@ public partial class MainWindow
         { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
     }
     private bool _capsulePending;
+    // The page buttons take the header's band for their pointer area (HitArea.Fit), and the capsule is as tall as they now draw. The
+    // capsule is set here, not read back from a button: after Fit a button's ActualHeight is still the old tier's until the next
+    // layout pass, so PlacePageCapsule, which RefreshStatus runs before ApplyHeader, would size it for the tier left behind.
+    private void FitPageButtons(PanelHeader header)
+    {
+        foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton }) HitArea.Fit(button, header.ButtonHeight, header.Height);
+        PageCapsule.Height = header.ButtonHeight;
+    }
     // The buttons stand in the order chosen in the settings; the first has no gap before it.
     private void OrderPageButtons()
     {

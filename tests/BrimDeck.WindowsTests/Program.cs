@@ -18,6 +18,7 @@ internal static class Program
             if (args is ["--only", "power"]) { PowerChecks.Run(Check); return 0; }
             if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return 0; }
             if (args is ["--only", "drawn"]) { DrawnAutomationTests.Run(Check); return 0; }
+            if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return 0; }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
             // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
             // says something about the machine, not the code. Without the flag every check runs.
@@ -30,7 +31,9 @@ internal static class Program
             CheckPageToolTips();
             LayoutRetryTests.Run(Check);
             DrawnAutomationTests.Run(Check);
+            SettingsFocusTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
+            BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
             if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, temperature and power readings, and the application identity the shell resolves (they read this machine or its shell).");
             else

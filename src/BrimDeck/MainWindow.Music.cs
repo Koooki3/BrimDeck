@@ -189,10 +189,11 @@ public partial class MainWindow
         ToolbarRow.Height = new GridLength(header.Row);
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
-        // The buttons take the band's height to the pointer, up to HitArea.Target, while they look as tall as before.
+        // The buttons take the band's height to the pointer, up to HitArea.Target, while they look as tall as before; the capsule under
+        // the chosen one is set to their new drawn height in the same step (FitPageButtons).
+        FitPageButtons(header);
         foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton })
         {
-            HitArea.Fit(button, header.ButtonHeight, header.Height);
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
             button.ApplyTemplate();
             if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(PanelTheme.Corner(PanelHeader.ButtonRadius));
