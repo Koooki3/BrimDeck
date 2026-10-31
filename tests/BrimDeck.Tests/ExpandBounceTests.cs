@@ -91,17 +91,6 @@ internal static class ExpandBounceTests
         check("Expand bounce: a closing that turns back an opening, even one past its end, takes a share between the least and the whole move", turned);
         check("Expand bounce: an opening over a move turned back gives in proportion to the distance that is left", proportional);
 
-        // Everything that opens on the spring follows: the indicator's arrival is the spring alone without a wind-up, and with one its
-        // release passes its size by under half a percent and lands (it used to leave a jump of a third of a percent at its end).
-        bool arrival = Curves.LineArrive(.4, 0) == Curves.Bounce(.4);
-        foreach (double windUp in new[] { .01, .03, .05 })
-        {
-            double high = 0;
-            for (int i = 1; i < Steps; i++) high = Math.Max(high, Curves.LineArrive((double)i / Steps, windUp));
-            arrival &= high < 1.005 && Math.Abs(Curves.LineArrive(1 - 1e-9, windUp) - 1) < .001;
-        }
-        check("Expand bounce: the indicator's arrival, on the same spring, passes its size by under half a percent and lands without a jump", arrival);
-
         // Every theme opens on this curve: a theme's motion section has no key for how the panel opens (a theme that gets one has to
         // be softened and checked here too), and every built-in theme, with its night look, resolves.
         var names = typeof(ThemeMotion).GetProperties().Select(p => p.Name).Concat(typeof(PanelThemeMotion).GetProperties().Select(p => p.Name)).ToList();

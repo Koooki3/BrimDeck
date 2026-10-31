@@ -81,14 +81,11 @@ internal static class EndfieldTests
         static (bool OnCut, bool Unit, bool RoundArc) Outline(double cut)
         {
             double w = 376, h = 52, shoulder = 16, radius = 20, right = w - shoulder, leg = 10;
-            var liquid = new BrimDeck.Core.Notices.NoticeLiquid(new BrimDeck.Core.Notices.LiquidSpec(BrimDeck.Core.Notices.LiquidForm.Notch, w, h, BrimDeck.Core.Notices.NoticeLiquid.DesignSeed, Shoulder: shoulder, CornerRadius: radius, Cut: cut));
-            var frame = new BrimDeck.Core.Notices.LiquidFrame();
-            liquid.Sample(0, frame, w, h);
+            var liquid = new BrimDeck.Core.Notices.IslandLiquid(BrimDeck.Core.Notices.IslandForm.Notch, w, h, corner: radius, shoulder: shoulder, cut: cut);
             bool onCut = true, unit = true, arc = false;
-            for (int i = 0; i < frame.Outline.Length; i++)
+            foreach (var p in liquid.Outline)
             {
-                var p = frame.Outline[i]; var n = frame.Normals[i];
-                unit &= Math.Abs(Math.Sqrt(n.X * n.X + n.Y * n.Y) - 1) < 1e-6;
+                unit &= Math.Abs(Math.Sqrt(p.Nx * p.Nx + p.Ny * p.Ny) - 1) < 1e-6;
                 // The bottom right corner's points lie on the cut line x + y = right + h - leg, or, round, off it.
                 if (p.X > right - leg + 1e-6 && p.Y > h - leg + 1e-6 && p.X < right + 1e-6)
                 {

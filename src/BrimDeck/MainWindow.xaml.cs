@@ -203,7 +203,7 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); if (!_rebuilt) await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _clipSettle?.Stop(); StopFill(); };
+        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _clipSettle?.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseWheel += PanelWheel;
@@ -738,8 +738,8 @@ public partial class MainWindow : Window
         if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
         // A hand-over cut short by closing the panel leaves nothing behind for the next opening.
         if (expanded && !_expanded) _handover.Drop();
-        // Opening over a notice, the panel grows on from the notice's outline (StartFromNotice) rather than from the island.
-        NoticeFrame? fromNotice = expanded && !_expanded && !instant && !_preview ? _noticeWindow?.HandOver() : null;
+        // Opening over a notice: the notice goes in the same frame and the panel grows from the island, which kept its outline.
+        if (expanded && !_expanded && !instant && !_preview) _noticeWindow?.HandOver();
         if (expanded) _noticeWindow?.Abort();
         bool wasExpanded = _expanded;
         _expanded = expanded;
@@ -819,12 +819,11 @@ public partial class MainWindow : Window
         bool turning = wasExpanded != expanded;
         int duration = !instant && Soft.Enabled
             ? expanded && !turning ? PanelMotion.Reshape : PanelMotion.Length(Settings.AnimationDuration, closing: turning && !expanded, keyboard: keyboard && turning) : 0;
-        if (fromNotice is { } notice && duration > 0) StartFromNotice(notice);
-        // motion-review F1, F2: turned back while the last move is still under way (the pointer left an opening panel, or came
-        // back to a closing one), the surface starts back from where it is at once, in the share of the move it has to undo.
-        // Only an opening or closing still under way counts; the panel laid out again in place never does.
+        // motion-review F1, F2: turned back while the last opening or closing is still under way (the pointer left an opening
+        // panel, or came back to a closing one), the surface starts back from where it is at once, in the share of the move it
+        // has to undo. The panel laid out again in place never counts.
         long now = Environment.TickCount64;
-        bool redirect = turning && duration > 0 && fromNotice is null && _turn.Turns(now, expanded);
+        bool redirect = turning && duration > 0 && _turn.Turns(now, expanded);
         if (redirect) duration = (int)Math.Round(duration * _turn.Share(now, expanded, Island.Width, Island.Height, width, height));
         // The collapsed surface laid out again while it is still closing (its content asked for a new width) carries the closing
         // on, on the same drawer curve, rather than holding for the closing's delay and starting a whole new move.
@@ -1017,7 +1016,7 @@ public partial class MainWindow : Window
             if (_pointerInside) PointerChanged(false);
             return;
         }
-        // A notice over the island takes the pointer itself (NoticeWindow); the panel only keeps track, so that a notice ending
+        // A notice over the island takes the pointer itself (IslandNotice); the panel only keeps track, so that a notice ending
         // under a resting pointer does not open the panel.
         if (NoticeCovering) { _cursorInCompact = inCompact; if (_pointerInside) PointerChanged(false); return; }
         if (inCompact != _cursorInCompact) { _cursorInCompact = inCompact; PointerChanged(inCompact); }

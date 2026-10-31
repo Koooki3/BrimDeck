@@ -23,8 +23,8 @@ public sealed partial class SettingsWindow
         var center = _app.Notices;
         _noticeStatusLines.Clear();
         Group(Toggle(Loc.T("启用灵动提示", "Turn on live notices"), S.NoticesEnabled, value => { Change(s => s.NoticesEnabled = value); ShowPage(NoticesSettingsPage); },
-            help: Loc.T("收到通知时，刘海、胶囊或指示条短暂展开，显示应用图标、标题和摘要；悬停查看详情。Windows 自己的横幅和通知中心保持不变。全部在本机处理，不使用云端服务。",
-                "When a notice arrives, the notch, capsule or indicator briefly opens to show the application's icon, title and summary; hover for details. Windows' own banners and notification center stay as they are. Everything is processed on this PC, without any cloud service.")));
+            help: Loc.T("收到通知时，刘海、胶囊或指示条以液体动效闪动，刘海和胶囊在岛上显示应用图标、标题和摘要；鼠标移上去即打开通知页。Windows 自己的横幅和通知中心保持不变。全部在本机处理，不使用云端服务。",
+                "When a notice arrives, the notch, capsule or indicator moves like a liquid and flashes; the notch and the capsule show the application's icon, title and summary on the island. Rest the pointer on it to open the notices page. Windows' own banners and notification center stay as they are. Everything is processed on this PC, without any cloud service.")));
         if (!S.NoticesEnabled)
         {
             var note = TextLine(Loc.T("开启后可选择接收 Windows 应用通知、WSL 中的通知以及 brim-notify 命令发送的提示。", "Once on, you can receive Windows app notifications, notices from WSL and those sent with the brim-notify command."), TextSize.Body, TextSecondary);
@@ -306,8 +306,6 @@ public sealed partial class SettingsWindow
             : center.Quiet ? (Loc.T("Windows 正处于专注、演示或锁定状态，提示暂时不显示。", "Windows is in focus, presentation or locked state; notices are held back for now."), false) : ("", false));
         Group(SliderRow(Loc.T("停留时间", "Shown for"), S.NoticeDuration, 2, 30, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeDuration = (int)Math.Round(value))),
             SliderRow(Loc.T("高优先级停留", "High priority shown for"), S.NoticeHighDuration, 2, 60, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeHighDuration = (int)Math.Round(value))),
-            Toggle(Loc.T("悬停显示详情", "Hover shows details"), S.NoticeHoverDetails, value => Change(s => s.NoticeHoverDetails = value),
-                help: Loc.T("鼠标在提示上停留约 0.25 秒即展开详情；关闭后需单击。提示到达时鼠标已在岛上，不会自动展开。", "Resting the pointer on a notice for about 0.25 s opens its details; when off, click instead. A notice arriving under a resting pointer does not open by itself.")),
             MusicChoice(Loc.T("显示在", "Show on"), S.NoticeScreen, [(NoticeScreen.Foreground, Loc.T("前台窗口所在屏幕", "Foreground window's screen")), (NoticeScreen.Main, Loc.T("主面板所在屏幕", "Main panel's screen"))], value => Change(s => s.NoticeScreen = value)),
             MusicChoice(Loc.T("到达时显示", "On arrival show"), S.NoticePrivacy, [(NoticePrivacy.Full, Loc.T("标题和摘要", "Title and summary")), (NoticePrivacy.TitleOnly, Loc.T("仅标题", "Title only")), (NoticePrivacy.AppOnly, Loc.T("仅应用", "App only"))], value => Change(s => s.NoticePrivacy = value)),
             Toggle(Loc.T("专注与演示时不打扰", "Quiet during focus and presentations"), S.NoticeRespectFocus, value => Change(s => s.NoticeRespectFocus = value),

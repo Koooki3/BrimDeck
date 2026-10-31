@@ -363,7 +363,7 @@ internal sealed class WindowsNoticeSource : IDisposable
                 InstanceKey = $"windows:{appId}:{id}:{created.UtcTicks}",
                 Title = BrimDeck.Protocol.NoticeProtocol.Clip(who.Title, BrimDeck.Protocol.NoticeProtocol.MaxTitle)!,
                 Body = BrimDeck.Protocol.NoticeProtocol.Clip(who.Body, BrimDeck.Protocol.NoticeProtocol.MaxBody)!,
-                IconRef = registered.Icon ?? "aumid:" + appId, CreatedAt = created, Category = who.Category, Call = who.Call, Capabilities = NoticeCapabilities.OpenApp
+                IconRef = registered.Icon ?? "aumid:" + appId, Picture = WindowsToastPicture.Find(id, appId), CreatedAt = created, Category = who.Category, Call = who.Call, Capabilities = NoticeCapabilities.OpenApp
             };
         }
         catch (Exception ex) when (ex is COMException or InvalidCastException or ArgumentException or NullReferenceException) { return null; }
@@ -397,15 +397,17 @@ internal sealed class WindowsNoticeSource : IDisposable
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or NotImplementedException) { return default; }
     }
 
-    // The application's logo as Windows provides it for its notifications, as PNG (or other image) bytes.
-    public async Task<byte[]?> LogoAsync(string appId)
+    // The application's logo as Windows provides it for its notifications, as PNG (or other image) bytes. Desktop applications
+    // often give none; their icon then comes from the Apps folder, as the Start menu shows it (ShellAppIcon).
+    public async Task<byte[]?> LogoAsync(string appId) => await NotificationLogoAsync(appId) ?? await ShellAppIcon.PngAsync(appId);
+
+    private async Task<byte[]?> NotificationLogoAsync(string appId)
     {
         Windows.ApplicationModel.AppInfo? app;
         lock (_apps) _apps.TryGetValue(appId, out app);
         if (app is null) return null;
         try
         {
-            // Desktop applications may have no display information or no logo at all.
             if (app.DisplayInfo?.GetLogo(new Windows.Foundation.Size(128, 128)) is not { } logo) return null;
             using var stream = await logo.OpenReadAsync();
             if (stream is null) return null;

@@ -483,7 +483,7 @@ internal sealed class NoticeCenter : IDisposable
         {
             Origin = NoticeOrigin.Test, AppKey = TestAppKey, AppName = "BrimDeck", InstanceKey = "test:" + Guid.NewGuid().ToString("N"),
             Title = Loc.T("灵动提示测试", "Live notice test"),
-            Body = Loc.T("通知会以当前主题在这里出现。悬停查看详情，点击“查看全部”打开通知历史。", "Notices appear here in the current theme. Hover for details; \"View all\" opens the notice history."),
+            Body = Loc.T("通知会在岛上显示。鼠标移上去即可打开通知页。", "Notices show on the island. Rest the pointer on it to open the notices page."),
             Category = NoticeCategory.Info
         });
     }
