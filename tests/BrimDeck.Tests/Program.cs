@@ -81,6 +81,7 @@ try
     CurvesTests.Run(Check);
     ExpandBounceTests.Run(Check);
     GlassFeedbackTests.Run(Check);
+    ExpandSnapTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);
     DisplayWatchTests.Run(Check);
