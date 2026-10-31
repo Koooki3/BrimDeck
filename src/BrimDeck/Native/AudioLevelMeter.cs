@@ -41,11 +41,12 @@ internal sealed class AudioLevelMeter : IDisposable
             _wake.Set();
         }
     }
-    // Fills the bars' levels from the captured audio's spectrum, one band of pitch for each of the levels.Length bars.
-    public bool TryFill(Span<double> levels)
+    // Fills the bars' levels from the captured audio, in the given way: flowing along the bars, or one band of pitch for each of
+    // the levels.Length bars.
+    public bool TryFill(Span<double> levels, EqualizerMode mode)
     {
         if (_capture is not { } capture) return false;
-        capture.Signal.Fill(levels, Now);
+        capture.Signal.Fill(levels, Now, mode);
         return true;
     }
     private void Run()

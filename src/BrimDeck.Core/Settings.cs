@@ -42,6 +42,10 @@ public enum DefaultDeckPage { Last, Usage, Music, Monitor }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
+// How the level bars show the sound. Flow: one value for the whole sound that runs from one end of the bars to the other, so a
+// drum beat or a voice is seen crossing them. Spectrum: the sound split by pitch, each bar one band, low on the left and high
+// on the right. Saved as numbers, so new members go at the end; a file without it, or with a number not listed, is Flow.
+public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
 public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock }
@@ -268,6 +272,7 @@ public sealed class DeckSettings
     private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
     private List<DeckPage> _pageOrder = [.. DeckPages.Order];
     private int _equalizerBars = CompactMusicLayout.DefaultBars, _musicEqualizerBars = 5;
+    private EqualizerMode _equalizerMode = EqualizerMode.Flow;
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
@@ -346,6 +351,8 @@ public sealed class DeckSettings
     public bool LyricsEnabled { get; set; } = true;
     // How many bars the music page's equalizer has, beside the title; its bars keep their spacing, so more bars make it longer.
     public int MusicEqualizerBars { get => _musicEqualizerBars; set => _musicEqualizerBars = CompactMusicLayout.SafeBars(value); }
+    // How the collapsed and the music page's equalizers show the sound (one choice for both); Flow keeps the original look.
+    public EqualizerMode EqualizerMode { get => _equalizerMode; set => _equalizerMode = Enum.IsDefined(value) ? value : EqualizerMode.Flow; }
     // Offers "网易云音乐 · 完整控制" in the source menu, or alone in its place when nothing plays.
     public bool NeteaseFullControlEntry { get; set; }
     // Restarts a player started the normal way with full control, without asking again; switching it on asks once.

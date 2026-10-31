@@ -11,7 +11,7 @@ internal static class EqualizerSpectrumTests
     private static List<(double Time, double[] Levels)> Play(EqualizerSignal signal, Func<double, float> wave, double seconds, int bars, double start = 0, Action<double>? beforeAnalysis = null)
     {
         var snapshots = new List<(double, double[])>(); var block = new float[441 * 2]; var levels = new double[bars];
-        signal.Fill(levels, start);
+        signal.Fill(levels, start, EqualizerMode.Spectrum);
         for (int n = 0; n < (int)Math.Round(seconds * 100); n++)
         {
             double t0 = start + n / 100d;
@@ -19,7 +19,7 @@ internal static class EqualizerSpectrumTests
             signal.Push(block, 2, t0 + .01);
             if (n % 3 != 2) continue;
             beforeAnalysis?.Invoke(t0 + .01);
-            signal.Advance(t0 + .01); signal.Fill(levels, t0 + .01); snapshots.Add((t0 + .01, (double[])levels.Clone()));
+            signal.Advance(t0 + .01); signal.Fill(levels, t0 + .01, EqualizerMode.Spectrum); snapshots.Add((t0 + .01, (double[])levels.Clone()));
         }
         return snapshots;
     }
@@ -162,9 +162,9 @@ internal static class EqualizerSpectrumTests
         check("Spectrum bars: silence and one-bit dither leave all the bars at 0 for any length, and they fall to 0 when the sound ends", silent);
         var idle = new EqualizerSignal(Rate); var idleLevels = new double[5];
         var idleRun = Play(idle, t => Sine(t, 440, .4), 1, 5);
-        idle.Fill(idleLevels, idleRun[^1].Time);
+        idle.Fill(idleLevels, idleRun[^1].Time, EqualizerMode.Spectrum);
         bool shownNow = idleLevels.Max() > .3;
-        idle.Fill(idleLevels, idleRun[^1].Time + 1);
+        idle.Fill(idleLevels, idleRun[^1].Time + 1, EqualizerMode.Spectrum);
         check("Spectrum bars: an analysis that is long out of date (the capture stalled) shows nothing", shownNow && idleLevels.All(l => l == 0));
 
         // The length changes while the sound plays (the slider is dragged, the row gains room): the bars carry on.
@@ -181,7 +181,7 @@ internal static class EqualizerSpectrumTests
         {
             double earlier = Mean(before[^1].Levels), earlierPeak = before[^1].Levels.Max();
             // The first look at the new count comes before the next analysis.
-            var asked = new double[count]; growing.Fill(asked, clock);
+            var asked = new double[count]; growing.Fill(asked, clock, EqualizerMode.Spectrum);
             carries &= asked.All(l => l > 0) && Math.Abs(Mean(asked) - earlier) < .2 && Math.Abs(asked.Max() - earlierPeak) < .3;
             before = Play(growing, Wave, 1, count, clock); clock = before[^1].Time;
             // The bars of the next analyses move gently and never fall to rest while the music plays.
