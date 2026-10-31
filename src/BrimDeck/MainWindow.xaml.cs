@@ -907,7 +907,12 @@ public partial class MainWindow : Window
         if (_expanded && NearGrips(screenPoint) && Environment.TickCount64 - _leftAt < GripHold) { _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(120); _leave.Start(); return; }
         _leave.Stop(); SetExpanded(false);
     }
-    private void Settings_Click(object sender, RoutedEventArgs e) { if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings(); else _app.OpenSettings(); }
+    private void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings();
+        else if (_app.Updates.UpdatedFrom is not null) _app.OpenReleaseNotes();
+        else _app.OpenSettings();
+    }
     private async Task<IReadOnlyList<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart)
     {
         var settings = Settings.Copy();

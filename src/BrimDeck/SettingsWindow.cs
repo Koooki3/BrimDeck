@@ -1079,7 +1079,12 @@ public sealed partial class SettingsWindow : Window
         SectionTitle(Loc.T("软件更新", "Software update"));
         _aboutUpdateView = CreateUpdateView(true); Group(_aboutUpdateView.Root);
         SectionTitle(Loc.T("项目信息", "Project"));
-        Group(Row(Loc.T("当前版本", "Current version"),TextLine(_app.Updates.CurrentVersion,12,TextSecondary)),
+        // What's new sits beside the version number, where someone looking for this version's changes looks first.
+        var version = new StackPanel { Orientation = Orientation.Horizontal };
+        var current = TextLine(_app.Updates.CurrentVersion,12,TextSecondary); current.VerticalAlignment = VerticalAlignment.Center; version.Children.Add(current);
+        var notes = ActionButton(Loc.T("更新内容", "What's new"), ShowReleaseNotes); notes.Style = (Style)FindResource("SettingsLink"); notes.Margin = new Thickness(14, 0, 0, 0);
+        version.Children.Add(notes);
+        Group(Row(Loc.T("当前版本", "Current version"),version),
             Row(Loc.T("开源许可证", "License"),TextLine("Apache License 2.0",12,TextSecondary)),
             Row(Loc.T("项目主页", "Homepage"),Link("GitHub ↗","https://github.com/MoFeng2223/BrimDeck")),
             Row(Loc.T("问题与建议", "Issues and suggestions"),Link(Loc.T("提交反馈 ↗", "Send feedback ↗"),"https://github.com/MoFeng2223/BrimDeck/issues")));
