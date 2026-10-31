@@ -268,7 +268,7 @@ internal sealed class MonitorView : Grid
             string detail = kind.Length > 0 && heatText.Length > 0 ? kind + " · " + heatText : kind + heatText;
             _gpuGauge.Set(idle ? null : gpu.Usage, idle ? "—" : MonitorFormat.Percent(gpu.Usage), idle ? "" : "%", detail, switchTo.Length > 0 ? tip + "\n" + switchTo : tip, motion,
                 heat is { } c ? Hot(Temperatures.OfGpu(c)) : null);
-            _gpuBlock?.Set(idle ? 0 : gpu.Usage, idle ? null : gpu.DedicatedFraction, tip, motion);
+            _gpuBlock?.Set(idle ? null : gpu.Usage, idle ? null : gpu.DedicatedFraction, tip, motion);
             _gpuGraph?.Set(gpu.Engines.Select(engine => new GraphColumn(engine.Usage, null, _colors.Gpu, 0,
                 GpuEngines.Label(engine.Kind) + " · " + MonitorFormat.Percent(engine.Usage) + "%", GpuEngines.Short(engine.Kind))).ToList(), motion);
         }
@@ -278,7 +278,7 @@ internal sealed class MonitorView : Grid
             _nextGpu = null;
             if (!cpuMain) _gpuGauge.Button = null;
             _gpuGauge.Set(null, "—", "", "", reason, motion);
-            _gpuBlock?.Set(0, null, reason, motion);
+            _gpuBlock?.Set(null, null, reason, motion);
             _gpuGraph?.Set([], motion);
         }
 

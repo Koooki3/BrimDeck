@@ -19,6 +19,8 @@ internal sealed class DrawnPeer : FrameworkElementAutomationPeer, IInvokeProvide
     private readonly Func<double?>? _share;
     private readonly Func<IEnumerable<DrawnPart>>? _parts;
     private readonly Dictionary<string, DrawnPartPeer> _partPeers = [];
+    // The keys of the parts as they were last listed, to tell a changed list from a changed reading.
+    private string _keys = "";
 
     // type: its kind; one whose clicks come and go (clickable) is a button while it takes them, and type otherwise.
     public DrawnPeer(FrameworkElement owner, AutomationControlType type, Func<string> name, Action? invoke = null, Func<bool>? clickable = null,
@@ -35,7 +37,8 @@ internal sealed class DrawnPeer : FrameworkElementAutomationPeer, IInvokeProvide
     public override object GetPattern(PatternInterface pattern) => pattern switch
     {
         PatternInterface.Invoke when Clickable => this,
-        PatternInterface.RangeValue when _share is not null && !(_clickable is not null && Clickable) => this,
+        // A share with no reading is not a value of zero: it offers no value at all.
+        PatternInterface.RangeValue when _share?.Invoke() is not null && !(_clickable is not null && Clickable) => this,
         _ => base.GetPattern(pattern)
     };
 
@@ -44,16 +47,39 @@ internal sealed class DrawnPeer : FrameworkElementAutomationPeer, IInvokeProvide
         if (_parts is null) return base.GetChildrenCore();
         var children = new List<AutomationPeer>();
         var current = new HashSet<string>();
+        var order = new List<string>();
         foreach (var part in _parts())
         {
             // The same part keeps its peer while it stays, so a screen reader's place in the list survives a new reading.
             if (!_partPeers.TryGetValue(part.Key, out var peer)) _partPeers[part.Key] = peer = new DrawnPartPeer(this);
             peer.Part = part;
-            current.Add(part.Key);
+            current.Add(part.Key); order.Add(part.Key);
             children.Add(peer);
         }
         foreach (var key in _partPeers.Keys.Where(key => !current.Contains(key)).ToList()) _partPeers.Remove(key);
+        _keys = string.Join('\n', order);
         return children;
+    }
+
+    // WPF keeps the children a peer listed until it is told they changed, and a part keeps the box and name it was listed with, so
+    // an element that draws its parts from data it replaces calls this after each replacement (not each frame): the parts a client
+    // already holds are brought up to date, the list is listed again at the next query, and a client that listens for structure
+    // changes is told when the parts themselves came or went. A peer no client has asked for yet does not exist, and costs nothing.
+    public static void Refresh(UIElement owner)
+    {
+        if (UIElementAutomationPeer.FromElement(owner) is DrawnPeer { _parts: not null } peer) peer.RefreshParts();
+    }
+
+    private void RefreshParts()
+    {
+        var keys = new List<string>();
+        foreach (var part in _parts!())
+        {
+            if (_partPeers.TryGetValue(part.Key, out var peer)) peer.Part = part;
+            keys.Add(part.Key);
+        }
+        ResetChildrenCache();
+        if (string.Join('\n', keys) != _keys && ListenerExists(AutomationEvents.StructureChanged)) InvalidatePeer();
     }
 
     void IInvokeProvider.Invoke()

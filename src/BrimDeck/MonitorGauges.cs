@@ -194,6 +194,8 @@ internal sealed class ColumnGraph : FrameworkElement
         _columns = columns;
         if (_tipIndex >= 0 && _tipIndex < columns.Count && _tip.IsOpen) _tip.Content = columns[_tipIndex].Tip;
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
+        // Once per reading, not per frame: the columns a screen reader lists are these.
+        DrawnPeer.Refresh(this);
     }
     private bool Step(double now) { InvalidateVisual(); return _values.Any(v => v.Moving(now)) || _ticks.Any(t => t.Moving(now)); }
 
@@ -290,7 +292,7 @@ internal sealed class BlockGauge : FrameworkElement
 {
     private readonly string _color;
     private Eased _value, _tick, _hover = new(0, Eased.Hover);
-    private bool _hasTick;
+    private bool _hasTick, _hasValue;
     private readonly string _action;
     public event Action? Clicked;
 
@@ -299,13 +301,15 @@ internal sealed class BlockGauge : FrameworkElement
     protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Button, Spoken, () => Clicked?.Invoke());
     // For screen readers, named as the block it is, with the memory its line shows, so it never reads the same as the small GPU figure beside the main
     // gauge that does the same thing (I-02): "GPU 占用块：占用 12% · 显存 18%，切换为以 GPU 为主".
-    private string Spoken() => Loc.T("GPU 占用块：占用 ", "GPU block: usage ") + MonitorFormat.Percent(_value.Target) + "%"
-        + (_hasTick ? Loc.T(" · 显存 ", " · VRAM ") + MonitorFormat.Percent(_tick.Target) + "%" : "") + Loc.T("，", ", ") + _action;
+    // Without a reading it says what the tooltip says (the adapter has none, and why), never a usage of zero.
+    private string Spoken() => MonitorSpeech.GpuBlock(_hasValue ? _value.Target : null, _hasTick ? _tick.Target : null, DrawnPeer.FirstLine(ToolTip), _action);
 
-    public void Set(double value, double? tick, string tip, bool motion)
+    // value: the adapter's usage, or null while it has no reading (the block then draws empty and reads as having none).
+    public void Set(double? value, double? tick, string tip, bool motion)
     {
         ToolTip = tip;
-        bool moving = _value.Set(value, motion);
+        _hasValue = value is not null;
+        bool moving = _value.Set(value ?? 0, motion);
         if (tick is { } t) moving |= _tick.Set(t, motion && _hasTick);
         _hasTick = tick is not null;
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
@@ -553,6 +557,8 @@ internal sealed class StorageBlock : FrameworkElement
         moving |= _heat.Set(rows.Any(row => row.Celsius is not null) ? 1 : 0, motion);
         ToolTip = rows.Count == 0 ? null : string.Join("\n", drives.Select(Describe));
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
+        // Once per reading, not per frame: the entries a screen reader lists are these.
+        DrawnPeer.Refresh(this);
     }
     private bool Step(double now)
     {
