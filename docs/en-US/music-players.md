@@ -1,6 +1,6 @@
 # Supported players
 
-The music page and the collapsed view show the song that is playing and offer playback controls. What is available depends on the player:
+The music page and the collapsed view show the song that is playing and offer playback controls. A title that fits stays still; one that does not (the longer the equalizer, the less room the title has) scrolls, as on the collapsed view. With animation off it does not scroll, and hovering shows the whole title. What is available depends on the player:
 
 | Player | Shown | Controls |
 | --- | --- | --- |
