@@ -44,6 +44,9 @@ try
     PowerTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
+    ExpandBounceTests.Run(Check);
+    ExpandStillTests.Run(Check);
+    ExpandSnapTests.Run(Check);
     MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);

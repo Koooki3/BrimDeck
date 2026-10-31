@@ -23,7 +23,7 @@ internal static class Soft
     public static readonly IEasingFunction Drawer = Frozen(new BezierEase(.32, .72, 0, 1));
     // The system monitor's move (Curves.Follow): content that moves or swaps, selections that glide, hover feedback.
     public static readonly IEasingFunction Follow = Frozen(new FollowEase());
-    // The opening surface: a fast attack that passes its size by under 2 percent and settles back (Curves.Bounce).
+    // The opening surface: a fast attack that passes its size by about a third of a percent and settles back (Curves.Bounce).
     public static readonly IEasingFunction Bounce = Frozen(new BounceEase());
 
     // Hover and press feedback, and what leaves; small things that appear or swap. Values that follow readings take
