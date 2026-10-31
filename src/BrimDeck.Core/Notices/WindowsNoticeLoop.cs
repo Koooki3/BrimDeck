@@ -64,12 +64,13 @@ public sealed class WindowsNoticeRun
 // The decisions of WindowsNoticeSource's loop, apart from Windows itself (IWindowsNoticeHost). A push notification log entry
 // names a toast by id and application; the loop reads that one notification at its next turn, whether or not a full reading
 // is under way, and hands it over at once. The whole list is read, one reading at a time and off the loop thread, for the
-// baseline after starting, being granted access or waking, every EventSafetyInterval, ReconcileInterval after a clear or an
-// id that could not be read (only a full reading shows what went), and at once (1 s apart) when an entry or a lookup could not
-// be trusted. When the log cannot be used the list is read on a timer: every ProbeInterval only the id after the newest one is
-// looked up (WindowsNoticePace.ProbeIds), and the whole list is read every FullInterval and whenever the probe finds a new
-// notice. Until a reading has confirmed the newest id, the list is read every 3 s at first and less often after a quiet
-// stretch (WindowsNoticeList.UnknownWait). Access is checked before every reading.
+// baseline after starting, being granted access or waking, every EventSafetyInterval, ReconcileInterval after a clear (only a
+// full reading shows what went), and at once (1 s apart) when an entry or a lookup could not be trusted or the id it named
+// could not be read yet, unless a clear is already waiting for its interval. When the log cannot be used the list is read on a
+// timer: every ProbeInterval only the id after the newest one is looked up (WindowsNoticePace.ProbeIds), and the whole list is
+// read every FullInterval and whenever the probe finds a new notice. Until a reading has confirmed the newest id, the list is
+// read every 3 s at first and less often after a quiet stretch (WindowsNoticeList.UnknownWait). Access is checked before
+// every reading.
 public sealed class WindowsNoticeLoop
 {
     public static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(2.5), FullInterval = TimeSpan.FromSeconds(15),
@@ -83,6 +84,13 @@ public sealed class WindowsNoticeLoop
     private WindowsNoticeRun? _current;
     private bool _dirty, _quiet;
     private int _refreshes;
+    // E: the ids the Start baseline took in without showing them, until the next reading, Refresh or reset (under Gate). The log
+    // names only toasts delivered after BrimDeck subscribed, so an entry that names one of these reaches the loop after the
+    // baseline's snapshot, which was taken after the toast: it is a new toast and is shown, not skipped as already known.
+    private HashSet<uint>? _absorbed;
+    // The absorbed ids the log named but whose single read could not return the notification yet (still under _absorbed): the next
+    // full reading is asked for them and shows the ones it can read, so a toast the lookup failed on is not lost with its place.
+    private HashSet<uint>? _unread;
     // When something last happened that makes a notice likely soon (WindowsNoticePace.Unconfirmed).
     private DateTimeOffset _lastActivity;
 
@@ -96,7 +104,7 @@ public sealed class WindowsNoticeLoop
 
     public void Begin(WindowsNoticeRun run, DateTimeOffset now)
     {
-        lock (Gate) { _current = run; _list.Reset(); _lastActivity = now; }
+        lock (Gate) { _current = run; _list.Reset(); _absorbed = _unread = null; _lastActivity = now; }
     }
 
     public void End(WindowsNoticeRun run)
@@ -123,6 +131,7 @@ public sealed class WindowsNoticeLoop
         lock (Gate)
         {
             _dirty = true; _list.ExpectBaseline(baseline); _lastActivity = now;
+            if (baseline != WindowsNoticeBaseline.None) _absorbed = _unread = null;
             if (_current is { } run) Interlocked.Increment(ref run.ResultGeneration);
             return ++_refreshes;
         }
@@ -174,13 +183,15 @@ public sealed class WindowsNoticeLoop
         {
             var access = host.Access();
             if (access != WindowsNoticeAccess.Allowed) { AccessLost(run, host, access); return false; }
-            bool known;
-            lock (Gate) { if (_current != run) return false; known = _list.Contains(id); }
+            bool known, absorbed;
+            lock (Gate) { if (_current != run) return false; absorbed = _absorbed?.Contains(id) == true; known = !absorbed && _list.Contains(id); }
             WindowsNoticeLogReadResult result;
             try { result = WindowsNoticeLogReader.Read(id, app, known, host.ReadOne); }
             catch (TimeoutException)
             {
-                // Windows did not answer (seen after waking): the id is left to a full reading with a new listener.
+                // Windows did not answer (seen after waking): the id is left to a full reading with a new listener. One the baseline
+                // absorbed keeps its place for that reading (_unread), as when the lookup finds nothing.
+                if (absorbed) lock (Gate) { if (_current == run) (_unread ??= []).Add(id); }
                 run.Batch.CompleteIds(id);
                 run.Batch.RequestReconcile(immediate: true);
                 throw;
@@ -189,12 +200,23 @@ public sealed class WindowsNoticeLoop
             lock (Gate)
             {
                 if (_current != run) return false;
-                changes = result.Apply(_list);
+                // A baseline id is in the list already, so the list would take the entry for a repeat: the notice is handed over here.
+                if (absorbed)
+                {
+                    // Handed over once read. One that could not be read (Windows has not got it ready, or did not trust the entry) keeps
+                    // its place for the reading that follows: removed here, no later entry or reading could show it.
+                    if (result is { Observed: true, Input: { } late }) { _absorbed?.Remove(id); _unread?.Remove(id); changes = new([late], [], []); }
+                    else if (result.Reconcile) { (_unread ??= []).Add(id); changes = None; }
+                    else { _absorbed?.Remove(id); _unread?.Remove(id); changes = None; }
+                }
+                else changes = result.Apply(_list);
                 if (changes.Arrived.Count + changes.Missed.Count > 0) _lastActivity = host.Now;
                 if (_list.SkippedProbe) run.WideUntil = host.Now + WindowsNoticePace.WideFor;
             }
             run.Batch.CompleteIds(id);
-            if (result.Reconcile) run.Batch.RequestReconcile(result.ImmediateReconcile);
+            // Reconcile without ImmediateReconcile is the id Windows could not return (WindowsNoticeLogReader).
+            if (result is { Reconcile: true, ImmediateReconcile: false }) run.Batch.RequestReconcileForMissing();
+            else if (result.Reconcile) run.Batch.RequestReconcile(result.ImmediateReconcile);
             host.Publish(changes);
             if (run.Batch.HasIds) host.Wake();
         }
@@ -286,6 +308,7 @@ public sealed class WindowsNoticeLoop
             _dirty = false;
             stamp = new(_list.BeginRead(), Volatile.Read(ref run.ResultGeneration), _refreshes, run.Batch.Snapshot().ReconcileVersion);
             known = _list.KnownIds;
+            if (_unread is not null) known.ExceptWith(_unread);
         }
         var reading = run.FullRead.Start(stamp, ct => host.ReadAll(known, ct), token);
         // The loop takes the result at its next turn; it is woken for that.
@@ -303,8 +326,26 @@ public sealed class WindowsNoticeLoop
             () => _current == run && completion.Stamp.ResultGeneration == Volatile.Read(ref run.ResultGeneration),
             snapshot =>
             {
+                // A Start baseline takes in the ids it lists that were not known without showing them (E); any other reading
+                // settles them.
+                var taken = _list.Baseline == WindowsNoticeBaseline.Start ? _list.KnownIds : null;
+                var unread = taken is null ? _unread : null;
                 changes = _list.Compare(snapshot.NotificationIds,
                     id => snapshot.Inputs.TryGetValue(id, out var input) ? input : null, completion.Stamp.ObservationGeneration);
+                _absorbed = taken is null ? null : snapshot.NotificationIds.Where(id => !taken.Contains(id)).ToHashSet();
+                _unread = null;
+                if (unread is { Count: > 0 })
+                {
+                    // The ids the log named whose lookup failed: this reading was asked for them, so a notification it could read is
+                    // shown now (the list knows the id already, so Compare did not), and one it still could not read stays for the next.
+                    var late = new List<NoticeInput>();
+                    foreach (uint id in unread.Where(snapshot.NotificationIds.Contains))
+                    {
+                        if (snapshot.Inputs.TryGetValue(id, out var input) && input is not null) late.Add(input);
+                        else { (_absorbed ??= []).Add(id); (_unread ??= []).Add(id); }
+                    }
+                    if (late.Count > 0) changes = new([.. changes.Arrived, .. late], changes.Missed, changes.Removed);
+                }
                 if (changes.Arrived.Count + changes.Missed.Count > 0) _lastActivity = host.Now;
                 if (_list.SkippedProbe) run.WideUntil = host.Now + WindowsNoticePace.WideFor;
             });
@@ -317,7 +358,10 @@ public sealed class WindowsNoticeLoop
     // Access was revoked: the list is forgotten (it reads as empty, which must not look like every notice being removed).
     private void AccessLost(WindowsNoticeRun run, IWindowsNoticeHost host, WindowsNoticeAccess access)
     {
-        lock (Gate) { if (_current == run) { _list.Reset(); _dirty = false; } }
+        lock (Gate) { if (_current == run) { _list.Reset(); _absorbed = _unread = null; _dirty = false; } }
+        // Ids the log named before access was lost would be read after it is granted again, under the Start baseline, and
+        // shown as new notices (C).
+        run.Batch.Reset();
         Detach(run, host);
         host.Report(access == WindowsNoticeAccess.NeedsAccess ? WindowsNoticeLoopState.NeedsAccess : WindowsNoticeLoopState.Denied);
     }
