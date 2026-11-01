@@ -847,11 +847,11 @@ internal sealed class IslandNotice : Window
             // Followed by the shared tick only while the countdown runs; one that ended keeps its full ring.
             if (NoticeClock.IsLive(counting.Timing, DateTimeOffset.UtcNow)) _ring = drawn;
         }
-        var line = new TextBlock { FontFamily = UI.PanelFont, FontSize = 12.5 * scale, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center };
+        var line = new TextBlock { FontFamily = UI.PanelFont, FontSize = TextSize.Strong * scale, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center };
         line.Inlines.Add(new Run(title) { FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary) });
         if (summary.Length > 0)
         {
-            var words = new Run("  " + summary) { Foreground = UI.Brush(_look.Secondary), FontSize = 12 * scale };
+            var words = new Run("  " + summary) { Foreground = UI.Brush(_look.Secondary), FontSize = TextSize.Body * scale };
             line.Inlines.Add(words);
             if (Notice is { } timed && NoticeClock.IsLive(timed.Timing, DateTimeOffset.UtcNow)) _liveRun = words;
         }
@@ -871,7 +871,7 @@ internal sealed class IslandNotice : Window
         if (width <= viewport) return;
         if (!Soft.Enabled) { line.Width = viewport; line.TextTrimming = TextTrimming.CharacterEllipsis; return; }
         // Read from the start, carried along at an even pace to its end, held there, and back to the start.
-        double travel = width - viewport, seconds = travel / (32 * scale);
+        double travel = width - viewport, seconds = travel / (NoticeMetrics.ScrollSpeed * scale);
         var move = new TranslateTransform();
         line.RenderTransform = move;
         var scroll = new DoubleAnimationUsingKeyFrames { RepeatBehavior = RepeatBehavior.Forever, Duration = TimeSpan.FromSeconds(1.2 + seconds + 1.2) };

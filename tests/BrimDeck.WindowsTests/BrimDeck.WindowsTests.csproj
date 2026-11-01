@@ -61,6 +61,10 @@
     <!-- The island itself: the shadow observes its properties, and the settled clip is checked on its drawing. -->
     <Compile Include="..\..\src\BrimDeck\IslandBorder.cs" Link="IslandBorder.cs" />
     <Compile Include="..\..\src\BrimDeck\IslandDecor.cs" Link="IslandDecor.cs" />
+    <!-- A notice on the island: the marks around its words, its sizes and the countdown ring. -->
+    <Compile Include="..\..\src\BrimDeck\NoticeMetrics.cs" Link="NoticeMetrics.cs" />
+    <Compile Include="..\..\src\BrimDeck\CountdownRing.cs" Link="CountdownRing.cs" />
+    <Compile Include="..\..\src\BrimDeck\Tokens.cs" Link="Tokens.cs" />
     <Compile Include="..\..\src\BrimDeck\PageToolTips.cs" Link="PageToolTips.cs" />
   </ItemGroup>
 </Project>
