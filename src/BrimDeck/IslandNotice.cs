@@ -20,13 +20,13 @@ namespace BrimDeck;
 // pointer resting on the island opens the panel on the notices page with this notice in front; there is no card of its own.
 //
 // The window lies over the island with room around it for the bubbles and the backlight, and is shown only while a notice is.
-// While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material.
+// While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material:
+// over a glass theme with the blur of GlassBackdrop under it, as the island has it (the island's own glass is hidden with it). How
+// the motion plays follows the notice and the theme (NoticeArrivals via NoticeLook): its strength and pace, one flash or two, the
+// light's color, and the theme's marks (a cut-corner theme's signal bar, hatching and frame) beside the words, never over them.
 // It never takes focus.
 internal sealed class IslandNotice : Window
 {
-    private static readonly Color LineFlash = Color.FromRgb(0xF5, 0xF5, 0xF7), GlowColor = Color.FromRgb(0xF0, 0xF3, 0xF8);
-    // The prototype's pace and intensity (the user's call, 2026-10-30: faster looked worse than the prototype).
-    private const double Pace = 1, Fury = 5;
     // The words leave quickly and arrive a little slower: the island's own content and the notice's take turns, by opacity alone.
     internal const int FadeOut = 150, FadeIn = 220;
     private readonly MainWindow _deck;
@@ -39,6 +39,10 @@ internal sealed class IslandNotice : Window
     private AttentionItem? _item;
     private CollapsedShape _shape = null!;
     private NoticeLook _look = NoticeLook.Current();
+    // How the notice shown arrives (its weight on the theme's way of moving), and the light it throws (the backlight, the bloom, the
+    // indicator's flash): both from the theme's tokens and the notice's tone.
+    private NoticeArrival _arrival = NoticeLook.Current().ArrivalOf(NoticeWeight.Standard);
+    private Color _light, _flash;
     private Rect _stageRect, _island;
     private bool _leaving, _arrivedUnderPointer, _held, _closed;
     private int _generation;
@@ -139,6 +143,7 @@ internal sealed class IslandNotice : Window
             AfterFrames(HandFrames, () => { if (generation == _generation && _item is not null) _deck.SetIslandCovered(true); });
         }
         _arrivedUnderPointer = _island.Contains(CursorInStage());
+        Arrive();
         BuildContent();
         _content.BeginAnimation(OpacityProperty, null);
         _content.Opacity = 0;
@@ -350,13 +355,25 @@ internal sealed class IslandNotice : Window
         _bloomSmall.Effect = new BlurEffect { Radius = 1.6 * 3 * _k, RenderingBias = RenderingBias.Performance };
         _bloomMiddle.Effect = new BlurEffect { Radius = 4 * 3 * _k, RenderingBias = RenderingBias.Performance };
         _bloomWide.Effect = new BlurEffect { Radius = 9 * 3 * _k, RenderingBias = RenderingBias.Performance };
+        Arrive();
         _body.InvalidateVisual(); _shadow.InvalidateVisual();
     }
+
+    // How the notice shown arrives on this theme, and the light it throws.
+    private void Arrive()
+    {
+        _arrival = _look.ArrivalOf(WeightOf(_item));
+        _light = _look.Light(_arrival.Tone);
+        _flash = _look.LineFlash(_arrival.Tone, PanelTheme.ColorOf("indicator"));
+    }
+
+    private static NoticeWeight WeightOf(AttentionItem? item)
+        => item is null ? NoticeWeight.Standard : NoticeArrivals.Weigh(item.Kind, item.Priority, item.Urgent, (item.Payload as Notice)?.Call ?? false, (item.Payload as Notice)?.Category);
 
     // ----- Motion -----
 
     // With animations on and outside high contrast; without, the island keeps still and only shows the words.
-    private bool MotionAllowed => Soft.Enabled && !_look.HighContrast;
+    private bool MotionAllowed => _arrival.Animated;
 
     private void StartMotion()
     {
@@ -364,10 +381,12 @@ internal sealed class IslandNotice : Window
         if (!MotionAllowed) { RedrawAll(); return; }
         var form = Form;
         double width = _island.Width / _k, height = _island.Height / _k;
+        // The notice's weight on the theme's way of moving (NoticeArrivals): its strength and how long droplets are thrown; a theme that
+        // keeps its outline still (pixel art) plays the backlight alone.
         _liquid = form switch
         {
-            IslandForm.Notch => new IslandLiquid(form, width, height, fury: Fury, corner: _shape.BottomRadius / _k, shoulder: _shape.Shoulder / _k, cut: _look.Pixel > 0 ? 0 : _look.Cut / _k),
-            _ => new IslandLiquid(form, width, height, fury: Fury)
+            IslandForm.Notch => new IslandLiquid(form, width, height, liquid: _arrival.Liquid, fury: _arrival.Fury, separation: _arrival.Separation, corner: _shape.BottomRadius / _k, shoulder: _shape.Shoulder / _k, cut: _look.Pixel > 0 ? 0 : _look.Cut / _k),
+            _ => new IslandLiquid(form, width, height, liquid: _arrival.Liquid, fury: _arrival.Fury, separation: _arrival.Separation)
         };
         _start = Eased.Now; _t = 0;
         Motion.Start(_body, Step);
@@ -377,11 +396,14 @@ internal sealed class IslandNotice : Window
     private bool Step(double now)
     {
         if (_liquid is not { } liquid) return false;
-        _t = Math.Max(0, now - _start) * Pace;
-        if (liquid.Finished(_t)) { StopMotion(); return false; }
+        _t = Math.Max(0, now - _start) * _arrival.Pace;
+        if (liquid.Finished(_t) || !_arrival.Liquid && _t >= QuietEnd()) { StopMotion(); return false; }
         RedrawAll();
         return true;
     }
+
+    // Where nothing but the light moves, the motion is over when the light is: the backlight's last flash, the indicator's last breath.
+    private double QuietEnd() => (Form == IslandForm.Line ? IslandLiquid.Breath * _arrival.Flashes : IslandLiquid.FlashEnd(_arrival.Flashes)) + .05;
 
     private void StopMotion()
     {
@@ -515,9 +537,9 @@ internal sealed class IslandNotice : Window
     {
         var color = PanelTheme.ColorOf("indicator");
         if (_liquid is not { } liquid) { drawing.DrawGeometry(Freeze(new SolidColorBrush(color)), null, RestOutline()); return; }
-        double b = IslandLiquid.BreathAt(_t) * .85;
-        var lit = Color.FromArgb((byte)Math.Round(color.A + (LineFlash.A - color.A) * b), (byte)Math.Round(color.R + (LineFlash.R - color.R) * b),
-            (byte)Math.Round(color.G + (LineFlash.G - color.G) * b), (byte)Math.Round(color.B + (LineFlash.B - color.B) * b));
+        double b = Math.Min(1, IslandLiquid.BreathAt(_t, _arrival.Flashes) * .85 * _arrival.Glow);
+        var lit = Color.FromArgb((byte)Math.Round(color.A + (_flash.A - color.A) * b), (byte)Math.Round(color.R + (_flash.R - color.R) * b),
+            (byte)Math.Round(color.G + (_flash.G - color.G) * b), (byte)Math.Round(color.B + (_flash.B - color.B) * b));
         double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2, h0 = liquid.Height / 2;
         double left = -liquid.LineEnd(_t, -1) + h0, right = liquid.LineEnd(_t, 1) - h0;
         var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
@@ -542,7 +564,7 @@ internal sealed class IslandNotice : Window
     private void DrawGlow(DrawingContext drawing, bool wide)
     {
         if (_liquid is not { } liquid || Form == IslandForm.Line) return;
-        double g = IslandLiquid.GlowAt(_t);
+        double g = Math.Min(1, IslandLiquid.GlowAt(_t, _arrival.Flashes) * _arrival.Glow);
         if (g <= .004) return;
         Geometry band;
         LinearGradientBrush brush;
@@ -579,19 +601,19 @@ internal sealed class IslandNotice : Window
     private void DrawBloom(DrawingContext drawing, double grow, double drop, double opacity)
     {
         if (_liquid is not { } liquid || Form != IslandForm.Line) return;
-        double b = IslandLiquid.BreathAt(_t);
+        double b = Math.Min(1, IslandLiquid.BreathAt(_t, _arrival.Flashes) * _arrival.Glow);
         if (b <= .004) return;
         double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2;
         double half = (liquid.Height / 2 + grow) * _k, left = cx - (liquid.LineEnd(_t, -1) + grow) * _k, right = cx + (liquid.LineEnd(_t, 1) + grow) * _k;
         drawing.PushOpacity(b * opacity);
-        drawing.DrawRoundedRectangle(Freeze(new SolidColorBrush(GlowColor)), null, new Rect(left, cy + drop * _k - half, Math.Max(0, right - left), 2 * half), half, half);
+        drawing.DrawRoundedRectangle(Freeze(new SolidColorBrush(_light)), null, new Rect(left, cy + drop * _k - half, Math.Max(0, right - left), 2 * half), half, half);
         drawing.Pop();
     }
 
     private LinearGradientBrush Fade(double from, double to, (double Offset, double Alpha)[] stops)
     {
         var brush = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute, StartPoint = new Point(from, 0), EndPoint = new Point(Math.Max(from + 1, to), 0) };
-        foreach (var (offset, alpha) in stops) brush.GradientStops.Add(new GradientStop(Color.FromArgb((byte)Math.Round(alpha * 255), GlowColor.R, GlowColor.G, GlowColor.B), offset));
+        foreach (var (offset, alpha) in stops) brush.GradientStops.Add(new GradientStop(Color.FromArgb((byte)Math.Round(alpha * 255), _light.R, _light.G, _light.B), offset));
         brush.Freeze();
         return brush;
     }
