@@ -59,7 +59,14 @@ internal sealed class IslandNotice : Window
         Content = _stage;
         // Back to front: the shadow, the backlight (or the indicator's bloom) behind the island, the island, the beads that trail its
         // ripples, the content and the area that takes the pointer.
-        foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts }) _stage.Children.Add(layer);
+        foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts })
+        {
+            // Nothing is drawn before the island has been laid out (Layout sets _shape): Prepare shows the window once, far off screen,
+            // before any notice, and the layers' first render then asked for the island's form (a NullReferenceException on every start,
+            // from 10-31, that left the window shown).
+            layer.Ready = () => _shape is not null;
+            _stage.Children.Add(layer);
+        }
         _stage.Children.Add(_content); _stage.Children.Add(_hit);
         _shadow.Draw = DrawShadow; _glowWide.Draw = d => DrawGlow(d, wide: true); _glowCore.Draw = d => DrawGlow(d, wide: false);
         _bloomWide.Draw = d => DrawBloom(d, 3, 4, .55); _bloomMiddle.Draw = d => DrawBloom(d, 1.5, 1.5, .6); _bloomSmall.Draw = d => DrawBloom(d, .5, 0, .8);
@@ -87,7 +94,12 @@ internal sealed class IslandNotice : Window
         WindowStartupLocation = WindowStartupLocation.Manual;
         Left = -32000; Top = -32000; Width = 16; Height = 16; Opacity = 0;
         try { Show(); UpdateLayout(); Hide(); }
-        finally { Left = left; Top = top; Width = width; Height = height; Opacity = opacity; }
+        finally
+        {
+            // A warm-up that failed half way must not leave the window shown (Covering would then hold the island's hover back).
+            if (IsVisible && _item is null) Hide();
+            Left = left; Top = top; Width = width; Height = height; Opacity = opacity;
+        }
     }
 
     // True while a notice covers the island: the panel then leaves hovering to this window.
@@ -766,7 +778,9 @@ internal sealed class IslandNotice : Window
     private sealed class Layer : FrameworkElement
     {
         public Action<DrawingContext>? Draw;
+        // False until the window has laid the island out: nothing is drawn then.
+        public Func<bool>? Ready;
         public Layer() { IsHitTestVisible = false; }
-        protected override void OnRender(DrawingContext drawingContext) => Draw?.Invoke(drawingContext);
+        protected override void OnRender(DrawingContext drawingContext) { if (Ready?.Invoke() != false) Draw?.Invoke(drawingContext); }
     }
 }

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Offscreen checks of the notices on the island and the notices page, on the real MainWindow and IslandNotice (B8, 2026-11-01).
+       Not part of BrimDeck.sln; named FxPreview so the panel's internals are visible to it. Nothing is shown on a screen:
+       the notice window is only warmed up far off screen, as the app does a few seconds after it starts.
+       dotnet build tests/BrimDeck.IslandChecks -c Release; tests/BrimDeck.IslandChecks/bin/.../BrimDeck.FxPreview.exe -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BrimDeck\BrimDeck.csproj" />
+    <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
+  </ItemGroup>
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>BrimDeck.FxPreview</AssemblyName>
+    <RootNamespace>IslandChecks</RootNamespace>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+</Project>
