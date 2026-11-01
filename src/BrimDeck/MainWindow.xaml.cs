@@ -81,7 +81,8 @@ public partial class MainWindow : Window
     private DateTimeOffset? _updatedAt;
     private ScreenContext _context;
     // Threshold levels seen per quota; a rise after the first reading briefly widens the compact island.
-    private readonly QuotaLevels _levels = new();
+    private readonly Dictionary<string, int> _levels = new();
+    private bool _levelsSeeded;
     private CompactAlertInfo? _alert;
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
@@ -675,15 +676,22 @@ public partial class MainWindow : Window
     private void DetectThresholds()
     {
         CompactAlertInfo? risen = null;
-        // Only the quotas an account really has are watched (QuotaLevels): a plan with a weekly limit alone has no five-hour one.
-        var rows = Settings.EnabledApps.Select(entry => (Entry: entry, Snapshot: DashboardUsage.Quota(entry, Snapshots)))
-            .Where(row => !row.Snapshot.IsStale && row.Snapshot.LiveQuota)
-            .Select(row => ((object)row.Entry, $"{row.Entry.InstanceId}:{row.Entry.ConfigurationKey}", (IEnumerable<UsageMetric>)row.Snapshot.Metrics));
-        if (_levels.Scan(rows) is { } rise)
+        foreach (var entry in Settings.EnabledApps)
         {
-            var entry = (AppEntry)rise.Owner;
-            risen = new CompactAlertInfo(entry, entry.Name, MetricLabel(rise.Metric) + " ", Math.Clamp(rise.Used, 0, 100), rise.Metric.ResetAt);
+            var snapshot = DashboardUsage.Quota(entry, Snapshots);
+            if (snapshot.IsStale || !snapshot.LiveQuota) continue;
+            foreach (var quota in snapshot.Metrics)
+            {
+                if (quota.UsedPercent is not { } used) continue;
+                var key = $"{entry.InstanceId}:{entry.ConfigurationKey}:{quota.Id}";
+                int level = AppPresets.Level(used);
+                bool rose = _levelsSeeded && _levels.TryGetValue(key, out var previous) && level > previous;
+                _levels[key] = level;
+                if (rose && level > 0 && (risen is null || used > risen.Used))
+                    risen = new CompactAlertInfo(entry, entry.Name, MetricLabel(quota) + " ", Math.Clamp(used, 0, 100), quota.ResetAt);
+            }
         }
+        _levelsSeeded = true;
         // Levels are still tracked while notices are off, so switching them back on does not replay an earlier rise.
         if (risen is not null && Settings.QuotaAlerts && !IsSuppressed) ShowAlert(risen);
     }
