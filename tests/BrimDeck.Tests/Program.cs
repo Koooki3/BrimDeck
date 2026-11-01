@@ -26,6 +26,7 @@ try
     NoticeTimeTests.Run(Check);
     NoticeEventLogTests.Run(Check);
     NoticeLoopFollowupTests.Run(Check);
+    NoticeRobustTests.Run(Check);
     NoticeBannerTests.Run(root, Check);
     IslandLiquidTests.Run(Check);
     IslandNoticeWarmupTests.Run(Check);

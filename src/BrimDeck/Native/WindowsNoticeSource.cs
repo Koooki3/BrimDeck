@@ -287,10 +287,12 @@ internal sealed class WindowsNoticeSource : IDisposable
         if (notification is null) return WindowsNoticeNotificationRead.Missing;
         if (notification.Id != id) throw new InvalidOperationException("The event id did not match the returned notification.");
         var input = Read(notification, id);
-        var app = notification.AppInfo;
+        // The application Windows will not name (AppInfo is E_NOTIMPL for some senders) leaves no id to check against the log
+        // entry: the loop then reads the whole list, which leaves this one out (Read).
+        var app = Safe(() => notification.AppInfo);
         var appUserModelId = input?.AppId;
-        if (string.IsNullOrWhiteSpace(appUserModelId)) appUserModelId = app.AppUserModelId;
-        if (string.IsNullOrWhiteSpace(appUserModelId)) appUserModelId = app.Id;
+        if (app is not null && string.IsNullOrWhiteSpace(appUserModelId)) appUserModelId = Safe(() => app.AppUserModelId);
+        if (app is not null && string.IsNullOrWhiteSpace(appUserModelId)) appUserModelId = Safe(() => app.Id);
         return new WindowsNoticeNotificationRead(true, appUserModelId, input);
     }
 
@@ -321,19 +323,8 @@ internal sealed class WindowsNoticeSource : IDisposable
         UserNotificationListener listener, IReadOnlySet<uint> known, CancellationToken token)
     {
         var notifications = await ReadAsync(listener, token);
-        var ids = new List<uint>(notifications.Count);
-        var seen = new HashSet<uint>();
-        var inputs = new Dictionary<uint, NoticeInput?>();
-        foreach (var notification in notifications)
-        {
-            token.ThrowIfCancellationRequested();
-            uint id;
-            try { id = notification.Id; } catch (COMException) { continue; }
-            if (!seen.Add(id)) continue;
-            ids.Add(id);
-            if (!known.Contains(id)) inputs[id] = Read(notification, id);
-        }
-        return new(ids, inputs);
+        // Each notification on its own: one Windows cannot describe must not fail the reading of all the others.
+        return WindowsNoticeSnapshot.Build(notifications, notification => notification.Id, Read, known, token);
     }
 
     private void Publish(WindowsNoticeList.Changes changes)
@@ -343,11 +334,18 @@ internal sealed class WindowsNoticeSource : IDisposable
         foreach (var key in changes.Removed) Removed?.Invoke(key);
     }
 
+    // Null for a notification that is BrimDeck's own, whose application cannot be told, or that cannot be read. Windows answers
+    // AppInfo with E_NOTIMPL (NotImplementedException) for some senders, such as a toast sent by an unpackaged program under an
+    // unusual application id. Such a notice is left out like one with no application id: without the application its own
+    // toasts cannot be told apart (BrimDeck would show its own toast again), its banner cannot be turned off, it cannot be
+    // muted per application or opened, so a notice with a made-up application would behave unlike every other. What matters
+    // is that it is skipped alone: the rest of the list is read as usual (WindowsNoticeSnapshot).
     private NoticeInput? Read(UserNotification notification, uint id)
     {
         try
         {
-            var app = notification.AppInfo;
+            var app = Safe(() => notification.AppInfo);
+            if (app is null) return null;
             string appId = Safe(() => app.AppUserModelId) ?? Safe(() => app.Id) ?? "";
             if (appId.Length == 0 || string.Equals(appId, OwnAppId, StringComparison.OrdinalIgnoreCase)) return null;
             lock (_apps) _apps[appId] = app;
@@ -366,7 +364,7 @@ internal sealed class WindowsNoticeSource : IDisposable
                 IconRef = registered.Icon ?? "aumid:" + appId, Picture = WindowsToastPicture.Find(id, appId), CreatedAt = created, Category = who.Category, Call = who.Call, Capabilities = NoticeCapabilities.OpenApp
             };
         }
-        catch (Exception ex) when (ex is COMException or InvalidCastException or ArgumentException or NullReferenceException) { return null; }
+        catch (Exception ex) when (WindowsNoticeSnapshot.Unreadable(ex)) { return null; }
     }
 
     // A desktop program that sends notifications without a Start menu shortcut registers its name and icon under
