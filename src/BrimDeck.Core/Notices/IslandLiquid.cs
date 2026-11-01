@@ -83,9 +83,15 @@ public sealed class IslandLiquid
     public static double Smooth(double p) { p = Math.Clamp(p, 0, 1); return p * p * (3 - 2 * p); }
 
     // The backlight's brightness: two flashes within about three quarters of a second.
-    public static double GlowAt(double t)
+    public static double GlowAt(double t) => GlowAt(t, 2);
+
+    // When the backlight's last flash is over: where nothing else moves (a pixel theme's island stays on its steps), the motion is over then.
+    public static double FlashEnd(int flashes) => flashes < 2 ? .42 : .75;
+
+    // flashes: 2 is the prototype's; 1 is the first flash alone, which dies away by itself (a theme that glows keeps it to one).
+    public static double GlowAt(double t, int flashes)
     {
-        ReadOnlySpan<(double T, double V)> keys = [(0, 0), (.12, 1), (.3, .12), (.42, 1), (.75, 0)];
+        ReadOnlySpan<(double T, double V)> keys = flashes < 2 ? [(0, 0), (.12, 1), (.42, 0)] : [(0, 0), (.12, 1), (.3, .12), (.42, 1), (.75, 0)];
         if (t <= 0 || t >= keys[^1].T) return 0;
         for (int i = 1; i < keys.Length; i++)
             if (t <= keys[i].T)
@@ -97,7 +103,10 @@ public sealed class IslandLiquid
     }
 
     // The indicator's two breaths.
-    public static double BreathAt(double t) => t <= 0 || t >= 2 * Breath ? 0 : Math.Pow(Math.Sin(Math.PI * t / Breath), 2);
+    public static double BreathAt(double t) => BreathAt(t, 2);
+
+    // breaths: 1 is the first breath alone.
+    public static double BreathAt(double t, int breaths) => t <= 0 || t >= Math.Max(1, Math.Min(2, breaths)) * Breath ? 0 : Math.Pow(Math.Sin(Math.PI * t / Breath), 2);
 
     // mulberry32, as the prototype's rng().
     public static Func<double> Random(int seed)

@@ -28,6 +28,8 @@ try
     NoticeLoopFollowupTests.Run(Check);
     NoticeBannerTests.Run(root, Check);
     IslandLiquidTests.Run(Check);
+    IslandNoticeWarmupTests.Run(Check);
+    IslandNoticeThemeTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     await AppleMusicLyricsTests.Run(root, Check);

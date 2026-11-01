@@ -372,6 +372,7 @@ public partial class MainWindow
         _waitingPlates.Clear();
         _liveRows.Clear();
         _pageRows.Clear(); _pageEmpty = null; _pageScroll = null;
+        _rowsGeneration++; _rebuildFocus = refocus;
         NoticesContent.Margin = PageMargin;
         var center = _app.Notices;
         var now = DateTimeOffset.UtcNow;
@@ -576,12 +577,13 @@ public partial class MainWindow
         var list = new StackPanel { Margin = new Thickness(-8, 8, 0, 0) };
         KeyboardNavigation.SetDirectionalNavigation(list, KeyboardNavigationMode.Contained);
         var listed = Listed(center);
-        foreach (var notice in listed)
-        {
-            var row = Row(notice, now, ReferenceEquals(notice, focus));
-            list.Children.Add(row);
-            _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row));
-        }
+        // The rows that show at once are built now, the rest a few a frame afterwards (FillRows): built whole, a long list took the
+        // page's first frame well past a frame (40 notices: 93 ms warm, 165 ms cold, offscreen; tests/BrimDeck.IslandChecks --rows).
+        // The selected row and the one the keyboard was on are among the first.
+        int first = Math.Min(listed.Count, Math.Max(FirstRows, Math.Max(listed.FindIndex(n => ReferenceEquals(n, focus)), listed.FindIndex(n => n.Id == _rebuildFocus)) + 1));
+        for (int i = 0; i < first; i++) AddRow(list, i, listed[i], focus, now);
+        int generation = _rowsGeneration;
+        if (first < listed.Count) FillRows(list, listed, first, focus, now, generation);
         if (listed.Count == 0)
         {
             var none = UI.Fixed(_noticeUnread ? Loc.T("没有未读的通知", "No unread notices") : Loc.T("今天还没有通知", "No notices today"), TextSize.Body, 18, UI.Tertiary);
@@ -603,6 +605,30 @@ public partial class MainWindow
         body.Children.Add(scroll); body.Children.Add(fade);
         column.Children.Add(body);
         return border;
+    }
+
+    // Rows built at once when the list is drawn, and rows added a frame (at background priority, so input and the panel's own motion go
+    // first). A page built again meanwhile (a new notice, a switch, a theme) drops what is left: _rowsGeneration moved on.
+    private const int FirstRows = 8, RowsPerFrame = 3;
+    private int _rowsGeneration;
+    private string? _rebuildFocus;
+
+    private void AddRow(StackPanel list, int index, Notice notice, Notice focus, DateTimeOffset now)
+    {
+        var row = Row(notice, now, ReferenceEquals(notice, focus));
+        list.Children.Insert(index, row);
+        _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row));
+    }
+
+    private void FillRows(StackPanel list, List<Notice> listed, int from, Notice focus, DateTimeOffset now, int generation)
+    {
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
+        {
+            if (generation != _rowsGeneration) return;
+            int to = Math.Min(listed.Count, from + RowsPerFrame);
+            for (int i = from; i < to; i++) AddRow(list, i, listed[i], focus, now);
+            if (to < listed.Count) FillRows(list, listed, to, focus, now, generation);
+        });
     }
 
     private Button Segment(string text, bool on, Action click)

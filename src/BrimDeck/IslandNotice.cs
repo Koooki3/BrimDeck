@@ -20,25 +20,31 @@ namespace BrimDeck;
 // pointer resting on the island opens the panel on the notices page with this notice in front; there is no card of its own.
 //
 // The window lies over the island with room around it for the bubbles and the backlight, and is shown only while a notice is.
-// While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material.
+// While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material:
+// over a glass theme with the blur of GlassBackdrop under it, as the island has it (the island's own glass is hidden with it). How
+// the motion plays follows the notice and the theme (NoticeArrivals via NoticeLook): its strength and pace, one flash or two, the
+// light's color, and the theme's marks (a cut-corner theme's signal bar, hatching and frame) beside the words, never over them.
 // It never takes focus.
 internal sealed class IslandNotice : Window
 {
-    private static readonly Color LineFlash = Color.FromRgb(0xF5, 0xF5, 0xF7), GlowColor = Color.FromRgb(0xF0, 0xF3, 0xF8);
-    // The prototype's pace and intensity (the user's call, 2026-10-30: faster looked worse than the prototype).
-    private const double Pace = 1, Fury = 5;
     // The words leave quickly and arrive a little slower: the island's own content and the notice's take turns, by opacity alone.
     internal const int FadeOut = 150, FadeIn = 220;
     private readonly MainWindow _deck;
     private readonly App _app;
     private readonly Canvas _stage = new() { Background = null };
-    private readonly Layer _shadow = new(), _glowWide = new(), _glowCore = new(), _bloomWide = new(), _bloomMiddle = new(), _bloomSmall = new(), _body = new(), _parts = new();
+    private readonly Layer _shadow = new(), _glowWide = new(), _glowCore = new(), _bloomWide = new(), _bloomMiddle = new(), _bloomSmall = new(), _body = new(), _marks = new(), _parts = new();
+    // The layers that move with the liquid (every frame of the motion), and all of them.
+    private readonly Layer[] _moving, _layers;
     private readonly Border _hit = new() { Background = Brushes.Transparent, Cursor = Cursors.Hand };
     private readonly Canvas _content = new() { IsHitTestVisible = false, ClipToBounds = true };
     private readonly PromptTimer _hoverOpen;
     private AttentionItem? _item;
     private CollapsedShape _shape = null!;
     private NoticeLook _look = NoticeLook.Current();
+    // How the notice shown arrives (its weight on the theme's way of moving), and the light it throws (the backlight, the bloom, the
+    // indicator's flash): both from the theme's tokens and the notice's tone.
+    private NoticeArrival _arrival = NoticeLook.Current().ArrivalOf(NoticeWeight.Standard);
+    private Color _light, _flash;
     private Rect _stageRect, _island;
     private bool _leaving, _arrivedUnderPointer, _held, _closed;
     private int _generation;
@@ -57,13 +63,24 @@ internal sealed class IslandNotice : Window
         Topmost = true; ShowActivated = false; ShowInTaskbar = false; Title = "BrimDeck notices"; UseLayoutRounding = true;
         TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
         Content = _stage;
-        // Back to front: the shadow, the backlight (or the indicator's bloom) behind the island, the island, the beads that trail its
-        // ripples, the content and the area that takes the pointer.
-        foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts }) _stage.Children.Add(layer);
+        // Back to front: the shadow, the backlight (or the indicator's bloom) behind the island, the island, the theme's marks on it, the
+        // beads that trail its ripples, the content and the area that takes the pointer.
+        _moving = [_shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts];
+        _layers = [_shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _marks, _parts];
+        foreach (var layer in _layers)
+        {
+            // Nothing is drawn before the island has been laid out (Layout sets _shape): Prepare shows the window once, far off screen,
+            // before any notice, and the layers' first render then asked for the island's form (a NullReferenceException on every start,
+            // from 10-31, that left the window shown).
+            layer.Ready = () => _shape is not null;
+            _stage.Children.Add(layer);
+        }
         _stage.Children.Add(_content); _stage.Children.Add(_hit);
+        // The marks come and go with the words (by opacity alone, as the content does): they are not on the island at rest.
+        _marks.SetBinding(OpacityProperty, new System.Windows.Data.Binding(nameof(Opacity)) { Source = _content });
         _shadow.Draw = DrawShadow; _glowWide.Draw = d => DrawGlow(d, wide: true); _glowCore.Draw = d => DrawGlow(d, wide: false);
         _bloomWide.Draw = d => DrawBloom(d, 3, 4, .55); _bloomMiddle.Draw = d => DrawBloom(d, 1.5, 1.5, .6); _bloomSmall.Draw = d => DrawBloom(d, .5, 0, .8);
-        _body.Draw = DrawBody; _parts.Draw = DrawParts;
+        _body.Draw = DrawBody; _marks.Draw = DrawMarks; _parts.Draw = DrawParts;
         RenderOptions.SetClearTypeHint(_content, ClearTypeHint.Enabled);
         AutomationProperties.SetName(_hit, Loc.T("灵动提示", "Live notice"));
         _hoverOpen = new(Dispatcher, () => { _hoverOpen!.Stop(); if (_item is not null && !_leaving && _hit.IsMouseOver) OpenPage(byKey: false); });
@@ -87,7 +104,12 @@ internal sealed class IslandNotice : Window
         WindowStartupLocation = WindowStartupLocation.Manual;
         Left = -32000; Top = -32000; Width = 16; Height = 16; Opacity = 0;
         try { Show(); UpdateLayout(); Hide(); }
-        finally { Left = left; Top = top; Width = width; Height = height; Opacity = opacity; }
+        finally
+        {
+            // A warm-up that failed half way must not leave the window shown (Covering would then hold the island's hover back).
+            if (IsVisible && _item is null) Hide();
+            Left = left; Top = top; Width = width; Height = height; Opacity = opacity;
+        }
     }
 
     // True while a notice covers the island: the panel then leaves hovering to this window.
@@ -127,6 +149,7 @@ internal sealed class IslandNotice : Window
             AfterFrames(HandFrames, () => { if (generation == _generation && _item is not null) _deck.SetIslandCovered(true); });
         }
         _arrivedUnderPointer = _island.Contains(CursorInStage());
+        Arrive();
         BuildContent();
         _content.BeginAnimation(OpacityProperty, null);
         _content.Opacity = 0;
@@ -221,6 +244,7 @@ internal sealed class IslandNotice : Window
     private void Empty()
     {
         _stage.Opacity = 0;
+        _glass?.Update();
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, () => { if (_item is null && !_leaving) Hide(); });
     }
 
@@ -296,13 +320,24 @@ internal sealed class IslandNotice : Window
         _stageRect = stage;
         _island = new Rect(island.X - stage.X, island.Y - stage.Y, island.Width, island.Height);
         Place();
-        foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts }) { layer.Width = stage.Width; layer.Height = stage.Height; }
+        foreach (var layer in _layers) { layer.Width = stage.Width; layer.Height = stage.Height; }
         // The pointer's area: the island, and for the thin indicator the band round it the island's own hover area takes.
         var hit = Form == IslandForm.Line ? new Rect(_island.X - 12, 0, _island.Width + 24, _island.Bottom + 10) : _island;
         Canvas.SetLeft(_hit, hit.X); Canvas.SetTop(_hit, hit.Y); _hit.Width = hit.Width; _hit.Height = hit.Height;
         Canvas.SetLeft(_content, _island.X); Canvas.SetTop(_content, _island.Y); _content.Width = _island.Width; _content.Height = _island.Height;
         _content.Clip = IslandBorder.BuildOutline(_island.Width, _island.Height, _shape.Shoulder, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius));
         _notchGlowCore = _notchGlowWide = null;
+        _words = null;
+        if (_glassFrame is { } frame) { Canvas.SetLeft(frame, _island.X); Canvas.SetTop(frame, _island.Y); frame.Width = _island.Width; frame.Height = _island.Height; }
+    }
+
+    // The area the icon and the words take, in the island's coordinates: what the theme's marks keep clear of (IslandDecor.Draw).
+    private Rect? _words;
+    private Rect Words()
+    {
+        if (_words is { } known) return known;
+        double plate = Math.Round(NoticeMetrics.PlateSize * _shape.Scale);
+        return (_words = new Rect(_shape.Inset, (_island.Height - plate) / 2, Math.Max(0, _island.Width - 2 * _shape.Inset), plate)).Value;
     }
 
     private void Place()
@@ -338,13 +373,108 @@ internal sealed class IslandNotice : Window
         _bloomSmall.Effect = new BlurEffect { Radius = 1.6 * 3 * _k, RenderingBias = RenderingBias.Performance };
         _bloomMiddle.Effect = new BlurEffect { Radius = 4 * 3 * _k, RenderingBias = RenderingBias.Performance };
         _bloomWide.Effect = new BlurEffect { Radius = 9 * 3 * _k, RenderingBias = RenderingBias.Performance };
-        _body.InvalidateVisual(); _shadow.InvalidateVisual();
+        Arrive();
+        Backdrop();
+        _body.InvalidateVisual(); _shadow.InvalidateVisual(); _marks.InvalidateVisual();
+    }
+
+    // How the notice shown arrives on this theme, and the light it throws.
+    private void Arrive()
+    {
+        _arrival = _look.ArrivalOf(WeightOf(_item));
+        _light = _look.Light(_arrival.Tone);
+        _flash = _look.LineFlash(_arrival.Tone, PanelTheme.ColorOf("indicator"));
+    }
+
+    private static NoticeWeight WeightOf(AttentionItem? item)
+        => item is null ? NoticeWeight.Standard : NoticeArrivals.Weigh(item.Kind, item.Priority, item.Urgent, (item.Payload as Notice)?.Call ?? false, (item.Payload as Notice)?.Category);
+
+    // ----- Glass -----
+    //
+    // Over a glass theme the island is the theme's tint over the desktop blurred by Windows (GlassBackdrop: a window of its own just
+    // under this one, its content clipped to the island's body). While a notice covers the island the island's own glass is hidden with
+    // it (the island is not shown), so the notice makes its own, with the same shape, tint and rim, and the island's liquid glass
+    // (the system acrylic) when the theme is one. It is made when a glass notice first shows and let go when the theme is not glass; it
+    // draws nothing while this window is hidden (GlassBackdrop hides with its owner), takes no capture of the desktop (the acrylic's
+    // light probe runs only while a notice shows) and, where Windows cannot blur (battery saver, a remote session, transparency
+    // effects off, high contrast), is not shown at all: the tint stays over the bare desktop, or the opaque surface of the theme.
+    private GlassBackdrop? _glass;
+    private Border? _glassFrame;
+    // The tint's opacity over the blur and whether the island's own surface steps aside for liquid glass (GlassBackdrop.Held).
+    private double _fillOpacity = 1;
+    private bool _aside;
+    private System.Windows.Media.Effects.DropShadowEffect? _halo;
+
+    private NoticeBackdrop BackdropNow()
+        => _shape is null || _look.HighContrast ? NoticeBackdrop.Opaque : NoticeBackdrops.Of(Form, _look.Glass, GlassBackdrop.Available);
+
+    private void Backdrop()
+    {
+        bool blur = BackdropNow() == NoticeBackdrop.Blur;
+        if (blur && _glass is null) MakeGlass();
+        else if (!_look.Glass && _glass is not null) DropGlass();
+        if (_glassFrame is not null) _glassFrame.Visibility = blur ? Visibility.Visible : Visibility.Collapsed;
+        if (!blur && (_aside || _fillOpacity != 1)) { _aside = false; _fillOpacity = 1; Halo(false); }
+        _glass?.Update();
+    }
+
+    private void MakeGlass()
+    {
+        _glassFrame = new Border { IsHitTestVisible = false, Background = null };
+        Canvas.SetLeft(_glassFrame, _island.X); Canvas.SetTop(_glassFrame, _island.Y); _glassFrame.Width = _island.Width; _glassFrame.Height = _island.Height;
+        _stage.Children.Insert(0, _glassFrame);
+        _glass = new GlassBackdrop(this, _glassFrame, () => (new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius), _shape.Shoulder, 1));
+        // The liquid glass themes' acrylic body takes the island's tint alpha, and its whole face is a content row (the words).
+        _glass.LiquidTint = () => _look.Surface.A / 255d;
+        _glass.ContentArea = () => _glassFrame is { ActualWidth: > 1, ActualHeight: > 1 } frame ? new Rect(frame.RenderSize) : null;
+        _glass.Held += GlassHeld;
+    }
+
+    private void DropGlass()
+    {
+        if (_glass is null) return;
+        _glass.Held -= GlassHeld;
+        _glass.Dispose();
+        _glass = null;
+        if (_glassFrame is not null) _stage.Children.Remove(_glassFrame);
+        _glassFrame = null;
+        _aside = false; _fillOpacity = 1;
+        Halo(false);
+    }
+
+    // What the glass reported for a frame: the tint's opacity over it, and whether the island's own surface, rim and edge step aside
+    // for liquid glass (they come back with the blur).
+    private void GlassHeld(double held)
+    {
+        if (_closed || _glass is null) return;
+        bool aside = _glass.SurfaceAside;
+        double opacity = GlassBackdrop.SurfaceOpacity(aside, held, _look.Surface.A / 255d);
+        if (aside == _aside && Math.Abs(opacity - _fillOpacity) < .002) return;
+        bool turned = aside != _aside;
+        _aside = aside; _fillOpacity = opacity;
+        if (turned) Halo(aside);
+        _body.InvalidateVisual(); _parts.InvalidateVisual();
+    }
+
+    // Round 13b's: the text on liquid glass carries its own legibility, a soft halo about a pixel wide in the glass's own tint, as the
+    // island's words have it (MainWindow.GlassHalo).
+    private void Halo(bool on)
+    {
+        if (!on)
+        {
+            if (_halo is not null && ReferenceEquals(_content.Effect, _halo)) _content.ClearValue(EffectProperty);
+            return;
+        }
+        _halo ??= new System.Windows.Media.Effects.DropShadowEffect { ShadowDepth = 0, BlurRadius = 3, RenderingBias = RenderingBias.Quality };
+        _halo.Color = Color.FromRgb(_look.Surface.R, _look.Surface.G, _look.Surface.B);
+        _halo.Opacity = PanelTheme.Current.IsDark ? .45 : .7;
+        _content.Effect = _halo;
     }
 
     // ----- Motion -----
 
     // With animations on and outside high contrast; without, the island keeps still and only shows the words.
-    private bool MotionAllowed => Soft.Enabled && !_look.HighContrast;
+    private bool MotionAllowed => _arrival.Animated;
 
     private void StartMotion()
     {
@@ -352,10 +482,12 @@ internal sealed class IslandNotice : Window
         if (!MotionAllowed) { RedrawAll(); return; }
         var form = Form;
         double width = _island.Width / _k, height = _island.Height / _k;
+        // The notice's weight on the theme's way of moving (NoticeArrivals): its strength and how long droplets are thrown; a theme that
+        // keeps its outline still (pixel art) plays the backlight alone.
         _liquid = form switch
         {
-            IslandForm.Notch => new IslandLiquid(form, width, height, fury: Fury, corner: _shape.BottomRadius / _k, shoulder: _shape.Shoulder / _k, cut: _look.Pixel > 0 ? 0 : _look.Cut / _k),
-            _ => new IslandLiquid(form, width, height, fury: Fury)
+            IslandForm.Notch => new IslandLiquid(form, width, height, liquid: _arrival.Liquid, fury: _arrival.Fury, separation: _arrival.Separation, corner: _shape.BottomRadius / _k, shoulder: _shape.Shoulder / _k, cut: _look.Pixel > 0 ? 0 : _look.Cut / _k),
+            _ => new IslandLiquid(form, width, height, liquid: _arrival.Liquid, fury: _arrival.Fury, separation: _arrival.Separation)
         };
         _start = Eased.Now; _t = 0;
         Motion.Start(_body, Step);
@@ -365,11 +497,14 @@ internal sealed class IslandNotice : Window
     private bool Step(double now)
     {
         if (_liquid is not { } liquid) return false;
-        _t = Math.Max(0, now - _start) * Pace;
-        if (liquid.Finished(_t)) { StopMotion(); return false; }
+        _t = Math.Max(0, now - _start) * _arrival.Pace;
+        if (liquid.Finished(_t) || !_arrival.Liquid && _t >= QuietEnd()) { StopMotion(); return false; }
         RedrawAll();
         return true;
     }
+
+    // Where nothing but the light moves, the motion is over when the light is: the backlight's last flash, the indicator's last breath.
+    private double QuietEnd() => (Form == IslandForm.Line ? IslandLiquid.Breath * _arrival.Flashes : IslandLiquid.FlashEnd(_arrival.Flashes)) + .05;
 
     private void StopMotion()
     {
@@ -380,7 +515,7 @@ internal sealed class IslandNotice : Window
 
     private void RedrawAll()
     {
-        foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts }) layer.InvalidateVisual();
+        foreach (var layer in _moving) layer.InvalidateVisual();
     }
 
     // ----- Drawing -----
@@ -449,17 +584,19 @@ internal sealed class IslandNotice : Window
     {
         if (Form == IslandForm.Line) { DrawLine(drawing); return; }
         var body = BodyOutline();
-        drawing.DrawGeometry(Fill, null, body);
-        if (_look.Gradient is { } gradient) drawing.DrawGeometry(gradient, null, body);
-        if (_decor is { } decor)
+        // Over glass the tint is thinned by the blur under it (GlassBackdrop.Held), and gone where liquid glass draws the island.
+        if (_fillOpacity > .002)
         {
-            // The theme's motifs at the island's size, over the island's own place and under the displaced outline.
-            drawing.PushClip(body);
-            drawing.PushTransform(new TranslateTransform(_island.X, _island.Y));
-            decor.Draw(drawing, _island.Size, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius), _shape.Shoulder, Rest().Outline);
-            drawing.Pop(); drawing.Pop();
+            if (_fillOpacity < 1) drawing.PushOpacity(_fillOpacity);
+            drawing.DrawGeometry(Fill, null, body);
+            if (_look.Gradient is { } gradient) drawing.DrawGeometry(gradient, null, body);
+            if (_fillOpacity < 1) drawing.Pop();
         }
-        if (_look.Pattern is { } pattern) drawing.DrawGeometry(pattern, null, body);
+        // The island's grain: liquid glass has the acrylic's noise (as the island has it), the other themes their own pattern.
+        var grain = _aside && !GlassBackdrop.Refraction ? LiquidGlass.AcrylicNoise.Brush(Dpi()) : _look.Pattern;
+        if (grain is not null) drawing.DrawGeometry(grain, null, body);
+        // Liquid glass draws its own rim light and edge (the island's painted ones step aside while it is shown).
+        if (_aside) return;
         if (_look.Edge is { } edge)
         {
             // Glass: the light gathered along the inside of the outline; clipped to the body, the pens' outer halves go.
@@ -485,6 +622,18 @@ internal sealed class IslandNotice : Window
         }
     }
 
+    private double Dpi() => PresentationSource.FromVisual(this) is null ? (WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen()).Scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
+
+    // The theme's marks on the island (IslandDecor), at rest and clear of the icon and the words: a cut-corner theme's signal bar,
+    // hatching and frame along the bottom edge, a HUD theme's cuts. They come and go with the content (the layer's opacity).
+    private void DrawMarks(DrawingContext drawing)
+    {
+        if (_decor is not { } decor || Form == IslandForm.Line) return;
+        drawing.PushTransform(new TranslateTransform(_island.X, _island.Y));
+        decor.Draw(drawing, _island.Size, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius), _shape.Shoulder, Rest().Outline, Words());
+        drawing.Pop();
+    }
+
     // The beads that trail some ripples, in the island's own color.
     private void DrawParts(DrawingContext drawing)
     {
@@ -495,7 +644,9 @@ internal sealed class IslandNotice : Window
         using (var g = parts.Open())
             foreach (var c in _circles) Circle(g, _island.X + c.X * _k, _island.Y + c.Y * _k, c.R * _k);
         parts.Freeze();
+        if (_fillOpacity < 1) drawing.PushOpacity(_fillOpacity);
         drawing.DrawGeometry(Fill, null, parts);
+        if (_fillOpacity < 1) drawing.Pop();
     }
 
     // The indicator: its thread with round ends, the droplets leaving them, in the indicator's color brightening as it breathes.
@@ -503,9 +654,9 @@ internal sealed class IslandNotice : Window
     {
         var color = PanelTheme.ColorOf("indicator");
         if (_liquid is not { } liquid) { drawing.DrawGeometry(Freeze(new SolidColorBrush(color)), null, RestOutline()); return; }
-        double b = IslandLiquid.BreathAt(_t) * .85;
-        var lit = Color.FromArgb((byte)Math.Round(color.A + (LineFlash.A - color.A) * b), (byte)Math.Round(color.R + (LineFlash.R - color.R) * b),
-            (byte)Math.Round(color.G + (LineFlash.G - color.G) * b), (byte)Math.Round(color.B + (LineFlash.B - color.B) * b));
+        double b = Math.Min(1, IslandLiquid.BreathAt(_t, _arrival.Flashes) * .85 * _arrival.Glow);
+        var lit = Color.FromArgb((byte)Math.Round(color.A + (_flash.A - color.A) * b), (byte)Math.Round(color.R + (_flash.R - color.R) * b),
+            (byte)Math.Round(color.G + (_flash.G - color.G) * b), (byte)Math.Round(color.B + (_flash.B - color.B) * b));
         double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2, h0 = liquid.Height / 2;
         double left = -liquid.LineEnd(_t, -1) + h0, right = liquid.LineEnd(_t, 1) - h0;
         var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
@@ -530,7 +681,7 @@ internal sealed class IslandNotice : Window
     private void DrawGlow(DrawingContext drawing, bool wide)
     {
         if (_liquid is not { } liquid || Form == IslandForm.Line) return;
-        double g = IslandLiquid.GlowAt(_t);
+        double g = Math.Min(1, IslandLiquid.GlowAt(_t, _arrival.Flashes) * _arrival.Glow);
         if (g <= .004) return;
         Geometry band;
         LinearGradientBrush brush;
@@ -567,19 +718,19 @@ internal sealed class IslandNotice : Window
     private void DrawBloom(DrawingContext drawing, double grow, double drop, double opacity)
     {
         if (_liquid is not { } liquid || Form != IslandForm.Line) return;
-        double b = IslandLiquid.BreathAt(_t);
+        double b = Math.Min(1, IslandLiquid.BreathAt(_t, _arrival.Flashes) * _arrival.Glow);
         if (b <= .004) return;
         double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2;
         double half = (liquid.Height / 2 + grow) * _k, left = cx - (liquid.LineEnd(_t, -1) + grow) * _k, right = cx + (liquid.LineEnd(_t, 1) + grow) * _k;
         drawing.PushOpacity(b * opacity);
-        drawing.DrawRoundedRectangle(Freeze(new SolidColorBrush(GlowColor)), null, new Rect(left, cy + drop * _k - half, Math.Max(0, right - left), 2 * half), half, half);
+        drawing.DrawRoundedRectangle(Freeze(new SolidColorBrush(_light)), null, new Rect(left, cy + drop * _k - half, Math.Max(0, right - left), 2 * half), half, half);
         drawing.Pop();
     }
 
     private LinearGradientBrush Fade(double from, double to, (double Offset, double Alpha)[] stops)
     {
         var brush = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute, StartPoint = new Point(from, 0), EndPoint = new Point(Math.Max(from + 1, to), 0) };
-        foreach (var (offset, alpha) in stops) brush.GradientStops.Add(new GradientStop(Color.FromArgb((byte)Math.Round(alpha * 255), GlowColor.R, GlowColor.G, GlowColor.B), offset));
+        foreach (var (offset, alpha) in stops) brush.GradientStops.Add(new GradientStop(Color.FromArgb((byte)Math.Round(alpha * 255), _light.R, _light.G, _light.B), offset));
         brush.Freeze();
         return brush;
     }
@@ -634,11 +785,12 @@ internal sealed class IslandNotice : Window
     // A time notice's words about its time ("还剩 24:59", "14 分钟后开始") follow NoticeCenter's shared second tick while it shows, and
     // change only those words; nothing ticks once it ends.
     private Run? _liveRun;
+    private CountdownRing? _ring;
     private bool _watchingLive;
 
     private void WatchLive()
     {
-        bool live = _liveRun is not null && _item is not null && !_leaving && !_closed;
+        bool live = (_liveRun is not null || _ring is not null) && _item is not null && !_leaving && !_closed;
         if (live == _watchingLive) return;
         _watchingLive = live;
         if (live) Center.LiveTick += LiveStep; else Center.LiveTick -= LiveStep;
@@ -646,12 +798,22 @@ internal sealed class IslandNotice : Window
 
     private void LiveStep()
     {
-        if (_liveRun is not { } run || _item is null || _leaving) { WatchLive(); return; }
-        string words = "  " + Texts().Summary;
-        // Words that grew (a stopwatch passing an hour, an event that started) may no longer fit: laid out again. Shorter ones stay.
-        if (words.Length > run.Text.Length) BuildContent(); else run.Text = words;
-        // Ended (the countdown reached its end, the event started): the last words stay; the tick is let go.
-        if (_item is not null && !NoticeClock.IsLive(Notice?.Timing, DateTimeOffset.UtcNow)) { _liveRun = null; WatchLive(); }
+        if (_liveRun is null && _ring is null || _item is null || _leaving) { WatchLive(); return; }
+        if (_liveRun is { } run)
+        {
+            string words = "  " + Texts().Summary;
+            // Words that grew (a stopwatch passing an hour, an event that started) may no longer fit: laid out again. Shorter ones stay.
+            if (words.Length > run.Text.Length) BuildContent(); else run.Text = words;
+        }
+        // The ring's arc moves in place, so nothing is laid out again.
+        var now = DateTimeOffset.UtcNow;
+        if (_ring is { } shown && Notice is { } counting)
+        {
+            shown.Set(NoticeClock.RingFraction(counting.Timing, now) ?? 1);
+            AutomationProperties.SetName(shown, Texts().Summary);
+        }
+        // Ended (the countdown reached its end, the event started): the last words and the whole ring stay; the tick is let go.
+        if (_item is not null && !NoticeClock.IsLive(Notice?.Timing, now)) { _liveRun = null; _ring = null; WatchLive(); }
     }
 
     // The icon and the words, laid out inside the island's content area at the island's scale. Words longer than the area scroll
@@ -665,19 +827,31 @@ internal sealed class IslandNotice : Window
     private void BuildContentCore()
     {
         _content.Children.Clear();
-        _announced = null; _liveRun = null;
+        _announced = null; _liveRun = null; _ring = null;
         if (_item is null || Form == IslandForm.Line) return;
         double scale = _shape.Scale, inset = _shape.Inset, available = Math.Max(0, _island.Width - 2 * inset);
-        double plate = Math.Round(20 * scale), gap = Math.Round(8 * scale);
+        double plate = Math.Round(NoticeMetrics.PlateSize * scale), gap = Math.Round(NoticeMetrics.PlateGap * scale);
         var (title, summary) = Texts();
         var icon = Plate(plate);
         Canvas.SetLeft(icon, inset); Canvas.SetTop(icon, (_island.Height - plate) / 2);
         _content.Children.Add(icon);
-        var line = new TextBlock { FontFamily = UI.PanelFont, FontSize = 12.5 * scale, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center };
+        // A countdown shows how far it has run as a ring at the right end of the words' area (it replaces nothing: the words give it room).
+        double ring = 0;
+        if (Notice is { } counting && NoticeClock.RingFraction(counting.Timing, DateTimeOffset.UtcNow) is { } fraction)
+        {
+            ring = Math.Round(NoticeMetrics.RingSize * scale);
+            var drawn = new CountdownRing(fraction, ring, Math.Max(1, NoticeMetrics.RingThickness * scale), AccentColor(counting), PanelTheme.ColorOf("ringTrack"));
+            Canvas.SetLeft(drawn, inset + available - ring); Canvas.SetTop(drawn, (_island.Height - ring) / 2);
+            AutomationProperties.SetName(drawn, summary);
+            _content.Children.Add(drawn);
+            // Followed by the shared tick only while the countdown runs; one that ended keeps its full ring.
+            if (NoticeClock.IsLive(counting.Timing, DateTimeOffset.UtcNow)) _ring = drawn;
+        }
+        var line = new TextBlock { FontFamily = UI.PanelFont, FontSize = TextSize.Strong * scale, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center };
         line.Inlines.Add(new Run(title) { FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary) });
         if (summary.Length > 0)
         {
-            var words = new Run("  " + summary) { Foreground = UI.Brush(_look.Secondary), FontSize = 12 * scale };
+            var words = new Run("  " + summary) { Foreground = UI.Brush(_look.Secondary), FontSize = TextSize.Body * scale };
             line.Inlines.Add(words);
             if (Notice is { } timed && NoticeClock.IsLive(timed.Timing, DateTimeOffset.UtcNow)) _liveRun = words;
         }
@@ -686,7 +860,7 @@ internal sealed class IslandNotice : Window
         AutomationProperties.SetName(line, spoken);
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
         _announced = line;
-        double viewport = Math.Max(0, available - plate - gap);
+        double viewport = Math.Max(0, available - plate - gap - (ring > 0 ? ring + gap : 0));
         var window = new Canvas { Width = viewport, Height = _island.Height, ClipToBounds = true };
         Canvas.SetLeft(window, inset + plate + gap);
         _content.Children.Add(window);
@@ -697,7 +871,7 @@ internal sealed class IslandNotice : Window
         if (width <= viewport) return;
         if (!Soft.Enabled) { line.Width = viewport; line.TextTrimming = TextTrimming.CharacterEllipsis; return; }
         // Read from the start, carried along at an even pace to its end, held there, and back to the start.
-        double travel = width - viewport, seconds = travel / (32 * scale);
+        double travel = width - viewport, seconds = travel / (NoticeMetrics.ScrollSpeed * scale);
         var move = new TranslateTransform();
         line.RenderTransform = move;
         var scroll = new DoubleAnimationUsingKeyFrames { RepeatBehavior = RepeatBehavior.Forever, Duration = TimeSpan.FromSeconds(1.2 + seconds + 1.2) };
@@ -726,12 +900,16 @@ internal sealed class IslandNotice : Window
             NoticeBadges.Decorate(framed, notice, size, _look.Glow, null);
             return framed;
         }
-        var accent = notice is null ? PanelTheme.ColorOf("accent") : _look.AppColor(Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
+        var accent = AccentColor(notice);
         // Without an icon, BrimDeck's own glyph (a device's) or one for the kind of application, else the initial.
         var plate = NoticeLetter.Plate(notice?.AppName, size, accent, bell: notice is null, icon: notice is null ? null : NoticeBadges.AppGlyph(notice, size, accent));
         if (notice is not null && plate is Panel panel) NoticeBadges.Decorate(panel, notice, size, _look.Glow, NoticeGlyphs.Plate(notice));
         return plate;
     }
+
+    // The application's color on this theme (the plate's letter, a countdown's ring); the theme's accent for BrimDeck's own summary.
+    private Color AccentColor(Notice? notice)
+        => notice is null ? PanelTheme.ColorOf("accent") : _look.AppColor(Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
 
     private void IconLoaded(string iconRef)
     {
@@ -766,7 +944,9 @@ internal sealed class IslandNotice : Window
     private sealed class Layer : FrameworkElement
     {
         public Action<DrawingContext>? Draw;
+        // False until the window has laid the island out: nothing is drawn then.
+        public Func<bool>? Ready;
         public Layer() { IsHitTestVisible = false; }
-        protected override void OnRender(DrawingContext drawingContext) => Draw?.Invoke(drawingContext);
+        protected override void OnRender(DrawingContext drawingContext) { if (Ready?.Invoke() != false) Draw?.Invoke(drawingContext); }
     }
 }

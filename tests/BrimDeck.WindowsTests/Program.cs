@@ -30,6 +30,7 @@ internal static class Program
             if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: window capture (not yet known to work on a virtual display).");
             else CaptureChecks.Run(Check);
             CheckSettledClip();
+            IslandNoticeDecorTests.Run(Check);
             CheckIslandTakesClicks();
             NoticeProtectionTests.Run(Check);
             ShaderTests.Run(Check, hosted);

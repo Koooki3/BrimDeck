@@ -91,6 +91,10 @@ public static class NoticeClock
         return Math.Clamp((now - start) / (end - start), 0, 1);
     }
 
+    // What the island's ring shows: how far a countdown that is still running has run. None for a stopped or cancelled one (its
+    // ring would stand at the moment it was drawn and say nothing) and for every other kind.
+    public static double? RingFraction(NoticeTiming? timing, DateTimeOffset now) => timing is { Stopped: false } ? Fraction(timing, now) : null;
+
     // The words about the notice's time: "还剩 24:59", "已计时 12:03", "14 分钟后开始". Null for kinds without any.
     public static string? Live(NoticeTiming? timing, DateTimeOffset now, TimeZoneInfo zone)
     {
