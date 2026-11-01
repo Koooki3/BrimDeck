@@ -59,13 +59,14 @@ internal static class MusicTitleMarqueeTests
         if (source is null) return;
         string page = File.ReadAllText(Path.Combine(source.FullName, "src", "BrimDeck", "MainWindow.Music.cs"));
         string visuals = File.ReadAllText(Path.Combine(source.FullName, "src", "BrimDeck", "MusicVisuals.cs"));
-        check("Music title: the open page builds its title as a MusicMarquee, in both layouts, and scrolls it with the lyric", Uses(page));
+        check("Music title: the open page builds its title as a MusicMarquee, in both layouts, and scrolls it whenever the page is open (not only while a song plays)", Uses(page));
         // Put the old layout back: a plain ellipsis TextBlock for the title, beside the equalizer or in the column.
         string oldHeader = page.Replace("PageTitle(track, c, center: false, merge: layout.MergeTitle)", "UI.Fixed(track.Title, c.Title, c.TitleLine, UI.Primary, FontWeights.SemiBold)");
         string oldColumn = page.Replace("PageTitle(track, c, center: true, merge: false)", "UI.Fixed(track.Title, c.Title, c.TitleLine, UI.Primary, FontWeights.SemiBold)");
         check("Music title: the finder rejects the old ellipsis title beside the equalizer", !Uses(oldHeader));
         check("Music title: the finder rejects the old ellipsis title in the column layout", !Uses(oldColumn));
-        check("Music title: the finder rejects a title that is never told when to scroll", !Uses(page.Replace("_musicTitle?.SetScrolling(scrolling)", "")));
+        check("Music title: the finder rejects a title that is never told when to scroll", !Uses(page.Replace("_musicTitle?.SetScrolling(open)", "")));
+        check("Music title: the finder rejects a title that scrolls only while a song plays", !Uses(page.Replace("_musicTitle?.SetScrolling(open)", "_musicTitle?.SetScrolling(open && MusicAudioActive)")));
         check("Music title: the finder rejects a title with no fade over the page's own surface",
             !Uses(Regex.Replace(page, @"(private MusicMarquee PageTitle\(.*?)Backdrop = PanelTheme\.MarqueeBackdrop, InkFade = PanelTheme\.Current\.HasOverlay", "$1", RegexOptions.Singleline)));
         check("Music title: the marquee takes its overhang from MusicTitleFit", Regex.IsMatch(visuals, @"double overflow = MusicTitleFit\.Overflow\(text\.Width, size\.Width, scale\);"));
@@ -84,7 +85,7 @@ internal static class MusicTitleMarqueeTests
             && Regex.IsMatch(title.Value, @"new MusicMarquee \{")
             && Regex.IsMatch(title.Value, @"Backdrop = PanelTheme\.MarqueeBackdrop, InkFade = PanelTheme\.Current\.HasOverlay")
             && Regex.IsMatch(title.Value, @"AutomationProperties\.SetName\(title, Loc\.T\(""歌名 "", ""Title ""\) \+ track\.Title\)")
-            && Regex.IsMatch(page, @"_musicTitle\?\.SetScrolling\(scrolling\)")
+            && Regex.IsMatch(page, @"_musicTitle\?\.SetScrolling\(open\)") && !Regex.IsMatch(page, @"_musicTitle\?\.SetScrolling\(open && MusicAudioActive\)")
             && Regex.IsMatch(page, @"equalizerWidth \+ MusicTitleFit\.EqualizerGap");
     }
 }
