@@ -349,7 +349,7 @@ internal sealed class MusicMarquee : FrameworkElement
         if ((offset, left, right, edge) == _applied) return;
         _applied = (offset, left, right, edge);
         _shift.X = -offset; _unshift.X = offset;
-        _left.Offset = edge * left; _right.Offset = 1 - edge * right;
+        _left.Offset = _tailLeft.Offset = edge * left; _right.Offset = _tailRight.Offset = 1 - edge * right;
     }
     private (double Offset, double Left, double Right, double Edge) _applied = (double.NaN, 0, 0, 0);
     protected override void OnRender(DrawingContext dc) { if (_glyphs is null) Draw(dc, RenderSize); }

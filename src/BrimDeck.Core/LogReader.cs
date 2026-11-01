@@ -24,7 +24,8 @@ public sealed class LogReader
     // Claude and Codex read different folders; each keeps only the files its latest read visited.
     private readonly Dictionary<ProviderId, Dictionary<string, CacheItem>> _caches = [];
     // The merged entries of the latest read, kept while no file changed and the start date stayed: most refreshes find nothing new.
-    private readonly Dictionary<ProviderId, (DateTimeOffset Cutoff, List<TokenEntry> Entries)> _merged = [];
+    // Next is the earliest record left out for being in the future, which joins once its time has come.
+    private readonly Dictionary<ProviderId, (DateTimeOffset Cutoff, DateTimeOffset? Next, List<TokenEntry> Entries)> _merged = [];
     // A line longer than this (a huge tool result) is skipped and counted as unreadable instead of growing the buffer without end.
     public const int DefaultMaxLine = 32 << 20;
     private const int Chunk = 1 << 20;
@@ -43,7 +44,7 @@ public sealed class LogReader
         var folders = id == ProviderId.Pi ? new[] { "" } : id == ProviderId.Codex ? new[] { "sessions", "archived_sessions" } : new[] { "projects" };
         if (!_caches.TryGetValue(id, out var cache)) _caches[id] = cache = new(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        bool changed = !_merged.TryGetValue(id, out var merged) || merged.Cutoff != cutoff;
+        bool changed = !_merged.TryGetValue(id, out var merged) || merged.Cutoff != cutoff || merged.Next <= now;
         int count = 0, errors = 0;
         JsonElement latestQuota = default;
         var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
@@ -75,14 +76,16 @@ public sealed class LogReader
         if (changed)
         {
             var entries = new Dictionary<string, TokenEntry>();
+            DateTimeOffset? next = null;
             foreach (var cached in cache.Values)
                 foreach (var entry in cached.Entries)
                 {
+                    if (entry.Time > now && entry.Total > 0 && (next is null || entry.Time < next)) next = entry.Time;
                     if (entry.Time < cutoff || entry.Time > now || entry.Total <= 0) continue;
                     // Streaming Claude records can repeat an id across files; keep its most complete usage.
                     if (!entries.TryGetValue(entry.Key, out var old) || entry.Total >= old.Total) entries[entry.Key] = entry;
                 }
-            _merged[id] = merged = (cutoff, entries.Values.OrderBy(x => x.Time).ToList());
+            _merged[id] = merged = (cutoff, next, entries.Values.OrderBy(x => x.Time).ToList());
         }
         result.Entries = merged.Entries;
         var where = place ?? Loc.T("本机", "This PC");

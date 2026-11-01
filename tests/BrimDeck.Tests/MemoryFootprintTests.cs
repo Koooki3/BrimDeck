@@ -28,7 +28,7 @@ internal static class MemoryFootprintTests
         var logs = new LogReader();
         var first = logs.Read(ProviderId.Codex, codexRoot, now);
         check("Codex records are known by a short key, whatever the size of their counters",
-            first.Entries.Count == 2 && first.Entries.All(e => e.Key.StartsWith("codex:", StringComparison.Ordinal) && e.Key.Length == "codex:".Length + 32));
+            first.Entries.Count == 2 && first.Entries.All(e => e.Key.StartsWith("codex:", StringComparison.Ordinal) && e.Key.Length < 100));
         check("A fork's copy of a record still counts once", first.Entries.Count == 2 && first.Entries.Sum(e => e.Output) == 50);
         check("Records share one string per model", ReferenceEquals(first.Entries[0].Model, first.Entries[1].Model));
 

@@ -62,8 +62,8 @@ internal static class MusicTitleMarqueeTests
         check("Music title: the finder rejects a peer that reads only the bare text", !Reads(visuals.Replace("AutomationControlType.Text, () => Reading)", "AutomationControlType.Text, () => _text)"), page));
         check("Music title: the finder rejects a title built without the reading", !Reads(visuals, page.Replace("AccessibleName = MusicTitleFit.ReadAs(track.Title, tail), ", "")));
         // The merged artist keeps one color whether the line fits or scrolls: its own, faded at the ends, never the text's at a lower opacity.
-        check("Music title: the artist fades in its own color on the shared clocks", Colors(visuals));
-        check("Music title: the finder rejects the artist's old 70 % copy of the text's gradient", !Colors(visuals.Replace("_tailLeft.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_glide.Children[1]);", "")
+        check("Music title: the artist fades in its own color with the text's fade stops", Colors(visuals));
+        check("Music title: the finder rejects the artist's old 70 % copy of the text's gradient", !Colors(visuals.Replace("_left.Offset = _tailLeft.Offset = edge * left; _right.Offset = _tailRight.Offset = 1 - edge * right;", "_left.Offset = edge * left; _right.Offset = 1 - edge * right;")
             .Replace("var tailColor = (TailForeground as SolidColorBrush)?.Color ?? ink;", "var tailColor = ink;")) && !Colors(visuals + "Opacity = TailInkOpacity"));
         check("Music title: the finder rejects the marquee's old inline rule", !Regex.IsMatch(
             visuals.Replace("MusicTitleFit.Overflow(text.Width, size.Width, scale)", "Math.Max(0, Math.Ceiling((text.Width - size.Width) * scale - .01) / scale)"),
@@ -79,7 +79,7 @@ internal static class MusicTitleMarqueeTests
             && !Regex.IsMatch(page, @"UI\.Fixed\(track\.Title")
             && Regex.IsMatch(title.Value, @"new MusicMarquee \{")
             && Regex.IsMatch(title.Value, @"Backdrop = PanelTheme\.MarqueeBackdrop, InkFade = PanelTheme\.Current\.HasOverlay")
-            && Regex.IsMatch(page, @"bool open = Settings\.Animations && SystemParameters\.ClientAreaAnimation")
+            && Regex.IsMatch(page, @"bool open = MusicMotion && IsVisible && !IsSuppressed && _expanded && IsMusicPage")
             && Regex.IsMatch(page, @"_musicTitle\?\.SetScrolling\(open\)") && !Regex.IsMatch(page, @"_musicTitle\?\.SetScrolling\(open && MusicAudioActive\)")
             && Regex.IsMatch(page, @"equalizerWidth \+ MusicTitleFit\.EqualizerGap");
     }
@@ -94,6 +94,6 @@ internal static class MusicTitleMarqueeTests
 
     private static bool Colors(string visuals) =>
         Regex.IsMatch(visuals, @"var tailColor = \(TailForeground as SolidColorBrush\)\?\.Color \?\? ink;")
-        && Regex.IsMatch(visuals, @"_tailLeft\.ApplyAnimationClock\(GradientStop\.OffsetProperty, \(AnimationClock\)_glide\.Children\[1\]\)")
+        && Regex.IsMatch(visuals, @"_left\.Offset = _tailLeft\.Offset = edge \* left; _right\.Offset = _tailRight\.Offset = 1 - edge \* right;")
         && !visuals.Contains("TailInkOpacity");
 }
