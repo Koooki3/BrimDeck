@@ -21,6 +21,9 @@ internal sealed class IslandDecor
     // The bottom marks: both are MarkBand tall and lie on the bottom edge, clear of the corners' cuts. Like the sea they belong to the
     // open panel and fade in between the two heights, so the collapsed island's clock is never crossed.
     internal const double MarkBand = 5, HatchWidth = 72, TabWidth = 28, MarksMinHeight = 56, MarksFullHeight = 80;
+    // A notice on the island (IslandNotice) shows the bottom marks at its own height, as far as they leave the words alone: the
+    // lowest height they are tried on, and the clear gap between the words' lowest point and the marks.
+    internal const double NoticeMarksMinHeight = 24, NoticeGap = 1;
     private static readonly Dictionary<Color, Drawing> HatchStrips = [];
     // The caustics' tile, in DIP: lines a few DIP wide, far enough apart to read as light, not as a pattern.
     private const double Tile = 150;
@@ -34,7 +37,8 @@ internal sealed class IslandDecor
     private readonly double _cut;
     private readonly Pen? _framePen, _crossPen;
     private readonly Brush? _diamond;
-    private (Size Size, CornerRadius Corners, double Shoulder)? _frameFor;
+    private (Size Size, CornerRadius Corners, double Shoulder, Rect? Clear)? _frameFor;
+    private bool _frameClear = true;
     private Geometry? _frame;
     private Geometry? _frameClip;
     private Size? _for;
@@ -46,7 +50,7 @@ internal sealed class IslandDecor
     private MatrixTransform? _shadePlace;
     // The HUD marks follow the corners' shapes, so they are made again when the size or the corners change (only a theme with them).
     private Drawing? _hud;
-    private (Size Size, CornerRadius Corners, double Shoulder)? _hudFor;
+    private (Size Size, CornerRadius Corners, double Shoulder, Rect? Clear)? _hudFor;
 
     public IslandDecor(PanelDecor decor, double cut = 0)
     {
@@ -59,12 +63,17 @@ internal sealed class IslandDecor
 
     public static IslandDecor? For(PanelPalette palette) => palette.Effects.Decor is { } decor ? new IslandDecor(decor, palette.Effects.Cut) : null;
 
-    public void Draw(DrawingContext dc, Size size, CornerRadius corners, double shoulder, Geometry outline)
+    // clear: the area a notice's icon and words take (IslandNotice), in the island's coordinates. Given, the island is a notice: the
+    // sea and the palm are left out (they would lie under the words), the HUD's ticks and the frame are drawn only where they leave the
+    // area clear, and the bottom marks are drawn at the notice's height, no taller than the room under the area.
+    public void Draw(DrawingContext dc, Size size, CornerRadius corners, double shoulder, Geometry outline, Rect? clear = null)
     {
         if (size.Width < 2) return;
-        bool scene = size.Height > SeaMinHeight && (_decor.Horizon is not null || _decor.Caustics is not null || _decor.Palm is not null);
+        bool notice = clear is not null;
+        bool scene = !notice && size.Height > SeaMinHeight && (_decor.Horizon is not null || _decor.Caustics is not null || _decor.Palm is not null);
         bool hud = _decor.Hud is not null && size.Height >= HudMinHeight;
-        bool plate = (_decor.Hatch is not null || _decor.Tab is not null || _decor.Frame is not null || _decor.Diamond is not null || _decor.Cross is not null) && size.Height > MarksMinHeight;
+        bool plate = (_decor.Hatch is not null || _decor.Tab is not null || _decor.Frame is not null || !notice && (_decor.Diamond is not null || _decor.Cross is not null))
+            && size.Height > (notice ? NoticeMarksMinHeight : MarksMinHeight);
         if (!scene && !hud && !plate) return;
         dc.PushClip(outline);
         if (scene)
@@ -75,39 +84,45 @@ internal sealed class IslandDecor
         }
         if (hud && _decor.Hud is { } marks)
         {
-            if (_hudFor != (size, corners, shoulder) || _hud is null)
+            if (_hudFor != (size, corners, shoulder, clear) || _hud is null)
             {
                 // The marks fade in too, so they do not appear on one frame as the island grows past the collapsed height.
                 var color = ToColor(marks.Color);
                 color.A = (byte)Math.Round(color.A * Math.Min(1, (size.Height - HudMinHeight) / (HudFullHeight - HudMinHeight)));
-                _hud = Hud(color, marks.Chamfer, size.Width, size.Height, corners, Math.Clamp(shoulder, 0, Math.Min(size.Width / 4, size.Height / 2)));
-                _hudFor = (size, corners, shoulder);
+                _hud = Hud(color, marks.Chamfer, size.Width, size.Height, corners, Math.Clamp(shoulder, 0, Math.Min(size.Width / 4, size.Height / 2)), clear);
+                _hudFor = (size, corners, shoulder, clear);
             }
             dc.DrawDrawing(_hud);
         }
-        if (plate) Marks(dc, size, corners, shoulder);
+        if (plate) Marks(dc, size, corners, shoulder, clear);
         dc.Pop();
     }
 
     // The tab at the bottom edge's left end and the hatching at its right end, each starting beyond its corner's radius.
-    private void Marks(DrawingContext dc, Size size, CornerRadius corners, double shoulder)
+    private void Marks(DrawingContext dc, Size size, CornerRadius corners, double shoulder, Rect? clear)
     {
-        double fade = Math.Min(1, (size.Height - MarksMinHeight) / (MarksFullHeight - MarksMinHeight));
+        bool notice = clear is not null;
+        double fade = notice ? 1 : Math.Min(1, (size.Height - MarksMinHeight) / (MarksFullHeight - MarksMinHeight));
         if (_framePen is not null)
         {
-            if (_frameFor != (size, corners, shoulder))
+            if (_frameFor != (size, corners, shoulder, clear))
             {
                 _frame = _cut > 0 ? IslandBorder.BuildCut(size.Width, size.Height, shoulder, corners, FrameInset, _cut) : IslandBorder.BuildOutline(size.Width, size.Height, shoulder, corners, FrameInset);
                 _frameClip = Frozen(new RectangleGeometry(new Rect(0, FrameInset + 1, size.Width, Math.Max(0, size.Height - FrameInset - 1))));
-                _frameFor = (size, corners, shoulder);
+                // On a notice the frame is drawn only where it leaves the words' area alone.
+                _frameClear = clear is not { } area || !Touches(_frame, _framePen, area);
+                _frameFor = (size, corners, shoulder, clear);
             }
-            if (fade < 1) dc.PushOpacity(fade);
-            dc.PushClip(_frameClip);
-            dc.DrawGeometry(null, _framePen, _frame);
-            dc.Pop();
-            if (fade < 1) dc.Pop();
+            if (_frameClear)
+            {
+                if (fade < 1) dc.PushOpacity(fade);
+                dc.PushClip(_frameClip);
+                dc.DrawGeometry(null, _framePen, _frame);
+                dc.Pop();
+                if (fade < 1) dc.Pop();
+            }
         }
-        if (_diamond is not null || _crossPen is not null)
+        if (!notice && (_diamond is not null || _crossPen is not null))
         {
             // Beads on the frame's two sides, level with each other a little above the cuts.
             double level = size.Height - 30, left = shoulder + FrameInset, right = size.Width - shoulder - FrameInset;
@@ -130,18 +145,32 @@ internal sealed class IslandDecor
             }
             if (fade < 1) dc.Pop();
         }
-        double y = size.Height - MarkBand, tabX = shoulder + corners.BottomLeft + 4, hatchX = size.Width - shoulder - corners.BottomRight - 4 - HatchWidth;
+        // The marks lie on the bottom edge. On a notice they are as tall as the room under the words' area leaves, and none where
+        // that is under two DIP.
+        double band = clear is { } words ? Math.Min(MarkBand, size.Height - words.Bottom - NoticeGap) : MarkBand;
+        if (band < (notice ? 2 : MarkBand)) return;
+        double y = size.Height - band, tabX = shoulder + corners.BottomLeft + 4, hatchX = size.Width - shoulder - corners.BottomRight - 4 - HatchWidth;
         bool tab = _tab is not null && tabX + TabWidth < size.Width, hatch = _decor.Hatch is not null && hatchX > (tab ? tabX + TabWidth + 8 : 0);
         if (!tab && !hatch) return;
         if (fade < 1) dc.PushOpacity(fade);
-        if (tab) dc.DrawRectangle(_tab, null, new Rect(tabX, y, TabWidth, MarkBand));
+        if (tab) dc.DrawRectangle(_tab, null, new Rect(tabX, y, TabWidth, band));
         if (hatch)
         {
-            dc.PushTransform(new TranslateTransform(hatchX, y));
+            // The strip is made MarkBand tall; a notice's lower band shows its bottom part.
+            if (band < MarkBand) dc.PushClip(new RectangleGeometry(new Rect(hatchX, y, HatchWidth, band)));
+            dc.PushTransform(new TranslateTransform(hatchX, size.Height - MarkBand));
             dc.DrawDrawing(HatchStrip(ToColor(_decor.Hatch!.Value)));
             dc.Pop();
+            if (band < MarkBand) dc.Pop();
         }
         if (fade < 1) dc.Pop();
+    }
+
+    // Whether the stroke of a geometry touches an area.
+    private static bool Touches(Geometry geometry, Pen pen, Rect area)
+    {
+        area.Inflate(NoticeGap, NoticeGap);
+        return geometry.GetWidenedPathGeometry(pen).FillContainsWithDetail(new RectangleGeometry(area)) != IntersectionDetail.Empty;
     }
 
     // A strip of hatching: 45-degree stripes 2 DIP wide every 5, clipped to the strip. It is the same for every island of a color.
@@ -308,36 +337,55 @@ internal sealed class IslandDecor
     // HUD marks: a 45-degree cut across the top-right (or bottom-right) and bottom-left corners, each led in by a short straight
     // run along the edge, and a small hexagon beside each cut, as on the heads-up displays the theme borrows from. One DIP
     // lines. A notch's body stands in from its shoulders, so the bottom corners do too.
-    private static Drawing Hud(Color color, double chamfer, double w, double h, CornerRadius corners, double shoulder)
+    // clear: a notice's words area (Draw). A corner's hexagon that would lie on it is left out, and the whole corner if its cut
+    // and leads would too.
+    private static Drawing Hud(Color color, double chamfer, double w, double h, CornerRadius corners, double shoulder, Rect? clear)
     {
-        var geometry = new StreamGeometry();
-        double inset = 3.5, lead = 14;
-        using (var g = geometry.Open())
-        {
-            void Corner(Point corner, Vector across, Vector down, double radius)
-            {
-                // Inside a rounded corner the cut moves in with the curve (a 45-degree line touches a radius r arc r(1 - 1/sqrt 2)
-                // from the corner), so it is never clipped away.
-                double c = Math.Max(chamfer, 2) + radius * .3;
-                // The cut runs from c along the top edge to c down the side, inset from the edge; the leads extend it.
-                var start = corner - across * (c + lead) + down * inset;
-                var cutTop = corner - across * (c + inset) + down * inset;
-                var cutSide = corner - across * inset + down * (c + inset);
-                var end = corner - across * inset + down * (c + inset + lead);
-                g.BeginFigure(start, false, false);
-                g.LineTo(cutTop, true, true); g.LineTo(cutSide, true, true); g.LineTo(end, true, true);
-                // One hexagonal tick just inside the cut, large enough to read as a hexagon.
-                Hexagon(g, corner - across * (c + inset + 14) + down * (inset + 9), 6);
-            }
-            // Only corners that are drawn round; a square corner (the notch's top) is the screen's edge, so an island hanging from
-            // it takes the second cut at its bottom-right instead.
-            if (corners.TopRight > 2) Corner(new Point(w, 0), new Vector(1, 0), new Vector(0, 1), corners.TopRight);
-            else if (corners.BottomRight > 2) Corner(new Point(w - shoulder, h), new Vector(1, 0), new Vector(0, -1), corners.BottomRight);
-            if (corners.BottomLeft > 2) Corner(new Point(shoulder, h), new Vector(-1, 0), new Vector(0, -1), corners.BottomLeft);
-        }
-        geometry.Freeze();
         var pen = Frozen(new Pen(new SolidColorBrush(color), 1) { StartLineCap = PenLineCap.Flat, EndLineCap = PenLineCap.Flat, LineJoin = PenLineJoin.Miter });
+        // Only corners that are drawn round; a square corner (the notch's top) is the screen's edge, so an island hanging from
+        // it takes the second cut at its bottom-right instead.
+        var places = new List<(Point Corner, Vector Across, Vector Down, double Radius)>(2);
+        if (corners.TopRight > 2) places.Add((new Point(w, 0), new Vector(1, 0), new Vector(0, 1), corners.TopRight));
+        else if (corners.BottomRight > 2) places.Add((new Point(w - shoulder, h), new Vector(1, 0), new Vector(0, -1), corners.BottomRight));
+        if (corners.BottomLeft > 2) places.Add((new Point(shoulder, h), new Vector(-1, 0), new Vector(0, -1), corners.BottomLeft));
+        var geometry = new StreamGeometry();
+        using (var g = geometry.Open())
+            foreach (var (corner, across, down, radius) in places)
+            {
+                bool tick = true;
+                if (clear is { } area)
+                {
+                    if (Touches(One(true), pen, area)) tick = false;
+                    if (!tick && Touches(One(false), pen, area)) continue;
+                }
+                Mark(g, corner, across, down, radius, chamfer, tick);
+
+                StreamGeometry One(bool withTick)
+                {
+                    var single = new StreamGeometry();
+                    using (var s = single.Open()) Mark(s, corner, across, down, radius, chamfer, withTick);
+                    return single;
+                }
+            }
+        geometry.Freeze();
         return new GeometryDrawing(null, pen, geometry);
+    }
+
+    private static void Mark(StreamGeometryContext g, Point corner, Vector across, Vector down, double radius, double chamfer, bool tick)
+    {
+        double inset = 3.5, lead = 14;
+        // Inside a rounded corner the cut moves in with the curve (a 45-degree line touches a radius r arc r(1 - 1/sqrt 2)
+        // from the corner), so it is never clipped away.
+        double c = Math.Max(chamfer, 2) + radius * .3;
+        // The cut runs from c along the top edge to c down the side, inset from the edge; the leads extend it.
+        var start = corner - across * (c + lead) + down * inset;
+        var cutTop = corner - across * (c + inset) + down * inset;
+        var cutSide = corner - across * inset + down * (c + inset);
+        var end = corner - across * inset + down * (c + inset + lead);
+        g.BeginFigure(start, false, false);
+        g.LineTo(cutTop, true, true); g.LineTo(cutSide, true, true); g.LineTo(end, true, true);
+        // One hexagonal tick just inside the cut, large enough to read as a hexagon.
+        if (tick) Hexagon(g, corner - across * (c + inset + 14) + down * (inset + 9), 6);
     }
 
     private static Color ToColor(ThemeColor color) => Color.FromArgb(color.A, color.R, color.G, color.B);
