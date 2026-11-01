@@ -785,11 +785,12 @@ internal sealed class IslandNotice : Window
     // A time notice's words about its time ("还剩 24:59", "14 分钟后开始") follow NoticeCenter's shared second tick while it shows, and
     // change only those words; nothing ticks once it ends.
     private Run? _liveRun;
+    private CountdownRing? _ring;
     private bool _watchingLive;
 
     private void WatchLive()
     {
-        bool live = _liveRun is not null && _item is not null && !_leaving && !_closed;
+        bool live = (_liveRun is not null || _ring is not null) && _item is not null && !_leaving && !_closed;
         if (live == _watchingLive) return;
         _watchingLive = live;
         if (live) Center.LiveTick += LiveStep; else Center.LiveTick -= LiveStep;
@@ -797,12 +798,22 @@ internal sealed class IslandNotice : Window
 
     private void LiveStep()
     {
-        if (_liveRun is not { } run || _item is null || _leaving) { WatchLive(); return; }
-        string words = "  " + Texts().Summary;
-        // Words that grew (a stopwatch passing an hour, an event that started) may no longer fit: laid out again. Shorter ones stay.
-        if (words.Length > run.Text.Length) BuildContent(); else run.Text = words;
-        // Ended (the countdown reached its end, the event started): the last words stay; the tick is let go.
-        if (_item is not null && !NoticeClock.IsLive(Notice?.Timing, DateTimeOffset.UtcNow)) { _liveRun = null; WatchLive(); }
+        if (_liveRun is null && _ring is null || _item is null || _leaving) { WatchLive(); return; }
+        if (_liveRun is { } run)
+        {
+            string words = "  " + Texts().Summary;
+            // Words that grew (a stopwatch passing an hour, an event that started) may no longer fit: laid out again. Shorter ones stay.
+            if (words.Length > run.Text.Length) BuildContent(); else run.Text = words;
+        }
+        // The ring's arc moves in place, so nothing is laid out again.
+        var now = DateTimeOffset.UtcNow;
+        if (_ring is { } shown && Notice is { } counting)
+        {
+            shown.Set(NoticeClock.RingFraction(counting.Timing, now) ?? 1);
+            AutomationProperties.SetName(shown, Texts().Summary);
+        }
+        // Ended (the countdown reached its end, the event started): the last words and the whole ring stay; the tick is let go.
+        if (_item is not null && !NoticeClock.IsLive(Notice?.Timing, now)) { _liveRun = null; _ring = null; WatchLive(); }
     }
 
     // The icon and the words, laid out inside the island's content area at the island's scale. Words longer than the area scroll
@@ -816,7 +827,7 @@ internal sealed class IslandNotice : Window
     private void BuildContentCore()
     {
         _content.Children.Clear();
-        _announced = null; _liveRun = null;
+        _announced = null; _liveRun = null; _ring = null;
         if (_item is null || Form == IslandForm.Line) return;
         double scale = _shape.Scale, inset = _shape.Inset, available = Math.Max(0, _island.Width - 2 * inset);
         double plate = Math.Round(NoticeMetrics.PlateSize * scale), gap = Math.Round(NoticeMetrics.PlateGap * scale);
@@ -824,6 +835,18 @@ internal sealed class IslandNotice : Window
         var icon = Plate(plate);
         Canvas.SetLeft(icon, inset); Canvas.SetTop(icon, (_island.Height - plate) / 2);
         _content.Children.Add(icon);
+        // A countdown shows how far it has run as a ring at the right end of the words' area (it replaces nothing: the words give it room).
+        double ring = 0;
+        if (Notice is { } counting && NoticeClock.RingFraction(counting.Timing, DateTimeOffset.UtcNow) is { } fraction)
+        {
+            ring = Math.Round(NoticeMetrics.RingSize * scale);
+            var drawn = new CountdownRing(fraction, ring, Math.Max(1, NoticeMetrics.RingThickness * scale), AccentColor(counting), PanelTheme.ColorOf("ringTrack"));
+            Canvas.SetLeft(drawn, inset + available - ring); Canvas.SetTop(drawn, (_island.Height - ring) / 2);
+            AutomationProperties.SetName(drawn, summary);
+            _content.Children.Add(drawn);
+            // Followed by the shared tick only while the countdown runs; one that ended keeps its full ring.
+            if (NoticeClock.IsLive(counting.Timing, DateTimeOffset.UtcNow)) _ring = drawn;
+        }
         var line = new TextBlock { FontFamily = UI.PanelFont, FontSize = 12.5 * scale, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center };
         line.Inlines.Add(new Run(title) { FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary) });
         if (summary.Length > 0)
@@ -837,7 +860,7 @@ internal sealed class IslandNotice : Window
         AutomationProperties.SetName(line, spoken);
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
         _announced = line;
-        double viewport = Math.Max(0, available - plate - gap);
+        double viewport = Math.Max(0, available - plate - gap - (ring > 0 ? ring + gap : 0));
         var window = new Canvas { Width = viewport, Height = _island.Height, ClipToBounds = true };
         Canvas.SetLeft(window, inset + plate + gap);
         _content.Children.Add(window);
@@ -877,12 +900,16 @@ internal sealed class IslandNotice : Window
             NoticeBadges.Decorate(framed, notice, size, _look.Glow, null);
             return framed;
         }
-        var accent = notice is null ? PanelTheme.ColorOf("accent") : _look.AppColor(Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
+        var accent = AccentColor(notice);
         // Without an icon, BrimDeck's own glyph (a device's) or one for the kind of application, else the initial.
         var plate = NoticeLetter.Plate(notice?.AppName, size, accent, bell: notice is null, icon: notice is null ? null : NoticeBadges.AppGlyph(notice, size, accent));
         if (notice is not null && plate is Panel panel) NoticeBadges.Decorate(panel, notice, size, _look.Glow, NoticeGlyphs.Plate(notice));
         return plate;
     }
+
+    // The application's color on this theme (the plate's letter, a countdown's ring); the theme's accent for BrimDeck's own summary.
+    private Color AccentColor(Notice? notice)
+        => notice is null ? PanelTheme.ColorOf("accent") : _look.AppColor(Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
 
     private void IconLoaded(string iconRef)
     {
