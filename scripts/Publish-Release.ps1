@@ -17,11 +17,18 @@ try {
     New-Item -ItemType Directory -Force -Path $publishPath, $outputPath | Out-Null
     # Each version gets a clean output folder, so files of an earlier release never end up in this one.
     Get-ChildItem -LiteralPath $outputPath -File | Remove-Item
+    # The sensor service is not in the installer: BrimDeck downloads it from this release when the user turns enhanced sensors on,
+    # and accepts it only if it matches the SHA-256 written into BrimDeck here (Native.SensorSetup).
+    $sensorsPath = "$publishPath-sensors"
+    dotnet publish src/BrimDeck.Sensors/BrimDeck.Sensors.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -p:PublishSingleFile=true -p:PublishTrimmed=true -p:EnableCompressionInSingleFile=true -o $sensorsPath
+    if ($LASTEXITCODE -ne 0) { throw 'Sensor service publish failed.' }
+    $sensors = Copy-Item -LiteralPath (Join-Path $sensorsPath 'BrimDeck.Sensors.exe') -Destination $outputPath -PassThru
+    $sensorsSha256 = (Get-FileHash -LiteralPath $sensors.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     # brim-notify for Windows shares the application's self-contained runtime. It is published first, so that the application's
     # own publish (precompiled, ReadyToRun) writes the shared files last.
     dotnet publish src/BrimDeck.Notify/BrimDeck.Notify.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -p:RestoreLockedMode=true -o $publishPath
     if ($LASTEXITCODE -ne 0) { throw 'brim-notify publish failed.' }
-    dotnet publish src/BrimDeck/BrimDeck.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -p:RestoreLockedMode=true -p:PublishSingleFile=false -o $publishPath
+    dotnet publish src/BrimDeck/BrimDeck.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -p:RestoreLockedMode=true -p:PublishSingleFile=false -p:SensorsSha256=$sensorsSha256 -o $publishPath
     if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
     # The WSL agent: one trimmed Linux file per processor and C library, copied into a distribution only when the user switches
     # it on for dynamic notices. BrimDeck picks wsl\<rid>\brimdeck-agent by what the distribution runs (WslPlatform.Rids).

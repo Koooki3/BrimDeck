@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO;
 
 namespace BrimDeck.Core;
@@ -24,31 +25,63 @@ public sealed class LibcefPatch
     public IReadOnlyList<Site> Sites => _sites;
     public LibcefPatch(int port, params Site[] sites) { Port = port; _sites = sites; }
 
+    // The file is searched a chunk at a time (a pooled buffer), as reading the whole 150 MB library at once kept that much memory
+    // until the next full collection. Each chunk starts with the last bytes of the one before, so a window across the boundary
+    // is found too.
+    public const int ChunkSize = 1 << 20;
+
     // Where each site's Core sits in this file and whether it already holds the patched bytes; null for a file no profile
     // fits (a site absent, found more than once, or present in both forms).
-    private List<(Site Site, long Offset, bool Patched)>? Locate(byte[] file)
+    private List<(Site Site, long Offset, bool Patched)>? Locate(Stream file)
     {
-        var found = new List<(Site, long, bool)>(_sites.Length);
-        foreach (var site in _sites)
+        // Each site's original window, then its patched one: where each was first found, and how often (counted up to 2).
+        var windows = _sites.SelectMany(site => new[] { site.Window(false), site.Window(true) }).ToArray();
+        var first = new long[windows.Length];
+        var seen = new int[windows.Length];
+        int overlap = windows.Max(window => window.Length) - 1;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(ChunkSize);
+        try
         {
-            long original = UniqueIndex(file, site.Window(false)), patched = UniqueIndex(file, site.Window(true));
-            if (original >= 0 && patched < 0) found.Add((site, original + site.Prefix.Length, false));
-            else if (patched >= 0 && original < 0) found.Add((site, patched + site.Prefix.Length, true));
+            file.Position = 0;
+            long start = 0;
+            int kept = 0;
+            while (true)
+            {
+                int filled = kept + file.ReadAtLeast(buffer.AsSpan(kept), buffer.Length - kept, throwOnEndOfStream: false);
+                var chunk = buffer.AsSpan(0, filled);
+                for (int i = 0; i < windows.Length; i++)
+                {
+                    // A match that lies wholly within the kept bytes was counted in the chunk before.
+                    int from = Math.Max(0, kept - windows[i].Length + 1);
+                    while (seen[i] < 2 && from <= filled)
+                    {
+                        int at = chunk[from..].IndexOf(windows[i]);
+                        if (at < 0) break;
+                        if (seen[i]++ == 0) first[i] = start + from + at;
+                        from += at + 1;
+                    }
+                }
+                if (filled < buffer.Length) break;
+                kept = overlap;
+                chunk[^kept..].CopyTo(buffer);
+                start += filled - kept;
+            }
+        }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
+
+        var found = new List<(Site, long, bool)>(_sites.Length);
+        for (int i = 0; i < _sites.Length; i++)
+        {
+            var site = _sites[i];
+            bool original = seen[2 * i] == 1, patched = seen[2 * i + 1] == 1;
+            if (original && !patched) found.Add((site, first[2 * i] + site.Prefix.Length, false));
+            else if (patched && !original) found.Add((site, first[2 * i + 1] + site.Prefix.Length, true));
             else return null;
         }
         return found;
     }
 
-    // The single offset of pattern in file, or -1 when it is absent or occurs more than once.
-    private static long UniqueIndex(ReadOnlySpan<byte> file, ReadOnlySpan<byte> pattern)
-    {
-        int first = file.IndexOf(pattern);
-        if (first < 0) return -1;
-        return file[(first + 1)..].IndexOf(pattern) < 0 ? first : -1;
-    }
-
-    public LibcefPatchState Classify(Stream file) => Classify(ReadAll(file));
-    private LibcefPatchState Classify(byte[] file)
+    public LibcefPatchState Classify(Stream file)
     {
         if (Locate(file) is not { } sites) return LibcefPatchState.Unsupported;
         return sites.All(s => s.Patched) ? LibcefPatchState.Patched
@@ -59,7 +92,7 @@ public sealed class LibcefPatch
     // the wanted bytes is not written; a file no profile fits is left alone.
     public void Write(Stream file, bool patch)
     {
-        if (Locate(ReadAll(file)) is not { } sites) throw new InvalidDataException("libcef.dll is not a known build.");
+        if (Locate(file) is not { } sites) throw new InvalidDataException("libcef.dll is not a known build.");
         bool written = false;
         foreach (var (site, offset, patched) in sites)
         {
@@ -70,13 +103,5 @@ public sealed class LibcefPatch
         file.Flush();
         if (Classify(file) != (patch ? LibcefPatchState.Patched : LibcefPatchState.Original))
             throw new IOException("libcef.dll did not keep the written bytes.");
-    }
-
-    private static byte[] ReadAll(Stream file)
-    {
-        file.Position = 0;
-        var bytes = new byte[file.Length];
-        file.ReadExactly(bytes);
-        return bytes;
     }
 }

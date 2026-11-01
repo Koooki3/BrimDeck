@@ -20,8 +20,8 @@ public enum CompactSmoothing { Off = 0, Ten = 10, Thirty = 30 }
 public enum CompactMonitorItems
 {
     None = 0, Columns = 1, Cpu = 2, Memory = 4, Gpu = 8, Download = 16, Upload = 32,
-    // The usage and rate readings, as the Full preset shows them. Storage came later and is not among them: it shows only when
-    // chosen in the table (CompactMonitor.Every is every reading). Temperature was a reading of its own before the temperatures
+    // The usage and rate readings, as the old Full mode showed them. Storage came later and is not among them (CompactMonitor.Every
+    // is every reading, as the Full preset shows them). Temperature was a reading of its own before the temperatures
     // joined CPU, GPU and the drives (CompactFigures); never released, it is dropped from saved tables and its number not reused.
     All = Columns | Cpu | Memory | Gpu | Download | Upload,
     Temperature = 64, Storage = 128,
@@ -174,28 +174,34 @@ public static class CompactMonitor
     // What the strip shows: with every reading switched off, CPU, as the old Custom choice did.
     public static CompactMonitorItems Shown(IEnumerable<CompactReading> readings) => Visible(readings) is var shown && shown != CompactMonitorItems.None ? shown : CompactMonitorItems.Cpu;
 
-    // The preset the table matches exactly: Full is every reading with the rings' figures, Brief the three rings alone; else
-    // none, and the table itself is the custom choice (saved as Custom in the old key).
+    // The preset the table matches exactly: Full is every reading with every figure (the rings' figures, the share and the
+    // temperature of CPU, GPU and the drives, the frame rate's program icon), Brief the three rings alone; else none, and the
+    // table itself is the custom choice (saved as Custom in the old key).
     public static CompactMonitorMode? Preset(IEnumerable<CompactReading> readings)
     {
         var all = readings.ToList();
         var (shown, values) = (Visible(all), Values(all));
-        // Storage and the battery are outside both presets: Full leaves them as they are, Brief hides them.
-        return (shown & CompactMonitorItems.All) == CompactMonitorItems.All && values == Rings ? CompactMonitorMode.Full
+        bool figures = all.All(reading => (!CompactFigures.Has(reading.Item) || CompactFigures.Of(reading).Count == FullFigures.Length)
+            && (reading.Item != CompactMonitorItems.Frames || CompactFrames.Shows(reading, CompactFrames.Icon)));
+        return shown == Every && values == Rings && figures ? CompactMonitorMode.Full
             : shown == Rings && values == CompactMonitorItems.None ? CompactMonitorMode.Brief : null;
     }
+    private static readonly string[] FullFigures = [CompactFigures.Usage, CompactFigures.Temperature];
 
-    // Sets which readings show and which rings carry their figure as the preset has them; the order and the colors stay.
-    // Custom (no preset) changes nothing.
+    // Sets which readings show and which figures they carry as the preset has them: Full shows every reading with every figure,
+    // Brief the three rings without figures; the order, the colors and the drive letters stay. Custom (no preset) changes nothing.
     public static void Apply(IEnumerable<CompactReading> readings, CompactMonitorMode preset)
     {
         if (preset == CompactMonitorMode.Custom) return;
+        bool full = preset == CompactMonitorMode.Full;
         foreach (var reading in readings)
         {
-            if (reading.Item is CompactMonitorItems.Storage or CompactMonitorItems.Battery or CompactMonitorItems.Power or CompactMonitorItems.Charge or CompactMonitorItems.Frames) { if (preset == CompactMonitorMode.Brief) reading.Visible = false; continue; }
             bool ring = HasValueChoice(reading.Item);
-            reading.Visible = preset == CompactMonitorMode.Full || ring;
-            if (ring) reading.ShowValue = preset == CompactMonitorMode.Full;
+            reading.Visible = full || ring;
+            if (ring) reading.ShowValue = full;
+            if (!full) continue;
+            if (CompactFigures.Has(reading.Item)) reading.Figures = [.. FullFigures];
+            if (reading.Item == CompactMonitorItems.Frames) reading.Figures = null;
         }
     }
 
@@ -272,9 +278,6 @@ public static class CompactMonitor
         return Width(shown, width, gap) <= available + 1e-9 ? shown : CompactMonitorItems.None;
     }
 
-    // Whether a region of the collapsed row this wide shows any of the readings; a region squeezed to nothing shows none, and the
-    // sampler is not run for them.
-    public static bool HasRoom(double region) => double.IsFinite(region) && region > 0;
 }
 
 // The colors of the collapsed readings at each level (ReadingLevels), from the color scheme. The normal state has a color per

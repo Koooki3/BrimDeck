@@ -66,8 +66,8 @@ public partial class App
         MainWindow = Deck;
         AssignDisplays();
         Deck.Show();
-        _tray?.Dispose();
-        MakeTray();
+        _tray?.Dispose(); _tray = null;
+        ApplyTray();
         old.Retire();
     }
     // How many times the panels were made again (for the checks).

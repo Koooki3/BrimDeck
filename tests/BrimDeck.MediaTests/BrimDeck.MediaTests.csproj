@@ -21,5 +21,6 @@
     <Compile Include="..\..\src\BrimDeck\Native\TcpListeners.cs" Link="TcpListeners.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\QqMediaConnection.cs" Link="QqMediaConnection.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\KugouCdpConnection.cs" Link="KugouCdpConnection.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\ProcessSnapshot.cs" Link="ProcessSnapshot.cs" />
   </ItemGroup>
 </Project>

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using BrimDeck.Core;
 
@@ -57,6 +58,13 @@ internal sealed class FrameRates : IDisposable
     private Timer? _flusher;
     private const int MostEvents = 200_000;
     private List<(long Time, int Pid, long Chain)> _events = [];
+    // The list Sample emptied last time, given back to be filled again rather than grown anew each second; not kept once a
+    // stall has grown it large.
+    private List<(long Time, int Pid, long Chain)> _drained = [];
+    private const int KeptCapacity = 16_384;
+    // Sample's own, emptied at each reading.
+    private readonly Dictionary<(int Pid, long Chain), long> _counts = [];
+    private readonly Dictionary<int, long> _busiest = [];
     private double _cutoff = double.NaN;
     private readonly EventRecordCallback _callback;
     private ulong _session, _trace;
@@ -127,19 +135,25 @@ internal sealed class FrameRates : IDisposable
                 try { StartTrace(); _reset = true; }
                 catch (TraceRefused ex) { Debug.WriteLine(ex.Message); StopTrace(); }
             }
-            events = _events; _events = [];
+            events = _events; _events = _drained;
             reset = _reset; _reset = false;
         }
         // The frames presented up to the cutoff are counted (and dropped after a reset); the later ones wait for the next Sample.
         double cutoff = now - Lag;
         long through = (long)(cutoff * Stopwatch.Frequency);
-        var counts = new Dictionary<(int Pid, long Chain), long>();
-        var later = new List<(long Time, int Pid, long Chain)>();
+        var counts = _counts; counts.Clear();
+        int later = 0;
         foreach (var e in events)
-            if (e.Time > through) later.Add(e);
+            if (e.Time > through) later++;
             else if (!reset) counts[(e.Pid, e.Chain)] = counts.GetValueOrDefault((e.Pid, e.Chain)) + 1;
-        if (later.Count > 0) lock (_lock) { if (_wanted && _events.Count + later.Count <= MostEvents) _events.AddRange(later); }
-        if (reset) { _cutoff = double.NaN; _history.Clear(); _shown = _lastDrawing = 0; _processes = null; _processesAt = double.NegativeInfinity; }
+        lock (_lock)
+        {
+            if (later > 0 && _wanted && _events.Count + later <= MostEvents)
+                foreach (var e in events) if (e.Time > through) _events.Add(e);
+            events.Clear();
+            _drained = events.Capacity <= KeptCapacity ? events : [];
+        }
+        if (reset) { _cutoff = double.NaN; _history.Clear(); _shown = _lastDrawing = 0; _processes = null; _processesAt = _wallpaperAt = _mainAt = double.NegativeInfinity; }
         var front = GetForegroundWindow();
         int frontPid = Owner(front);
         double seconds = cutoff - _cutoff;
@@ -147,15 +161,15 @@ internal sealed class FrameRates : IDisposable
         if (!double.IsFinite(seconds) || seconds <= 0) return Reading<FrameSample>.Unavailable(Why.Waiting);
 
         // A process's frames: its busiest swap chain, or its kernel records if more.
-        var busiest = new Dictionary<int, long>();
+        var busiest = _busiest; busiest.Clear();
         foreach (var ((pid, _), count) in counts) busiest[pid] = Math.Max(busiest.GetValueOrDefault(pid), count);
-        if (IsDesktop(front)) return DesktopRate(front, frontPid, busiest, seconds);
+        if (IsDesktop(front)) return DesktopRate(front, frontPid, busiest, seconds, now);
         Dictionary<int, (int Parent, string File)> Known(int pid)
         {
             bool stale = _processes is null || _processesFront != frontPid || now - _processesAt >= ProcessesSeconds
                 || !_processes.ContainsKey(pid) || busiest.Keys.Any(process => !_processes.ContainsKey(process));
             // At most once a reading: a process that ended before the list was taken stays missing from it.
-            if (stale && _processesAt != now) { _processes = Processes(); _processesAt = now; _processesFront = frontPid; }
+            if (stale && _processesAt != now) { _processes = ProcessSnapshot.Read(); _processesAt = now; _processesFront = frontPid; }
             return _processes!;
         }
         long Family(int pid)
@@ -185,7 +199,7 @@ internal sealed class FrameRates : IDisposable
         }
         if (frames > 0) _lastDrawing = shown;
         if (shown != _shown) { _shown = shown; _history.Clear(); }
-        var window = shown == frontPid ? front : MainWindow(shown);
+        var window = shown == frontPid ? front : MainWindow(shown, front, now);
         var display = Display(window);
         double rate = frames / seconds;
         if (_history.Count == HistoryLength) _history.Dequeue();
@@ -196,10 +210,11 @@ internal sealed class FrameRates : IDisposable
 
     // The desktop's own frames, with the desktop or taskbar in front (explorer, explorerPid): a live wallpaper's program if one draws
     // the desktop, named and with its icon, else the desktop itself. On the display under the window in front, for the refresh rate.
-    private Reading<FrameSample> DesktopRate(IntPtr front, int explorerPid, Dictionary<int, long> busiest, double seconds)
+    private Reading<FrameSample> DesktopRate(IntPtr front, int explorerPid, Dictionary<int, long> busiest, double seconds, double now)
     {
         var display = Display(front);
-        int wallpaper = Wallpaper(explorerPid);
+        if (_wallpaperFront != front || now - _wallpaperAt >= LookAgainSeconds) { _wallpaper = Wallpaper(explorerPid); _wallpaperFront = front; _wallpaperAt = now; }
+        int wallpaper = _wallpaper;
         int key = wallpaper != 0 ? wallpaper : Desktop;
         if (_shown != key) { _shown = key; _history.Clear(); }
         double rate = busiest.GetValueOrDefault(wallpaper != 0 ? wallpaper : explorerPid) / seconds;
@@ -209,6 +224,13 @@ internal sealed class FrameRates : IDisposable
         return new FrameSample(rate, name) { Path = path, Refresh = display?.Refresh, History = _history.ToArray() };
     }
 
+    // The windows looked for each reading (a live wallpaper's program, a program's largest window) are kept until the window in front
+    // changes, or for LookAgainSeconds: listing every window each second cost the most of a reading.
+    private const double LookAgainSeconds = 5;
+    private IntPtr _wallpaperFront, _mainFront, _mainWindow;
+    private int _wallpaper, _mainPid;
+    private double _wallpaperAt = double.NegativeInfinity, _mainAt = double.NegativeInfinity;
+
     // The program of a live wallpaper: the owner of a window inside the desktop's (Progman, or a WorkerW behind the icons) that is
     // not explorer's; 0 behind a still wallpaper.
     private static int Wallpaper(int explorerPid)
@@ -216,7 +238,7 @@ internal sealed class FrameRates : IDisposable
         int found = 0;
         EnumWindows((window, _) =>
         {
-            if (ClassName(window) is not ("Progman" or "WorkerW")) return true;
+            if (ClassName(window, stackalloc char[64]) is not ("Progman" or "WorkerW")) return true;
             EnumChildWindows(window, (child, _) =>
             {
                 GetWindowThreadProcessId(child, out int owner);
@@ -235,25 +257,22 @@ internal sealed class FrameRates : IDisposable
     {
         if (window == IntPtr.Zero) return false;
         if (window == GetShellWindow()) return true;
-        return ClassName(window) is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+        return ClassName(window, stackalloc char[64]) is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
     }
-    private static string ClassName(IntPtr window)
-    {
-        var name = new char[64];
-        int length = GetClassNameW(window, name, name.Length);
-        return new string(name, 0, Math.Max(0, length));
-    }
+    // The window's class name, read into the caller's buffer.
+    private static ReadOnlySpan<char> ClassName(IntPtr window, Span<char> buffer) =>
+        buffer[..Math.Max(0, GetClassNameW(window, ref Unsafe.As<char, ushort>(ref MemoryMarshal.GetReference(buffer)), buffer.Length))];
 
     // The process that draws a window: its own, except for a UWP app (Settings, Calculator), whose window is ApplicationFrameHost's
     // frame around the app's own window (a CoreWindow child of another process); the frame draws only its title bar.
     private static int Owner(IntPtr window)
     {
         GetWindowThreadProcessId(window, out int pid);
-        if (window == IntPtr.Zero || ClassName(window) != "ApplicationFrameWindow") return pid;
+        if (window == IntPtr.Zero || ClassName(window, stackalloc char[64]) is not "ApplicationFrameWindow") return pid;
         int app = 0;
         EnumChildWindows(window, (child, _) =>
         {
-            if (ClassName(child) != "Windows.UI.Core.CoreWindow") return true;
+            if (ClassName(child, stackalloc char[64]) is not "Windows.UI.Core.CoreWindow") return true;
             GetWindowThreadProcessId(child, out int owner);
             if (owner == pid || owner == 0) return true;
             app = owner;
@@ -301,8 +320,14 @@ internal sealed class FrameRates : IDisposable
         return _names[pid] = (name, file);
     }
 
-    // The largest visible window of a program (a UWP app's frame), for the display it is on.
-    private static IntPtr MainWindow(int pid)
+    // The largest visible window of a program (a UWP app's frame), for the display it is on; kept as LookAgainSeconds says.
+    private IntPtr MainWindow(int pid, IntPtr front, double now)
+    {
+        if (pid != _mainPid || front != _mainFront || now - _mainAt >= LookAgainSeconds || !IsWindow(_mainWindow))
+        { _mainWindow = LargestWindow(pid); _mainPid = pid; _mainFront = front; _mainAt = now; }
+        return _mainWindow;
+    }
+    private static IntPtr LargestWindow(int pid)
     {
         IntPtr best = IntPtr.Zero; long area = 0;
         EnumWindows((window, _) =>
@@ -315,21 +340,6 @@ internal sealed class FrameRates : IDisposable
         return best;
     }
 
-    // Each process's parent and executable file name, from one snapshot of the processes.
-    private static Dictionary<int, (int Parent, string File)> Processes()
-    {
-        var processes = new Dictionary<int, (int, string)>();
-        IntPtr snapshot = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
-        if (snapshot == new IntPtr(-1)) return processes;
-        try
-        {
-            var entry = new PROCESSENTRY32W { dwSize = Marshal.SizeOf<PROCESSENTRY32W>() };
-            for (bool more = Process32FirstW(snapshot, ref entry); more; more = Process32NextW(snapshot, ref entry))
-                processes[entry.th32ProcessID] = (entry.th32ParentProcessID, entry.szExeFile);
-        }
-        finally { CloseHandle(snapshot); }
-        return processes;
-    }
     private static bool Descends(int process, int ancestor, Dictionary<int, (int Parent, string File)> processes)
     {
         for (int depth = 0; depth < 8 && processes.TryGetValue(process, out var entry) && entry.Parent != 0 && entry.Parent != process; depth++)
@@ -385,7 +395,7 @@ internal sealed class FrameRates : IDisposable
         _reader = null;
         _flusher?.Dispose(); _flusher = null;
         if (_loggerName != IntPtr.Zero) { Marshal.FreeHGlobal(_loggerName); _loggerName = IntPtr.Zero; }
-        _events = [];
+        _events = []; _drained = [];
     }
 
     // Stops the sessions of BrimDecks no longer running (and the one this process may have left), found among all the machine's
@@ -494,10 +504,12 @@ internal sealed class FrameRates : IDisposable
         lock (_lock) if (_events.Count < MostEvents) _events.Add((time, pid, chain));
     }
 
+    // As large as the largest block asked for (StopLeftSessions).
+    private static readonly byte[] Zeros = new byte[120 + 2048];
     private static IntPtr Zeroed(int size)
     {
         IntPtr p = Marshal.AllocHGlobal(size);
-        for (int i = 0; i < size; i++) Marshal.WriteByte(p, i, 0);
+        Marshal.Copy(Zeros, 0, p, size);
         return p;
     }
 
@@ -511,12 +523,6 @@ internal sealed class FrameRates : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void EventRecordCallback(IntPtr record);
     private delegate bool WindowProc(IntPtr window, IntPtr data);
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct PROCESSENTRY32W
-    {
-        public int dwSize, cntUsage, th32ProcessID; public IntPtr th32DefaultHeapID; public int th32ModuleID, cntThreads, th32ParentProcessID, pcPriClassBase, dwFlags;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
-    }
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] private static extern uint StartTraceW(out ulong handle, string name, IntPtr properties);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] private static extern uint ControlTraceW(ulong handle, string? name, IntPtr properties, uint code);
     [DllImport("advapi32.dll")] private static extern uint EnableTraceEx2(ulong handle, in Guid provider, uint code, byte level, ulong any, ulong all, uint timeout, IntPtr parameters);
@@ -526,7 +532,9 @@ internal sealed class FrameRates : IDisposable
     [DllImport("advapi32.dll")] private static extern uint QueryAllTracesW([In] IntPtr[] properties, uint count, out uint loggers);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern IntPtr GetShellWindow();
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(IntPtr window, char[] name, int length);
+    // ushort: a char is not blittable to DllImport, which would copy a single ANSI byte.
+    [DllImport("user32.dll")] private static extern int GetClassNameW(IntPtr window, ref ushort name, int length);
+    [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out int pid);
     [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
     [DllImport("user32.dll")] private static extern bool EnumWindows(WindowProc proc, IntPtr data);
@@ -536,7 +544,4 @@ internal sealed class FrameRates : IDisposable
     [DllImport("kernel32.dll")] private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageNameW(IntPtr process, int flags, char[] name, ref int size);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
-    [DllImport("kernel32.dll")] private static extern IntPtr CreateToolhelp32Snapshot(uint flags, int pid);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool Process32FirstW(IntPtr snapshot, ref PROCESSENTRY32W entry);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool Process32NextW(IntPtr snapshot, ref PROCESSENTRY32W entry);
 }

@@ -40,5 +40,56 @@ internal static class SettingsFocusTests
             check("No focus at all is left alone", !RowFocus.Orphaned(row, null));
         }
         finally { window.Close(); }
+
+        NumberBoxClicks(check);
+    }
+
+    // A left press on an element, as the two routed events WPF raises for the mouse: MouseDown (which the settings window's "empty
+    // click releases the focus" rule listens to) and MouseLeftButtonDown (which the number box's frame listens to). Which of the two
+    // reaches the element first is WPF's business and the test cannot press a real button to find out, so both orders are tried.
+    private static void Press(UIElement target, bool leftButtonFirst)
+    {
+        System.Windows.Input.MouseButtonEventArgs Args(RoutedEvent routed) =>
+            new(System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount, System.Windows.Input.MouseButton.Left) { RoutedEvent = routed, Source = target };
+        if (leftButtonFirst) target.RaiseEvent(Args(UIElement.MouseLeftButtonDownEvent));
+        target.RaiseEvent(Args(UIElement.MouseDownEvent));
+        if (!leftButtonFirst) target.RaiseEvent(Args(UIElement.MouseLeftButtonDownEvent));
+    }
+
+    // The number box of the settings window as it is built there (NumberBox.Create): a framed field with its unit, a divider and two
+    // steppers, in a window that takes the focus off a field when empty space is clicked. Clicking its padding or its unit puts the
+    // focus in the field and selects its number; clicking a stepper does not; clicking empty space still releases the focus.
+    private static void NumberBoxClicks(Action<string, bool> check)
+    {
+        var holder = new Border { Focusable = true };
+        var field = new TextBox { Text = "260", Width = 40 };
+        var unit = new TextBlock { Text = "ms" };
+        var plus = new System.Windows.Controls.Primitives.RepeatButton { Width = 21, Height = 26, Content = "+" };
+        var minus = new System.Windows.Controls.Primitives.RepeatButton { Width = 21, Height = 26, Content = "-" };
+        var brush = System.Windows.Media.Brushes.White;
+        // The box through the factory the settings window builds its own with.
+        var chip = NumberBox.Create(field, unit, minus, plus, brush, brush, brush);
+        var other = new TextBox { Text = "other" };
+        var empty = new Border { Height = 20, Background = System.Windows.Media.Brushes.Transparent };
+        var host = new StackPanel(); host.Children.Add(holder); host.Children.Add(chip); host.Children.Add(other); host.Children.Add(empty);
+        var window = new Window { Width = 300, Height = 200, Left = -20000, Top = -20000, ShowActivated = false, WindowStyle = WindowStyle.None, Content = host };
+        EmptyClickFocus.Attach(window, () => holder);
+        try
+        {
+            window.Show();
+            foreach (bool leftFirst in new[] { true, false })
+                foreach (var (name, target) in new (string, UIElement)[] { ("the box's padding", chip), ("the unit beside the number", unit) })
+                {
+                    System.Windows.Input.Keyboard.Focus(other);
+                    field.Select(0, 0);
+                    Press(target, leftFirst);
+                    check($"A click on {name} focuses the number in the box and selects it ({(leftFirst ? "MouseLeftButtonDown first" : "MouseDown first")})",
+                        System.Windows.Input.Keyboard.FocusedElement == field && field.SelectedText == "260");
+                }
+            System.Windows.Input.Keyboard.Focus(field);
+            Press(empty, leftButtonFirst: false);
+            check("A click on empty space still takes the focus off the number", System.Windows.Input.Keyboard.FocusedElement == holder);
+        }
+        finally { window.Close(); }
     }
 }

@@ -32,12 +32,21 @@ public sealed record CoreSample(int Id, int Group, CoreTier Tier, int Number, do
     public double? FrequencyFraction => FrequencyMhz.TryGet(out var mhz) && MaxFrequencyMhz is { } top && top > 0 ? Math.Clamp(mhz / top, 0, 1) : null;
 }
 
-// Temperature is the processor's from the ACPI thermal zones in degrees Celsius, TemperatureZone the zone it came from; null
-// where no zone gives one (Temperatures.Cpu).
+// Where the processor's temperature comes from, the best first: its own sensors through the sensor service (enhanced sensors,
+// PawnIO), a monitor already running (HWiNFO's shared memory, LibreHardwareMonitor's WMI), else the ACPI thermal zones, which may
+// be the board near the processor.
+public enum CpuTemperatureSource { Zone, Processor, HwInfo, LibreHardwareMonitor }
+
+// Temperature is the processor's in degrees Celsius, null where no source gives one; TemperatureZone the ACPI zone it came from
+// when it came from one (Temperatures.Cpu).
 public sealed record CpuSample(IReadOnlyList<CoreSample> Cores, Reading<double> FrequencyMhz)
 {
     public double? Temperature { get; init; }
     public string? TemperatureZone { get; init; }
+    // Where the temperature was read (CpuTemperatureSource); with the processor's own sensors, each core's or each CCD's too.
+    public CpuTemperatureSource TemperatureSource { get; init; }
+    public IReadOnlyList<double> CoreTemperatures { get; init; } = [];
+    public bool CoreTemperaturesAreCcds { get; init; }
     // By index, as Average and Max add up: both are read on every redraw of the collapsed readings, which allocate nothing.
     public double Usage
     {
@@ -129,8 +138,19 @@ public sealed record GpuEngine(string Kind, double Usage);
 // of engine in a fixed order (GpuEngines.Order); Name and DedicatedTotal come from the adapter's description and are null where the
 // system does not give them. Luid names the adapter until the next restart, Key for good (GpuReadings.Keyed); History is its last
 // usage readings, oldest first, 0 to 1.
+// Usage is the figure shown: the driver's own where it gives one (UsageSource names the driver), else EngineUsage, the busiest engine
+// as Windows counts it (Task Manager's figure), which also tells whether the adapter is awake.
 public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
 {
+    public double EngineUsage { get; init; }
+    public string? UsageSource { get; init; }
+    // The board power the driver reports where it is read with the usage (AMD and Intel discrete adapters), in watts.
+    public double? DriverWatts { get; init; }
+    // The temperature the driver reports with the usage, for an adapter whose graphics kernel gives none (GpuTemperatures).
+    public double? DriverTemperature { get; init; }
+    // PCI vendor id (0x10DE NVIDIA, 0x1002 AMD, 0x8086 Intel) and where the adapter sits on the bus ("1:0.0"), to find it in its driver.
+    public uint VendorId { get; init; }
+    public string? Location { get; init; }
     // In degrees Celsius as Task Manager reads it; null without a sensor. TemperatureFrom names the adapter it was read from
     // when that is not this one (this adapter has no sensor and another has), and TemperatureKind says its kind ("独显").
     public double? Temperature { get; init; }

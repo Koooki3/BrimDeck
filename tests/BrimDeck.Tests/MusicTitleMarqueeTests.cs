@@ -17,40 +17,27 @@ internal static class MusicTitleMarqueeTests
         check("Music title: a bar count out of range counts as the nearest allowed one",
             MusicTitleFit.EqualizerWidth(metrics.Equalizer, 0) == widths[0] && MusicTitleFit.EqualizerWidth(metrics.Equalizer, 99) == widths[^1]);
 
-        // The room: the line less the bars and the gap, so it shrinks as the bars grow and never goes below nothing.
-        const double line = 320;
-        var rooms = Enumerable.Range(3, 18).Select(bars => MusicTitleFit.HeaderRoom(line, MusicTitleFit.EqualizerWidth(metrics.Equalizer, bars))).ToList();
-        check("Music title: the room is the line less the bars and the gap", rooms[2] == line - five - MusicTitleFit.EqualizerGap);
-        check("Music title: the room shrinks as the bars grow", rooms.Zip(rooms.Skip(1), (a, b) => b < a).All(x => x));
-        check("Music title: a line narrower than its bars leaves no room, not a negative one", MusicTitleFit.HeaderRoom(10, 60) == 0);
-
-        // A title scrolls exactly when it overhangs its room, for every bar count and every scale.
+        // The marquee measures its text against its room with Overflow (the grid decides the room): none when it fits, whole device
+        // pixels when it does not, and nothing starts for rounding noise, at every scale.
+        const double room = 258;
         foreach (double scale in new[] { 1, 1.25, 1.5, 2 })
         {
-            double room = MusicTitleFit.HeaderRoom(line, five);
-            check($"Music title: text as wide as its room rests at {scale * 100:0}%", !MusicTitleFit.Scrolls(room, room, scale, true));
-            check($"Music title: text a device pixel wider than its room scrolls at {scale * 100:0}%", MusicTitleFit.Scrolls(room + 1 / scale, room, scale, true));
-            check($"Music title: rounding noise does not start a one-pixel scroll at {scale * 100:0}%", !MusicTitleFit.Scrolls(room + 1e-4, room, scale, true));
+            check($"Music title: text as wide as its room does not overhang at {scale * 100:0}%", MusicTitleFit.Overflow(room, room, scale) == 0);
+            check($"Music title: text a device pixel wider than its room overhangs at {scale * 100:0}%", MusicTitleFit.Overflow(room + 1 / scale, room, scale) > 0);
+            check($"Music title: rounding noise does not start a one-pixel scroll at {scale * 100:0}%", MusicTitleFit.Overflow(room + 1e-4, room, scale) == 0);
             double over = MusicTitleFit.Overflow(room + 10.3, room, scale);
             check($"Music title: the overhang is whole device pixels at {scale * 100:0}%", over >= 10.3 && Math.Abs(over * scale - Math.Round(over * scale)) < 1e-9);
         }
-        check("Music title: with animation off the title rests, cut at its edge, whatever its length", !MusicTitleFit.Scrolls(900, 100, 1.5, false));
-        check("Music title: no text, no room or no scale never scrolls and never fails",
-            !MusicTitleFit.Scrolls(0, 100, 1, true) && MusicTitleFit.Overflow(50, 0, 0) == 0 && MusicTitleFit.Overflow(double.NaN, 10, 1) == 0 && MusicTitleFit.Overflow(10, double.NaN, 1) == 0);
+        check("Music title: no text, no room or no scale never overhangs and never fails",
+            MusicTitleFit.Overflow(0, 100, 1) == 0 && MusicTitleFit.Overflow(50, 0, 0) == 0 && MusicTitleFit.Overflow(double.NaN, 10, 1) == 0 && MusicTitleFit.Overflow(10, double.NaN, 1) == 0);
+        // The room the grid leaves beside the equalizer shrinks as the bars grow, so the same title goes from fitting to overhanging.
+        const double line = 320;
+        var overhangs = Enumerable.Range(3, 18).Select(bars => MusicTitleFit.Overflow(250, line - MusicTitleFit.EqualizerWidth(metrics.Equalizer, bars) - MusicTitleFit.EqualizerGap, 1.5) > 0).ToList();
+        check("Music title: a title that fits few bars overhangs with more", !overhangs[0] && overhangs[^1] && overhangs.Zip(overhangs.Skip(1), (a, b) => !a || b).All(x => x));
 
-        // Short title rests and long title scrolls at every bar count; a title in between starts scrolling at some count and then
-        // keeps scrolling for every longer bar run, at both panel scales.
-        foreach (double scale in new[] { 1, 1.5 })
-        {
-            bool Scrolls(double text, int bars) => MusicTitleFit.Scrolls(text, MusicTitleFit.HeaderRoom(line, MusicTitleFit.EqualizerWidth(metrics.Equalizer, bars)), scale, true);
-            var counts = Enumerable.Range(3, 18).ToList();
-            check($"Music title: a short title rests at every bar count at {scale * 100:0}%", counts.All(bars => !Scrolls(80, bars)));
-            check($"Music title: a long title scrolls at every bar count at {scale * 100:0}%", counts.All(bars => Scrolls(900, bars)));
-            double between = MusicTitleFit.HeaderRoom(line, MusicTitleFit.EqualizerWidth(metrics.Equalizer, 10)) + 1;
-            var states = counts.Select(bars => Scrolls(between, bars)).ToList();
-            check($"Music title: a title between fits few bars and scrolls with more at {scale * 100:0}%",
-                !states[0] && states[^1] && states.Zip(states.Skip(1), (a, b) => !a || b).All(x => x));
-        }
+        // A screen reader reads the whole title with its name, and the artist when the short page merges it into the line.
+        check("Music title: the reading has the title's name and the whole title", MusicTitleFit.ReadAs("【IGN】《影之刃零》官方实机演示预告片") is { } read && read.EndsWith("【IGN】《影之刃零》官方实机演示预告片") && (read.StartsWith("歌名 ", StringComparison.Ordinal) || read.StartsWith("Title ", StringComparison.Ordinal)));
+        check("Music title: a merged line reads with its artist", MusicTitleFit.ReadAs("夜曲", " · IGN China").EndsWith("夜曲 · IGN China"));
 
         // The page lays its title through the one marquee, and the marquee measures its overhang with the same rule.
         var source = new DirectoryInfo(AppContext.BaseDirectory);
@@ -70,6 +57,14 @@ internal static class MusicTitleMarqueeTests
         check("Music title: the finder rejects a title with no fade over the page's own surface",
             !Uses(Regex.Replace(page, @"(private MusicMarquee PageTitle\(.*?)Backdrop = PanelTheme\.MarqueeBackdrop, InkFade = PanelTheme\.Current\.HasOverlay", "$1", RegexOptions.Singleline)));
         check("Music title: the marquee takes its overhang from MusicTitleFit", Regex.IsMatch(visuals, @"double overflow = MusicTitleFit\.Overflow\(text\.Width, size\.Width, scale\);"));
+        // Screen readers: the marquee's peer reads its own reading (DrawnPeer used the bare text, so the name and the artist were lost).
+        check("Music title: the marquee's peer reads the title's name and merged artist, and the page gives it", Reads(visuals, page));
+        check("Music title: the finder rejects a peer that reads only the bare text", !Reads(visuals.Replace("AutomationControlType.Text, () => Reading)", "AutomationControlType.Text, () => _text)"), page));
+        check("Music title: the finder rejects a title built without the reading", !Reads(visuals, page.Replace("AccessibleName = MusicTitleFit.ReadAs(track.Title, tail), ", "")));
+        // The merged artist keeps one color whether the line fits or scrolls: its own, faded at the ends, never the text's at a lower opacity.
+        check("Music title: the artist fades in its own color on the shared clocks", Colors(visuals));
+        check("Music title: the finder rejects the artist's old 70 % copy of the text's gradient", !Colors(visuals.Replace("_tailLeft.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_glide.Children[1]);", "")
+            .Replace("var tailColor = (TailForeground as SolidColorBrush)?.Color ?? ink;", "var tailColor = ink;")) && !Colors(visuals + "Opacity = TailInkOpacity"));
         check("Music title: the finder rejects the marquee's old inline rule", !Regex.IsMatch(
             visuals.Replace("MusicTitleFit.Overflow(text.Width, size.Width, scale)", "Math.Max(0, Math.Ceiling((text.Width - size.Width) * scale - .01) / scale)"),
             @"double overflow = MusicTitleFit\.Overflow\("));
@@ -84,8 +79,21 @@ internal static class MusicTitleMarqueeTests
             && !Regex.IsMatch(page, @"UI\.Fixed\(track\.Title")
             && Regex.IsMatch(title.Value, @"new MusicMarquee \{")
             && Regex.IsMatch(title.Value, @"Backdrop = PanelTheme\.MarqueeBackdrop, InkFade = PanelTheme\.Current\.HasOverlay")
-            && Regex.IsMatch(title.Value, @"AutomationProperties\.SetName\(title, Loc\.T\(""歌名 "", ""Title ""\) \+ track\.Title\)")
+            && Regex.IsMatch(page, @"bool open = Settings\.Animations && SystemParameters\.ClientAreaAnimation")
             && Regex.IsMatch(page, @"_musicTitle\?\.SetScrolling\(open\)") && !Regex.IsMatch(page, @"_musicTitle\?\.SetScrolling\(open && MusicAudioActive\)")
             && Regex.IsMatch(page, @"equalizerWidth \+ MusicTitleFit\.EqualizerGap");
     }
+
+    private static bool Reads(string visuals, string page)
+    {
+        var title = Regex.Match(page, @"private MusicMarquee PageTitle\(.*?return title;", RegexOptions.Singleline);
+        return Regex.IsMatch(visuals, @"OnCreateAutomationPeer\(\) => new DrawnPeer\(this, AutomationControlType\.Text, \(\) => Reading\)")
+            && Regex.IsMatch(visuals, @"Reading => AccessibleName\.Length > 0 \? AccessibleName : _text \+ Tail")
+            && title.Success && Regex.IsMatch(title.Value, @"AccessibleName = MusicTitleFit\.ReadAs\(track\.Title, tail\)");
+    }
+
+    private static bool Colors(string visuals) =>
+        Regex.IsMatch(visuals, @"var tailColor = \(TailForeground as SolidColorBrush\)\?\.Color \?\? ink;")
+        && Regex.IsMatch(visuals, @"_tailLeft\.ApplyAnimationClock\(GradientStop\.OffsetProperty, \(AnimationClock\)_glide\.Children\[1\]\)")
+        && !visuals.Contains("TailInkOpacity");
 }

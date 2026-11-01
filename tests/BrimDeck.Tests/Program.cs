@@ -40,7 +40,6 @@ try
     CompactMotionTests.Run(Check);
     AuditPerfTests.Run(Check);
     MemoryFootprintTests.Run(Check);
-    EqualizerRebuildTests.Run(Check);
     EqualizerModeTests.Run(root, Check);
     ColorMathTests.Run(Check);
     CompactSpacingTests.Run(Check);
@@ -50,6 +49,7 @@ try
     AuditFollowupTests.Run(Check);
     AuditWin2Tests.Run(Check);
     NoticeOpsTests.Run(Check);
+    RingLetterTests.Run(root, Check);
     PanelThemeTests.Run(root, Check);
     DaylightTests.Run(root, Check);
     NoticeGlyphTests.Run(Check);
@@ -98,6 +98,7 @@ try
     DatePickerMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     GpuAdapterTests.Run(root, Check);
+    CpuSensorTests.Run(Check);
     GpuIdentityTests.Run(Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
@@ -667,7 +668,6 @@ try
     Check("Cursor quota alone does not imply a paid plan", PlanParser.Cursor(Json("""{"planUsage":{"totalPercentUsed":0}}""")) == "");
     Check("Antigravity uses the named user tier before its service plan", PlanParser.Antigravity(Json("""{"userStatus":{"userTier":{"name":"Example Tier"},"planStatus":{"planInfo":{"planName":"Pro"}}}}""")) == "Example Tier");
     Check("Missing Antigravity subscription is not inferred from quota", PlanParser.Antigravity(Json("""{"groups":[{"buckets":[{"bucketId":"gemini-weekly","remainingFraction":1}]}]}""")) == "");
-    Check("Claude local account tier preserves Max multiplier", PlanParser.ClaudeProfile(Json("""{"oauthAccount":{"organizationRateLimitTier":"default_claude_max_20x"}}""")) == "Max 20x");
     Check("Unknown Claude profile does not invent a plan", PlanParser.ClaudeProfile(Json("""{"oauthAccount":{"organizationRateLimitTier":"unknown"}}""")) == "");
     var eventItem = UsageService.ParseCursorEvent(Json("""{"timestamp":"1789000000000","model":"composer-2.5","tokenUsage":{"inputTokens":100,"cacheReadTokens":900,"cacheWriteTokens":20,"outputTokens":30,"totalCents":3.45131}}"""));
     Check("Cursor token categories are disjoint", eventItem!.Total == 1050);

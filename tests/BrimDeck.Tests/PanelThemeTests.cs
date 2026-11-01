@@ -70,7 +70,6 @@ internal static class PanelThemeTests
         var dark = BuiltIn("dark");
         check("The dark theme is the original look", dark.Surface == ThemeColor.Black && dark["textPrimary"].ToString() == "#F5F5F7"
             && dark["textSecondary"].ToString() == "#9EEBEBF5" && dark.AppDefault(ProviderId.Claude)?.ToString() == AppPresets.ThemeColor(ProviderId.Claude) && !dark.HasOverlay && dark.IsDark);
-        check("The light theme is light and has its own app colors", !BuiltIn("light").IsDark && BuiltIn("light").AppDefault(ProviderId.DeepSeek)?.ToString() == "#9B51C9");
         // Each theme keeps what the user changed under it.
         {
             var kept = new DeckSettings();

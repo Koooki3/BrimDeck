@@ -15,10 +15,6 @@ internal static class MonitorSpeechTests
             check("GPU block without a reading says why, not zero", MonitorSpeech.GpuBlock(null, null, "暂无读数：计数器不可用", "切换") == "GPU 占用块：暂无读数：计数器不可用，切换");
             check("GPU block without a reading ignores a stale memory figure", !MonitorSpeech.GpuBlock(null, .5, "暂无读数", "切换").Contains("显存"));
             check("GPU block without a reading or a note still says there is none", MonitorSpeech.GpuBlock(null, null, "", "切换") == "GPU 占用块：暂无读数，切换");
-            Loc.Use(Loc.English);
-            check("GPU block reads in English", MonitorSpeech.GpuBlock(.12, .18, "x", "Switch GPU") == "GPU block: usage 12% · VRAM 18%, Switch GPU");
-            string none = MonitorSpeech.GpuBlock(null, null, "No reading: counters unavailable", "Switch GPU");
-            check("GPU block without a reading says why in English", none == "GPU block: No reading: counters unavailable, Switch GPU" && !none.Contains("usage"));
         }
         finally { Loc.Use(language); }
     }

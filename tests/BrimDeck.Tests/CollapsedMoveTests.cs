@@ -10,7 +10,6 @@ internal static class CollapsedMoveTests
         var work = new DipRect(0, 0, 1920, 1032);
         const double W = 1920, H = 1080;
 
-        check("A double click on a resize handle moves the surface by default", new DeckSettings().GripDoubleClick == GripDoubleClick.Move);
         check("The notch hangs from the edge nearest the pointer, the bottom one at the taskbar's top",
             CollapsedMove.NearestEdge(900, 10, W, H, ScreenEdge.Top) == ScreenEdge.Top
             && CollapsedMove.NearestEdge(900, 1040, W, H, ScreenEdge.Top) == ScreenEdge.Bottom

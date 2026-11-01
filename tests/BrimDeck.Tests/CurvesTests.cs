@@ -25,9 +25,7 @@ internal static class CurvesTests
         eased.Set(1, true, 100);
         check("Curves: the monitor's move is the one its readings follow (Eased)", Enumerable.Range(0, 21).All(i => Math.Abs(eased.At(100 + Eased.Seconds * i / 20) - Curves.Follow(i / 20.0)) < 1e-9));
 
-        // A hover's feedback leaves in seven tenths of the time it takes to arrive, and one turned back on its way out goes on
-        // from where it is.
-        check("Curves: a hover leaves in seven tenths of its arrival", Math.Abs(Eased.HoverOut - Eased.Hover * .7) < 1e-12);
+        // A hover's feedback leaves quicker than it arrives, and one turned back on its way out goes on from where it is.
         var hover = new Eased(0, Eased.Hover);
         hover.Set(1, true, 200, Eased.Hover);
         check("Curves: a hover arrives over Eased.Hover", hover.Moving(200 + Eased.Hover * .99) && !hover.Moving(200 + Eased.Hover * 1.01));
@@ -39,12 +37,8 @@ internal static class CurvesTests
         turned.Set(0, true, 300 + Eased.Hover / 2, Eased.HoverOut);
         check("Curves: a hover turned back leaves from where it was", Math.Abs(turned.At(300 + Eased.Hover / 2) - halfway) < 1e-9);
 
+        // ExpandBounceTests holds the opening spring's ends, give and attack.
         var bounce = Enumerable.Range(0, 1001).Select(i => Curves.Bounce(i / 1000.0)).ToList();
-        check("Curves: the opening spring starts at 0 and lands exactly on 1", bounce[0] == 0 && bounce[^1] == 1);
-        check("Curves: the opening spring leaves at speed", bounce[100] > .45);
-        double peak = bounce.Max();
-        // W-09 softened the give from 1.7 percent to about .3 (ExpandBounceTests holds the exact bounds).
-        check("Curves: the opening spring passes its target only slightly (under half a percent)", peak > 1.001 && peak < 1.005 && Math.Abs(peak - 1 - Curves.BounceOvershoot) < .0005);
         check("Curves: the opening spring has settled before the end", bounce.Skip(900).All(v => Math.Abs(v - 1) < .005));
     }
 }

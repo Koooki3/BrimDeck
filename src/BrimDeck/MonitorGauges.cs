@@ -36,8 +36,11 @@ internal sealed class FramesBlock : FrameworkElement
     {
         var frames = snapshot.Frames.OrDefault;
         if (ReferenceEquals(frames, _frames)) return;
+        // The curve moves with every reading; the tooltip's words only when the figure, the program or the display change.
+        string figure = Figure;
+        bool same = frames is not null && _frames is not null && frames.Program == _frames.Program && frames.Refresh == _frames.Refresh;
         _frames = frames;
-        Describe();
+        if (!same || Figure != figure) Describe();
         InvalidateVisual();
     }
 

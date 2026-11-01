@@ -128,10 +128,10 @@ public sealed record MusicColumns(double Height, double InfoWidth, double Divide
     public int LyricLines => LyricsWidth > 0 ? Before + 1 + After : 0;
 }
 
-// The room of the title on the open music page and whether it scrolls. The title shares its line with the equalizer, so its room
-// is the line's width less the bars' width and a gap; it rests when it fits and scrolls (MusicMarquee) when it does not. All of
-// it follows from the bar count (3 to 20), the panel size and the type size, so the room is worked out here and the window only
-// lays the title in it.
+// What the open music page's title needs worked out outside the window. The title's room is decided by the page's grid (the line
+// less the equalizer's column, EqualizerWidth + EqualizerGap) and whether it scrolls by the MusicMarquee itself, which measures
+// its text against its room with Overflow; this holds the equalizer's width from the bar count (3 to 20), that measure, and the
+// name a screen reader reads.
 public static class MusicTitleFit
 {
     // The gap between the title's room and the equalizer.
@@ -142,8 +142,8 @@ public static class MusicTitleFit
         double fiveBars = Math.Max(27, Math.Round(equalizerHeight * 1.7));
         return Math.Round(3 + (CompactMusicLayout.SafeBars(bars) - 1) * (fiveBars - 3) / 4);
     }
-    // The width left for the title beside the equalizer in a line of the given width.
-    public static double HeaderRoom(double lineWidth, double equalizerWidth) => Math.Max(0, lineWidth - equalizerWidth - EqualizerGap);
+    // What a screen reader reads for the title: the whole title, and the artist when the short page merges it into the line.
+    public static string ReadAs(string title, string tail = "") => Loc.T("歌名 ", "Title ") + title + tail;
     // How far the text overhangs its room, in whole device pixels (scale: device pixels per DIP). The small allowance keeps
     // rounding noise from starting a one-pixel scroll.
     public static double Overflow(double textWidth, double room, double scale)
@@ -151,8 +151,6 @@ public static class MusicTitleFit
         if (scale <= 0 || double.IsNaN(textWidth) || double.IsNaN(room)) return 0;
         return Math.Max(0, Math.Ceiling((textWidth - room) * scale - .01) / scale);
     }
-    // The title scrolls when it overhangs its room and animation is on; it rests, whole or cut at the edge, otherwise.
-    public static bool Scrolls(double textWidth, double room, double scale, bool animations) => animations && Overflow(textWidth, room, scale) > 0;
 }
 
 public enum MusicPlaybackMode { List, Track, Shuffle, Order }

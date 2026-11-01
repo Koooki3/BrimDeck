@@ -18,7 +18,6 @@ public partial class MainWindow
         if (wanted != _details) _usageHandover = wanted ? Handover.Forward : Handover.Back;
         _details = wanted; RenderUsage();
     }
-    internal FrameworkElement ScaledContent => ContentCanvas;
 
     private const double ColumnTopInset = 2, EdgeInset = 6;
 

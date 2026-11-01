@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -54,6 +55,27 @@ public sealed class WindowsHost : IDisposable
         _monitor = monitor; _window = window; _island = island; _forceTopmost = forceTopmost; _backgroundWindows = backgroundWindows;
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
+        _orderEvent = OnOrderEvent;
+        _hooks = [Hook(0x0003), Hook(0x8002), Hook(0x8004)]; // EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_SHOW, EVENT_OBJECT_REORDER
+    }
+    // Polling alone leaves the panel covered for up to a poll, longer while this thread is busy, each time another window
+    // raises itself. A z-order change among top-level windows is reported as a reorder of the desktop window's children,
+    // and a window coming up as a show or a foreground event, so each of these asks for a check of the order at once; the
+    // poll stays for whatever the events miss. The hooks are out of context and skip this process: the events arrive as
+    // messages on this thread, and a burst of them runs one check.
+    private readonly WinEventProc _orderEvent;
+    private readonly IntPtr[] _hooks;
+    private bool _orderCheckPending;
+    private static readonly IntPtr DesktopWindow = GetDesktopWindow();
+    private IntPtr Hook(uint winEvent) => SetWinEventHook(winEvent, winEvent, IntPtr.Zero, _orderEvent, 0, 0, 0x0002); // WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
+    private void OnOrderEvent(IntPtr hook, uint winEvent, IntPtr window, int idObject, int idChild, uint thread, uint time)
+    {
+        // Reorders of the desktop's children only, which are the top-level windows; other events for windows only, not
+        // for carets or cursors.
+        if (winEvent == 0x8004 ? window != DesktopWindow : idObject != 0 || idChild != 0) return;
+        if (_orderCheckPending) return;
+        _orderCheckPending = true;
+        _timer.Dispatcher.BeginInvoke(() => { _orderCheckPending = false; WatchOrder(_window()); });
     }
     private readonly Func<IntPtr> _window;
     private readonly Func<bool>? _forceTopmost;
@@ -83,12 +105,15 @@ public sealed class WindowsHost : IDisposable
     //    once, since no ordinary window has any business over a topmost overlay;
     //  - another topmost window covering the island: often deliberate, a pinned video, a screenshot mask, another
     //    overlay. Leave it above the panel unless the user enabled ForceTopmost. The taskbar is always recovered from.
+    //    A menu open over the island is always left alone, and so is an app that keeps raising itself (see Yield).
     //    Recovery keeps keyboard focus unchanged and only runs when an overlapping window is found.
     private void WatchOrder(IntPtr window)
     {
         if (window == IntPtr.Zero || !IsWindowVisible(window) || IsIconic(window)) return;
         var island = _island();
         string? cause = null;
+        // The window the cause names, if any; its process is looked up only for the log.
+        var culprit = IntPtr.Zero;
         bool recover = false;
         if ((GetWindowLongPtr(window, -20).ToInt64() & 0x8) == 0) { cause = "topmost flag lost"; recover = true; }
         else
@@ -103,14 +128,19 @@ public sealed class WindowsHost : IDisposable
                 GetWindowThreadProcessId(above, out var pid);
                 if (pid == Environment.ProcessId) continue;
                 bool over = (GetWindowLongPtr(above, -20).ToInt64() & 0x8) != 0;
-                if (!over) { cause = "under " + ProcessName(above); recover = true; break; }
+                if (!over) { cause = "under"; culprit = above; recover = true; break; }
                 if (island is { } strip && Covers(above, strip))
                 {
                     // The taskbar puts itself on top whenever it is used, and would then hide a capsule moved down over it
                     // until the next use of the panel. Other topmost windows require the explicit setting.
-                    bool taskbar = IsTaskbar(above);
-                    cause = "covered by topmost " + (taskbar ? "taskbar" : ProcessName(above));
-                    recover = taskbar || _forceTopmost?.Invoke() == true;
+                    if (IsTaskbar(above)) { cause = "covered by topmost taskbar"; recover = true; }
+                    else if (IsMenu(above)) { cause = "covered by a menu of"; culprit = above; }
+                    else
+                    {
+                        cause = "covered by topmost"; culprit = above;
+                        recover = _forceTopmost?.Invoke() == true;
+                        if (recover && Yield()) { cause = "repeatedly covered by topmost"; recover = false; }
+                    }
                     break;
                 }
             }
@@ -118,26 +148,52 @@ public sealed class WindowsHost : IDisposable
         if (cause is null) { _orderCulprit = null; return; }
         // Log repeated obstruction at most every ten seconds, including whether recovery was requested.
         if (recover) SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
-        if (cause != _orderCulprit || Environment.TickCount64 - _orderLoggedAt > 10000)
+        if (_orderCulprit != (cause, culprit) || Environment.TickCount64 - _orderLoggedAt > 10000)
         {
-            _orderCulprit = cause; _orderLoggedAt = Environment.TickCount64;
-            NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} panel {cause}" + (recover ? "; topmost restored" : "; left as is"));
+            _orderCulprit = (cause, culprit); _orderLoggedAt = Environment.TickCount64;
+            var named = culprit == IntPtr.Zero ? cause : cause + " " + ProcessName(culprit);
+            NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} panel {named}" + (recover ? "; topmost restored" : "; left as is"));
         }
     }
-    private string? _orderCulprit;
+    private (string Cause, IntPtr Window)? _orderCulprit;
     private long _orderLoggedAt;
+    // An app that raises itself whenever it is covered would trade places with the panel without end, the two flickering
+    // in turn. Past ten recoveries from topmost windows within two seconds, the panel leaves them above it for five.
+    private long _raisesFrom, _yieldUntil;
+    private int _raises;
+    private bool Yield()
+    {
+        var now = Environment.TickCount64;
+        if (now < _yieldUntil) return true;
+        if (now - _raisesFrom > 2000) { _raisesFrom = now; _raises = 0; }
+        if (++_raises <= 10) return false;
+        _yieldUntil = now + 5000;
+        return true;
+    }
+    // A menu open over the island: the user is at work in that app, and the panel stays beneath it. Besides the system's
+    // own menus, a narrow window owned by a shown one, such as a dropdown under a menu bar. A bar across the screen is
+    // not a menu even when owned, and neither is a window whose owner is hidden, which is only how some frameworks keep a
+    // window off the taskbar.
+    private static bool IsMenu(IntPtr window)
+    {
+        if (ClassName(window, stackalloc char[32]) is "#32768") return true;
+        var owner = GetWindow(window, 4); // GW_OWNER
+        if (owner == IntPtr.Zero || !IsWindowVisible(owner) || !GetWindowRect(window, out var r)) return false;
+        var info = new MONITORINFO { Size = Marshal.SizeOf<MONITORINFO>() };
+        return GetMonitorInfo(MonitorFromWindow(window, 2), ref info) && r.Right - r.Left < (info.Monitor.Right - info.Monitor.Left) / 2;
+    }
     // Whether the window above reaches into the island's drawn area, given in screen physical pixels.
     private static bool Covers(IntPtr above, Rect island)
     {
         if (!(island.Width > 0) || !GetWindowRect(above, out var r)) return false;
         return r.Left < island.Right && r.Right > island.Left && r.Top < island.Bottom && r.Bottom > island.Top;
     }
-    private static bool IsTaskbar(IntPtr window)
-    {
-        var name = new System.Text.StringBuilder(32);
-        GetClassName(window, name, name.Capacity);
-        return name.ToString() is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
-    }
+    private static bool IsTaskbar(IntPtr window) => ClassName(window, stackalloc char[32]) is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+    // The desktop and the taskbars.
+    private static bool IsShell(IntPtr window) => ClassName(window, stackalloc char[32]) is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+    // The window's class name, read into the caller's buffer: the windows are polled several times a second.
+    private static ReadOnlySpan<char> ClassName(IntPtr window, Span<char> buffer) =>
+        buffer[..Math.Max(0, GetClassName(window, ref Unsafe.As<char, ushort>(ref MemoryMarshal.GetReference(buffer)), buffer.Length))];
     private static string ProcessName(IntPtr window)
     {
         try
@@ -254,9 +310,7 @@ public sealed class WindowsHost : IDisposable
         GetWindowThreadProcessId(foreground, out var pid);
         if (pid == Environment.ProcessId) { _appName = ""; _appPath = ""; return Desktop(); }
         if (MonitorFromWindow(foreground, 2) != monitor) { _appName = ""; _appPath = ""; return Desktop(); }
-        var name = new System.Text.StringBuilder(256);
-        GetClassName(foreground, name, name.Capacity);
-        if (name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") { _appName = ""; _appPath = ""; return Desktop(); }
+        if (IsShell(foreground)) { _appName = ""; _appPath = ""; return Desktop(); }
         // The window's app travels with its context, so the app rules can answer for it; the read is cached per window.
         Describe(foreground, pid, out _appName, out _appPath);
         if (SHQueryUserNotificationState(out var state) == 0 && state == 3) return ScreenContext.Exclusive;
@@ -285,12 +339,6 @@ public sealed class WindowsHost : IDisposable
             if (!IsWindowVisible(window) || IsIconic(window)) return true;
             if ((GetWindowLongPtr(window, -20).ToInt64() & 0x00000080) != 0) return true;              // WS_EX_TOOLWINDOW
             if (MonitorFromWindow(window, 2) != monitor) return true;
-            if (DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
-            GetWindowThreadProcessId(window, out var pid);
-            if (pid == Environment.ProcessId) return true;
-            var cls = new System.Text.StringBuilder(256);
-            GetClassName(window, cls, cls.Capacity);
-            if (cls.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return true;
             // A maximised window counts here too. The island is a topmost strip at the top of the screen, so a window that
             // fills the screen is partly hidden behind it even when that window is not in front — the case reported for a
             // browser left maximised behind another app. Only the window the user is actually working in is excluded, by
@@ -304,6 +352,10 @@ public sealed class WindowsHost : IDisposable
             var caption = (GetWindowLongPtr(window, -16).ToInt64() & 0x00C00000) != 0;
             // Maximised, or frameless across the whole monitor (browser F11, a borderless game, a full-screen video).
             if (!IsZoomed(window) && !(coversMonitor && !caption)) return true;
+            // Asked only of a window that fills the screen, which few do.
+            if (DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            GetWindowThreadProcessId(window, out var pid);
+            if (pid == Environment.ProcessId || IsShell(window)) return true;
             found = window;
             return false;
         }, IntPtr.Zero);
@@ -361,19 +413,28 @@ public sealed class WindowsHost : IDisposable
         handled = true;
         return new IntPtr(3); // MA_NOACTIVATE: deliver the click without taking focus.
     }
-    public void Dispose() => _timer.Stop();
+    public void Dispose()
+    {
+        _timer.Stop();
+        foreach (var hook in _hooks) if (hook != IntPtr.Zero) UnhookWinEvent(hook);
+    }
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct RECT
     { public int Left, Top, Right, Bottom; public readonly Rect ToRect() => new(Left, Top, Right - Left, Bottom - Top); }
     [StructLayout(LayoutKind.Sequential)] private struct MONITORINFO { public int Size; public RECT Monitor, Work; public int Flags; }
     private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+    private delegate void WinEventProc(IntPtr hook, uint winEvent, IntPtr window, int idObject, int idChild, uint thread, uint time);
+    [DllImport("user32")] private static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc callback, uint pid, uint thread, uint flags);
+    [DllImport("user32")] private static extern bool UnhookWinEvent(IntPtr hook);
+    [DllImport("user32")] private static extern IntPtr GetDesktopWindow();
     [DllImport("user32")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
     [DllImport("user32")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32")] private static extern bool IsZoomed(IntPtr window);
     [DllImport("user32")] private static extern bool IsIconic(IntPtr window);
     [DllImport("user32")] private static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
-    [DllImport("user32", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int max);
+    // ushort: a char is not blittable to DllImport, which would copy a single ANSI byte.
+    [DllImport("user32", EntryPoint = "GetClassNameW")] private static extern int GetClassName(IntPtr window, ref ushort name, int max);
     [DllImport("user32")] private static extern bool GetCursorPos(out POINT point);
     [DllImport("user32")] private static extern bool GetWindowRect(IntPtr window, out RECT rect);
     [DllImport("user32")] private static extern IntPtr MonitorFromPoint(POINT point, uint flags);

@@ -55,6 +55,24 @@ internal static class KugouTests
         try { Sample.Write(mixed, true); } catch (InvalidDataException) { refused = true; }
         check("A file a different build left unmatched is left alone", Sample.Classify(mixed) == LibcefPatchState.Unsupported && refused && mixed.Writes == 0);
         check("An empty file is not a known build", Sample.Classify(new SparseStream(0x40000)) == LibcefPatchState.Unsupported);
+
+        // The file is searched a chunk at a time: a window across the first chunk's end, or wholly in the bytes the next chunk
+        // starts with, is found once and written in place; a second copy elsewhere still makes the file unknown.
+        var window = Sample.Sites[0].Window(false);
+        bool acrossChunks = true;
+        for (int offset = LibcefPatch.ChunkSize - window.Length - 2; offset <= LibcefPatch.ChunkSize + 1; offset++)
+        {
+            var file = new SparseStream(LibcefPatch.ChunkSize + 0x40000L);
+            for (int i = 1; i < Sample.Sites.Count; i++) { file.Position = 0x10000L * i; file.Write(Sample.Sites[i].Window(false)); }
+            file.Position = offset; file.Write(window);
+            acrossChunks &= Sample.Classify(file) == LibcefPatchState.Original;
+            Sample.Write(file, true);
+            acrossChunks &= Sample.Classify(file) == LibcefPatchState.Patched
+                && file.ReadAt(offset + Sample.Sites[0].Prefix.Length, 4).SequenceEqual(Sample.Sites[0].Patched);
+            file.Position = LibcefPatch.ChunkSize + 0x20000L; file.Write(Sample.Sites[0].Window(true));
+            acrossChunks &= Sample.Classify(file) == LibcefPatchState.Unsupported;
+        }
+        check("A window across a chunk boundary is found once and written in place", acrossChunks);
     }
 
     // Each real profile round-trips on a synthetic file built from its own site windows, and names the port it writes.

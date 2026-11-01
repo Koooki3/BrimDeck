@@ -26,7 +26,7 @@ A native Windows app built with C# and WPF, designed for performance and smoothn
 
 - **All quotas in one place**: Quotas for Claude, Codex, Cursor, Antigravity and more are shown in a single panel, so you no longer open each website, command line or app to check them.
 - **Quota checks made simple**: BrimDeck stays collapsed at the top of the screen. Move the pointer over it to open it, and move away to close it.
-- **Media control**: Preview and control the song that is playing inline; the cover, equalizer and lyrics follow the music. The equalizer flows with the sound by default (a beat or a voice runs along the bars); in settings it can instead show the spectrum: the sound is split into pitch bands by an FFT, low on the left and high on the right. Either way it has the length (3 to 20 bars) you set.
+- **Media control**: Preview and control the song that is playing inline; the cover, equalizer and lyrics follow the music. The equalizer can flow with the sound or show its pitch from low to high.
 - **System monitor**: CPU, memory, network speed and other readings stay in the notch or capsule, visible at a glance.
 - **No interruptions in full screen**: Hides automatically while you play full-screen games or watch full-screen video, so it never opens by accident. Adjustable in settings.
 - **Works out of the box**: Detects Claude, Codex, Cursor and other tools already signed in on this PC. No keys to enter and no extra sign-in.
@@ -46,7 +46,7 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
   </tr>
 </table>
 
-- Notch and Capsule show the highest quota usage of each tool as a ring, and preview the music that is playing with its cover, an equalizer, and the title or the current lyric line.
+- Notch and Capsule show the highest quota usage of each tool as a ring (a tool with no reading yet shows no ring); an option under "Quota rings" in the collapsed settings writes the first letter or digit of each tool's display name inside its ring (off by default). They also preview the music that is playing with its cover, an equalizer, and the title or the current lyric line.
 
   <img src="docs/en-US/images/compact-notch-lyrics.png" width="279" alt="Notch showing a lyric line">
 

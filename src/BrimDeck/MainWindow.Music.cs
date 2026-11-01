@@ -785,9 +785,9 @@ public partial class MainWindow
     private MusicMarquee PageTitle(MediaTrack track, MusicMetrics c, bool center, bool merge)
     {
         string tail = merge && track.Artist.Length > 0 ? " · " + track.Artist : "";
-        var title = new MusicMarquee { Text = track.Title, Tail = tail, TailFontSize = c.Artist, TailForeground = UI.Brush(UI.Secondary), FontSize = c.Title,
+        var title = new MusicMarquee { Text = track.Title, Tail = tail, AccessibleName = MusicTitleFit.ReadAs(track.Title, tail), TailFontSize = c.Artist, TailForeground = UI.Brush(UI.Secondary), FontSize = c.Title,
             FontWeight = FontWeights.SemiBold, Height = c.TitleLine, CenterWhenFits = center, EdgeWidth = Math.Max(MusicMarquee.Edge, Math.Round(c.Title * .6)), Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
-        AutomationProperties.SetName(title, Loc.T("歌名 ", "Title ") + track.Title);
+        AutomationProperties.SetName(title, MusicTitleFit.ReadAs(track.Title, tail));
         ShowCutText(title, track.Title + tail);
         _musicTitle = title; UpdateLyricScrolling();
         return title;
@@ -1156,7 +1156,7 @@ public partial class MainWindow
                 case CompactPart.Clock:
                     element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
                 case CompactPart.Rings:
-                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), scale, _quotaElapsed, animate,
+                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.Scale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
                         flow > 0 ? rings.Window : null, ringCut); break;
                 case CompactPart.Music:
                     element = _compactMarquee = CompactTitle(text, room, layout); break;
@@ -1182,7 +1182,7 @@ public partial class MainWindow
     // Whether an application's quota has anything read, which its collapsed ring needs.
     private bool HasQuotaReading(AppEntry entry) => DashboardUsage.Quota(entry, Snapshots).Metrics.Count > 0;
     // One ring per application: the highest used share among its quotas, with every quota in the tooltip, and the application's
-    // letter inside so the rings are told apart by more than their color.
+    // letter inside when the setting asks for it, so the rings are told apart by more than their color.
     private (double Used, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
     {
         var snapshot = DashboardUsage.Quota(entry, Snapshots);
@@ -1190,7 +1190,8 @@ public partial class MainWindow
         double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
         string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-        return (used, PanelTheme.QuotaTheme(entry), tip, QuotaCarousel.Letter(entry.Name));
+        // The display name (AppEntry.Name: the name the user gave the application, else the source's own), so a renamed application's letter follows.
+        return (used, PanelTheme.QuotaTheme(entry), tip, CompactMusicLayout.RingLetterFor(Settings.QuotaRingLetters, entry.Name));
     }).ToArray();
     private Brush CompactEqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");
     private Brush PageEqualizerColor => MusicColor(Settings.MusicPageEqualizerColor, Settings.MusicPageEqualizerCustomColor, "equalizer");
@@ -1336,11 +1337,12 @@ public partial class MainWindow
         bool levels = playerVisible || systemVisible;
         float peak = levels ? _media?.Peak() ?? 0 : 0;
         // Captured audio drives the bars, as many values as the equalizer on show has bars (at whatever length it is set to), flowing
-        // along them or one frequency band for each bar, as the setting chooses; the session peak is the fallback.
+        // along them or one frequency band for each bar, as that equalizer's setting chooses; the session peak is the fallback.
         var shown = _expanded ? IsMusicPage ? _musicEqualizer : null : _alert is null ? _compactEqualizer : null;
         var bandLevels = shown is null ? default : _flowLevels.AsSpan(0, Math.Clamp(shown.Bars, 1, _flowLevels.Length));
-        bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, Settings.EqualizerMode) == true;
-        bool pitchAxis = Settings.EqualizerMode == EqualizerMode.Spectrum;
+        var mode = _expanded ? Settings.MusicEqualizerMode : Settings.EqualizerMode;
+        bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, mode) == true;
+        bool pitchAxis = mode == EqualizerMode.Spectrum;
         if (_expanded && IsMusicPage) { if (flowing) _musicEqualizer?.Show(bandLevels, playing, pitchAxis); else _musicEqualizer?.Tick(peak, playing, seconds); }
         if (!_expanded && _alert is null) { if (flowing) _compactEqualizer?.Show(bandLevels, compactPlaying, pitchAxis); else _compactEqualizer?.Tick(peak, compactPlaying, seconds); }
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }

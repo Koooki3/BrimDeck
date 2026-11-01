@@ -21,7 +21,6 @@
     <Compile Include="..\..\src\BrimDeck\Native\StorageReader.cs" Link="StorageReader.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\SensorGuard.cs" Link="SensorGuard.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\SettingsChrome.cs" Link="SettingsChrome.cs" />
-    <Compile Include="..\..\src\BrimDeck\Native\ProcessLoopbackCapture.cs" Link="ProcessLoopbackCapture.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeProtection.cs" Link="NoticeProtection.cs" />
     <Compile Include="..\..\src\BrimDeck\LiquidGlass\*.cs" LinkBase="LiquidGlass" />
@@ -38,6 +37,7 @@
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.stats.cso" LogicalName="BrimDeck.LiquidGlass.Frost.stats.cso" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl.sha256" />
     <Compile Include="..\..\src\BrimDeck\Native\FrameRates.cs" Link="FrameRates.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\ProcessSnapshot.cs" Link="ProcessSnapshot.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Displays.cs" Link="Displays.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\GpuProvider.cs" Link="GpuProvider.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Hid.cs" Link="Hid.cs" />
@@ -46,6 +46,7 @@
     <Compile Include="..\..\src\BrimDeck\Native\GamingBatteries.cs" Link="GamingBatteries.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\AppleBatteries.cs" Link="AppleBatteries.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\DeviceBatteries.cs" Link="DeviceBatteries.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\GpuDrivers.cs" Link="GpuDrivers.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Why.cs" Link="Why.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeBannerRegistry.cs" Link="NoticeBannerRegistry.cs" />
     <Compile Include="..\..\src\BrimDeck\NoticeBannerKeeper.cs" Link="NoticeBannerKeeper.cs" />
@@ -56,8 +57,11 @@
     <Compile Include="..\..\src\BrimDeck\PageHandover.cs" Link="PageHandover.cs" />
     <Compile Include="..\..\src\BrimDeck\RadioGroups.cs" Link="RadioGroups.cs" />
     <Compile Include="..\..\src\BrimDeck\RowFocus.cs" Link="RowFocus.cs" />
+    <Compile Include="..\..\src\BrimDeck\FieldBox.cs" Link="FieldBox.cs" />
+    <Compile Include="..\..\src\BrimDeck\EmptyClickFocus.cs" Link="EmptyClickFocus.cs" />
     <Compile Include="..\..\src\BrimDeck\DrawnAutomation.cs" Link="DrawnAutomation.cs" />
     <Compile Include="..\..\src\BrimDeck\Soft.cs" Link="Soft.cs" />
+    <Compile Include="..\..\src\BrimDeck\RingLetter.cs" Link="RingLetter.cs" />
     <!-- The island itself: the shadow observes its properties, and the settled clip is checked on its drawing. -->
     <Compile Include="..\..\src\BrimDeck\IslandBorder.cs" Link="IslandBorder.cs" />
     <Compile Include="..\..\src\BrimDeck\IslandDecor.cs" Link="IslandDecor.cs" />

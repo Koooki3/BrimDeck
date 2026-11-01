@@ -100,6 +100,7 @@ internal sealed class MediaSessions : IDisposable
     // from NeteaseInstall directly when media is off.
     public LibcefPatchState? NeteasePatchState => Netease?.FilePatchState;
     public bool NeteaseFileControlWanted { set { if (Netease is { } source) source.FileFullControl = value; } }
+    public void CheckNeteaseFile() => Netease?.CheckFile();
     public async Task<string?> EnableNeteaseFileControlAsync()
     {
         if (Netease is not { } source) return null;
@@ -115,13 +116,12 @@ internal sealed class MediaSessions : IDisposable
         return error;
     }
     // KuGou's full control. Once its libcef.dll is changed, every start of KuGou opens the debugging port, so full control is a
-    // lasting state: the setting KugouFullControl. The file's state is read off the UI thread, at most once a minute, or every
-    // few seconds while the setting is on; while it is on, a file found unchanged (as after a KuGou update) is changed again
-    // and a running KuGou restarts, once for each start of KuGou.
+    // lasting state: the setting KugouFullControl. The file's state is read off the UI thread when it is needed
+    // (CheckKugouInstall); while the setting is on, a file found unchanged (as after a KuGou update) is changed again and a
+    // running KuGou restarts, once for each start of KuGou.
     private KugouCdpConnection? Kugou => _connections.OfType<KugouCdpConnection>().FirstOrDefault();
     public bool RestartingKugou { get; private set; }
     public LibcefPatchState? KugouState { get; private set; }
-    public bool KugouInstalled => KugouState is not null;
     public bool KugouFullControl => Kugou?.Ready == true;
     // Why the last attempt to enable full control failed; cleared by the next attempt.
     public string? KugouError { get; private set; }
@@ -132,18 +132,29 @@ internal sealed class MediaSessions : IDisposable
         get => _kugouAuto;
         set { if (_kugouAuto == value) return; _kugouAuto = value; _kugouAttempted = null; if (value) CheckKugouInstall(now: true); }
     }
-    private bool _kugouAuto, _kugouChecking;
+    private bool _kugouAuto, _kugouChecking, _kugouRead;
     private string? _kugouAttempted;
-    private long _kugouCheckedAt = -60_000;
+    private long _kugouCheckedAt = long.MinValue / 2;
+    // The file is read when asked (now: the settings page, a change of the setting, the first KuGou song shown), and while the
+    // setting is on and KuGou runs without full control, as after an update left the file original: at most every 5 seconds,
+    // found by KuGou's process (its system media session may be off). The 150 MB file is searched only once it has changed
+    // (LibcefFile).
     public void CheckKugouInstall(bool now = false)
     {
-        if (_kugouChecking || !now && Environment.TickCount64 - _kugouCheckedAt < (_kugouAuto ? 5_000 : 60_000)) return;
+        if (!now && (!_kugouAuto || KugouFullControl)) return;
+        if (_kugouChecking || !now && Environment.TickCount64 - _kugouCheckedAt < 5_000) return;
         _kugouChecking = true; _kugouCheckedAt = Environment.TickCount64;
-        _ = Task.Run(() => (State: KugouInstall.State(), Processes: KugouInstall.Processes())).ContinueWith(check => _dispatcher.BeginInvoke(() =>
+        _ = Task.Run(() =>
+        {
+            var processes = KugouInstall.Processes();
+            bool read = now || processes.Key.Length > 0;
+            return (Read: read, State: read ? KugouInstall.State() : null, Processes: processes);
+        }).ContinueWith(check => _dispatcher.BeginInvoke(() =>
         {
             _kugouChecking = false;
-            if (_disposed || !check.IsCompletedSuccessfully) return;
-            var (state, (processes, started)) = check.Result;
+            if (_disposed || !check.IsCompletedSuccessfully || !check.Result.Read) return;
+            var (_, state, (processes, started)) = check.Result;
+            _kugouRead = true;
             if (state != KugouState) { KugouState = state; Changed?.Invoke(); }
             // An unchanged file is changed again at once; a KuGou with the debugging port is connected within a few seconds of its
             // start, so one that runs longer without it started before the change and restarts.
@@ -434,7 +445,8 @@ internal sealed class MediaSessions : IDisposable
                 _announcedPin = _pinned; _announcedRestarting = restarting;
                 Tracks = tracks; Current = current; Cover = cover;
                 Error = connectionError;
-                UpdateMeter(); CheckKugouInstall();
+                // The music page's full control entry for KuGou needs the file's state once a KuGou song shows.
+                UpdateMeter(); CheckKugouInstall(now: current is { IsKugou: true } && !_kugouRead);
                 if (changed) Changed?.Invoke();
             } while (_again && !_disposed);
         }
@@ -651,12 +663,15 @@ internal sealed class MediaSessions : IDisposable
         }
         catch { return null; }
 
+        // At most CoverPixels wide, and never wider than the picture itself: a smaller cover is not enlarged into a larger bitmap.
         BitmapSource Decode(BitmapCreateOptions options)
         {
             using var memory = new MemoryStream(bytes);
+            int width = BitmapDecoder.Create(memory, options | BitmapCreateOptions.DelayCreation, BitmapCacheOption.None).Frames[0].PixelWidth;
+            memory.Position = 0;
             var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
             image.CreateOptions = options;
-            image.DecodePixelWidth = CoverPixels; image.StreamSource = memory; image.EndInit(); image.Freeze(); return image;
+            image.DecodePixelWidth = Math.Clamp(width, 1, CoverPixels); image.StreamSource = memory; image.EndInit(); image.Freeze(); return image;
         }
     }
 

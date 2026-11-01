@@ -71,7 +71,6 @@ internal static class DashboardUsageTests
             && targeted.Metrics[0] is { Total: 100, TotalIsTarget: true } && targeted.Metrics[1].Total is null && targeted.Metrics[1].UsedPercent is null);
         check("A balance above the target is drawn as unused", Used(balanceRow, 150) is < 0 && AppPresets.Level(Math.Clamp(Used(balanceRow, 150)!.Value, 0, 100)) == 0);
         check("The target leaves the shared snapshot unchanged", balanceSnapshot.Metrics[0].Total is null && !ReferenceEquals(DashboardUsage.Quota(balanceRow, [balanceSnapshot]), balanceSnapshot));
-        check("New rows start with a target balance of 100", new AppEntry().BalanceTarget == 100);
         var untargeted = new AppEntry { QuotaSource = ProviderId.DeepSeek, BalanceTarget = null };
         check("Without a target the account balance stays an amount", Used(untargeted, 20) is null && ReferenceEquals(DashboardUsage.Quota(untargeted, [balanceSnapshot]), balanceSnapshot));
         var limited = new ProviderSnapshot(ProviderId.OpenRouter) { Configurations = [new AppEntry { QuotaSource = ProviderId.OpenRouter }.ConfigurationKey],

@@ -103,10 +103,10 @@ internal sealed class MonitorStrip : FrameworkElement
         // A reading fading out of a narrow row stays within it, off the lyric or the rings beside it.
         ClipToBounds = true;
         // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings. A rate has
-        // at most four characters (MonitorFormat.CompactRate): "999M" or "999G" at the widest.
+        // three digits and a letter, with a point below 100 (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("999M"), text("999G"))), DrivesWidth(), DeviceWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(), DeviceWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
             FramesSlot + Math.Round(3 * _scale) + FigureWidth(WidestFrames) + Math.Round(2 * _scale) + SmallWidth(FramesUnit));
     }
@@ -421,7 +421,7 @@ internal sealed class MonitorStrip : FrameworkElement
     // levels, as the quota bars' numbers do.
     private static string FigureColor(MemoryLevel level, string color) => level == MemoryLevel.Normal ? UI.Primary : color;
 
-    // An arrow and the rate in at most four characters and a letter: "84K", "1.2M".
+    // An arrow and the rate in three significant digits and a letter: "84.2K", "1.24M".
     private void Rate(DrawingContext drawing, double x, double center, MonitorGlyph glyph, double? rate, string color, MemoryLevel level, double ppd)
     {
         double size = Math.Round(9 * _scale);

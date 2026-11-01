@@ -112,8 +112,9 @@ internal sealed class MonitorView : Grid
         graphs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(mini) });
         if (cpuMain)
         {
-            // The cores carry no figures: the fill is the load, the tick the clock, and pointing at a core gives both.
-            _cpuGraph = new ColumnGraph(26, layout.Caption, labels: false, name: cores);
+            // Fill the main graph's width even on CPUs with few cores. The fill is the
+            // load, the tick the clock, and pointing at a core gives both.
+            _cpuGraph = new ColumnGraph(double.PositiveInfinity, layout.Caption, labels: false, name: cores);
             _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu);
             _gpuBlock.Clicked += () => mainChanged(MonitorMain.Gpu);
             SetColumn(_gpuBlock, 2); graphs.Children.Add(_cpuGraph); graphs.Children.Add(_gpuBlock);
@@ -192,7 +193,6 @@ internal sealed class MonitorView : Grid
         Children.Add(_overlay);
     }
 
-    public bool CardOpen => _card is not null;
     // A press anywhere in the window outside the card and the list's rows closes the card: the page's blank room, the list's own
     // blank room and its sort buttons, the window's top bar. The click still reaches what it was meant for. On a row the row
     // decides (Open): its own row closes the card, another row opens its own.
@@ -250,7 +250,7 @@ internal sealed class MonitorView : Grid
             string temperature = heat is { } celsius ? Temperatures.Format(celsius) + " °C" : "";
             _cpuGauge.Set(cpu.Usage, MonitorFormat.Percent(cpu.Usage), "%", temperature,
                 "CPU " + MonitorFormat.Percent(cpu.Usage) + "%" + (frequency.Length > 0 ? " · " + frequency : "") + Loc.T($" · {cpu.Cores.Count} 个逻辑处理器", $" · {cpu.Cores.Count} logical processors")
-                + (temperature.Length > 0 ? Loc.T($"\n温度 {temperature}（ACPI 热区 {cpu.TemperatureZone}，可能是主板而非 CPU 本身）", $"\nTemperature {temperature} (ACPI thermal zone {cpu.TemperatureZone}, possibly the board rather than the CPU itself)") : ""),
+                + (temperature.Length > 0 ? "\n" + TemperatureLine(cpu, temperature) : ""),
                 motion, heat is { } c ? Hot(Temperatures.OfCpu(c)) : null);
             int groups = Math.Max(1, cpu.GroupCount);
             _cpuGraph.Set(cpu.Cores.Select(core => new GraphColumn(core.Usage, cpuMain ? core.FrequencyFraction : null, _colors.Core(core.Group, groups), core.Group, Describe(core))).ToList(), motion);
@@ -268,7 +268,9 @@ internal sealed class MonitorView : Grid
             string temperature = heat is { } celsius ? Temperatures.Format(celsius) + " °C" : "";
             // An adapter without engine readings at the moment (NoReadings) shows a dash and says so; it can still be switched from.
             bool idle = gpu.NoReadings;
-            string tip = (several ? GpuChoice.Describe(gpu.Name, gpu.Kind) : gpu.Name ?? "GPU") + " · " + (idle ? Loc.T("暂无读数", "No reading") : MonitorFormat.Percent(gpu.Usage) + "%") + (memory.Length > 0 ? " · " + memory : "")
+            // The usage says where it was read when its driver gave it; the engines' columns are always Windows' own.
+            string usage = MonitorFormat.Percent(gpu.Usage) + "%" + (gpu.UsageSource is { } source ? Loc.T($"（{source}）", $" ({source})") : "");
+            string tip = (several ? GpuChoice.Describe(gpu.Name, gpu.Kind) : gpu.Name ?? "GPU") + " · " + (idle ? Loc.T("暂无读数", "No reading") : usage) + (memory.Length > 0 ? " · " + memory : "")
                 + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "")
                 + (temperature.Length > 0 ? " · " + temperature + (gpu.TemperatureFrom is { } from ? Loc.T($"（{from} 的温度）", $" ({from}'s temperature)") : "") : "");
             string switchTo = _nextGpu is { } next ? Loc.T("点击切换到 ", "Click to show ") + GpuChoice.Describe(next.Name, next.Kind) : "";
@@ -314,6 +316,22 @@ internal sealed class MonitorView : Grid
 
     // A temperature's color: the text's while normal, the collapsed readings' warning or critical color above.
     private string? Hot(MemoryLevel level) => level == MemoryLevel.Normal ? null : _colors.Level(level, UI.Tertiary);
+
+    // The processor's temperature with where it was read: its own sensors (with each core's range, or each CCD's), a hardware
+    // monitor, or an ACPI zone, which may be the board near the processor.
+    private static string TemperatureLine(CpuSample cpu, string temperature)
+    {
+        string cores = cpu.CoreTemperatures.Count == 0 ? ""
+            : cpu.CoreTemperaturesAreCcds ? " · CCD " + string.Join(" / ", cpu.CoreTemperatures.Select(Temperatures.Format)) + " °C"
+            : Loc.T(" · 各核心 ", " · cores ") + Temperatures.Format(cpu.CoreTemperatures.Min()) + "–" + Temperatures.Format(cpu.CoreTemperatures.Max()) + " °C";
+        return cpu.TemperatureSource switch
+        {
+            CpuTemperatureSource.Processor => Loc.T($"温度 {temperature}（处理器传感器）", $"Temperature {temperature} (processor sensors)") + cores,
+            CpuTemperatureSource.HwInfo => Loc.T($"温度 {temperature}（HWiNFO）", $"Temperature {temperature} (HWiNFO)"),
+            CpuTemperatureSource.LibreHardwareMonitor => Loc.T($"温度 {temperature}（LibreHardwareMonitor）", $"Temperature {temperature} (LibreHardwareMonitor)"),
+            _ => Loc.T($"温度 {temperature}（ACPI 热区 {cpu.TemperatureZone}，可能是主板而非 CPU 本身）", $"Temperature {temperature} (ACPI thermal zone {cpu.TemperatureZone}, possibly the board rather than the CPU itself)")
+        };
+    }
 
     private static string Describe(CoreSample core)
     {

@@ -1,33 +1,13 @@
 using BrimDeck.Core;
+using static EqualizerAudio;
 
 // The level bars as a spectrum: every bar is a band of pitch, for every length the settings allow (3 to 20 bars).
 internal static class EqualizerSpectrumTests
 {
-    private const int Rate = 44100;
     private static readonly int[] Lengths = Enumerable.Range(CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars - CompactMusicLayout.MinimumBars + 1).ToArray();
 
-    // Feeds 10 ms blocks of stereo audio, analyses every third block (30 times a second, as the capture does) and reads the bars
-    // as the panel does after each analysis.
-    private static List<(double Time, double[] Levels)> Play(EqualizerSignal signal, Func<double, float> wave, double seconds, int bars, double start = 0, Action<double>? beforeAnalysis = null)
-    {
-        var snapshots = new List<(double, double[])>(); var block = new float[441 * 2]; var levels = new double[bars];
-        signal.Fill(levels, start, EqualizerMode.Spectrum);
-        for (int n = 0; n < (int)Math.Round(seconds * 100); n++)
-        {
-            double t0 = start + n / 100d;
-            for (int i = 0; i < 441; i++) { float v = wave(t0 + i / (double)Rate); block[i * 2] = v; block[i * 2 + 1] = v; }
-            signal.Push(block, 2, t0 + .01);
-            if (n % 3 != 2) continue;
-            beforeAnalysis?.Invoke(t0 + .01);
-            signal.Advance(t0 + .01); signal.Fill(levels, t0 + .01, EqualizerMode.Spectrum); snapshots.Add((t0 + .01, (double[])levels.Clone()));
-        }
-        return snapshots;
-    }
-
-    private static float Sine(double t, double hz, double amplitude) => (float)(amplitude * Math.Sin(2 * Math.PI * hz * t));
-    // A decaying tone started every period seconds, like a drum hit; it swells over a few ms, as a struck drum does (a start
-    // that jumps to full is a click, which has some of every pitch).
-    private static float Hit(double t, double hz, double period, double amplitude, double decay) { double since = t % period; return (float)(amplitude * (1 - Math.Exp(-since / .004)) * Math.Exp(-since / decay) * Math.Sin(2 * Math.PI * hz * since)); }
+    private static List<(double Time, double[] Levels)> Play(EqualizerSignal signal, Func<double, float> wave, double seconds, int bars, double start = 0) =>
+        EqualizerAudio.Play(signal, wave, seconds, bars, EqualizerMode.Spectrum, start);
     private static int Loudest(double[] levels) => Array.IndexOf(levels, levels.Max());
     private static double Mean(IEnumerable<double> values) => values.Average();
     // The mean level of each bar over the last seconds of the run.
@@ -169,13 +149,9 @@ internal static class EqualizerSpectrumTests
 
         // The length changes while the sound plays (the slider is dragged, the row gains room): the bars carry on.
         var growing = new EqualizerSignal(Rate); var fresh = new EqualizerSignal(Rate);
-        // Notes, drums and a floor of noise that depends only on the time, so every signal hears the same.
-        static double Floor(double t) { double x = Math.Sin(t * 12345.6789) * 43758.5453; return (x - Math.Floor(x) - .5) * .1; }
-        double Music(double t) => Sine(t, 220, .25) + Sine(t, 1800, .12 * (1 + Math.Sin(t * 5)) / 2) + Hit(t, 60, .5, .5, .08) + Hit(t + .25, 6500, .5, .1, .03) + Floor(t);
-        float Wave(double t) => (float)Music(t);
         var counts = new[] { 3, 20, 4, 12, 5, 20, 3 };
         double clock = 0; bool carries = true, equalsFresh = true; double biggestStep = 0;
-        var before = Play(growing, Wave, 3, 5);
+        var before = Play(growing, Music, 3, 5);
         clock = before[^1].Time;
         foreach (int count in counts)
         {
@@ -183,15 +159,15 @@ internal static class EqualizerSpectrumTests
             // The first look at the new count comes before the next analysis.
             var asked = new double[count]; growing.Fill(asked, clock, EqualizerMode.Spectrum);
             carries &= asked.All(l => l > 0) && Math.Abs(Mean(asked) - earlier) < .2 && Math.Abs(asked.Max() - earlierPeak) < .3;
-            before = Play(growing, Wave, 1, count, clock); clock = before[^1].Time;
+            before = Play(growing, Music, 1, count, clock); clock = before[^1].Time;
             // The bars of the next analyses move gently and never fall to rest while the music plays.
             carries &= before.All(s => s.Levels.Max() > .1);
             biggestStep = Math.Max(biggestStep, Math.Abs(Mean(before[0].Levels) - earlier));
         }
         // A signal that had that length all along shows the same bars as one that was changed to it.
         var reference = new EqualizerSignal(Rate);
-        var referenceRun = Play(reference, Wave, clock, 7);
-        var lastRun = Play(growing, Wave, 1.5, 7, clock); var referenceTail = Play(reference, Wave, 1.5, 7, clock);
+        var referenceRun = Play(reference, Music, clock, 7);
+        var lastRun = Play(growing, Music, 1.5, 7, clock); var referenceTail = Play(reference, Music, 1.5, 7, clock);
         equalsFresh = lastRun.Zip(referenceTail).Skip(10).All(pair => pair.First.Levels.Zip(pair.Second.Levels).All(l => Math.Abs(l.First - l.Second) < .25));
         check("Spectrum bars: changing the length while playing shows the bars at the new length at once, none at rest and none far from before", carries && biggestStep < .3);
         check("Spectrum bars: after a change of length the bars are those of a signal that had the new length all along", equalsFresh);
@@ -203,5 +179,13 @@ internal static class EqualizerSpectrumTests
         // Flowing levels are not positions along a pitch axis: the signal makes them again for any count, so Fit leaves them alone.
         var flowShown = new EqualizerBars(); flowShown.Show([.1, .5, 1], true, pitchAxis: false); flowShown.Fit(6);
         check("Flow bars: levels from the flowing analysis are not spread along a pitch axis by a change of length", flowShown.Levels[0] == .1 && flowShown.Levels[1] == .5 && flowShown.Levels[2] == 1 && flowShown.Levels[3] == 0 && flowShown.Levels[5] == 0);
+
+        // A length changed in silence makes the bars again from the narrow bands kept, so it must not bring back the last sound.
+        var quieted = new EqualizerSignal(Rate);
+        var toned = Play(quieted, t => Sine(t, 440, .5), 1.5, 5);
+        var hushed = Play(quieted, _ => 0, 1, 5, toned[^1].Time);
+        var regrown = Play(quieted, _ => 0, .1, 12, hushed[^1].Time);
+        check("Spectrum bars: a length changed in silence does not bring back the level of the last sound",
+            toned[^1].Levels.Max() > .3 && hushed[^1].Levels.Max() < .01 && regrown.All(s => s.Levels.Max() < .01));
     }
 }

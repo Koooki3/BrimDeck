@@ -12,14 +12,23 @@ namespace BrimDeck.Native;
 // player's install (KugouInstall, NeteaseInstall).
 internal static class LibcefFile
 {
+    // The state last read of each file, with its write time and length then: KuGou's install is checked every 5 to 60 seconds,
+    // and the 150 MB file is searched again only once it has changed.
+    private static readonly Dictionary<string, (DateTime Written, long Length, LibcefPatchState State)> Known = new(StringComparer.OrdinalIgnoreCase);
+
     // Reads the file's patch state without changing it; also clears any held files left from an earlier replace.
     public static LibcefPatchState State(string library, LibcefPatch profile)
     {
         CleanUp(library);
         try
         {
+            var info = new FileInfo(library);
+            var (written, length) = (info.LastWriteTimeUtc, info.Length);
+            lock (Known) if (Known.TryGetValue(library, out var known) && known.Written == written && known.Length == length) return known.State;
             using var file = new FileStream(library, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            return profile.Classify(file);
+            var state = profile.Classify(file);
+            lock (Known) Known[library] = (written, length, state);
+            return state;
         }
         catch (IOException) { return LibcefPatchState.Unsupported; }
         catch (UnauthorizedAccessException) { return LibcefPatchState.Unsupported; }
@@ -38,6 +47,7 @@ internal static class LibcefFile
 
     public static void Write(string library, LibcefPatch profile, bool patch, bool elevated = false)
     {
+        lock (Known) Known.Remove(library);
         try
         {
             using var file = new FileStream(library, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);

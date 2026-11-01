@@ -150,6 +150,8 @@ internal sealed class MusicMarquee : FrameworkElement
     // An edge fades only while text is hidden beyond it: none on the left before the text moves,
     // none on the right once its end is in view. The first and last characters rest unfaded.
     private readonly GradientStop _left = new(Colors.White, 0), _right = new(Colors.White, 1);
+    // The same fade for the tail's own color (InkFade): its stops follow the text's clocks and offsets.
+    private readonly GradientStop _tailLeft = new(Colors.White, 0), _tailRight = new(Colors.White, 1);
     private string _text = "";
     private double _fontSize = 11.5, _overflow, _fadeWidth = -1;
     private FormattedText? _formatted;
@@ -186,8 +188,11 @@ internal sealed class MusicMarquee : FrameworkElement
     }
     // The width the text takes on one line, in DIPs.
     public double TextWidth => _text.Length == 0 ? 0 : Formatted.Width;
-    // For screen readers: the whole line as text, however much of it shows.
-    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => _text);
+    // For screen readers: the whole line as text, however much of it shows. The open page's title reads with its own name
+    // ("Title ..." and the artist merged into the line); every other line reads as it is drawn.
+    public string AccessibleName { get; init; } = "";
+    internal string Reading => AccessibleName.Length > 0 ? AccessibleName : _text + Tail;
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => Reading);
     public double FontSize
     {
         get => _fontSize;
@@ -196,11 +201,11 @@ internal sealed class MusicMarquee : FrameworkElement
     // The open page's title is semibold; the collapsed row and the lyrics are regular.
     public FontWeight FontWeight { init => _weight = value; }
     // A second run after the text in its own size and color: the merged title of a short page ("title · artist"). It scrolls with
-    // the text as one line. Over a gradient or scan lines (InkFade) the run takes the text's gradient at TailInkOpacity.
+    // the text as one line. Over a gradient or scan lines (InkFade) it fades at its ends like the text, in its own color, so it
+    // is the same color whether the line fits or scrolls.
     public string Tail { get; init; } = "";
     public double TailFontSize { get; init; }
     public Brush? TailForeground { get; init; }
-    private const double TailInkOpacity = .7;
     // Whether the text overhangs the room it was last drawn in: the window shows the whole title in a tooltip then.
     public bool Overflows => _overflow > 0;
     public bool CenterWhenFits { get; init; } = true;
@@ -370,9 +375,12 @@ internal sealed class MusicMarquee : FrameworkElement
                 var clear = Color.FromArgb(0, ink.R, ink.G, ink.B);
                 _ink = fadeWidth > 0 ? new LinearGradientBrush(new GradientStopCollection { new(clear, 0), _left, _right, new(clear, 1) },
                     new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute, Transform = _unshift } : null;
-                // The tail's brush shares the text brush's stops, so the one glide moves both fades.
-                _tailInk = _ink is LinearGradientBrush main && Tail.Length > 0 ? new LinearGradientBrush(main.GradientStops, main.StartPoint, main.EndPoint)
-                    { MappingMode = BrushMappingMode.Absolute, Transform = _unshift, Opacity = TailInkOpacity } : null;
+                // The tail fades in its own color (TailForeground, as it is drawn when the line fits); its stops take the same offsets.
+                var tailColor = (TailForeground as SolidColorBrush)?.Color ?? ink;
+                _tailLeft.Color = _tailRight.Color = tailColor;
+                var tailClear = Color.FromArgb(0, tailColor.R, tailColor.G, tailColor.B);
+                _tailInk = fadeWidth > 0 && Tail.Length > 0 ? new LinearGradientBrush(new GradientStopCollection { new(tailClear, 0), _tailLeft, _tailRight, new(tailClear, 1) },
+                    new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute, Transform = _unshift } : null;
                 _formatted = null; text = Formatted;
             }
             else
@@ -586,18 +594,24 @@ internal sealed class QuotaCarousel : GlideCarousel
 {
     // For screen readers: its name, every ring's tooltip line, rotating or not.
     protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
-    // The first letter or digit of an application's name, upper case, for the middle of its ring; empty without one.
-    internal static string Letter(string name)
+    // One ring with its application's letter inside, at the size the system readings' dials carry theirs for this height, in the secondary text color.
+    internal static Grid Ring((double Used, string Color, string Tip, string Letter) item, double size, double thickness, double scale)
     {
-        foreach (char c in name ?? "") if (char.IsLetterOrDigit(c)) return char.ToUpperInvariant(c).ToString();
-        return "";
+        var ring = UI.Ring(item.Used, item.Color, size, thickness);
+        // Empty without the setting (DeckSettings.QuotaRingLetters): the ring is then as it was without letters.
+        if (item.Letter.Length > 0
+            && RingLetter.Create(item.Letter, Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * scale)), size, Math.Max(1, size - 2 * thickness),
+                Application.Current?.MainWindow is { } window ? VisualTreeHelper.GetDpi(window).PixelsPerDip : 1, UI.PanelFont, UI.Brush(UI.Secondary)) is { } letter)
+            ring.Children.Add(letter);
+        return ring;
     }
 
+    // rowScale: the row's scale, which sizes the letter inside each ring (as the system readings' dials size theirs).
     // count: the whole rings the window holds (CompactSpacing.Window); gap: the row's gap, which the rings keep between them too.
     // flowing: the window as wide as the room gives it, not whole rings (the surface is being dragged; CompactSpacing.ShareFlowing),
     // with the ring it cuts faded over cut DIPs; nothing glides then.
-    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip, string Letter)> items, double size, double thickness, double gap, int count, double edge,
-        double scale, TimeSpan elapsed = default, bool animate = true, double? flowing = null, double cut = 0)
+    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip, string Letter)> items, double size, double thickness, double rowScale, double gap, int count, double edge,
+        TimeSpan elapsed = default, bool animate = true, double? flowing = null, double cut = 0)
     {
         // Ring positions, the window and the travel all use whole device pixels. Layout rounding would otherwise widen each gap
         // at 150 % and carry the last ring into the edge fade.
@@ -610,14 +624,7 @@ internal sealed class QuotaCarousel : GlideCarousel
         var strip = new Canvas { Width = items.Count * step, Height = size };
         for (int i = 0; i < items.Count; i++)
         {
-            var ring = UI.Ring(items[i].Used, items[i].Color, size, thickness);
-            if (items[i].Letter.Length > 0)
-            {
-                // The letter inside, at the size the system readings' dials carry theirs for this height, in the secondary text color.
-                var letter = new TextBlock { Text = items[i].Letter, FontFamily = UI.PanelFont, FontWeight = FontWeights.SemiBold, FontSize = Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * scale)),
-                    Foreground = UI.Brush(UI.Secondary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center };
-                ring.Children.Add(letter);
-            }
+            var ring = Ring(items[i], size, thickness, rowScale);
             Canvas.SetLeft(ring, i * step); strip.Children.Add(ring);
         }
         ToolTip = string.Join("\n", items.Select(i => i.Tip));

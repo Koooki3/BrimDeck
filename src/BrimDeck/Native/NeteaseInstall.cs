@@ -72,6 +72,8 @@ internal static class NeteaseInstall
 
     private static IEnumerable<string> RunningPaths()
     {
+        // Looked for in a snapshot first: GetProcessesByName reads every process's threads.
+        if (!ProcessSnapshot.Any("cloudmusic.exe")) return [];
         var processes = Process.GetProcessesByName("cloudmusic");
         try { return processes.Select(PathOf).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray(); }
         finally { foreach (var process in processes) process.Dispose(); }

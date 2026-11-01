@@ -94,6 +94,9 @@ internal static class KugouInstall
     // while KuGou is not running.
     public static (string Key, DateTime? Started) Processes()
     {
+        // Looked for in a snapshot first: GetProcessesByName reads every process's threads, which is the most of a check while
+        // KuGou is not running.
+        if (!ProcessSnapshot.Any("KuGou.exe")) return ("", null);
         var processes = Process.GetProcessesByName("KuGou");
         try
         {
@@ -144,6 +147,7 @@ internal static class KugouInstall
 
     private static IEnumerable<string> RunningPaths()
     {
+        if (!ProcessSnapshot.Any("KuGou.exe")) return [];
         var processes = Process.GetProcessesByName("KuGou");
         try { return processes.Select(PathOf).OfType<string>().ToArray(); }
         finally { foreach (var process in processes) process.Dispose(); }

@@ -295,4 +295,25 @@ internal static class PowerMarks
         if (area.Height <= 0) return;
         drawing.DrawGeometry(UI.Brush(color), null, PlugIn(area));
     }
+
+    // An exclamation mark centred in the area: a bar and a square dot of the same thickness, at least 1.5 DIP, all on whole device
+    // pixels so the dot is as dark as the bar. halo: a device pixel of this color around them, setting them off the fill.
+    public static void Exclamation(DrawingContext drawing, Rect area, string color, string? halo, double ppd)
+    {
+        double Snap(double value) => Math.Round(value * ppd) / ppd;
+        double h = area.Height, thickness = Math.Max(Math.Ceiling(1.5 * ppd), Math.Round(h * .2 * ppd)) / ppd;
+        double left = Snap(area.X + area.Width / 2 - thickness / 2), dotBottom = Snap(area.Y + h * .85), dotTop = dotBottom - thickness;
+        double barBottom = dotTop - Math.Max(1 / ppd, Snap(h * .1)), barTop = Math.Min(Snap(area.Y + h * .15), barBottom - thickness);
+        var bar = new Rect(left, barTop, thickness, barBottom - barTop);
+        var dot = new Rect(left, dotTop, thickness, thickness);
+        if (halo is not null)
+        {
+            var around = UI.Brush(halo);
+            drawing.DrawRectangle(around, null, Rect.Inflate(bar, 1 / ppd, 1 / ppd));
+            drawing.DrawRectangle(around, null, Rect.Inflate(dot, 1 / ppd, 1 / ppd));
+        }
+        var ink = UI.Brush(color);
+        drawing.DrawRectangle(ink, null, bar);
+        drawing.DrawRectangle(ink, null, dot);
+    }
 }

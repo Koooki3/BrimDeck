@@ -62,9 +62,12 @@ internal sealed class KugouCdpConnection : IMediaPlayerConnection
     // A DevTools server of KuGou at the loopback address. Other tools that patch KuGou the same way open the same port, and
     // others open one of their own, so every port a KuGou process alone listens on at 127.0.0.1 is asked, 12233 first.
     // A port that is also open beyond this PC is never used.
+    // The ports are read only while KuGou runs: without it every 3 seconds would read the port tables for nothing.
     private async Task<Owner?> FindAsync(CancellationToken token)
     {
-        foreach (var candidate in Candidates())
+        var kugou = ProcessSnapshot.Ids("KuGou.exe");
+        if (kugou.Count == 0) return null;
+        foreach (var candidate in Candidates(kugou))
         {
             if (_rejected.Contains((candidate.Id, candidate.Started, candidate.Port))) continue;
             if (await AnswersAsDevToolsAsync(candidate.Port, token).ConfigureAwait(false) && Owns(candidate)) return candidate;
@@ -74,7 +77,8 @@ internal sealed class KugouCdpConnection : IMediaPlayerConnection
         }
         return null;
     }
-    private static List<Owner> Candidates()
+    // kugou: the ids of the KuGou processes; only their ports are looked at, so no other program's process is opened.
+    private static List<Owner> Candidates(HashSet<int> kugou)
     {
         var found = new List<Owner>();
         try
@@ -83,11 +87,11 @@ internal sealed class KugouCdpConnection : IMediaPlayerConnection
             foreach (var group in TcpListeners.Read().GroupBy(l => l.Port))
             {
                 var first = group.First();
-                if (open.Contains(group.Key) || group.Any(l => !l.Address.Equals(IPAddress.Loopback) || l.ProcessId != first.ProcessId)) continue;
+                if (!kugou.Contains(first.ProcessId) || open.Contains(group.Key) || group.Any(l => !l.Address.Equals(IPAddress.Loopback) || l.ProcessId != first.ProcessId)) continue;
                 try
                 {
                     using var process = Process.GetProcessById(first.ProcessId);
-                    if (string.Equals(process.ProcessName, "KuGou", StringComparison.OrdinalIgnoreCase) && !process.HasExited)
+                    if (!process.HasExited)
                         found.Add(new(process.Id, process.StartTime.ToUniversalTime().Ticks, group.Key));
                 }
                 catch (ArgumentException) { }
@@ -97,7 +101,7 @@ internal sealed class KugouCdpConnection : IMediaPlayerConnection
         catch { }
         return found.OrderBy(o => o.Port == KugouPatch.Port ? 0 : 1).ToList();
     }
-    private static bool Owns(Owner owner) => Candidates().Contains(owner);
+    private static bool Owns(Owner owner) => Candidates(ProcessSnapshot.Ids("KuGou.exe")).Contains(owner);
     private static async Task<bool> AnswersAsDevToolsAsync(int port, CancellationToken token)
     {
         try
@@ -137,7 +141,7 @@ internal sealed class KugouCdpConnection : IMediaPlayerConnection
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
                 // A reply that is not the play info (a page that went away) ends this page; the supervisor looks again.
-                var info = await EvaluateAsync(Call(864), true, token).ConfigureAwait(false);
+                var info = await EvaluateAsync(PlayInfo, true, token).ConfigureAwait(false);
                 if (info is not { ValueKind: JsonValueKind.String } text) break;
                 if (text.GetString() is { Length: > 0 and <= 65536 } json)
                 {
@@ -154,6 +158,7 @@ internal sealed class KugouCdpConnection : IMediaPlayerConnection
         }
     }
 
+    private static readonly string PlayInfo = Call(864);
     // The client answers through a named callback, given with the call's own fields; a reply that does not come within
     // 3 seconds counts as none.
     internal static string Call(int number, object? fields = null) => $$"""
@@ -165,6 +170,9 @@ internal sealed class KugouCdpConnection : IMediaPlayerConnection
             catch (e) { clearTimeout(timer); window[name] = null; resolve(""); }
         })
         """;
+    // Kept between requests, which come one at a time (_exchange); the message is dropped once a large reply has grown it.
+    private readonly byte[] _buffer = new byte[16384];
+    private MemoryStream _message = new();
     // One request at a time: each waits for its own reply, so the page's other messages need no dispatcher.
     private async Task<JsonElement?> EvaluateAsync(string expression, bool awaitPromise, CancellationToken token, Action? dispatching = null)
     {
@@ -178,8 +186,9 @@ internal sealed class KugouCdpConnection : IMediaPlayerConnection
             var request = JsonSerializer.SerializeToUtf8Bytes(new { id, method = "Runtime.evaluate", @params = new { expression, returnByValue = true, awaitPromise } });
             dispatching?.Invoke();
             await socket.SendAsync(request.AsMemory(), WebSocketMessageType.Text, true, timeout.Token).ConfigureAwait(false);
-            var buffer = new byte[16384];
-            using var message = new MemoryStream();
+            var buffer = _buffer;
+            var message = _message;
+            message.SetLength(0);
             while (true)
             {
                 var read = await socket.ReceiveAsync(buffer.AsMemory(), timeout.Token).ConfigureAwait(false);
@@ -196,7 +205,11 @@ internal sealed class KugouCdpConnection : IMediaPlayerConnection
             }
         }
         catch (Exception ex) when (ex is IOException or WebSocketException or JsonException || ex is OperationCanceledException && !token.IsCancellationRequested) { return null; }
-        finally { _exchange.Release(); }
+        finally
+        {
+            if (_message.Capacity > 65_536) _message = new();
+            _exchange.Release();
+        }
     }
 
     internal static DesktopMediaSnapshot? ParseSnapshot(JsonElement data, DateTimeOffset now)

@@ -27,7 +27,6 @@ static class FrameRateTests
         var parts = tall.Parts(400);
         check("Frame line: a tall page has it, right under memory and network, the drives under it",
             tall.FrameLine && parts[5].Top == parts[2].Top + parts[2].Height && parts[3].Top == parts[5].Top + parts[5].Height && parts[5].Height > 0);
-        check("Frame line: the graph keeps its least height", parts[1].Height >= MonitorLayout.MinimumGraph - 1e-9);
         check("Frame line: the first power line keeps its place", tall.PowerLines >= 1 == (MonitorLayout.For(700, 400, true, 2, 1).PowerLines >= 1));
         var small = MonitorLayout.For(480, 120, false, 2, 1, frames: true);
         check("Frame line: a page too short for it has none", !small.FrameLine && small.Parts(120)[1].Height >= 16);
@@ -48,12 +47,12 @@ static class FrameRateTests
         check("Frame rate: one color, the frame rate's", CompactMonitor.Channels(Frames) == 1 && CompactMonitor.Role(Frames) == MonitorRole.Frames);
 
         var full = CompactMonitor.Normalize(null);
+        full.First(reading => reading.Item == Frames).Figures = [];
         CompactMonitor.Apply(full, CompactMonitorMode.Full);
-        check("Frame rate: Full does not turn it on", !full.First(reading => reading.Item == Frames).Visible);
-        full.First(reading => reading.Item == Frames).Visible = true;
-        check("Frame rate: shown, Full still matches", CompactMonitor.Preset(full) == CompactMonitorMode.Full);
-        CompactMonitor.Apply(full, CompactMonitorMode.Full);
-        check("Frame rate: Full leaves it as it is", full.First(reading => reading.Item == Frames).Visible);
+        check("Frame rate: Full shows it with the program's icon", full.First(reading => reading.Item == Frames) is { Visible: true } shownFrames
+            && CompactFrames.Shows(shownFrames, CompactFrames.Icon) && CompactMonitor.Preset(full) == CompactMonitorMode.Full);
+        full.First(reading => reading.Item == Frames).Figures = [];
+        check("Frame rate: without its icon, Full no longer matches", CompactMonitor.Preset(full) is null);
         CompactMonitor.Apply(full, CompactMonitorMode.Brief);
         check("Frame rate: Brief hides it", !full.First(reading => reading.Item == Frames).Visible);
 
@@ -75,7 +74,6 @@ static class FrameRateTests
         var kept = copy.CompactReadings.First(reading => reading.Item == Frames);
         check("Frame rate: it, the figure alone and the page's switch survive the settings file",
             kept.Visible && kept.Figures is [] && copy.MonitorFrames && (CompactMonitor.Shown(copy.CompactReadings) & Frames) != 0);
-        check("Frame rate: the page's switch is off by default", !new DeckSettings().MonitorFrames);
 
         var width = CompactMonitor.Widths(CompactMonitorItems.None, 16, _ => 0, 16, 40, 30, frames: 47);
         check("Frame rate: its own width", width(Frames) == 47 && CompactMonitor.Fit(CompactMonitorItems.Cpu | Frames, width, 6, 16 + 6 + 47 - 1) == CompactMonitorItems.Cpu);

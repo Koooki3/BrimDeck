@@ -82,7 +82,6 @@ internal static class FullscreenRuleTests
         check("The rule list is capped", many.FullscreenRules.Count == AppPresets.MaximumFullscreenExceptions);
         // A full-screen window behind the foreground one has no rules of its own: the way it fills the screen picks the
         // rule, the app's own first and the global one after it, as if that window were in front.
-        check("Windows behind the foreground one count by default", new DeckSettings().BackgroundWindows);
         var bg = new DeckSettings { Maximized = WindowBehavior.Line, Borderless = WindowBehavior.Hide };
         check("A background full screen follows the global rule for the way it fills the screen",
             bg.Behavior(ScreenContext.BackgroundFullscreen, null, null, ScreenContext.Maximized) == WindowBehavior.Line

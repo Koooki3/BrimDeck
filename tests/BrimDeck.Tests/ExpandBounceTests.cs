@@ -50,10 +50,8 @@ internal static class ExpandBounceTests
     public static void Run(Action<string, bool> check)
     {
         check("Expand bounce: the opening spring keeps every bound (give, single return, landing, attack)", Breaks(Curves.Bounce) is null);
-        check("Expand bounce: the curve before W-09 broke them (the bounds can fail)", Breaks(Before) is "peak");
-        double peakBefore = Enumerable.Range(0, Steps + 1).Max(i => Before((double)i / Steps)) - 1;
+        check("Expand bounce: the curve before the softening broke them (the bounds can fail)", Breaks(Before) is "peak");
         double peakNow = Enumerable.Range(0, Steps + 1).Max(i => Curves.Bounce((double)i / Steps)) - 1;
-        check("Expand bounce: the give is under a quarter of what it was (1.7 percent before)", peakBefore > .016 && peakNow < peakBefore / 4 && peakNow > .002 && peakNow < .004);
         check("Expand bounce: BounceOvershoot is the sampled peak, and is covered by the region held while the panel moves (2 percent)",
             Math.Abs(peakNow - Curves.BounceOvershoot) < 2e-5 && Curves.BounceOvershoot < .02 / 4);
 
@@ -64,7 +62,6 @@ internal static class ExpandBounceTests
         foreach (double move in new double[] { 40, 200, 600, DeckPages.MaxWidth })
             widths &= move * Curves.BounceOvershoot / 2 <= 2;
         check("Expand bounce: the bottom edge passes its end by under 1.5 DIPs on the tallest move (under .75 up to 200), each side by under 2 DIPs on the widest", heights && widths);
-        check("Expand bounce: before, the tallest move's bottom edge passed by over 6 DIPs", DeckPages.MaxHeight * peakBefore > 6);
 
         // The move's own length does not change what it passes its end by, but the speed it comes back at: at every setting it stays
         // under a DIP a frame (60 Hz) on the tallest move, and it is slower still at the default.

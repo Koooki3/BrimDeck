@@ -58,7 +58,7 @@ public sealed partial class SettingsWindow
         var rows = new StackPanel();
         _partOptions.Clear();
         foreach (var part in S.CompactOrder(style))
-            rows.Children.Add(part switch { CompactPart.Equalizer => EqualizerRow(style, rows), CompactPart.Clock => ClockRow(style, rows), _ => PartRow(style, part, rows) });
+            rows.Children.Add(part switch { CompactPart.Equalizer => EqualizerRow(style, rows), CompactPart.Clock => ClockRow(style, rows), CompactPart.Rings => RingsRow(style, rows), _ => PartRow(style, part, rows) });
         UpdateDividers(rows);
         Group(rows);
     }
@@ -151,6 +151,16 @@ public sealed partial class SettingsWindow
         Show(_openParts.Contains(part));
         return item;
     }
+    // The quota rings: the switch turns them on or off; the option under the title writes each application's letter inside its ring.
+    private Border RingsRow(CompactStyle style, StackPanel rows)
+    {
+        bool notch = style == CompactStyle.Notch;
+        string letters = Loc.T("环内显示首字母", "Letter in the rings");
+        var options = new StackPanel();
+        options.Children.Add(Lighter(Toggle(letters, S.QuotaRingLetters, v => Change(s => s.QuotaRingLetters = v)), letters));
+        return OptionsPartRow(style, CompactPart.Rings, rows, Loc.T("配额环", "Quota rings"), Loc.T("配额环设置", "Quota ring settings"), S.ShowsSummary(style),
+            on => Change(s => { if (notch) s.NotchSummary = on; else s.CapsuleSummary = on; }), options);
+    }
     private Border EqualizerRow(CompactStyle style, StackPanel rows)
     {
         bool notch = style == CompactStyle.Notch;
@@ -161,18 +171,17 @@ public sealed partial class SettingsWindow
         options.Children.Add(Lighter(SliderRow(length, S.EqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
             v => Change(s => s.EqualizerBars = (int)v)), length));
         string way = Loc.T("方式", "Mode");
-        options.Children.Add(Lighter(EqualizerModeChoice(way), way));
+        options.Children.Add(Lighter(EqualizerModeChoice(way, S.EqualizerMode, v => Change(s => s.EqualizerMode = v)), way));
         options.Children.Add(Lighter(Row(color, ColorSwatches("EqualizerColor" + style, Loc.T("律动条颜色 ", "Equalizer color "), S.EqualizerColor, S.EqualizerCustomColor,
             UI.Brush(PanelTheme.Hex("equalizer")), (chosen, custom) => Change(s => { s.EqualizerColor = chosen; s.EqualizerCustomColor = custom; }))), color));
         return OptionsPartRow(style, CompactPart.Equalizer, rows, Loc.T("律动条", "Equalizer"), Loc.T("律动条设置", "Equalizer settings"), S.ShowsEqualizer(style),
             on => Change(s => { if (notch) s.NotchEqualizer = on; else s.CapsuleEqualizer = on; }), options);
     }
-    // How the equalizers show the sound, one choice for the collapsed and the expanded equalizer.
-    private FrameworkElement EqualizerModeChoice(string title, bool enabled = true) => MusicChoice(title, S.EqualizerMode,
-        [(EqualizerMode.Flow, Loc.T("流动", "Flow")), (EqualizerMode.Spectrum, Loc.T("频谱", "Spectrum"))], v => Change(s => s.EqualizerMode = v), enabled,
-        help: Loc.T("流动：声音的整体起伏从一端流向另一端。频谱：按音高拆成频段，每根条各取一段。",
-            "Flow: the sound's overall rise and fall runs from one end of the bars to the other. Spectrum: the sound is split into bands by pitch, and each bar takes one."));
-
+    // How an equalizer shows the sound; the collapsed and the expanded equalizer each have their own.
+    private FrameworkElement EqualizerModeChoice(string title, EqualizerMode selected, Action<EqualizerMode> change, bool enabled = true) => MusicChoice(title, selected,
+        [(EqualizerMode.Flow, Loc.T("流动", "Flow")), (EqualizerMode.Spectrum, Loc.T("频谱", "Spectrum"))], change, enabled,
+        help: Loc.T("流动：声音的起伏从左流到右。频谱：每根条显示一段音高，左低右高。",
+            "Flow: the rise and fall of the sound runs from left to right. Spectrum: each bar shows a range of pitch, low on the left."));
     // The clock's swatches but the gradient: the theme's color (theme), the presets, a custom color and the cover's. Used for the
     // collapsed equalizer and for the music page's equalizer and current lyric; save gets the chosen color and the custom one.
     private StackPanel ColorSwatches(string group, string label, ClockColor selected, string custom, Brush theme, Action<ClockColor, string> save)
@@ -236,7 +245,7 @@ public sealed partial class SettingsWindow
         equalizerColor.IsEnabled = lyricColor.IsEnabled = S.MusicPage;
         Group(Toggle(Loc.T("显示封面", "Show cover"), S.MusicPageCover, v => Change(s => s.MusicPageCover = v), S.MusicPage),
             Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars,
-            EqualizerModeChoice(Loc.T("律动方式", "Equalizer mode"), S.MusicPage), equalizerColor, lyricColor);
+            EqualizerModeChoice(Loc.T("律动方式", "Equalizer mode"), S.MusicEqualizerMode, v => Change(s => s.MusicEqualizerMode = v), S.MusicPage), equalizerColor, lyricColor);
     }
     // Operations only one player supports, grouped under that player's name.
     private void Players()
@@ -278,8 +287,12 @@ public sealed partial class SettingsWindow
     {
         var app = (App)Application.Current;
         string title = Loc.T("始终启用完整控制", "Always enable full control");
-        // A file another tool or an earlier change left changed is on as well: KuGou starts with full control either way.
-        bool changed = (app.Media is { } known ? known.KugouState : Native.KugouInstall.State()) == LibcefPatchState.Patched;
+        // The file is read when the page opens: here for the switch, and by media to change it again when an update left it
+        // original while the setting is on. A file another tool or an earlier change left changed is on as well: KuGou starts
+        // with full control either way.
+        var read = app.Media?.KugouState ?? Native.KugouInstall.State();
+        app.Media?.CheckKugouInstall(now: true);
+        bool changed = read == LibcefPatchState.Patched;
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.KugouFullControl || changed, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);
         var note = TextLine("", 11, TextTertiary); note.TextWrapping = TextWrapping.Wrap;
@@ -315,7 +328,7 @@ public sealed partial class SettingsWindow
         void Update()
         {
             var media = app.Media;
-            var state = media is not null ? media.KugouState : Native.KugouInstall.State();
+            var state = media is not null ? media.KugouState ?? read : Native.KugouInstall.State();
             bool working = busy || media is { RestartingKugou: true };
             bool supported = state is LibcefPatchState.Original or LibcefPatchState.Patched or LibcefPatchState.Partial;
             toggle.IsEnabled = supported && !working && S.MusicPage;
@@ -347,7 +360,10 @@ public sealed partial class SettingsWindow
     {
         var app = (App)Application.Current;
         string title = Loc.T("始终启用完整控制", "Always enable full control");
-        bool changed = (app.Media is { } known ? known.NeteasePatchState : Native.NeteaseInstall.State()) == LibcefPatchState.Patched;
+        // Read when the page opens, as KuGou's.
+        var read = app.Media?.NeteasePatchState ?? Native.NeteaseInstall.State();
+        app.Media?.CheckNeteaseFile();
+        bool changed = read == LibcefPatchState.Patched;
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NeteaseFullControl || changed, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);
         var note = TextLine("", 11, TextTertiary); note.TextWrapping = TextWrapping.Wrap;
@@ -383,11 +399,11 @@ public sealed partial class SettingsWindow
         void Update()
         {
             var media = app.Media;
-            var state = media is not null ? media.NeteasePatchState : Native.NeteaseInstall.State();
+            var state = media is not null ? media.NeteasePatchState ?? read : Native.NeteaseInstall.State();
             bool working = busy || media is { RestartingNetease: true };
             bool supported = state is LibcefPatchState.Original or LibcefPatchState.Patched or LibcefPatchState.Partial;
-            // With media on, the source reads the file state only while the setting is on, so a null state there does not mean "not
-            // installed"; media.NeteaseInstalled answers that. With media off, the state read above is null only when not installed.
+            // With media on, a null state there may only mean the source has not read the file yet; media.NeteaseInstalled
+            // answers whether it is installed. With media off, the state read above is null only when not installed.
             bool installed = media is not null ? media.NeteaseInstalled : state is not null;
             toggle.IsEnabled = (supported || state is null && installed) && !working && S.MusicPage;
             string? error = working ? null : failure;

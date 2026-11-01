@@ -359,6 +359,8 @@ internal sealed class ProcessCard : Border
     private readonly Image _icon;
     private readonly Button _switch;
     private string? _executable;
+    private const long WindowCheck = 3000;
+    private long _windowCheckedAt;
     public string Id { get; private set; } = "";
     private string _spoken = "";
     // The app's window was brought to the front from the card.
@@ -415,8 +417,13 @@ internal sealed class ProcessCard : Border
     {
         Id = sample.Id;
         // The button only for an app that has a window to show: not for background processes or an app left in the tray.
-        _executable = sample.AppKey ?? System.IO.Path.GetFileName(sample.Path);
-        _switch.Visibility = ProcessWindows.Find(_executable) != 0 ? Visibility.Visible : Visibility.Collapsed;
+        // Looked for as the card opens and then every few seconds, not with every reading: it lists every window.
+        string executable = sample.AppKey ?? System.IO.Path.GetFileName(sample.Path) ?? "";
+        if (executable != _executable || Environment.TickCount64 - _windowCheckedAt >= WindowCheck)
+        {
+            _executable = executable; _windowCheckedAt = Environment.TickCount64;
+            _switch.Visibility = ProcessWindows.Find(_executable) != 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
         _icon.Source = ProcessIcons.For(sample.Path); _icon.Visibility = _icon.Source is null ? Visibility.Collapsed : Visibility.Visible;
         _name.Text = sample.Name;
         _where.Text = sample.Path ?? (sample.AppKey ?? "") + " · PID " + sample.Pid;
@@ -467,6 +474,7 @@ internal static class ProcessIcons
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ImageSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
 
+    public static void Clear() => Cache.Clear();
     public static ImageSource? For(string? path) => !string.IsNullOrEmpty(path) && Cache.TryGetValue(path, out var icon) ? icon : null;
 
     public static void Prepare(string? path)
