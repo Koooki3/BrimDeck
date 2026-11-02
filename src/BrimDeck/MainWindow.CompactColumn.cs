@@ -31,20 +31,20 @@ public partial class MainWindow
         double scale = CompactMusicLayout.SafeScale(shape.Scale), dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         double column = SnapDown(ColumnWidth(shape), dpi), room = SnapDown(CompactContentWidth(shape), dpi);
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
+        bool cover = media && !PausedHides(PausedMusicHide.Cover), hideText = PausedHides(PausedMusicHide.Text);
         bool equalizer = CompactEqualizerShown;
-        bool notice = media && _trackNoticeUntil > DateTimeOffset.UtcNow;
+        bool notice = media && !hideText && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";
-        if (media)
+        if (media && !hideText)
         {
             if (notice || Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
             else if (Settings.MusicText == CompactMusicText.Lyrics)
             {
-                text = CurrentLyrics(_mediaTrack!).Current;
-                _compactLyric = text;
-                if (text.Length == 0) text = _mediaTrack!.Caption;
+                _compactLyric = CurrentLyrics(_mediaTrack!).Current;
+                text = CompactLyricText(_mediaTrack!, _compactLyric);
             }
         }
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? [.. Settings.EnabledApps.Where(HasQuotaReading)] : new List<AppEntry>();
+        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, 0, equalizer, Settings.EqualizerBars); CurrentCompactLayout = layout;
         // One strip per reading, each alone on its line and centred in it. The drives show no glyph here: each drive has a line with its
@@ -86,11 +86,11 @@ public partial class MainWindow
             line.Children.Add(element);
             lines.Add((line, height));
         }
-        if (media)
+        if (cover)
         {
-            var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius);
-            System.Windows.Automation.AutomationProperties.SetName(cover, _mediaTrack!.Caption);
-            Add(cover, layout.CoverSize);
+            var image = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius);
+            System.Windows.Automation.AutomationProperties.SetName(image, _mediaTrack!.Caption);
+            Add(image, layout.CoverSize);
         }
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
@@ -126,7 +126,7 @@ public partial class MainWindow
         // The column's width and length for the shape (CollapsedGeometry.Resolve): the widest fixed part, the readings up to the cap,
         // and every line with the gaps; the surface never shortens below its tallest line. Like the row, the track notice is left out.
         var stack = CompactColumn.Stack([.. lines.Select(line => line.Height)], gap);
-        double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (media ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, apps.Count > 0 ? layout.RingSize : 0],
+        double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (cover ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, apps.Count > 0 ? layout.RingSize : 0],
             strips.Select(strip => strip.PreferredWidth));
         double wanted = notice ? (double.IsNaN(_compactWanted) ? stack.Length : _compactWanted) : DevicePixels.Up(stack.Length, dpi);
         double required = lines.Count == 0 ? 0 : Math.Ceiling(lines.Max(line => line.Height));

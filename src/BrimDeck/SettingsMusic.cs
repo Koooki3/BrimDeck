@@ -229,9 +229,20 @@ public sealed partial class SettingsWindow
     private void MusicStyle()
     {
         SectionTitle(Loc.T("收起时", "When collapsed"));
-        Group(MusicChoice(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) }, v => Change(s => s.MusicText = v)),
+        // The instrumental choice belongs to the lyric, so it shows only while the middle text is the lyric.
+        var text = new List<FrameworkElement> { MusicChoice(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) },
+            v => { Change(s => s.MusicText = v); ShowPage(_page); }) };
+        if (S.MusicText == CompactMusicText.Lyrics)
+            text.Add(Toggle(Loc.T("纯音乐时显示歌名", "Show the title for instrumentals"), S.MusicInstrumentalTitle, v => Change(s => s.MusicInstrumentalTitle = v),
+                help: Loc.T("歌曲本身没有可靠的纯音乐标识，只能根据歌词内容推断，因此可能判断错误。",
+                    "Songs carry no reliable instrumental mark, so this is inferred from the lyrics and can be wrong.")));
+        Group([.. text,
+            MusicChoice(Loc.T("暂停时隐藏", "Hide while paused"), S.MusicPausedHide, new[] { (PausedMusicHide.None, Loc.T("不隐藏", "Nothing")), (PausedMusicHide.Text, Loc.T("文字", "Text")),
+                (PausedMusicHide.Cover, Loc.T("封面", "Cover")), (PausedMusicHide.Both, Loc.T("全部", "Both")) }, v => Change(s => s.MusicPausedHide = v),
+                help: Loc.T("音乐暂停时，收起状态下隐藏所选内容，恢复播放后重新显示。“文字”指按“中间文字”显示的歌名或歌词；“全部”指文字和封面，不包括律动条。",
+                    "While music is paused, the chosen part is hidden when collapsed and comes back when playback resumes. \"Text\" is the title or lyric shown by \"Middle text\"; \"Both\" is the text and the cover, not the equalizer.")),
             Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v)),
-            Toggle(Loc.T("显示封面", "Show cover"), S.MusicCompactCover, v => Change(s => s.MusicCompactCover = v)));
+            Toggle(Loc.T("显示封面", "Show cover"), S.MusicCompactCover, v => Change(s => s.MusicCompactCover = v))]);
         SectionTitle(Loc.T("展开时", "When expanded"));
         var bars = SliderRow(Loc.T("律动条长度", "Equalizer length"), S.MusicEqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
             v => Change(s => s.MusicEqualizerBars = (int)v));

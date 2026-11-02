@@ -418,18 +418,19 @@ internal sealed class SystemSampler : IDisposable
     }
 }
 
-// Per logical processor: usage, and the current frequency against the highest seen so far. Usage is the processor
-// utility Task Manager shows on Windows 10 and 11 (busy time scaled by the frequency, capped at 100 %); without
-// performance counters it falls back to busy time from the kernel.
+// Per logical processor: usage, and the current frequency against the highest seen so far. Usage is the share of time
+// the processor was busy, which Task Manager shows on Windows 11 since 24H2; the processor utility it showed before
+// scales that by the frequency and reads well above it while the cores boost. Without performance counters the same
+// busy time comes from the kernel.
 internal sealed class CpuProvider
 {
-    private const string UtilityPath = @"\Processor Information(*)\% Processor Utility";
+    private const string BusyPath = @"\Processor Information(*)\% Processor Time";
     private const string PerformancePath = @"\Processor Information(*)\% Processor Performance";
     private const string BasePath = @"\Processor Information(*)\Processor Frequency";
     private readonly PdhQuery? _pdh;
-    private readonly bool _utility, _frequency;
-    // Whether the utility counter gave readings last time; until it does, or once it stops, the kernel's times stand in.
-    private bool _utilityReads;
+    private readonly bool _busy, _frequency;
+    // Whether the busy-time counter gave readings last time; until it does, or once it stops, the kernel's times stand in.
+    private bool _busyReads;
     private readonly Dictionary<(int Group, int Number), (int Group, CoreTier Tier)> _kinds = CpuTopology.Read();
     private readonly Dictionary<int, double> _highest = [];
     private (long Idle, long Kernel, long User)[] _previousTimes = [];
@@ -437,14 +438,14 @@ internal sealed class CpuProvider
     public CpuProvider(PdhQuery? pdh)
     {
         _pdh = pdh;
-        _utility = pdh?.Add(UtilityPath) == true;
+        _busy = pdh?.Add(BusyPath) == true;
         _frequency = pdh?.Add(PerformancePath) == true & pdh?.Add(BasePath) == true;
     }
 
     public Reading<CpuSample> Sample(bool pdhCollected)
     {
-        // The kernel's times are only the fallback; while the utility counter gives readings they are not read at all.
-        var times = _utilityReads ? null : KernelTimes();
+        // The kernel's times are only the fallback; while the busy-time counter gives readings they are not read at all.
+        var times = _busyReads ? null : KernelTimes();
         var timeUsage = new Dictionary<int, double>();
         if (times is not null)
         {
@@ -452,25 +453,25 @@ internal sealed class CpuProvider
                 for (int i = 0; i < times.Length; i++) if (MonitorMetrics.Usage(_previousTimes[i], times[i]) is { } usage) timeUsage[i] = usage;
             _previousTimes = times;
         }
-        var utility = pdhCollected && _utility ? Processors(_pdh!.Read(UtilityPath)) : [];
-        _utilityReads = utility.Count > 0;
+        var busy = pdhCollected && _busy ? Processors(_pdh!.Read(BusyPath)) : [];
+        _busyReads = busy.Count > 0;
         IReadOnlyList<(string, double)> performanceValues = pdhCollected && _frequency ? _pdh!.Read(PerformancePath) : [];
         IReadOnlyList<(string, double)> nominalValues = pdhCollected && _frequency ? _pdh!.Read(BasePath) : [];
         var (performance, nominal) = (Processors(performanceValues), Processors(nominalValues));
 
         // The processors in their logical order. The kernel's times cover the first processor group only, so the counters
         // decide the list when they are there.
-        var processors = utility.Count > 0 ? utility.Keys.OrderBy(key => key).ToList()
+        var processors = busy.Count > 0 ? busy.Keys.OrderBy(key => key).ToList()
             : Enumerable.Range(0, times?.Length ?? 0).Select(index => (Group: 0, Number: index)).ToList();
-        if (processors.Count == 0 || utility.Count == 0 && timeUsage.Count == 0) return Reading<CpuSample>.Unavailable(Why.Waiting);
+        if (processors.Count == 0 || busy.Count == 0 && timeUsage.Count == 0) return Reading<CpuSample>.Unavailable(Why.Waiting);
         var counters = new Dictionary<int, int>();
         var cores = new List<CoreSample>(processors.Count);
         for (int logical = 0; logical < processors.Count; logical++)
         {
             var key = processors[logical];
             var (group, tier) = _kinds.TryGetValue(key, out var kind) ? kind : (0, CoreTier.Unknown);
-            double usage = utility.TryGetValue(key, out var percent) ? Math.Clamp(percent / 100, 0, 1)
-                : timeUsage.TryGetValue(key.Number, out var busy) && key.Group == 0 ? busy : 0;
+            double usage = busy.TryGetValue(key, out var percent) ? Math.Clamp(percent / 100, 0, 1)
+                : timeUsage.TryGetValue(key.Number, out var kernelBusy) && key.Group == 0 ? kernelBusy : 0;
             Reading<double> frequency = Reading<double>.Unavailable(_frequency ? Why.NoFrequency : Why.NoCounters);
             double? top = null;
             if (performance.TryGetValue(key, out var share) && nominal.TryGetValue(key, out var baseMhz) && baseMhz > 0)

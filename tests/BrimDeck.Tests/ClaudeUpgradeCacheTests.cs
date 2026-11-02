@@ -82,7 +82,7 @@ static class ClaudeUpgradeCacheTests
         check("Claude upgrade cache: the quota interface was asked", handler.Requests > 0);
         check("Claude upgrade cache: limited right after the upgrade, the reading kept by the earlier version is shown (two quotas, from the file)",
             claude.Quotas.Count == 2 && claude.Quotas.Any(q => q.Minutes == 300 && q.UsedPercent == 34) && claude.IsStale);
-        // The collapsed ring is drawn for an application that has a reading (MainWindow.HasQuotaReading).
+        // The application has a reading, so its collapsed ring shows it.
         var entry = settings.EnabledApps.Single();
         check("Claude upgrade cache: the application has a reading, so the collapsed row draws its ring", DashboardUsage.Quota(entry, snapshots).Metrics.Count > 0);
         // The interface answers: the reading is kept under the organization's name, and the earlier version's no longer stands for it.

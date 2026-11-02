@@ -139,7 +139,7 @@ public sealed partial class LyricsService
         {
             var lyrics = await find(track, token);
             if (lyrics.Synced && lyrics.Lines.Count > 0) return lyrics;
-            if (plain.Lines.Count == 0 && lyrics.Lines.Count > 0) plain = lyrics;
+            if (plain.Lines.Count == 0 && !plain.Instrumental && (lyrics.Lines.Count > 0 || lyrics.Instrumental)) plain = lyrics;
         }
         return plain;
     }

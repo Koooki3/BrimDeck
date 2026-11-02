@@ -296,6 +296,9 @@ public partial class MainWindow
     // The expanded page and the compact text choose lyrics independently; either one is enough to look them up.
     private bool CompactLyrics => Settings.ShowsMusic(Settings.Style) && Settings.MusicText == CompactMusicText.Lyrics;
     private bool NeedsLyrics => Settings.MusicPage && Settings.LyricsEnabled || CompactLyrics;
+    // While the song is paused the collapsed title or lyric, the cover, or both give way (DeckSettings.MusicPausedHide); the state
+    // change builds the row again.
+    private bool PausedHides(PausedMusicHide part) => _mediaTrack?.State == MediaState.Paused && (Settings.MusicPausedHide == part || Settings.MusicPausedHide == PausedMusicHide.Both);
     private string LyricsKey(MediaTrack? track) => NeedsLyrics && track is not null
         ? string.Join("\n", track.Id, track.SongKey, track.SongId, track.EmbeddedLyrics) : "";
     private async void UpdateLyrics()
@@ -998,12 +1001,12 @@ public partial class MainWindow
             }
             for (int i = 0; i < _lyricsBelow.Length; i++) _lyricsBelow[i].Text = i < window.After.Count ? window.After[i] : "";
         }
-        if (CompactLyrics && _compactLyric != line.Current)
+        if (CompactLyrics && !PausedHides(PausedMusicHide.Text) && _compactLyric != line.Current)
         {
             _compactLyric = line.Current;
             if (_trackNoticeUntil <= DateTimeOffset.UtcNow)
             {
-                if (_compactMarquee is not null) _compactMarquee.Text = line.Current.Length > 0 ? line.Current : track.Caption;
+                if (_compactMarquee is not null) _compactMarquee.Text = CompactLyricText(track, line.Current);
                 else RenderCompact();
             }
         }
@@ -1022,6 +1025,9 @@ public partial class MainWindow
         if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return ("", track.CurrentLyric ?? "", "");
         return _lyrics.At(track, DateTimeOffset.UtcNow);
     }
+    // The collapsed lyric: the line, or the title without one, and for an instrumental when chosen (DeckSettings.MusicInstrumentalTitle).
+    private string CompactLyricText(MediaTrack track, string line)
+        => line.Length == 0 || Settings.MusicInstrumentalTitle && _lyrics.Instrumental ? track.Caption : line;
     private LyricWindow CurrentLyricWindow(MediaTrack track, int before, int after)
     {
         if (!NeedsLyrics || track.State == MediaState.Stopped) return LyricWindow.Empty;
@@ -1037,23 +1043,20 @@ public partial class MainWindow
         double scale = CompactMusicLayout.SafeScale(shape.Scale);
         double contentWidth = CompactContentWidth(shape);
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
-        bool showCover = Settings.MusicCompactCover;
+        bool showCover = Settings.MusicCompactCover && !PausedHides(PausedMusicHide.Cover), hideText = PausedHides(PausedMusicHide.Text);
         bool equalizer = CompactEqualizerShown;
-        bool notice = media && _trackNoticeUntil > DateTimeOffset.UtcNow;
+        bool notice = media && !hideText && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";
-        if (media)
+        if (media && !hideText)
         {
             if (notice || Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
             else if (Settings.MusicText == CompactMusicText.Lyrics)
             {
-                text = CurrentLyrics(_mediaTrack!).Current;
-                _compactLyric = text;
-                if (text.Length == 0) text = _mediaTrack!.Caption;
+                _compactLyric = CurrentLyrics(_mediaTrack!).Current;
+                text = CompactLyricText(_mediaTrack!, _compactLyric);
             }
         }
-        // A quota ring with nothing read yet would be an empty grey circle that says nothing: it is left out until its quota has
-        // a reading (QuotaRings).
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? [.. Settings.EnabledApps.Where(HasQuotaReading)] : new List<AppEntry>();
+        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
         // The clock keeps its own width; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         // The system readings offer each chosen reading, in the order of the settings' table and in the scheme's colors; the row
@@ -1073,8 +1076,8 @@ public partial class MainWindow
         CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
         // and the lyric's changing length are left out, so the width changes only when the content itself does.
-        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count(HasQuotaReading) : 0;
-        bool steadyText = media && Settings.MusicText != CompactMusicText.None;
+        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
+        bool steadyText = media && !hideText && Settings.MusicText != CompactMusicText.None;
         double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi), dpi,
             equalizer, Settings.EqualizerBars, showCover);
         // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
@@ -1179,8 +1182,6 @@ public partial class MainWindow
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }
-    // Whether an application's quota has anything read, which its collapsed ring needs.
-    private bool HasQuotaReading(AppEntry entry) => DashboardUsage.Quota(entry, Snapshots).Metrics.Count > 0;
     // One ring per application: the highest used share among its quotas, with every quota in the tooltip, and the application's
     // letter inside when the setting asks for it, so the rings are told apart by more than their color.
     private (double Used, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>

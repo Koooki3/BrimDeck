@@ -658,7 +658,7 @@ public sealed partial class SettingsWindow : Window
                     s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;s.MonitorPower=defaults.MonitorPower;break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
-                case 5:s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicEqualizerMode=defaults.MusicEqualizerMode;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;
+                case 5:s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicEqualizerMode=defaults.MusicEqualizerMode;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicPausedHide=defaults.MusicPausedHide;s.MusicInstrumentalTitle=defaults.MusicInstrumentalTitle;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;
                     s.MusicPageEqualizerColor=defaults.MusicPageEqualizerColor;s.MusicPageEqualizerCustomColor=defaults.MusicPageEqualizerCustomColor;s.MusicLyricColor=defaults.MusicLyricColor;s.MusicLyricCustomColor=defaults.MusicLyricCustomColor;break;
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;s.NeteaseAutoFullControl=defaults.NeteaseAutoFullControl;s.AppleMusicFullControl=defaults.AppleMusicFullControl;break;
                 // The default theme, with its own colors and suggested clock, the clock reset as the collapsed page resets it; the
@@ -684,11 +684,7 @@ public sealed partial class SettingsWindow : Window
     private void Interaction()
     {
         SectionTitle(Loc.T("悬停与动画", "Hover and animation"));
-        // motion-review F20: the length covers the panel's expanding and collapsing and the dynamic notices; hover and press
-        // feedback keep their own pace (C5).
-        var duration = SliderRow(Loc.T("展开与收起动画时长", "Expand and collapse duration"), S.AnimationDuration, AnimationLength.Min, AnimationLength.Max, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value),
-            Loc.T("面板展开、收起和灵动提示出现、收回的动画时长。时间越短，动画越快；收起比展开略快。悬停、按压等反馈有各自固定的节奏，不受此项影响。",
-                "How long the panel takes to expand and collapse, and live notices to appear and go back. The shorter the time, the faster the animation; collapsing is a little quicker than expanding. Hover and press feedback keep their own pace and are not affected."));
+        var duration = SliderRow(Loc.T("展开与收起动画时长", "Expand and collapse duration"), S.AnimationDuration, AnimationLength.Min, AnimationLength.Max, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value));
         void EnableDuration(bool enabled)
         {
             foreach (var control in duration.Children.OfType<FrameworkElement>().Where(control => Grid.GetColumn(control) > 0)) control.IsEnabled = enabled;
@@ -702,9 +698,7 @@ public sealed partial class SettingsWindow : Window
             SliderRow(Loc.T("收起延迟", "Collapse delay"), S.CloseDelay, 0, 2000, 50, Loc.T("毫秒", "ms"), value => Change(s => s.CloseDelay = (int)value),
                 Loc.T("鼠标离开 BrimDeck 的展开面板范围多久后，开始收起。0 毫秒表示立即开始收起。",
                     "How long after the pointer leaves BrimDeck's expanded panel it starts to collapse. 0 ms collapses immediately.")),
-            Toggle(Loc.T("启用动画", "Animations"), S.Animations, value => { Change(s => s.Animations = value); EnableDuration(value); },
-                help: Loc.T("开启后，BrimDeck 的展开与收起、灵动提示、换页、悬停与按压反馈和主题动效都有过渡动画；关闭后一切直接切换。Windows 关闭了动画效果或处于高对比度时，同样不播放动画。",
-                    "When on, BrimDeck animates expanding and collapsing, live notices, page switches, hover and press feedback and the theme's motion; when off, everything changes at once. Nothing is animated either while Windows' animation effects are off or in high contrast.")), duration);
+            Toggle(Loc.T("启用动画", "Animations"), S.Animations, value => { Change(s => s.Animations = value); EnableDuration(value); }), duration);
     }
 
     private void WindowRules()
@@ -787,24 +781,16 @@ public sealed partial class SettingsWindow : Window
     {
         foreach (var (title, column, help) in columns)
         {
-            var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Center };
-            var label = TextLine(title, TextSize.Caption, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center; heading.Children.Add(label);
+            var label = TextLine(title, TextSize.Caption, TextSecondary);
+            FrameworkElement heading = label;
             if (help.Length > 0)
             {
                 // The mark sits close to its own label so that, in the narrow color columns, each label and mark read as one pair.
-                // Drawn as a vector like the row labels' mark, so the "i" is centred exactly rather than by font metrics.
-                // Sized to the label's glyph height and nudged down half a unit: measured on the rendered header, the
-                // centred mark otherwise sits higher than the Chinese label beside it. The box leaves half a unit around the
-                // circle's stroke: a box exactly the circle's size clips the outer edge of the stroke on all four sides.
-                var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
-                // The 12 DIP mark takes the pointer 24 DIP square (SW-08); the negative margin keeps its place.
-                var info = new HelpMark { Width = 24, Height = 24, Background = Brushes.Transparent, Margin = new Thickness(2.5 - 6, -6, -6, -6),
-                    VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
-                    FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
-                AttachSettingHelp(info, title, () => help);
-                heading.Children.Add(info);
+                // The 24 DIP pointer box of SmallHelp keeps its negative margin, so the mark sits 2.5 DIP after the label.
+                var info = SmallHelp(title, () => help); info.Margin = new Thickness(2.5 - 6, -6, -6, -6);
+                heading = new HelpHeading(label, info);
             }
+            heading.VerticalAlignment = VerticalAlignment.Center; heading.HorizontalAlignment = HorizontalAlignment.Center;
             Grid.SetColumn(heading, column); headings.Children.Add(heading);
         }
     }
