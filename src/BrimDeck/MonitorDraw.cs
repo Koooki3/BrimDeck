@@ -251,10 +251,13 @@ internal sealed class DrawingCache<TKey> where TKey : struct, IEquatable<TKey>
 {
     private TKey _key;
     private DrawingGroup? _drawing;
+    // The text in it was laid out in the font of its day: another font draws it again.
+    private int _font = -1;
 
     public Drawing Get(TKey key, Action<DrawingContext> draw)
     {
-        if (_drawing is not null && key.Equals(_key)) return _drawing;
+        if (_drawing is not null && key.Equals(_key) && _font == Fonts.Version) return _drawing;
+        _font = Fonts.Version;
         var group = new DrawingGroup();
         using (var context = group.Open()) draw(context);
         group.Freeze();

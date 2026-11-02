@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using BrimDeck.Core;
 
@@ -66,18 +68,64 @@ internal static class Fonts
         }
     }
 
-    // Makes the saved family current. False when it already was (nothing is published or raised then).
+    // Makes the saved family current. False when it already was (nothing is published or raised then). Everything already built
+    // follows: the resources are published again, and a control that was given a family of its own when it was made (settings
+    // window, small windows, notices) gets the new one in its place (Retarget).
     public static bool Use(string? name)
     {
         var clean = UiFonts.Normalize(name);
+        Dictionary<string, FontFamily> follow = [];
         lock (Sync)
         {
             if (clean == _custom) return false;
+            var before = Enum.GetValues<UiFontRole>().ToDictionary(role => role, role => UiFonts.Chain(role, _custom));
             _custom = clean; Array.Clear(Families); Faces.Clear(); Version++;
+            foreach (var (role, chain) in before)
+                if (!string.Equals(chain, UiFonts.Chain(role, clean), StringComparison.Ordinal)) follow[chain] = Of(role);
         }
-        if (Application.Current is { } app) Publish(app.Resources);
+        if (Application.Current is { } app) { Publish(app.Resources); Retarget(app, follow); }
         Changed?.Invoke();
         return true;
+    }
+
+    // Walks every window (visual and logical trees, and the menus and tips hung on the elements) and puts the new family where the
+    // old text family was set on the element itself; what is bound to a resource follows by itself. Layout and drawing are asked
+    // again, since both were made with the old family's metrics.
+    internal static void Retarget(Application app, IReadOnlyDictionary<string, FontFamily> follow)
+    {
+        var seen = new HashSet<DependencyObject>(ReferenceEqualityComparer.Instance);
+        var pending = new Stack<DependencyObject>();
+        foreach (Window window in app.Windows) pending.Push(window);
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            if (!seen.Add(node)) continue;
+            if (node.ReadLocalValue(TextElement.FontFamilyProperty) is FontFamily { Source: { } source } && follow.TryGetValue(source, out var next))
+                node.SetValue(TextElement.FontFamilyProperty, next);
+            if (node is UIElement element) { element.InvalidateMeasure(); element.InvalidateVisual(); }
+            if (node is Visual or System.Windows.Media.Media3D.Visual3D)
+                for (int i = VisualTreeHelper.GetChildrenCount(node) - 1; i >= 0; i--) pending.Push(VisualTreeHelper.GetChild(node, i));
+            if (node is FrameworkElement or FrameworkContentElement)
+                foreach (var child in LogicalTreeHelper.GetChildren(node)) if (child is DependencyObject logical) pending.Push(logical);
+            if (node is FrameworkElement { ContextMenu: { } menu }) pending.Push(menu);
+            if (node is FrameworkElement { ToolTip: DependencyObject tip }) pending.Push(tip);
+        }
+    }
+
+    // The families installed on this machine, by the name each is called by (the English one, which any language finds), for the
+    // font picker. A walk over the system's fonts: made when the picker opens, not kept. Symbol fonts are left out.
+    public static List<string> Installed()
+    {
+        var names = new SortedSet<string>(StringComparer.CurrentCultureIgnoreCase);
+        foreach (var family in System.Windows.Media.Fonts.SystemFontFamilies)
+        {
+            string? name = null;
+            foreach (var (language, value) in family.FamilyNames)
+                if (language == System.Windows.Markup.XmlLanguage.GetLanguage("en-us")) { name = value; break; }
+            name ??= family.FamilyNames.Values.FirstOrDefault() ?? family.Source;
+            if (UiFonts.Normalize(name).Length > 0 && !UiFonts.IsSymbolFamily(name)) names.Add(name);
+        }
+        return [.. names];
     }
 
     // Puts the current text families into a resource dictionary (the application's), where DynamicResource finds them.

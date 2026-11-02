@@ -273,6 +273,8 @@ public partial class App : Application
         bool styleChanged = settings.Style != Settings.Style;
         var previousTheme = Settings.PanelTheme;
         settings.Normalize(); Settings = settings;
+        // A different interface font is published at once and reaches every window already made (Fonts.Use); the panels below lay out again with it.
+        UseFont();
         ApplyHotkeys();
         ApplyTray();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).

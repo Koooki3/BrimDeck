@@ -60,6 +60,17 @@ public static class UiFonts
         return clean;
     }
 
+    // Families made of symbols and icons, not letters: text drawn in one would be boxes and pictures, so the picker does not list them.
+    public static bool IsSymbolFamily(string? name)
+    {
+        var clean = Normalize(name);
+        return clean.StartsWith("Wingdings", StringComparison.OrdinalIgnoreCase) || clean.StartsWith("Webdings", StringComparison.OrdinalIgnoreCase) ||
+            clean.StartsWith("Marlett", StringComparison.OrdinalIgnoreCase) || clean.StartsWith("Segoe MDL2", StringComparison.OrdinalIgnoreCase) ||
+            clean.StartsWith("Segoe Fluent Icons", StringComparison.OrdinalIgnoreCase) || clean.StartsWith("HoloLens MDL2", StringComparison.OrdinalIgnoreCase) ||
+            clean.Equals("Symbol", StringComparison.OrdinalIgnoreCase) || clean.StartsWith("Bookshelf Symbol", StringComparison.OrdinalIgnoreCase) ||
+            clean.StartsWith("MT Extra", StringComparison.OrdinalIgnoreCase);
+    }
+
     // The chain a role is drawn in: the default one with no font chosen, otherwise the chosen family followed by the default
     // chain (without a repeat of the chosen family if the chain already names it).
     public static string Chain(UiFontRole role, string? custom)
