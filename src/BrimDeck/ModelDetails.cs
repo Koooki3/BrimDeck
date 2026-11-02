@@ -381,14 +381,7 @@ public partial class MainWindow
                     !header && (total && i >= 2 || !total && i == 0 || i == widths.Length - 1) ? FontWeights.SemiBold : FontWeights.Normal);
                 text.TextAlignment = i >= 2 ? TextAlignment.Right : TextAlignment.Left;
                 FrameworkElement cell = text;
-                if (i == 0 && provider is { } id)
-                {
-                    var box = new Grid(); box.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(13) }); box.ColumnDefinitions.Add(new ColumnDefinition());
-                    // Match the visible Latin glyphs, whose center sits just below the font's line-box center.
-                    box.Children.Add(new Ellipse { Width = 7, Height = 7, Fill = UI.Brush(StatisticsTheme(id)), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center,
-                        RenderTransform = new TranslateTransform(0, 1) });
-                    Grid.SetColumn(text, 1); box.Children.Add(text); cell = box;
-                }
+                if (i == 0 && provider is { } id) cell = new CapDot(text, UI.Brush(StatisticsTheme(id)), 7, 13);
                 Grid.SetColumn(cell, i * 2); row.Children.Add(cell);
             }
             return row;
