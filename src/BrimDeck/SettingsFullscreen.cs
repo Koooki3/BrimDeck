@@ -96,6 +96,10 @@ public sealed partial class SettingsWindow
         void CaptureHeight()
         {
             if (list.Visibility != Visibility.Visible) return;
+            // The measurement is posted after the row is laid out, and the page may have rebuilt the list since (removing
+            // an app). This closure's slot then belongs to a list that is no longer shown: measuring it would write that
+            // list's height into the shared reservation and bring back the blank block for the new, shorter list.
+            if (_exceptionsHost is not { } host || !host.IsAncestorOf(space)) return;
             // Measure the list on its own: with the reserved height still on the slot, ActualHeight would report that
             // height back and the reservation could never shrink after apps were removed.
             space.MinHeight = 0;
@@ -140,8 +144,7 @@ public sealed partial class SettingsWindow
         // The buttons handle their own clicks; a click anywhere else on the row opens or closes it, as the clock row does.
         header.MouseLeftButtonDown += (_, e) => { if (arrow is not null) Flip(); e.Handled = true; };
         Show(_exceptionsOpen && n > 0);
-        var row = new StackPanel(); row.Children.Add(header); row.Children.Add(space); return row;
-    }
+        var row = new StackPanel(); row.Children.Add(header); row.Children.Add(space); return row;    }
 
     // One app under the row: its icon, the name its executable gives, the file name, and under them one behaviour pick
     // per context, each offering the global rules' three behaviours and a fourth choice that follows them.
