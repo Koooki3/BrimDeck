@@ -468,6 +468,7 @@ internal sealed class CpuProvider
     private bool _busyReads;
     private readonly Dictionary<(int Group, int Number), (int Group, CoreTier Tier)> _kinds = CpuTopology.Read();
     private readonly Dictionary<int, double> _highest = [];
+    private readonly ProcessorShares _shares = new();
     private (long Idle, long Kernel, long User)[] _previousTimes = [];
     private Reading<CpuSample> _last = Reading<CpuSample>.Unavailable(Why.Waiting);
 
@@ -489,7 +490,7 @@ internal sealed class CpuProvider
                 for (int i = 0; i < times.Length; i++) if (MonitorMetrics.Usage(_previousTimes[i], times[i]) is { } usage) timeUsage[i] = usage;
             _previousTimes = times;
         }
-        var busy = pdhCollected && _busy ? Processors(_pdh!.Read(BusyPath)) : [];
+        var busy = _shares.Fill(pdhCollected && _busy ? Processors(_pdh!.Read(BusyPath)) : []);
         _busyReads = busy.Count > 0;
         IReadOnlyList<(string, double)> performanceValues = pdhCollected && _frequency ? _pdh!.Read(PerformancePath) : [];
         IReadOnlyList<(string, double)> nominalValues = pdhCollected && _frequency ? _pdh!.Read(BasePath) : [];
