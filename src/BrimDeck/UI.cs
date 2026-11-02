@@ -135,6 +135,7 @@ internal static class UI
         if (cost.IsEstimate && pricing.UpdatedAt is { } time)
             lines.Add(Loc.T($"价格更新 {time.LocalDateTime:MM-dd HH:mm}", $"Prices updated {time.LocalDateTime:MM-dd HH:mm}") +
                 (pricing.IsStale || pricing.LastError is not null ? Loc.T(" · 缓存", " · cached") : ""));
+        if (cost.Fitted > 0) lines.Add(Loc.T($"{cost.Fitted} 条记录按每周已用金额推算", Loc.Count(cost.Fitted, "record is", "records are") + " priced from the weekly amount used"));
         if (cost.Unpriced > 0) lines.Add(Loc.T($"{cost.Unpriced} 条记录未计价", Loc.Count(cost.Unpriced, "record has", "records have") + " no price"));
         return lines.Count == 0 ? null : string.Join("\n", lines);
     }

@@ -304,6 +304,7 @@ public partial class MainWindow
         }
         string note = recovery switch
         {
+            { Status: RecoveryStatus.Recovered } when record.Entries.All(t => t.FittedCost) => Loc.T("USD / 百万 Token · 根据每周已用金额推算", "USD per million tokens · worked out from the weekly amount used"),
             { Status: RecoveryStatus.Recovered } => Loc.T("USD / 百万 Token · 根据接口金额推算", "USD per million tokens · worked out from the API amounts"),
             { Status: RecoveryStatus.TooFewRecords, Records: var count } => Loc.T($"所选时段只有 {count} 条记录，不足以推算单价",
                 $"The selected period has only {Loc.Count(count, "record", "records")}, too few to work out the prices"),
