@@ -224,7 +224,7 @@ public partial class MainWindow
         // Opening marks the list seen before it draws the page (SetExpanded): marked here afterwards, the page was built a second
         // time in the middle of the opening.
         _keepPageOnOpen = true;
-        try { OpenFromHotkey(byKey); } finally { _keepPageOnOpen = false; }
+        try { OpenFromHotkey(byKey: byKey); } finally { _keepPageOnOpen = false; }
     }
 
     private void NoticesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Notices);

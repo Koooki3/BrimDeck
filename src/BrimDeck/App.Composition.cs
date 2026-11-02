@@ -74,7 +74,7 @@ public partial class App
     internal int SurfaceRebuilds { get; private set; }
 
     private void MakeTray()
-        => _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden)
+        => _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden, ToggleClickThrough, () => Settings.ClickThrough)
         {
             NoticeEntry = () => !Settings.NoticesEnabled ? null
                 : Notices.Paused ? (Loc.T("恢复通知提醒", "Resume notices"), () => Notices.Pause(null))

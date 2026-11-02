@@ -140,7 +140,7 @@ internal sealed class MonitorStrip : FrameworkElement
         return width;
     }
 
-    private double ColumnsWidth(int cores) => Math.Min(Math.Round(56 * _scale), cores * Math.Max(1.5, 2 * _scale) + (cores - 1) * Math.Max(.5, _scale));
+    private double ColumnsWidth(int cores) => CompactMonitor.CoreColumns(cores, _scale).Width;
 
     private CompactMonitorItems Shown => _shown;
     // Rounded up to whole device pixels: the row rounds the region it gives down to them, which must not drop a reading.
@@ -347,21 +347,12 @@ internal sealed class MonitorStrip : FrameworkElement
     {
         double height = Math.Round(14 * _scale), top = Math.Round(center - height / 2);
         if (cpu is null || cpu.Cores.Count == 0) { drawing.DrawRoundedRectangle(UI.Brush(UI.Fill), null, new Rect(x, top, width, height), 2, 2); return; }
-        int cores = cpu.Cores.Count, groups = Math.Max(1, cpu.GroupCount);
-        double gap = Math.Max(.5, _scale);
-        // With more cores than columns fit (CompactSpacing.CoreColumns), neighbours share a column, which shows the busiest of them.
-        int count = CompactSpacing.CoreColumns(cores, width, gap);
-        double column = Math.Max(1, (width - (count - 1) * gap) / count);
+        int count = cpu.Cores.Count, groups = Math.Max(1, cpu.GroupCount);
+        var (column, gap, _) = CompactMonitor.CoreColumns(count, _scale);
         for (int i = 0; i < count; i++)
         {
-            var (first, end) = CompactSpacing.CoreRange(i, count, cores);
-            var core = cpu.Cores[first];
-            double usage = EasedUsage(first, core, now);
-            for (int j = first + 1; j < end; j++)
-            {
-                if (cpu.Cores[j].Usage > core.Usage) core = cpu.Cores[j];
-                usage = Math.Max(usage, EasedUsage(j, cpu.Cores[j], now));
-            }
+            var core = cpu.Cores[i];
+            double usage = EasedUsage(i, core, now);
             double cx = x + i * (column + gap), fill = Math.Max(1.5, usage * height);
             drawing.DrawRectangle(UI.Brush(UI.Fill), null, new Rect(cx, top, column, height));
             drawing.DrawRectangle(UI.Brush(CoreColor(core.Group, groups, ReadingLevels.OfShare(core.Usage))), null, new Rect(cx, top + height - fill, column, fill));

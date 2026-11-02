@@ -15,7 +15,7 @@ namespace BrimDeck;
 // their lines follow NoticeCenter.Changed without rebuilding the page.
 public sealed partial class SettingsWindow
 {
-    private const int NoticesSettingsPage = 10;
+    private const int NoticesSettingsPage = 12;
     private readonly List<Action> _noticeStatusLines = [];
 
     private void NoticesPage()

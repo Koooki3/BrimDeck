@@ -40,8 +40,11 @@ public partial class MainWindow
         bool shown = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
         bool page = shown && !ScreenOff;
         // A row whose only chosen reading is the battery reads the devices (UpdateDevicesDemand), not the system. A row whose
-        // chosen readings all wait for their first figures shows nothing, yet must be read for them (StripAwaits).
-        bool strip = !_expanded && (Strips.Any(reading => reading.Showing(Eased.Now) && reading.NeedsSystem) || StripAwaits()) && IsVisible && !IsSuppressed && !ScreenOff && _alert is null && EffectiveStyle != CompactStyle.Line;
+        // chosen readings all wait for their first figures shows nothing, yet must be read for them (StripAwaits). A row only
+        // hidden for now (the panel open, or a notice in its place, which leaves no row built: RenderCompact) keeps its
+        // temperatures read while the sampler runs (App.UpdateMonitorExtras).
+        bool heldStrip = (Strips.Any(reading => reading.NeedsSystem) || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !ScreenOff && EffectiveStyle != CompactStyle.Line;
+        bool strip = heldStrip && !_expanded && _alert is null && (Strips.Any(reading => reading.Showing(Eased.Now) && reading.NeedsSystem) || StripAwaits());
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -52,7 +55,7 @@ public partial class MainWindow
         // The power is read for a page that shows its line (a page too small for it, or with the setting off, reads none of it).
         bool power = page && Settings.MonitorPower && _monitorView?.ShowsPower == true;
         _powerPage = power;
-        _app.PresentMonitor(this, page, strip, power);
+        _app.PresentMonitor(this, page, strip, power, heldStrip);
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);

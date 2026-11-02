@@ -122,8 +122,9 @@ public partial class MainWindow
     {
         // Opened for a page of its own (the recent notices from a notice), the panel keeps that page.
         if (_keepPageOnOpen) return;
-        var wanted = DeckPages.Opening(Settings.DefaultPage) ?? _page;
-        if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: false);
+        // A page hotkey opens on its page and remembers it, as choosing it on the page switch does (MainWindow.Hotkeys.cs).
+        var wanted = _hotkeyPage ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
+        if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: _hotkeyPage is not null);
     }
     // The page switch moves as one: the page left behind leaves as a picture toward the side it is left for, while the next
     // page is built at once and comes in from the other side and the panel takes its size (PageHandover).
@@ -475,7 +476,7 @@ public partial class MainWindow
         bool animate = Soft.Enabled;
         // Without the cover the lyrics, or a message, take a column of their own; with neither the titles have the width.
         bool lyricColumn = !Settings.MusicPageCover && (hasLyrics || message.Length > 0);
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicPageEqualizerColor}|{Settings.MusicPageEqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
@@ -561,7 +562,7 @@ public partial class MainWindow
             }
             header.Children.Add(titles);
             if (shown && songChanging) RiseIn(titles);
-            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = equalizerWidth, Height = c.Equalizer, Color = PageEqualizerColor, HorizontalAlignment = HorizontalAlignment.Right,
+            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = equalizerWidth, Height = c.Equalizer, Color = EqualizerColor, HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, (c.TitleLine - c.Equalizer) / 2, 0, 0) };
             Grid.SetColumn(_musicEqualizer, 1); header.Children.Add(_musicEqualizer); right.Children.Add(header);
 
@@ -817,7 +818,7 @@ public partial class MainWindow
         }
         if (columns.ShowEqualizer)
         {
-            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = MusicEqualizerWidth(c), Height = c.Equalizer, Color = PageEqualizerColor,
+            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = MusicEqualizerWidth(c), Height = c.Equalizer, Color = EqualizerColor,
                 HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, columns.EqualizerGap, 0, 0) };
             info.Children.Add(_musicEqualizer);
         }
@@ -1154,7 +1155,7 @@ public partial class MainWindow
                 case CompactPart.Equalizer:
                     // The bars' levels carry over from the row before (EqualizerBars), so rebuilding the row while resizing never resets them.
                     _compactEqualizer = new MusicEqualizer { Bars = Settings.EqualizerBars, Levels = _compactBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar,
-                        Color = CompactEqualizerColor };
+                        Color = EqualizerColor };
                     element = CompactRegion(_compactEqualizer, room, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Clock:
                     element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
@@ -1194,8 +1195,8 @@ public partial class MainWindow
         // The display name (AppEntry.Name: the name the user gave the application, else the source's own), so a renamed application's letter follows.
         return (used, PanelTheme.QuotaTheme(entry), tip, CompactMusicLayout.RingLetterFor(Settings.QuotaRingLetters, entry.Name));
     }).ToArray();
-    private Brush CompactEqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");
-    private Brush PageEqualizerColor => MusicColor(Settings.MusicPageEqualizerColor, Settings.MusicPageEqualizerCustomColor, "equalizer");
+    // The collapsed equalizer and the music page's share one color.
+    private Brush EqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");
     private Brush LyricInk => MusicColor(Settings.MusicLyricColor, Settings.MusicLyricCustomColor, "textPrimary", text: true);
     // A color chosen among the clock's swatches, drawn as the theme can show it on its surface; text needs more contrast than
     // bars. White, and every choice under high contrast, is the theme's own color (theme).
@@ -1338,10 +1339,10 @@ public partial class MainWindow
         bool levels = playerVisible || systemVisible;
         float peak = levels ? _media?.Peak() ?? 0 : 0;
         // Captured audio drives the bars, as many values as the equalizer on show has bars (at whatever length it is set to), flowing
-        // along them or one frequency band for each bar, as that equalizer's setting chooses; the session peak is the fallback.
+        // along them or one frequency band for each bar, as the equalizer setting chooses; the session peak is the fallback.
         var shown = _expanded ? IsMusicPage ? _musicEqualizer : null : _alert is null ? _compactEqualizer : null;
         var bandLevels = shown is null ? default : _flowLevels.AsSpan(0, Math.Clamp(shown.Bars, 1, _flowLevels.Length));
-        var mode = _expanded ? Settings.MusicEqualizerMode : Settings.EqualizerMode;
+        var mode = Settings.EqualizerMode;
         bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, mode) == true;
         bool pitchAxis = mode == EqualizerMode.Spectrum;
         if (_expanded && IsMusicPage) { if (flowing) _musicEqualizer?.Show(bandLevels, playing, pitchAxis); else _musicEqualizer?.Tick(peak, playing, seconds); }

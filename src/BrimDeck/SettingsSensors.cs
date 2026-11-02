@@ -12,7 +12,7 @@ namespace BrimDeck;
 // what Windows gives and a hardware monitor the user runs (MonitorBridges); one line says so.
 public sealed partial class SettingsWindow
 {
-    internal const int SensorsPage = 12;
+    internal const int SensorsPage = 10;
     private Action? _refreshSensors;
     private bool _sensorsBusy;
     private string? _sensorsFailure;

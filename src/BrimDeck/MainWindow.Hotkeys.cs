@@ -10,7 +10,8 @@ namespace BrimDeck;
 
 // How a panel follows the global hotkeys (see App.Hotkeys.cs).
 // Opened by the expand hotkey, the panel stays open until the pointer has been inside it once; after that the usual leave
-// rules close it. While the panels are hidden, the expand hotkey still opens this panel; once it closes, it hides again.
+// rules close it (under mouse pass-through, a panel that ignores the pointer stays open until a hotkey or Esc closes it). While
+// the panels are hidden, the expand hotkey still opens this panel; once it closes, it hides again.
 // Opened by a hotkey, the panel also takes the keyboard (Tab, arrows, Enter work its pages, the recent notices among them)
 // and gives it back to the window that had it when it closes. The panel never activates otherwise (WS_EX_NOACTIVATE): opened
 // by the pointer, it leaves the keyboard where it is.
@@ -30,11 +31,20 @@ public partial class MainWindow
     internal bool IsOpenForHotkey => _expanded && !_preview;
     internal bool IsHotkeyPinned => _hotkeyPinned;
 
-    // byKey: the hotkey itself; false when a click asked for the same opening ("View all" on a notice), which then moves as a
-    // pointer's opening does (motion-review C4).
-    internal void OpenFromHotkey(bool byKey = true)
+    // page: the page to open on (a page hotkey), in place of the page chosen for opening (ApplyDefaultMusicPage). byKey: the
+    // hotkey itself; false when a click asked for the same opening ("View all" on a notice), which then moves as a pointer's
+    // opening does (motion-review C4).
+    internal void OpenFromHotkey(DeckPage? page = null, bool byKey = true)
     {
         if (_expanded) return;
+        _hotkeyPage = page;
+        try { Open(byKey); } finally { _hotkeyPage = null; }
+    }
+
+    private DeckPage? _hotkeyPage;
+
+    private void Open(bool byKey)
+    {
         // A collapsed preview of the settings ends as hovering would end it; a preview of the open panel is left alone.
         if (_preview) { if (_previewExpanded) return; _app.EndPreviewFromDeck(); }
         // The full-screen rule hides the panel; the hotkey does not override it.

@@ -404,7 +404,7 @@ public partial class MainWindow
             }
             var sync = EmptyAction(Loc.T("立即同步", "Sync now"), 24); sync.HorizontalAlignment = HorizontalAlignment.Center; sync.Margin = new Thickness(0, Space.Tight, 0, 0);
             AutomationProperties.SetName(sync, Loc.T("立即同步用量", "Sync usage now"));
-            sync.Click += (_, _) => _ = RefreshAsync();
+            sync.Click += (_, _) => SyncNow();
             status.Children.Add(sync);
             var holder = new Grid { VerticalAlignment = VerticalAlignment.Stretch };
             holder.Children.Add(status);
