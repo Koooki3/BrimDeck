@@ -42,8 +42,8 @@ static class FrameRateTests
     private static void Table(Action<string, bool> check)
     {
         var table = CompactMonitor.Normalize(null);
-        check("Frame rate: last in the table but for the devices' battery, hidden", table[^1].Item == CompactMonitorItems.Battery && table[^2].Item == Frames && !table[^2].Visible);
-        check("Frame rate: a reading of the system that leaves a short row at once, after the devices' battery", (CompactMonitor.Every & Frames) != 0 && CompactMonitor.LeaveOrder[1] == Frames);
+        check("Frame rate: last in the table, hidden", table[^1].Item == Frames && !table[^1].Visible);
+        check("Frame rate: a reading of the system that leaves a short row at once, before the devices' battery", (CompactMonitor.Every & Frames) != 0 && CompactMonitor.LeaveOrder[0] == Frames);
         check("Frame rate: one color, the frame rate's", CompactMonitor.Channels(Frames) == 1 && CompactMonitor.Role(Frames) == MonitorRole.Frames);
 
         var full = CompactMonitor.Normalize(null);

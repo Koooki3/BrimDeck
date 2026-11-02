@@ -53,7 +53,7 @@ static class DevicesPageTests
         var older = SettingsMigrations.Read("""{"AppVersion":"1.2.2","MonitorPage":true,"PanelScale":150,"PageOrder":[2,0,1]}""");
         check("Devices settings: a file from before the page reads with the page's defaults, last in the order",
             older.DevicesPage && older.DevicesWidth == 460 && older.DevicesHeight == 200 && older.HiddenDevices.Count == 0 && older.DeviceLowPercent == Devices.DefaultLowPercent
-            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices]) && older.PanelScale == 150);
+            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices, DeckPage.Notices]) && older.PanelScale == 150);
         check("Devices settings: the collapsed battery reading joins an older table hidden", older.CompactReadings.Single(r => r.Item == CompactMonitorItems.Battery) is { Visible: false });
     }
 

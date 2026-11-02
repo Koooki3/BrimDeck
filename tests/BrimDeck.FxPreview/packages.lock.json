@@ -51,6 +51,11 @@
         "resolved": "10.0.0",
         "contentHash": "LE3rDZoPzulou78Tsq+3ALhUs4vatQ03v2QWbYVIenVPneUH/+LTUmHyyl098OxIFLQI6sNkZs8YHbUnT/sm3A=="
       },
+      "System.ServiceProcess.ServiceController": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "PaFmFQXX/qL1vl0CfdJUMPMYT8TOEHlcdEiOZtd4LV2rcaS/WDQM4bpECcbRM4BrD+DWkWd/jtb6iPOqAX9TWA=="
+      },
       "Vortice.D3DCompiler": {
         "type": "Transitive",
         "resolved": "3.8.3",
@@ -106,6 +111,7 @@
           "BrimDeck.Protocol": "[1.0.0, )",
           "NAudio.Wasapi": "[2.2.1, )",
           "System.Management": "[10.0.0, )",
+          "System.ServiceProcess.ServiceController": "[10.0.0, )",
           "Vortice.D3DCompiler": "[3.8.3, )",
           "Vortice.DXGI": "[3.8.3, )",
           "Vortice.Direct3D11": "[3.8.3, )"
