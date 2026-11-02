@@ -311,18 +311,19 @@ static class SystemMonitorTests
         check("Pages: the music page alone", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Music);
         settings.MusicPage = false; settings.DevicesPage = false;
         check("Pages: with every page off the usage page says so", DeckPages.Resolve(settings, DeckPage.Music) == DeckPage.Usage && DeckPages.Visible(settings).Count == 0);
-        var ordered = new DeckSettings { PageOrder = [DeckPage.Monitor, DeckPage.Usage, DeckPage.Music] };
-        check("Pages: pages left out of a chosen order follow it in their default places", ordered.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices, DeckPage.Notices]));
-        check("Pages: the switch follows the chosen order", DeckPages.Visible(ordered).SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices]));
+        var ordered = new DeckSettings { PageOrder = [DeckPage.Devices, DeckPage.Monitor, DeckPage.Usage, DeckPage.Music] };
+        check("Pages: the switch follows the chosen order", DeckPages.Visible(ordered).SequenceEqual([DeckPage.Devices, DeckPage.Monitor, DeckPage.Usage, DeckPage.Music]));
         var moved = new DeckSettings { PageOrder = [DeckPage.Devices, DeckPage.Notices, DeckPage.Usage], NoticesEnabled = true };
         check("Pages: the devices and notices pages sit in the order too", DeckPages.Visible(moved).SequenceEqual([DeckPage.Devices, DeckPage.Notices, DeckPage.Usage, DeckPage.Music, DeckPage.Monitor]));
         ordered.MonitorPage = false;
-        check("Pages: a hidden page falls back to the first shown one in the chosen order", DeckPages.Resolve(ordered, DeckPage.Monitor) == DeckPage.Usage);
+        check("Pages: a hidden page falls back to the first shown one in the chosen order", DeckPages.Resolve(ordered, DeckPage.Monitor) == DeckPage.Devices && DeckPages.Visible(ordered).SequenceEqual([DeckPage.Devices, DeckPage.Usage, DeckPage.Music]));
+        ordered.DevicesPage = false;
+        check("Pages: the devices page leaves the switch with its page off, in whatever place it stands", DeckPages.Resolve(ordered, DeckPage.Devices) == DeckPage.Usage);
         var odd = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"PageOrder":[2,9,2]}""")!;
         check("Pages: unknown and repeated pages are dropped and missing ones added", odd.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices, DeckPage.Notices]));
         var copy = ordered.Copy(); copy.PageOrder = [.. DeckPages.Order];
         var orderRead = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>(System.Text.Json.JsonSerializer.Serialize(ordered))!;
-        check("Pages: the order is copied deeply and survives saving and reading", ordered.PageOrder[0] == DeckPage.Monitor && orderRead.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices, DeckPage.Notices])
+        check("Pages: the order is copied deeply and survives saving and reading", ordered.PageOrder[0] == DeckPage.Devices && orderRead.PageOrder.SequenceEqual([DeckPage.Devices, DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Notices])
             && new DeckSettings().PageOrder.SequenceEqual(DeckPages.Order));
         var wheelOff = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":false}""")!; wheelOff.Normalize();
         var wheelOn = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":true}""")!; wheelOn.Normalize();

@@ -509,6 +509,7 @@ public sealed class DeckSettings
     // A notice when a device's battery falls to DeviceLowPercent or under, once per discharge (LowBatteryWatch); it goes
     // through the dynamic notices, so it shows only while those are on.
     public bool DeviceLowNotice { get; set; } = true;
+    // At or under this charge a battery shows as low, within ten points above it as getting low (Devices.Level).
     public int DeviceLowPercent { get; set; } = Devices.DefaultLowPercent;
     // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
     // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame

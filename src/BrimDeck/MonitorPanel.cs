@@ -66,11 +66,12 @@ public partial class MainWindow
     private CompactMonitorItems _stripUnavailable;
     private string _stripLayout = "";
     // A laptop on mains that gave no power reading may give one on battery (the discharge rate): its power is asked again then.
-    private SensorStates StripSensors => _app.Monitor is { } monitor ? new(monitor.CpuSensor, monitor.GpuSensor, monitor.StorageState, monitor.DriveSensor)
+    // The devices' battery state comes from the devices, also while the sampler does not run.
+    private SensorStates StripSensors => _app.Monitor is { } monitor ? new(monitor.CpuSensor, monitor.GpuSensor, monitor.StorageState, monitor.DriveSensor, BatteryState())
     {
         Power = monitor.PowerSensor == SensorState.None && Native.BatteryProvider.SystemHasBattery && !Native.BatteryProvider.OnMains ? SensorState.Unknown : monitor.PowerSensor,
         Charge = monitor.BatterySensor, Frames = monitor.FramesSensor
-    } : SensorStates.Unknown;
+    } : SensorStates.Unknown with { Battery = BatteryState() };
     // Whether this panel's open page shows the frame rate's line (its layout had room for it): the frame rate is read for it then.
     internal bool PageShowsFrames => _monitorView?.ShowsFrames == true;
     // Whether this surface shows the system readings and waits for the first figures of one it does not show yet.
@@ -125,7 +126,7 @@ public partial class MainWindow
     }
     private (CompactMonitorItems Hidden, CompactMonitorItems Arriving) UpdateStripAdmission(MonitorSnapshot? snapshot)
     {
-        return _stripAdmission.Update(snapshot, Settings.CompactReadings, StripSensors, BatteryState());
+        return _stripAdmission.Update(snapshot, Settings.CompactReadings, StripSensors);
     }
     // The battery reading's state: Found while a shown device reports a charge, None once the devices are listed and none
     // does, Unknown before (or while nothing reads them).

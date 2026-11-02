@@ -12,9 +12,11 @@ internal static class DeviceChecks
     public static void Run(Action<string, bool> check)
     {
         PathFilters(check);
-        var paths = Hid.Paths();
-        var infos = paths.Select(path => Hid.Query(path, batteries: true)).OfType<HidInfo>().ToList();
-        check("devices: HID collections list and open for their attributes", paths.Count == 0 || infos.Count > 0 && infos.All(info => info.Vendor >= 0 && info.InputLength >= 0));
+        // As HidBatteries.Scan does: a Bluetooth collection no reader speaks to is not opened (a sleeping device could hold its
+        // string requests), and none is asked for its battery usages.
+        var opened = Hid.Paths().Where(path => !Hid.IsBluetooth(path) || HidBatteries.Spoken(Hid.Ids(path))).ToList();
+        var infos = opened.Select(path => Hid.Query(path, batteries: !Hid.IsBluetooth(path))).OfType<HidInfo>().ToList();
+        check("devices: HID collections list and open for their attributes", opened.Count == 0 || infos.Count > 0 && infos.All(info => info.Vendor >= 0 && info.InputLength >= 0));
 
         var batteries = new DeviceBatteries(Dispatcher.CurrentDispatcher);
         Pump(TimeSpan.FromMilliseconds(100));
@@ -66,6 +68,17 @@ internal static class DeviceChecks
         // The HID worker ends when nothing is wanted, so the threads after the last stop are no more than after the first; one
         // more is allowed for the thread pool and WinRT, which start and end threads of their own.
         check("devices: starting and stopping again leaves no threads behind", threadCounts[^1] <= threadCounts[0] + 1);
+        // Started again after all those stops, every source watches afresh: the same devices are listed again, with readings.
+        int changes = 0;
+        batteries.Changed += () => changes++;
+        batteries.SetDemand(DeviceDemand.Watch);
+        settleBy = Environment.TickCount64 + 11_000;
+        while (!batteries.Settled && Environment.TickCount64 < settleBy) Pump(TimeSpan.FromMilliseconds(250));
+        var listedAgain = batteries.All.ToList();
+        check("devices: started again, the same devices are listed and read", batteries.Settled && (read.Count == 0 || changes > 0)
+            && read.Select(device => device.Key).Order().SequenceEqual(listedAgain.Select(device => device.Key).Order())
+            && read.Where(device => device.Lowest is not null).All(device => listedAgain.Single(other => other.Key == device.Key).Lowest is not null));
+        batteries.SetDemand(DeviceDemand.None); Pump(TimeSpan.FromSeconds(11));
         batteries.Dispose();
     }
 
