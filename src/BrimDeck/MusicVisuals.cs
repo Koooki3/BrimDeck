@@ -259,7 +259,16 @@ internal sealed class MusicMarquee : FrameworkElement
     protected override Size MeasureOverride(Size availableSize) { _glyphs?.Measure(availableSize); return default; }
     protected override Size ArrangeOverride(Size finalSize) { _glyphs?.Arrange(new Rect(finalSize)); return finalSize; }
     private Brush? _tailInk;
-    private FormattedText Formatted => _formatted ??= Format();
+    private FormattedText Formatted
+    {
+        get
+        {
+            // Laid out in the font of its day: another font sets it again.
+            if (_formattedFont != Fonts.Version) { _formatted = null; _formattedFont = Fonts.Version; }
+            return _formatted ??= Format();
+        }
+    }
+    private int _formattedFont = -1;
     private FormattedText Format()
     {
         var text = new FormattedText(Text + Tail, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,

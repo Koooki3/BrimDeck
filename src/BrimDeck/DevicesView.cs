@@ -183,7 +183,7 @@ internal sealed class DevicesView : FrameworkElement
         }
     }
 
-    private ((string, double, double, string) Key, FormattedText Text)? _hint;
+    private ((string, double, double, string, int) Key, FormattedText Text)? _hint;
 
     // A centred title and, under it, a hint of up to two lines, at the given opacity.
     private void Message(DrawingContext drawing, double w, double h, double ppd, double opacity, string title, string? hint)
@@ -194,7 +194,7 @@ internal sealed class DevicesView : FrameworkElement
         if (hint is not null)
         {
             // Laid out once per text, width and scale: it is drawn on every frame of a fade.
-            var key = (hint, Math.Round(Math.Max(40, Math.Min(w - 24, 420))), ppd, UI.Tertiary);
+            var key = (hint, Math.Round(Math.Max(40, Math.Min(w - 24, 420))), ppd, UI.Tertiary, Fonts.Version);
             if (_hint is not { } known || known.Key != key)
                 _hint = (key, new FormattedText(hint, System.Globalization.CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
                     new Typeface(UI.PanelFont, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal), _layout.Caption, UI.Brush(UI.Tertiary), ppd)

@@ -49,7 +49,7 @@ internal static class Checks
                 Console.WriteLine($"PASS: the notice window warms up on a {style} island without throwing and ends hidden");
                 window.Close();
             }
-            return 0;
+            return FontChecks.Run(app, deck);
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }

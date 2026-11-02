@@ -252,3 +252,7 @@ An unofficial fan look inspired by the industrial interface of *Arknights: Endfi
 **Check.** Every color of both looks passes as written, with no adjustment: primary text at least 7:1, the rest 4.5:1, the scroll bar's thumb 2:1, ink on the selected item 16:1. In high contrast the system colors replace everything and the cuts, hatching and signal bar are not drawn.
 
 The file is [`endfield-industrial.json`](../../src/BrimDeck.Core/Themes/endfield-industrial.json). The alpha badge on the theme's card comes from the file's `stage`; the name itself carries no alpha.
+
+## Interface font
+
+The interface font is an app setting, not part of a theme: choose it under Settings › General › Appearance and language › Interface font. A theme file cannot name a font. The chosen font goes in front of the default one and Chinese still falls back to Microsoft YaHei, so a missing glyph never shows as a box. The clock styles that ship their own font (such as Orbitron, Tektur and Fredoka) and the seven-segment, dot-matrix and pixel styles keep their own letterforms; the other clock styles follow the chosen font.
