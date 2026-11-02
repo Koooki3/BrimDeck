@@ -162,7 +162,7 @@ public partial class App : Application
     // Adds or removes the tray icon to match the settings.
     private void ApplyTray()
     {
-        if (Settings.ShowTrayIcon && _tray is null) _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden);
+        if (Settings.ShowTrayIcon && _tray is null) _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden, ToggleClickThrough, () => Settings.ClickThrough);
         else if (!Settings.ShowTrayIcon && _tray is not null) { _tray.Dispose(); _tray = null; }
     }
     // The panel ends a collapsed preview when the pointer reaches it. The settings window clears its own preview state; the

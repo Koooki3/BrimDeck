@@ -57,7 +57,7 @@ public partial class MainWindow : Window
     private double _themeDpi;
     private VirtualDesktopPresence? _virtualDesktops;
     private EscapeDismissal? _escapeDismissal;
-    private bool _expanded, _refreshing, _preview, _refreshRequested, _pointerInside;
+    private bool _expanded, _refreshing, _syncAsked, _preview, _refreshRequested, _pointerInside;
     // A preview from the settings window either holds the panel open or keeps it collapsed while a collapsed size is adjusted.
     private bool _previewExpanded;
     private Rect? _popupReturnArea;
@@ -833,6 +833,7 @@ public partial class MainWindow : Window
         UpdateMusicTimer();
         UpdateMonitorDemand();
         UpdateGrips();
+        ApplyClickThrough();
     }
     private static T Timed<T>(T animation, int duration, Track track) where T : AnimationTimeline
     {
@@ -864,6 +865,8 @@ public partial class MainWindow : Window
         var cursor = WindowsHost.Cursor();
         // Move mode: the panel does not open (MainWindow.Move.cs).
         if (_moveArmed) { TrackMove(cursor); return; }
+        // Mouse pass-through: hovering does nothing (MainWindow.ClickThrough.cs).
+        if (IgnorePointer()) return;
         var area = CompactHoverScreenRect();
         if (area.IsEmpty) return;
         // The surface's ends resize it (MainWindow.Resize.cs); pointing there does not open the panel.
@@ -979,9 +982,9 @@ public partial class MainWindow : Window
         catch (Exception ex) { LastRefreshError = ex.GetType().Name + "\n" + ex.StackTrace; }
         finally
         {
-            _refreshing = false; foreach (var deck in _app.Decks) deck.FirstReadEnded();
+            _refreshing = false; _syncAsked = false; foreach (var deck in _app.Decks) deck.FirstReadEnded();
             RestartSyncCycle(); _app.RequestTrim();
-            foreach (var deck in _app.Decks) deck.RenderUsage();
+            foreach (var deck in _app.Decks) { deck.RenderUsage(); deck.RenderSyncButton(); }
             if (_refreshRequested)
             {
                 _refreshRequested = false; _ = RefreshAsync();
