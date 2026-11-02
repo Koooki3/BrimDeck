@@ -64,6 +64,7 @@ try
     PixelBlocksTests.Run(root, Check);
     EndfieldTests.Run(root, Check);
     ThemeCoverageTests.Run(Check, Environment.GetEnvironmentVariable("BRIMDECK_THEME_REPORT") == "1");
+    NoticeThemeFitTests.Run(Check);
     DisplayLayoutTests.Run(Check);
     WindowCompositionTests.Run(Check);
     MediaAppTargetTests.Run(Check);

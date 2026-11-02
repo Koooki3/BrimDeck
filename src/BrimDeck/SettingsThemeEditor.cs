@@ -26,7 +26,7 @@ public sealed partial class SettingsWindow
     private static (string Chinese, string English, string[] Keys)[] TokenGroups =>
     [
         ("文字", "Text", ["textPrimary", "textSecondary", "textTertiary", "menuDetail"]),
-        ("强调与状态", "Accent and states", ["accent", "onAccent", "danger", "liked", "rangeFill"]),
+        ("强调与状态", "Accent and states", ["accent", "onAccent", "danger", "success", "caution", "liked", "rangeFill"]),
         ("时间与律动条", "Clock and equalizer", ["clock", "equalizer"]),
         ("面板与收起形态", "Panel and collapsed view", ["surface", "rim", "shadow", "indicator", "indicatorProgress", "coverPlaceholder", "coverOutline"]),
         ("控件", "Controls", ["hairline", "track", "ringTrack", "fill", "fillSelected", "hover", "pressed", "outline", "input", "scrollThumb", "switchFill", "seekRail", "rowDivider", "rowHover"]),

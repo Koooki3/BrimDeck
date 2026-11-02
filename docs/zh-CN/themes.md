@@ -50,7 +50,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 
 ### 颜色项（colors）
 
-颜色写作 `#RRGGBB` 或 `#AARRGGBB`（AA 为不透明度）。括号中是对比度下限，按 WCAG 2 的算法计算。文字三级、`menuDetail`、`accent` 和 `danger` 要在面板底色（含渐变的每个色标）与弹出层底色上都达标；`liked`、`clock`、`equalizer` 只看面板底色；`onAccent` 看强调色，`indicatorProgress` 看指示条。另外，文字也会落在填充色上：`textPrimary` 在 `fillSelected`、`pressed`、`input`、`rangeFill`、`tooltip`、`bubble` 上，`textSecondary` 在 `fill`、`hover` 上，都需要 4.5:1。
+颜色写作 `#RRGGBB` 或 `#AARRGGBB`（AA 为不透明度）。括号中是对比度下限，按 WCAG 2 的算法计算。文字三级、`menuDetail`、`accent`、`danger`、`success` 和 `caution` 要在面板底色（含渐变的每个色标）与弹出层底色上都达标；`liked`、`clock`、`equalizer` 只看面板底色；`onAccent` 看强调色，`indicatorProgress` 看指示条。另外，文字也会落在填充色上：`textPrimary` 在 `fillSelected`、`pressed`、`input`、`rangeFill`、`tooltip`、`bubble` 上，`textSecondary` 在 `fill`、`hover`、`pressed` 上，`textTertiary` 在 `fill` 上，都需要 4.5:1。
 
 | 键 | 用途 |
 | --- | --- |
@@ -60,6 +60,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 | `textTertiary` | 重置时间、备注等辅助小字（4.5:1） |
 | `accent` / `onAccent` | 键盘焦点、选中的日期（3:1） / 其上的文字，如通知的主按钮（4.5:1） |
 | `danger` | 错误与暂停同步（4.5:1） |
+| `success` `caution` | 通知页的来电与成功、警告（4.5:1）；自定义主题没写时按面板底色自动调到可读 |
 | `liked` | 已喜欢的歌曲（3:1） |
 | `clock` | 时间颜色选“主题默认色”时的颜色（4.5:1） |
 | `equalizer` | 律动条不跟随封面时的颜色（3:1） |

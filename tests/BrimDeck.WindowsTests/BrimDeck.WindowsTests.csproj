@@ -70,5 +70,7 @@
     <Compile Include="..\..\src\BrimDeck\CountdownRing.cs" Link="CountdownRing.cs" />
     <Compile Include="..\..\src\BrimDeck\Tokens.cs" Link="Tokens.cs" />
     <Compile Include="..\..\src\BrimDeck\PageToolTips.cs" Link="PageToolTips.cs" />
+    <!-- The notices page's header, row and fade panels (laid out by WPF in NoticePanelTests). -->
+    <Compile Include="..\..\src\BrimDeck\NoticePanels.cs" Link="NoticePanels.cs" />
   </ItemGroup>
 </Project>

@@ -50,7 +50,7 @@ The full template is [`theme-template.json`](../../src/BrimDeck.Core/Templates/t
 
 ### Colors
 
-Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets is a WCAG 2 contrast. The three text levels, `menuDetail`, `accent` and `danger` must reach it on the surface (each stop of its gradient included) and on the pop-up surface; `liked`, `clock` and `equalizer` on the surface only; `onAccent` on the accent and `indicatorProgress` on the indicator. Text also stands on fills: `textPrimary` on `fillSelected`, `pressed`, `input`, `rangeFill`, `tooltip` and `bubble`, and `textSecondary` on `fill` and `hover`, each needing 4.5:1.
+Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets is a WCAG 2 contrast. The three text levels, `menuDetail`, `accent`, `danger`, `success` and `caution` must reach it on the surface (each stop of its gradient included) and on the pop-up surface; `liked`, `clock` and `equalizer` on the surface only; `onAccent` on the accent and `indicatorProgress` on the indicator. Text also stands on fills: `textPrimary` on `fillSelected`, `pressed`, `input`, `rangeFill`, `tooltip` and `bubble`; `textSecondary` on `fill`, `hover` and `pressed`; and `textTertiary` on `fill`, each needing 4.5:1.
 
 | Key | Use |
 | --- | --- |
@@ -60,6 +60,7 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 | `textTertiary` | Reset times, notes and other small text (4.5:1) |
 | `accent` / `onAccent` | Keyboard focus and chosen dates (3:1) / text on them, such as a notice's main button (4.5:1) |
 | `danger` | Errors and paused sync (4.5:1) |
+| `success` `caution` | The notices page's incoming calls and successes, and warnings (4.5:1); a custom theme that leaves them out gets colors made readable on its surface |
 | `liked` | A liked song (3:1) |
 | `clock` | The clock when its color is "Theme default" (4.5:1) |
 | `equalizer` | The equalizer when it does not follow the cover (3:1) |
