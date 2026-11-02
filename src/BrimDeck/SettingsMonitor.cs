@@ -24,8 +24,8 @@ public sealed partial class SettingsWindow
         _refreshReadings = null;
         // Shows what the settings hold in place: the colors, the preset they match, and the readings' colors in the table.
         void Refresh() { syncing = true; try { foreach (var update in refresh) update(); } finally { syncing = false; } _refreshReadings?.Invoke(); }
-        // A color per reading, three to a row.
-        var roles = KeepPreview(new UniformGrid { Columns = 3, Width = Loc.IsEnglish ? 450 : 330, Margin = new Thickness(0, 6, 0, 6) });
+        // A color per reading, four to a row.
+        var roles = KeepPreview(new UniformGrid { Columns = 4, Width = Loc.IsEnglish ? 600 : 440, Margin = new Thickness(0, 6, 0, 6) });
         foreach (var role in Enum.GetValues<MonitorRole>()) roles.Children.Add(SwatchCell(RoleName(role), RoleHelp(role), () => RoleSwatch(role, Refresh), refresh));
         // Quick presets under the colors, as under the collapsed readings' table: one sets every color, and the one the colors
         // match is lit, else none (the colors are then the user's own). Each is shown by its CPU, memory and GPU colors as the

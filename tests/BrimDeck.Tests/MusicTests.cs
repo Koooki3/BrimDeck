@@ -38,6 +38,8 @@ internal static class MusicTests
         check("LRC multiple timestamps and offsets are parsed", lrc.Synced && lrc.Lines.Count == 3 && lrc.Lines[0].Seconds == 1.5 && lrc.Lines[1].Seconds == 5.75);
         check("Lyrics show an instrumental introduction before the first timestamp", lrc.At(0).Current == "♪");
         check("Long lyric lines stay visible until the next timestamp", lrc.At(10.75).Current == "同一行" && lrc.At(12).Current == "同一行" && lrc.At(19.499).Current == "同一行" && lrc.At(19.5).Current == "后一行");
+        var words = Lyrics.Parse("[03:17.552]<03:17.552>我<03:17.855>也<03:18.143>可<03:18.479>以 <03:19.000>", null, 252, "test");
+        check("Word timing tags are removed from LRC lines", words.Lines.Count == 1 && words.Lines[0].Text == "我也可以" && Math.Abs(words.Lines[0].Seconds - 197.552) < 0.001);
         var gap = Lyrics.Parse("[00:02]长句\n[00:14]\n[00:20]下一句", null, 40, "网易云音乐");
         check("Only timestamped blank lines start an instrumental gap", gap.At(13.999).Current == "长句" && gap.At(14).Current == "♪" && gap.At(19.999).Current == "♪" && gap.At(20).Current == "下一句");
         check("Seeking backwards from an explicit gap restores the lyric", gap.At(16).Current == "♪" && gap.At(8).Current == "长句");
@@ -45,6 +47,12 @@ internal static class MusicTests
         var plain = Lyrics.Parse(null, "甲\n乙", 100, "test");
         check("Plain lyrics retain text without fabricating timestamps", !plain.Synced && plain.Lines.Select(l => l.Text).SequenceEqual(["甲", "乙"]) && plain.Lines.All(l => l.Seconds == 0));
         check("Plain lyrics never select a timed line", !plain.CanSynchronize(track) && plain.At(0).Current == "" && plain.At(60).Current == "");
+        var netease = Lyrics.Parse("[00:00.00] 作曲 : Yiruma\n[00:05.00]纯音乐，请欣赏\n", null, 200, "网易云音乐");
+        var qq = Lyrics.Parse("[00:00:00]此歌曲为没有填词的纯音乐，请您欣赏", null, 200, "QQ 音乐");
+        check("Credits with an instrumental notice mark the song instrumental, without lines", netease is { Instrumental: true, Lines.Count: 0 } && qq is { Instrumental: true, Lines.Count: 0 }
+            && netease.At(30).Current == "♪" && Lyrics.Parse(null, "作曲：某人\n纯音乐，请欣赏", 200, "test").Instrumental);
+        var sung = Lyrics.Parse("[00:00.00] 作曲 : 某人\n[00:05.00]纯音乐，请欣赏\n[00:12.00]第一句歌词", null, 200, "test");
+        check("A notice among sung lines is a lyric, and a long interlude stays a gap", !sung.Instrumental && sung.Lines.Count == 3 && !gap.Instrumental && gap.At(16).Current == "♪");
         var song = Lyrics.Parse("[00:01]一\n[00:02]二\n[00:03]三\n[00:04]四\n[00:05]五", null, 10, "test");
         check("The lyric window gives the lines around the current one in the order they are sung, as many as there are",
             song.Around(3.5, 2, 2) is { Current: "三", Before: ["一", "二"], After: ["四", "五"] }

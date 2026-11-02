@@ -70,7 +70,8 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         {
             var stamps = Regex.Matches(row, @"\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]");
             if (stamps.Count == 0) continue;
-            string text = row[(stamps[^1].Index + stamps[^1].Length)..].Trim();
+            // Word-timed LRC puts a <mm:ss.xx> tag before each word; the panel shows whole lines, so the tags are dropped.
+            string text = Regex.Replace(row[(stamps[^1].Index + stamps[^1].Length)..], @"<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>", "").Trim();
             foreach (Match stamp in stamps)
             {
                 double time = int.Parse(stamp.Groups[1].Value) * 60 + int.Parse(stamp.Groups[2].Value);
@@ -78,11 +79,22 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
                 result.Add(new(Math.Max(0, time + offset), text));
             }
         }
-        if (result.Count > 0) return new(result.OrderBy(l => l.Seconds).Distinct().ToList(), true, source, instrumental);
+        if (result.Count > 0)
+            return InstrumentalNotice(result.Select(l => l.Text)) ? new([], true, source, true) : new(result.OrderBy(l => l.Seconds).Distinct().ToList(), true, source, instrumental);
         var lines = (plain ?? "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToArray();
         if (lines.Length == 0) return new([], true, source, instrumental);
+        if (InstrumentalNotice(lines)) return new([], true, source, true);
         // Plain lyrics have no timing information; retain their order for manual scrolling.
         return new(lines.Select(line => new LyricLine(0, line)).ToArray(), false, source, instrumental);
+    }
+    // QQ Music, NetEase and KuGou give a song without words a lyric of only credits ("作曲 : Yiruma") and a notice such as
+    // "纯音乐，请欣赏" or "此歌曲为没有填词的纯音乐，请您欣赏"; such a lyric is the song's mark as instrumental. A notice worded
+    // otherwise is not recognised, and its lines are shown as a lyric.
+    private static bool InstrumentalNotice(IEnumerable<string> lines)
+    {
+        var texts = lines.Select(text => text.Trim()).Where(text => text.Length > 0).ToArray();
+        static bool Notice(string text) => text.Contains("纯音乐", StringComparison.Ordinal) && text.Contains("欣赏", StringComparison.Ordinal);
+        return texts.Any(Notice) && texts.All(text => Notice(text) || Regex.IsMatch(text, @"\A[^:：]{1,16}[:：]"));
     }
 }
 
@@ -220,8 +232,10 @@ public sealed partial class LyricsService : IDisposable
         // lv, kv and tv name the lyric versions the caller already holds; the reply leaves out a version that is
         // not newer. lv=1 therefore received an empty lyric for every song still at its first version (measured).
         var data = await Get($"https://music.163.com/api/song/lyric?id={id}&lv=-1&kv=-1&tv=-1", token);
-        return data is { ValueKind: JsonValueKind.Object } value && value.TryGetProperty("lrc", out var lrc)
-            ? Lyrics.Parse(Str(lrc, "lyric"), null, duration, "网易云音乐") : Lyrics.Empty;
+        if (data is not { ValueKind: JsonValueKind.Object } value) return Lyrics.Empty;
+        // NetEase marks a song without words; its lyric then holds only credits and a notice.
+        if (value.TryGetProperty("pureMusic", out var pure) && pure.ValueKind == JsonValueKind.True) return new([], true, "网易云音乐", true);
+        return value.TryGetProperty("lrc", out var lrc) ? Lyrics.Parse(Str(lrc, "lyric"), null, duration, "网易云音乐") : Lyrics.Empty;
     }
     private async Task<Lyrics> FindLrclib(MediaTrack track, CancellationToken token)
     {
@@ -247,7 +261,7 @@ public sealed partial class LyricsService : IDisposable
             string artist = song.TryGetProperty("artists", out var artists) && artists.ValueKind == JsonValueKind.Array ? string.Join(" / ", artists.EnumerateArray().Select(a => Str(a, "name"))) : "";
             if (!Matches(track, Str(song, "name"), artist, Num(song, "duration") / 1000) || !song.TryGetProperty("id", out var id)) continue;
             var lyrics = await FindNeteaseId(id.ToString(), track.Duration.TotalSeconds, token);
-            if (lyrics.Lines.Count > 0) return lyrics;
+            if (lyrics.Lines.Count > 0 || lyrics.Instrumental) return lyrics;
         }
         return Lyrics.Empty;
     }

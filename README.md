@@ -46,7 +46,7 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
   </tr>
 </table>
 
-- Notch and Capsule show the highest quota usage of each tool as a ring (a tool with no reading yet shows no ring); an option under "Quota rings" in the collapsed settings writes the first letter or digit of each tool's display name inside its ring (off by default). They also preview the music that is playing with its cover, an equalizer, and the title or the current lyric line.
+- Notch and Capsule show the highest quota usage of each tool as a ring; an option under "Quota rings" in the collapsed settings writes the first letter or digit of each tool's display name inside its ring (off by default). They also preview the music that is playing with its cover, an equalizer, and the title or the current lyric line.
 
   <img src="docs/en-US/images/compact-notch-lyrics.png" width="279" alt="Notch showing a lyric line">
 

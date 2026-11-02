@@ -41,8 +41,7 @@ internal sealed class KugouControlWindow : Window
         Add(Loc.T("•  酷狗正在运行时会重启一次，正在播放的歌曲会停止", "•  A running KuGou restarts once, and the playing song stops"), 10, color: palette.Primary);
         {
             // How the file is changed, behind an info icon drawn like the settings window's.
-            var file = new StackPanel { Orientation = Orientation.Horizontal };
-            file.Children.Add(Text(Loc.T("•  会修改酷狗的 libcef.dll，之后酷狗每次启动都是完整控制", "•  KuGou's libcef.dll is changed; KuGou then starts with full control every time"), 13, palette.Primary, lineHeight: 21));
+            var label = Text(Loc.T("•  会修改酷狗的 libcef.dll，之后酷狗每次启动都是完整控制", "•  KuGou's libcef.dll is changed; KuGou then starts with full control every time"), 13, palette.Primary, lineHeight: 21);
             var info = new Border { Width = 22, Height = 21, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent, Cursor = Cursors.Help, Focusable = true,
                 Child = new System.Windows.Shapes.Path { Data = Geometry.Parse("M 7,1 A 6,6 0 1 1 6.99,1 M 7,6.5 V 10 M 7,4 V 4.1"), Width = 14, Height = 14,
                     Stroke = UI.Brush(palette.Tertiary), StrokeThickness = 1.2, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
@@ -52,7 +51,7 @@ internal sealed class KugouControlWindow : Window
             info.ToolTip = new ToolTip { Content = new TextBlock { Text = how, TextWrapping = TextWrapping.Wrap, MaxWidth = 320 } };
             ToolTipService.SetInitialShowDelay(info, 0);
             AutomationProperties.SetName(info, Loc.T("修改方式说明", "How the file is changed")); AutomationProperties.SetHelpText(info, how);
-            file.Children.Add(info); body.Children.Add(file);
+            body.Children.Add(new HelpHeading(label, info) { HorizontalAlignment = HorizontalAlignment.Left });
         }
 
         var notice = new StackPanel();
