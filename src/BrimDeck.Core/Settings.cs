@@ -49,6 +49,9 @@ public enum MouseWheelAction { None, Pages, Volume }
 // (MainWindow.Move.cs); moving is the default. Saved as numbers, so new members go at the end.
 public enum GripDoubleClick { AutoWidth, Move }
 public enum CompactMusicText { None, Title, Lyrics }
+// What the collapsed music hides while the song is paused: the title or lyric, the cover, or both. Saved as numbers, so new
+// members go at the end.
+public enum PausedMusicHide { None, Text, Cover, Both }
 // How the level bars show the sound. Flow: one value for the whole sound that runs from one end of the bars to the other, so a
 // drum beat or a voice is seen crossing them. Spectrum: the sound split by pitch, each bar one band, low on the left and high
 // on the right. Saved as numbers, so new members go at the end; a file without it, or with a number not listed, is Flow.
@@ -279,7 +282,8 @@ public sealed class DeckSettings
     private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
     private List<DeckPage> _pageOrder = [.. DeckPages.Order];
     private int _equalizerBars = CompactMusicLayout.DefaultBars, _musicEqualizerBars = 5;
-    private EqualizerMode _equalizerMode = EqualizerMode.Flow, _musicEqualizerMode = EqualizerMode.Flow;
+    private EqualizerMode _equalizerMode = EqualizerMode.Flow;
+    private PausedMusicHide _musicPausedHide;
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
@@ -335,10 +339,44 @@ public sealed class DeckSettings
     public double LineThickness { get; set; } = CollapsedLimits.LineThicknessDefault;
     public double LineTop { get; set; } = CollapsedLimits.LineTopDefault;
     public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
+    // The global shortcuts (HotkeyKind), all unset by default; Hotkey and SetHotkey reach them by kind.
     public string HideHotkey { get; set; } = "";
     public string ExpandHotkey { get; set; } = "";
-    // The resize shortcut: modifiers with the arrow keys ("Ctrl+Alt+Arrows", HotkeyText.Arrows); unset by default.
+    // The resize and move shortcuts: modifiers with the arrow keys ("Ctrl+Alt+Arrows", HotkeyText.Arrows).
     public string ResizeHotkey { get; set; } = "";
+    public string MoveHotkey { get; set; } = "";
+    public string ClickThroughHotkey { get; set; } = "";
+    public string SettingsHotkey { get; set; } = "";
+    public string Page1Hotkey { get; set; } = "";
+    public string Page2Hotkey { get; set; } = "";
+    public string Page3Hotkey { get; set; } = "";
+    public string RefreshHotkey { get; set; } = "";
+    public string Hotkey(HotkeyKind kind) => (kind switch
+    {
+        HotkeyKind.Hide => HideHotkey, HotkeyKind.Expand => ExpandHotkey, HotkeyKind.Resize => ResizeHotkey, HotkeyKind.Move => MoveHotkey,
+        HotkeyKind.ClickThrough => ClickThroughHotkey, HotkeyKind.OpenSettings => SettingsHotkey, HotkeyKind.Page1 => Page1Hotkey,
+        HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Refresh => RefreshHotkey, _ => ""
+    }) ?? "";
+    public void SetHotkey(HotkeyKind kind, string value)
+    {
+        switch (kind)
+        {
+            case HotkeyKind.Hide: HideHotkey = value; break;
+            case HotkeyKind.Expand: ExpandHotkey = value; break;
+            case HotkeyKind.Resize: ResizeHotkey = value; break;
+            case HotkeyKind.Move: MoveHotkey = value; break;
+            case HotkeyKind.ClickThrough: ClickThroughHotkey = value; break;
+            case HotkeyKind.OpenSettings: SettingsHotkey = value; break;
+            case HotkeyKind.Page1: Page1Hotkey = value; break;
+            case HotkeyKind.Page2: Page2Hotkey = value; break;
+            case HotkeyKind.Page3: Page3Hotkey = value; break;
+            case HotkeyKind.Refresh: RefreshHotkey = value; break;
+        }
+    }
+    // Mouse pass-through: hovering does not open the panel and every click goes to the window beneath; only the shortcuts open
+    // it. ClickThroughPanel lets the open panel take clicks as usual.
+    public bool ClickThrough { get; set; }
+    public bool ClickThroughPanel { get; set; }
     public bool MusicPage { get; set; } = true;
     public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
@@ -357,8 +395,8 @@ public sealed class DeckSettings
     public bool EqualizerAlways { get; set; }
     // How many bars the collapsed equalizer has, which sets its length (CompactMusicLayout.BarsWidth).
     public int EqualizerBars { get => _equalizerBars; set => _equalizerBars = CompactMusicLayout.SafeBars(value); }
-    // The collapsed equalizer's color, chosen among the clock's swatches: White is the theme's equalizer color, Cover the playing
-    // song's, Custom EqualizerCustomColor. Gradient is not offered and reads as White.
+    // The color of the collapsed equalizer and the music page's, chosen among the clock's swatches: White is the theme's equalizer
+    // color, Cover the playing song's, Custom EqualizerCustomColor. Gradient is not offered and reads as White.
     public ClockColor EqualizerColor { get; set; } = ClockColor.Cover;
     public string EqualizerCustomColor { get; set; } = ClockColors.DefaultCustom;
     // The notch and the capsule each switch the clock on; its style, color, hour format and seconds are shared.
@@ -372,6 +410,10 @@ public sealed class DeckSettings
     public bool ClockSeconds { get; set; }
     public CompactMusicText MusicText { get; set; }
     public bool MusicTrackNotice { get; set; } = true;
+    // A song taken as instrumental (Lyrics.Instrumental) shows its title in the collapsed lyric's place instead of "♪".
+    public bool MusicInstrumentalTitle { get; set; }
+    // The surface narrows without what is hidden; a number not listed shows everything.
+    public PausedMusicHide MusicPausedHide { get => _musicPausedHide; set => _musicPausedHide = Enum.IsDefined(value) ? value : PausedMusicHide.None; }
     // The album cover at the left of the collapsed row and on the music page; some players give no cover, only a placeholder.
     public bool MusicCompactCover { get; set; } = true;
     public bool MusicPageCover { get; set; } = true;
@@ -379,13 +421,9 @@ public sealed class DeckSettings
     public bool LyricsEnabled { get; set; } = true;
     // How many bars the music page's equalizer has, beside the title; its bars keep their spacing, so more bars make it longer.
     public int MusicEqualizerBars { get => _musicEqualizerBars; set => _musicEqualizerBars = CompactMusicLayout.SafeBars(value); }
-    // How the collapsed equalizer and the music page's equalizer show the sound, each its own choice, as their lengths are.
+    // How the collapsed equalizer and the music page's equalizer show the sound; one choice for both, while each has its own length.
     public EqualizerMode EqualizerMode { get => _equalizerMode; set => _equalizerMode = Enum.IsDefined(value) ? value : EqualizerMode.Flow; }
-    public EqualizerMode MusicEqualizerMode { get => _musicEqualizerMode; set => _musicEqualizerMode = Enum.IsDefined(value) ? value : EqualizerMode.Flow; }
-    // The music page's equalizer and current lyric each take their own color, chosen as the collapsed equalizer's is
-    // (EqualizerColor): White is the theme's equalizer color for the bars and its primary text color for the lyric.
-    public ClockColor MusicPageEqualizerColor { get; set; } = ClockColor.Cover;
-    public string MusicPageEqualizerCustomColor { get; set; } = ClockColors.DefaultCustom;
+    // The music page's current lyric, its color chosen as the equalizer's is (EqualizerColor): White is the theme's primary text color.
     public ClockColor MusicLyricColor { get; set; } = ClockColor.Cover;
     public string MusicLyricCustomColor { get; set; } = ClockColors.DefaultCustom;
     // Offers "网易云音乐 · 完整控制" in the source menu, or alone in its place when nothing plays.
@@ -420,6 +458,8 @@ public sealed class DeckSettings
     // grow together, as Windows' display scaling would for BrimDeck alone. Sizes stay saved before the scale.
     public int PanelScale { get; set; } = PanelScales.Default;
     public int OpenDelay { get; set; } = 0;
+    // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
+    public bool ClickToExpand { get; set; }
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;
@@ -704,9 +744,7 @@ public sealed class DeckSettings
         LineThickness = CollapsedGeometry.RoundLineThickness(LineThickness);
         LineTop = Fit(LineTop, CollapsedLimits.LineTopMin, CollapsedLimits.LineTopMax, CollapsedLimits.LineTopDefault);
         LineOffsetX = Offset(LineOffsetX);
-        HideHotkey ??= "";
-        ExpandHotkey ??= "";
-        ResizeHotkey ??= "";
+        foreach (var kind in Enum.GetValues<HotkeyKind>()) SetHotkey(kind, Hotkey(kind));
         if (QuickSize is { } quick && !Enum.IsDefined(quick)) QuickSize = null;
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;

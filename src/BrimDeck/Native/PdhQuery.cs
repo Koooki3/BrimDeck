@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace BrimDeck.Native;
 
-// A Performance Data Helper query of wildcard counters, read the way Task Manager reads processor utility, processor
+// A Performance Data Helper query of wildcard counters, read the way Task Manager reads processor time, processor
 // frequency and the graphics engines. Rate counters need two collections, so the first reading of each is unavailable.
 // One thread uses a query; it is not thread safe.
 internal sealed class PdhQuery : IDisposable
@@ -20,7 +20,7 @@ internal sealed class PdhQuery : IDisposable
     // False when the performance counters could not be opened at all (the service is disabled or its data is damaged).
     public bool IsOpen => _query != IntPtr.Zero;
 
-    // Adds an English counter path such as \Processor Information(*)\% Processor Utility. Returns false when the counter
+    // Adds an English counter path such as \Processor Information(*)\% Processor Time. Returns false when the counter
     // does not exist on this machine (graphics counters need a WDDM 2 driver).
     public bool Add(string path)
     {

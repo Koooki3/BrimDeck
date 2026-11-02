@@ -24,7 +24,7 @@ public sealed partial class LyricsService
             string id = Str(candidate, "id"), key = Str(candidate, "accesskey");
             if (!fits || !Regex.IsMatch(id, @"\A[0-9]{1,16}\z") || !Regex.IsMatch(key, @"\A[0-9A-Fa-f]{16,64}\z")) continue;
             var lyrics = await DownloadKugou(id, key, track.Duration.TotalSeconds, token);
-            if (lyrics.Lines.Count > 0) return lyrics;
+            if (lyrics.Lines.Count > 0 || lyrics.Instrumental) return lyrics;
         }
         return Lyrics.Empty;
     }

@@ -113,8 +113,9 @@ public partial class MainWindow
     }
     private void ApplyDefaultMusicPage()
     {
-        var wanted = DeckPages.Opening(Settings.DefaultPage) ?? _page;
-        if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: false);
+        // A page hotkey opens on its page and remembers it, as choosing it on the page switch does (MainWindow.Hotkeys.cs).
+        var wanted = _hotkeyPage ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
+        if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: _hotkeyPage is not null);
     }
     // The page switch moves as one: the page left behind leaves as a picture toward the side it is left for, while the next
     // page is built at once and comes in from the other side and the panel takes its size (PageHandover).
@@ -277,6 +278,9 @@ public partial class MainWindow
     // The expanded page and the compact text choose lyrics independently; either one is enough to look them up.
     private bool CompactLyrics => Settings.ShowsMusic(Settings.Style) && Settings.MusicText == CompactMusicText.Lyrics;
     private bool NeedsLyrics => Settings.MusicPage && Settings.LyricsEnabled || CompactLyrics;
+    // While the song is paused the collapsed title or lyric, the cover, or both give way (DeckSettings.MusicPausedHide); the state
+    // change builds the row again.
+    private bool PausedHides(PausedMusicHide part) => _mediaTrack?.State == MediaState.Paused && (Settings.MusicPausedHide == part || Settings.MusicPausedHide == PausedMusicHide.Both);
     private string LyricsKey(MediaTrack? track) => NeedsLyrics && track is not null
         ? string.Join("\n", track.Id, track.SongKey, track.SongId, track.EmbeddedLyrics) : "";
     private async void UpdateLyrics()
@@ -453,7 +457,7 @@ public partial class MainWindow
         bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
         // Without the cover the lyrics, or a message, take a column of their own; with neither the titles have the width.
         bool lyricColumn = !Settings.MusicPageCover && (hasLyrics || message.Length > 0);
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicPageEqualizerColor}|{Settings.MusicPageEqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
@@ -530,7 +534,7 @@ public partial class MainWindow
             }
             header.Children.Add(titles);
             if (shown && songChanging) RiseIn(titles);
-            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = equalizerWidth, Height = c.Equalizer, Color = PageEqualizerColor, HorizontalAlignment = HorizontalAlignment.Right,
+            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = equalizerWidth, Height = c.Equalizer, Color = EqualizerColor, HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, (c.TitleLine - c.Equalizer) / 2, 0, 0) };
             Grid.SetColumn(_musicEqualizer, 1); header.Children.Add(_musicEqualizer); right.Children.Add(header);
 
@@ -779,7 +783,7 @@ public partial class MainWindow
         }
         if (columns.ShowEqualizer)
         {
-            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = MusicEqualizerWidth(c), Height = c.Equalizer, Color = PageEqualizerColor,
+            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = MusicEqualizerWidth(c), Height = c.Equalizer, Color = EqualizerColor,
                 HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, columns.EqualizerGap, 0, 0) };
             info.Children.Add(_musicEqualizer);
         }
@@ -963,14 +967,14 @@ public partial class MainWindow
             }
             for (int i = 0; i < _lyricsBelow.Length; i++) _lyricsBelow[i].Text = i < window.After.Count ? window.After[i] : "";
         }
-        if (CompactLyrics && _compactLyric != line.Current)
+        if (CompactLyrics && !PausedHides(PausedMusicHide.Text) && _compactLyric != line.Current)
         {
             _compactLyric = line.Current;
             if (_trackNoticeUntil <= DateTimeOffset.UtcNow)
             {
                 // A new line scrolls again, also a line that comes back later in the song.
                 _compactTitleRested = null;
-                if (_compactMarquee is not null) _compactMarquee.Text = line.Current.Length > 0 ? line.Current : track.Caption;
+                if (_compactMarquee is not null) _compactMarquee.Text = CompactLyricText(track, line.Current);
                 else RenderCompact();
             }
         }
@@ -988,6 +992,9 @@ public partial class MainWindow
         if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return ("", track.CurrentLyric ?? "", "");
         return _lyrics.At(track, DateTimeOffset.UtcNow);
     }
+    // The collapsed lyric: the line, or the title without one, and for an instrumental when chosen (DeckSettings.MusicInstrumentalTitle).
+    private string CompactLyricText(MediaTrack track, string line)
+        => line.Length == 0 || Settings.MusicInstrumentalTitle && _lyrics.Instrumental ? track.Caption : line;
     private LyricWindow CurrentLyricWindow(MediaTrack track, int before, int after)
     {
         if (!NeedsLyrics || track.State == MediaState.Stopped) return LyricWindow.Empty;
@@ -1017,23 +1024,20 @@ public partial class MainWindow
         double scale = CompactMusicLayout.SafeScale(shape.Scale);
         double contentWidth = CompactContentWidth(shape);
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
-        bool showCover = Settings.MusicCompactCover;
+        bool showCover = Settings.MusicCompactCover && !PausedHides(PausedMusicHide.Cover), hideText = PausedHides(PausedMusicHide.Text);
         bool equalizer = CompactEqualizerShown;
-        bool notice = media && _trackNoticeUntil > DateTimeOffset.UtcNow;
+        bool notice = media && !hideText && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";
-        if (media)
+        if (media && !hideText)
         {
             if (notice || Settings.MusicText == CompactMusicText.Title) text = _mediaTrack!.Caption;
             else if (Settings.MusicText == CompactMusicText.Lyrics)
             {
-                text = CurrentLyrics(_mediaTrack!).Current;
-                _compactLyric = text;
-                if (text.Length == 0) text = _mediaTrack!.Caption;
+                _compactLyric = CurrentLyrics(_mediaTrack!).Current;
+                text = CompactLyricText(_mediaTrack!, _compactLyric);
             }
         }
-        // A quota ring with nothing read yet would be an empty grey circle that says nothing: it is left out until its quota has
-        // a reading (QuotaRings).
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? [.. Settings.EnabledApps.Where(HasQuotaReading)] : new List<AppEntry>();
+        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
         // The clock keeps its own width; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
@@ -1049,8 +1053,8 @@ public partial class MainWindow
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, equalizer, Settings.EqualizerBars, showCover); CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
         // and the lyric's changing length are left out, so the width changes only when the content itself does.
-        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count(HasQuotaReading) : 0;
-        bool steadyText = media && Settings.MusicText != CompactMusicText.None;
+        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
+        bool steadyText = media && !hideText && Settings.MusicText != CompactMusicText.None;
         double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, dpi, equalizer, Settings.EqualizerBars, showCover);
         // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
         // for, this leaves out the track notice, so the surface does not move for it.
@@ -1124,7 +1128,7 @@ public partial class MainWindow
                     var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
                     element = CompactRegion(cover, room, layout.CoverSize, layout.CoverSize, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Equalizer:
-                    _compactEqualizer = new MusicEqualizer { Bars = Settings.EqualizerBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = CompactEqualizerColor };
+                    _compactEqualizer = new MusicEqualizer { Bars = Settings.EqualizerBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = EqualizerColor };
                     element = CompactRegion(_compactEqualizer, room, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Clock:
                     element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
@@ -1152,8 +1156,6 @@ public partial class MainWindow
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }
-    // Whether an application's quota has anything read, which its collapsed ring needs.
-    private bool HasQuotaReading(AppEntry entry) => DashboardUsage.Quota(entry, Snapshots).Metrics.Count > 0;
     // One ring per application: the highest used share among its quotas, with every quota in the tooltip, and the application's
     // letter inside when the setting asks for it, so the rings are told apart by more than their color.
     private (double Used, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
@@ -1166,8 +1168,8 @@ public partial class MainWindow
         // The display name (AppEntry.Name: the name the user gave the application, else the source's own), so a renamed application's letter follows.
         return (used, PanelTheme.QuotaTheme(entry), tip, CompactMusicLayout.RingLetterFor(Settings.QuotaRingLetters, entry.Name));
     }).ToArray();
-    private Brush CompactEqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");
-    private Brush PageEqualizerColor => MusicColor(Settings.MusicPageEqualizerColor, Settings.MusicPageEqualizerCustomColor, "equalizer");
+    // The collapsed equalizer and the music page's share one color.
+    private Brush EqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");
     private Brush LyricInk => MusicColor(Settings.MusicLyricColor, Settings.MusicLyricCustomColor, "textPrimary", text: true);
     // A color chosen among the clock's swatches, drawn as the theme can show it on its surface; text needs more contrast than
     // bars. White, and every choice under high contrast, is the theme's own color (theme).
@@ -1271,11 +1273,10 @@ public partial class MainWindow
         bool levels = playerVisible || systemVisible;
         float peak = levels ? _media?.Peak() ?? 0 : 0;
         // Captured audio drives the bars, as many values as the equalizer on show has bars (at whatever length it is set to), flowing
-        // along them or one frequency band for each bar, as that equalizer's setting chooses; the session peak is the fallback.
+        // along them or one frequency band for each bar, as the equalizer setting chooses; the session peak is the fallback.
         var shown = _expanded ? IsMusicPage ? _musicEqualizer : null : _alert is null ? _compactEqualizer : null;
         var bandLevels = shown is null ? default : _flowLevels.AsSpan(0, Math.Clamp(shown.Bars, 1, _flowLevels.Length));
-        var mode = _expanded ? Settings.MusicEqualizerMode : Settings.EqualizerMode;
-        bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, mode) == true;
+        bool flowing = levels && shown is not null && _media?.FlowLevels(bandLevels, Settings.EqualizerMode) == true;
         if (_expanded && IsMusicPage) { if (flowing) _musicEqualizer?.Show(bandLevels, playing); else _musicEqualizer?.Tick(peak, playing, seconds); }
         if (!_expanded && _alert is null) { if (flowing) _compactEqualizer?.Show(bandLevels, compactPlaying); else _compactEqualizer?.Tick(peak, compactPlaying, seconds); }
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }

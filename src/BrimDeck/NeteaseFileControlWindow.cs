@@ -43,8 +43,7 @@ internal sealed class NeteaseFileControlWindow : Window
         Add(Loc.T("•  之后网易云每次启动都是完整控制，不必再逐次启用", "•  NetEase Cloud Music then starts with full control every time, with nothing to enable again"), 10, color: palette.Primary);
         {
             // How the file is changed, behind an info icon drawn like the settings window's.
-            var file = new StackPanel { Orientation = Orientation.Horizontal };
-            file.Children.Add(Text(Loc.T("•  会修改网易云的 libcef.dll", "•  NetEase Cloud Music's libcef.dll is changed"), 13, palette.Primary, lineHeight: 21));
+            var label = Text(Loc.T("•  会修改网易云的 libcef.dll", "•  NetEase Cloud Music's libcef.dll is changed"), 13, palette.Primary, lineHeight: 21);
             var info = new Border { Width = 22, Height = 21, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent, Cursor = Cursors.Help, Focusable = true,
                 Child = new System.Windows.Shapes.Path { Data = Geometry.Parse("M 7,1 A 6,6 0 1 1 6.99,1 M 7,6.5 V 10 M 7,4 V 4.1"), Width = 14, Height = 14,
                     Stroke = UI.Brush(palette.Tertiary), StrokeThickness = 1.2, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
@@ -54,7 +53,7 @@ internal sealed class NeteaseFileControlWindow : Window
             info.ToolTip = new ToolTip { Content = new TextBlock { Text = how, TextWrapping = TextWrapping.Wrap, MaxWidth = 320 } };
             ToolTipService.SetInitialShowDelay(info, 0);
             AutomationProperties.SetName(info, Loc.T("修改方式说明", "How the file is changed")); AutomationProperties.SetHelpText(info, how);
-            file.Children.Add(info); body.Children.Add(file);
+            body.Children.Add(new HelpHeading(label, info) { HorizontalAlignment = HorizontalAlignment.Left });
         }
 
         var notice = new StackPanel();
