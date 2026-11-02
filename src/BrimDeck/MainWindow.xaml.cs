@@ -104,9 +104,7 @@ public partial class MainWindow : Window
         {
             _hover!.Stop();
             if (IsSuppressed || !_pointerInside) return;
-            // Opened by hovering: the panel may centre on the pointer (see SetExpanded).
-            if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
-            SetExpanded(true);
+            OpenAtPointer();
         });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
         _pointerTrack = new(Dispatcher, TrackPointer) { Interval = TimeSpan.FromMilliseconds(TrackNear) };
@@ -853,6 +851,24 @@ public partial class MainWindow : Window
         target.BeginAnimation(property, null);
         ((DependencyObject)target).SetValue(property, value);
     }
+    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded).
+    private void OpenAtPointer()
+    {
+        if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
+        SetExpanded(true);
+    }
+    // With ClickToExpand on, a click on the collapsed surface opens the panel; the press must start on it, so a drag that ends
+    // there does not. The resize grips take their own clicks, and pass-through lets none reach the window.
+    private bool _islandPressed;
+    private void Island_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => _islandPressed = !_expanded;
+    private void Island_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        bool pressed = _islandPressed; _islandPressed = false;
+        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed || !Settings.ClickToExpand) return;
+        e.Handled = true;
+        _hover.Stop(); _leave.Stop();
+        OpenAtPointer();
+    }
     // While compact, TrackPointer alone decides; an extra enter or leave message would restart the open delay.
     private void Island_MouseEnter(object sender, MouseEventArgs e)
     { if (_expanded) PointerChanged(true); }
@@ -926,7 +942,8 @@ public partial class MainWindow : Window
         {
             _popupReturnArea = null;
             _leave.Stop(); if (_expanded || IsSuppressed) return;
-            _hover.Stop(); _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
+            _hover.Stop(); if (Settings.ClickToExpand) return;
+            _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
         {

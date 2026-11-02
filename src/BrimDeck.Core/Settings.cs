@@ -457,6 +457,8 @@ public sealed class DeckSettings
     // grow together, as Windows' display scaling would for BrimDeck alone. Sizes stay saved before the scale.
     public int PanelScale { get; set; } = PanelScales.Default;
     public int OpenDelay { get; set; } = 0;
+    // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
+    public bool ClickToExpand { get; set; }
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;
