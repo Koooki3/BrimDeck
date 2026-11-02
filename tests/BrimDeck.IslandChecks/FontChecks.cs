@@ -56,6 +56,10 @@ internal static class FontChecks
                     var stale = Walk(app).Where(node => node.GetValue(TextElement.FontFamilyProperty) is FontFamily f && left.Contains(f.Source ?? "")).Select(Describe).ToList();
                     Check($"after the font becomes {label} no element keeps the family of the one before ({stale.Count}: {string.Join(", ", stale.Take(4))})", stale.Count == 0);
                 }
+                // The settings window is where the font is chosen: it keeps the app's own families, none of the user's.
+                var settingsTexts = WalkFrom([settings]).OfType<TextBlock>().Where(t => t.Text.Length > 0).ToList();
+                var settingsOwn = settingsTexts.Where(t => family.Length > 0 && Enum.GetValues<UiFontRole>().Any(role => t.FontFamily.Source == Fonts.Of(role).Source)).Select(Describe).ToList();
+                Check($"{label}: the settings window keeps the app's own fonts ({settingsOwn.Count} texts took the chosen family: {string.Join(", ", settingsOwn.Take(4))})", settingsOwn.Count == 0);
                 var texts = Walk(app).OfType<TextBlock>().Where(t => t.Text.Length > 0 && t.IsVisible || t.Text.Length > 0 && ReferenceEquals(t, small.Content)).ToList();
                 bool Ours(FontFamily f) => Enum.GetValues<UiFontRole>().Any(role => f.Source == Fonts.Of(role).Source);
                 var inNew = texts.Count(t => Ours(t.FontFamily));
@@ -86,11 +90,14 @@ internal static class FontChecks
     }
 
     // Every element of every window: the visual tree, the logical tree, and the menus and tips hung on elements.
-    private static List<DependencyObject> Walk(App app)
+    // The settings window keeps the app's own fonts whatever font is chosen (Fonts.Plain), so it is walked on its own.
+    private static List<DependencyObject> Walk(App app) => WalkFrom(app.Windows.Cast<Window>().Where(window => window is not SettingsWindow));
+
+    private static List<DependencyObject> WalkFrom(IEnumerable<Window> windows)
     {
         var seen = new HashSet<DependencyObject>(ReferenceEqualityComparer.Instance);
         var stack = new Stack<DependencyObject>();
-        foreach (Window window in app.Windows) stack.Push(window);
+        foreach (var window in windows) stack.Push(window);
         var all = new List<DependencyObject>();
         while (stack.Count > 0)
         {

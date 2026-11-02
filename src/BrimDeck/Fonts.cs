@@ -21,6 +21,9 @@ internal static class Fonts
     private static string _custom = "";
     private static readonly FontFamily?[] Families = new FontFamily?[Enum.GetValues<UiFontRole>().Length];
     private static readonly Dictionary<(UiFontRole, FontWeight), Typeface> Faces = [];
+    // While a window that keeps the app's own fonts is being built (the settings window: Plain), the families asked for are the usual ones, not the user's.
+    [ThreadStatic] private static bool _plain;
+    private static readonly FontFamily?[] PlainFamilies = new FontFamily?[Enum.GetValues<UiFontRole>().Length];
 
     // Counts the changes of the chosen font, from 0; text laid out at another count is stale.
     public static int Version { get; private set; }
@@ -53,13 +56,14 @@ internal static class Fonts
 
     public static FontFamily Of(UiFontRole role)
     {
-        lock (Sync) return Families[(int)role] ??= new FontFamily(UiFonts.Chain(role, _custom));
+        lock (Sync) return _plain ? PlainFamilies[(int)role] ??= new FontFamily(UiFonts.Chain(role, "")) : Families[(int)role] ??= new FontFamily(UiFonts.Chain(role, _custom));
     }
 
     // The role's family in a weight, kept until the font changes; for text drawn or measured with a Typeface.
     public static Typeface Face(UiFontRole role, FontWeight? weight = null)
     {
         var w = weight ?? FontWeights.Normal;
+        if (_plain) return new Typeface(Of(role), FontStyles.Normal, w, FontStretches.Normal);
         lock (Sync)
         {
             if (!Faces.TryGetValue((role, w), out var face))
@@ -67,6 +71,10 @@ internal static class Fonts
             return face;
         }
     }
+
+    // Builds with the app's own fonts whatever the user chose: the settings window does not change with the font it sets (Fonts.Plain).
+    public static IDisposable Plain() { var was = _plain; _plain = true; return new PlainScope(was); }
+    private sealed class PlainScope(bool was) : IDisposable { public void Dispose() => _plain = was; }
 
     // Makes the saved family current. False when it already was (nothing is published or raised then). Everything already built
     // follows: the resources are published again, and a control that was given a family of its own when it was made (settings
@@ -95,7 +103,7 @@ internal static class Fonts
     {
         var seen = new HashSet<DependencyObject>(ReferenceEqualityComparer.Instance);
         var pending = new Stack<DependencyObject>();
-        foreach (Window window in app.Windows) pending.Push(window);
+        foreach (Window window in app.Windows) if (window is not SettingsWindow) pending.Push(window);
         while (pending.Count > 0)
         {
             var node = pending.Pop();

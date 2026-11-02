@@ -66,6 +66,7 @@ public sealed partial class SettingsWindow : Window
     {
         _app = app;
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/BrimDeck;component/SettingsResources.xaml", UriKind.Relative) });
+        using (Fonts.Plain()) Fonts.Publish(Resources);
         Style = (Style)FindResource(typeof(Window));
         // Sizes are DIPs, so the window looks the same at any scale factor. The default fits the page layout (the content
         // column is at most 858 wide); the last closed size replaces it. Either is fitted to the work area of the screen
@@ -299,7 +300,9 @@ public sealed partial class SettingsWindow : Window
         }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
-    public void ShowPage(int page)
+    // The window keeps the app's own fonts whatever interface font the user chose (Fonts.Plain): it is where the font is chosen, and it stays readable.
+    public void ShowPage(int page) { using (Fonts.Plain()) ShowPageCore(page); }
+    private void ShowPageCore(int page)
     {
         if (page < 0 || page >= _pages.Length) return;
         RememberFocus();
