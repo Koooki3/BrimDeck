@@ -120,6 +120,7 @@ The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT
 
 - Built-in themes include Dark, Light, One Dark Pro, GitHub Dark, GitHub Light, Dracula, Night Owl and Cyberpunk: Edgerunners.
 - On the Panel theme page in settings, you can change the background, foreground, accent and other colors and save them as a custom theme, or write a theme file by following the [theme guide](docs/en-US/themes.md).
+- Under Settings › General › Appearance and language › Interface font, any font installed on the PC can be chosen; it applies at once, without a restart, and "Default" restores the original. Icons, the monospaced script editor and the clock styles that ship their own fonts are not affected, and a chosen font that is missing falls back to the default one. The list of fonts is read only when the drop-down is opened.
 
 ## Install
 
