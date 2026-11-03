@@ -18,8 +18,8 @@ public sealed partial class SettingsWindow
     private bool _exceptionsOpen;
     // Holds the row, so that adding or removing an app rebuilds the row alone; rebuilding the page makes the window flash.
     private Border? _exceptionsHost;
-    // Tallest height the open list has reached on this visit. Removing an app or closing the row keeps this space so the
-    // page does not jump; it is cleared when the settings page is left, the window closes, or the row scrolls out of view.
+    // Height the open list last took. The slot keeps it while the row is open and reserves nothing while it is closed; it
+    // is cleared when the list is rebuilt, the settings page is left, the window closes, or the row scrolls out of view.
     private double _exceptionsReservedHeight;
     // Executable descriptions read for the list and the menu, by path; the row is rebuilt on every change.
     private static readonly Dictionary<string, string> AppDescriptions = new(StringComparer.OrdinalIgnoreCase);
@@ -72,7 +72,6 @@ public sealed partial class SettingsWindow
         string title = Loc.T("应用程序规则", "App rules");
         var exceptions = S.FullscreenRules;
         // With no apps there is nothing open: a leftover open flag would expand the list the moment the first app is added.
-        // A reserved height from earlier on this visit is kept so the page does not jump.
         if (exceptions.Count == 0) _exceptionsOpen = false;
         var list = new StackPanel { Margin = new Thickness(20, 0, 0, 6) };
         foreach (var exception in exceptions)
@@ -144,7 +143,8 @@ public sealed partial class SettingsWindow
         // The buttons handle their own clicks; a click anywhere else on the row opens or closes it, as the clock row does.
         header.MouseLeftButtonDown += (_, e) => { if (arrow is not null) Flip(); e.Handled = true; };
         Show(_exceptionsOpen && n > 0);
-        var row = new StackPanel(); row.Children.Add(header); row.Children.Add(space); return row;    }
+        var row = new StackPanel(); row.Children.Add(header); row.Children.Add(space); return row;
+    }
 
     // One app under the row: its icon, the name its executable gives, the file name, and under them one behaviour pick
     // per context, each offering the global rules' three behaviours and a fourth choice that follows them.
