@@ -6,7 +6,7 @@ using Windows.Devices.Enumeration;
 namespace BrimDeck.Native;
 
 // The batteries that only the devices' own protocols tell, over HID: Logitech receivers and cables (HID++), Razer mice, the
-// 2.4 GHz mice and keyboards of ATK, VXE, VGN, MCHOSE, Endgame Gear, VAXEE, Inphic and Nordic receivers, SteelSeries, HyperX
+// 2.4 GHz mice and keyboards of ATK, VXE, VGN, MCHOSE, Endgame Gear, VAXEE, and Inphic receivers (those whose vendor and product are known), SteelSeries, HyperX
 // and MCHOSE headsets, PlayStation controllers, and any device that carries the standard HID battery usages. The protocols
 // themselves are in Core (DeviceProtocols.cs); this sends them. Every request only reads: nothing is set on any device.
 // One worker thread at below normal priority does the I/O, so a slow device never holds the panel: once a minute while the
@@ -370,24 +370,20 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
 
     // ----- The 2.4 GHz brands -----
 
-    // On their dongles only: a request is never sent to a Bluetooth collection that happens to share a vendor and page.
-    private static Func<HidInfo, HashSet<string>, IEnumerable<DeviceBattery>>? Dongle(HidInfo info) => info.Bluetooth ? null : (info.Vendor, info.UsagePage) switch
-    {
-        (Dongles.AtkVendor, 0xFF05) => BitMouse,
-        (Dongles.CompxVendor or Dongles.AtkVendor, 0xFF02 or 0xFF04) => Compx,
-        (Dongles.VgnVendor, 0xFF1C) when info.Product == 0x5088 => Vgn,
-        (Dongles.EndgameVendor, 0xFF01) => Endgame,
-        (Dongles.VaxeeVendor, 0xFF05) => Vaxee,
-        (Dongles.NordicVendor, 0xFFA0) => Nordic,
-        (Dongles.InphicVendor, _) when info.Product is 0x5B2E or 0x5B2F && info.FeatureLength >= 33 => Inphic,
-        // The 2.4 GHz receiver's product is not fixed: only its vendor collection.
-        (Dongles.InphicWireless, >= 0xFF00) when info.FeatureLength >= 33 => Inphic,
-        // MCHOSE's mouse protocol only on its mice: Realtek's 0x4762 dongle, and MCHOSE devices that call themselves a mouse (its
-        // keyboards, headsets and the MagDock speak other protocols).
-        (0x0BDA, 0xFF01 or 0xFF0B) when info.Product == 0x4762 => Mchose,
-        (Dongles.MchoseVendor, 0xFF01 or 0xFF0B) when Dongles.IsMchoseMouse(info.Product, info.ProductName) => Mchose,
-        _ => null
-    };
+    // On their dongles only: a request is never sent to a Bluetooth collection that happens to share a vendor and page. Which
+    // collections get which protocol is Dongles.Find's decision (vendor and product pairs that are known, not vendor ids alone).
+    private static Func<HidInfo, HashSet<string>, IEnumerable<DeviceBattery>>? Dongle(HidInfo info) => info.Bluetooth ? null
+        : Dongles.Find(info.Vendor, info.Product, info.UsagePage, info.ProductName, info.FeatureLength) switch
+        {
+            Dongles.Protocol.BitMouse => BitMouse,
+            Dongles.Protocol.Compx => Compx,
+            Dongles.Protocol.Vgn => Vgn,
+            Dongles.Protocol.Endgame => Endgame,
+            Dongles.Protocol.Vaxee => Vaxee,
+            Dongles.Protocol.Inphic => Inphic,
+            Dongles.Protocol.Mchose => Mchose,
+            _ => null
+        };
 
     private static DeviceBattery Mouse(string prefix, HidInfo info, string fallback, BatteryRead battery, DeviceKind kind = DeviceKind.Mouse)
         => new(Key(prefix, info), NameOf(info, fallback), Devices.Named(info.ProductName) is { } named and not DeviceKind.Other ? named : kind, DeviceSource.Hid, battery.Percent)
@@ -441,7 +437,6 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     }
     private static IEnumerable<DeviceBattery> Endgame(HidInfo info, HashSet<string> claimed) => Feature(info, claimed, "endgame", "Endgame Gear", Dongles.EndgameRequest(info.FeatureLength), 350, Dongles.EndgameBattery);
     private static IEnumerable<DeviceBattery> Vaxee(HidInfo info, HashSet<string> claimed) => Feature(info, claimed, "vaxee", "VAXEE", Dongles.VaxeeRequest(info.FeatureLength), 120, Dongles.VaxeeBattery);
-    private static IEnumerable<DeviceBattery> Nordic(HidInfo info, HashSet<string> claimed) => Feature(info, claimed, "nordic", "2.4G", Dongles.NordicRequest(info.FeatureLength), 90, Dongles.NordicBattery);
 
     // Inphic IN9: the handshake, then the battery, with one sequence number (InphicBatteryTray's order).
     private static IEnumerable<DeviceBattery> Inphic(HidInfo info, HashSet<string> claimed)
