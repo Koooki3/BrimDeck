@@ -188,7 +188,6 @@ internal static class Hid
     [DllImport("hid.dll")] private static extern int HidP_GetValueCaps(int reportType, [Out] byte[] caps, ref ushort length, IntPtr data);
     [DllImport("hid.dll")] private static extern int HidP_GetUsageValue(int reportType, ushort page, ushort link, ushort usage, out uint value, IntPtr data, byte[] report, uint length);
     [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] internal static extern bool HidD_FlushQueue(IntPtr handle);
-    [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] internal static extern bool HidD_SetOutputReport(IntPtr handle, byte[] buffer, int length);
     [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_GetProductString(IntPtr handle, byte[] buffer, int length);
     [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_GetSerialNumberString(IntPtr handle, byte[] buffer, int length);
 
@@ -336,12 +335,6 @@ internal sealed class HidDevice : IDisposable
             return true;
         }
         finally { if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory); if (overlapped != IntPtr.Zero) Hid.FreeOverlapped(overlapped); }
-    }
-    public bool SetOutput(byte[] data)
-    {
-        var buffer = new byte[Math.Max(OutputLength, data.Length)];
-        Array.Copy(data, buffer, data.Length);
-        return Hid.HidD_SetOutputReport(_handle, buffer, buffer.Length);
     }
 
     internal void ArmRead()
