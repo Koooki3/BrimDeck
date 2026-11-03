@@ -29,8 +29,8 @@ static class DeviceProtocolTests
         check("HID++: the reply to its request", Hidpp.Match(Long(1, 0x08, 1, 55, 4, 1), 1, 0x08, 1).Reply is [55, 4, 1, ..]);
         check("HID++: another device's or another function's report is not the reply", Hidpp.Match(Long(2, 0x08, 1, 55), 1, 0x08, 1) == (null, null)
             && Hidpp.Match(Long(1, 0x08, 0, 55), 1, 0x08, 1) == (null, null));
-        check("HID++: a 2.0 error", Hidpp.Match([0x11, 1, 0xFF, 0x08, 0x1D, 0x05, 0, 0], 1, 0x08, 1).Error == 0x05);
-        check("HID++: a 1.0 error (the device speaks only 1.0)", Hidpp.Match([0x10, 1, 0x8F, 0x00, 0x1D, 0x01, 0], 1, 0x00, 1).Error == Hidpp.InvalidSubId);
+        check("HID++: a 2.0 error", Hidpp.Match([0x11, 1, 0xFF, 0x08, 0x1E, 0x05, 0, 0], 1, 0x08, 1).Error == 0x05);
+        check("HID++: a 1.0 error (the device speaks only 1.0)", Hidpp.Match([0x10, 1, 0x8F, 0x00, 0x1E, 0x01, 0], 1, 0x00, 1).Error == Hidpp.InvalidSubId);
         check("HID++: an event (software id 0) is not a reply", Hidpp.Match([0x11, 1, 0x08, 0x00, 50, 0, 0], 1, 0x08, 0) == (null, null));
         check("HID++: receivers hold six devices, a cable one", Hidpp.Indices(Hidpp.IsReceiver(0xC52B, "USB Receiver")).Count == 6 && Hidpp.Indices(Hidpp.IsReceiver(0xC08B, "G502 HERO")).SequenceEqual(new byte[] { 0xFF })
             && Hidpp.IsReceiver(0xC548, "") && Hidpp.IsReceiver(0x1234, "LIGHTSPEED Receiver"));
