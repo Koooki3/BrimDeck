@@ -6,9 +6,10 @@ using Windows.Devices.Enumeration;
 namespace BrimDeck.Native;
 
 // The batteries that only the devices' own protocols tell, over HID: Logitech receivers and cables (HID++), Razer mice, the
-// 2.4 GHz mice and keyboards of ATK, VXE, VGN, MCHOSE, Endgame Gear, VAXEE, Inphic and Nordic receivers, SteelSeries, HyperX
-// and MCHOSE headsets, PlayStation controllers, and any device that carries the standard HID battery usages. The protocols
-// themselves are in Core (DeviceProtocols.cs); this sends them. Every request only reads: nothing is set on any device.
+// 2.4 GHz mice and keyboards of ATK, VXE, VGN, MCHOSE, Endgame Gear, VAXEE, Inphic, AJAZZ/AJ179 and Nordic receivers,
+// SteelSeries, HyperX and MCHOSE headsets, PlayStation controllers, and any device that carries the standard HID battery
+// usages. The protocols themselves are in Core (DeviceProtocols.cs); this sends them. Every request only reads: nothing is
+// set on any device.
 // One worker thread at below normal priority does the I/O, so a slow device never holds the panel: once a minute while the
 // page or the collapsed reading shows (DeviceDemand.Watch), and not at all otherwise, when it lets every handle go and ends
 // (the next start makes a new one). A device plugged in while the page shows is read within a moment (a watcher over the HID
@@ -375,6 +376,11 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         (Dongles.EndgameVendor, 0xFF01) => Endgame,
         (Dongles.VaxeeVendor, 0xFF05) => Vaxee,
         (Dongles.NordicVendor, 0xFFA0) => Nordic,
+        // AJAZZ AJ179 / XCTECH: MI_02 interrupt R/W (not Feature 0xF7). Match before the generic 249A Inphic vendor page.
+        (Dongles.AjazzWirelessVendor, _) when Dongles.IsAjazzReceiver(info.Product)
+            && Dongles.AjazzCollection(info.Interface, info.UsagePage, info.Usage, info.InputLength, info.OutputLength) => Ajazz,
+        (Dongles.AjazzWiredVendor, _) when Dongles.IsAjazzWired(info.Product)
+            && Dongles.AjazzCollection(info.Interface, info.UsagePage, info.Usage, info.InputLength, info.OutputLength) => Ajazz,
         (Dongles.InphicVendor, _) when info.Product is 0x5B2E or 0x5B2F && info.FeatureLength >= 33 => Inphic,
         // The 2.4 GHz receiver's product is not fixed: only its vendor collection.
         (Dongles.InphicWireless, >= 0xFF00) when info.FeatureLength >= 33 => Inphic,
@@ -385,9 +391,10 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         _ => null
     };
 
-    private static DeviceBattery Mouse(string prefix, HidInfo info, string fallback, BatteryRead battery, DeviceKind kind = DeviceKind.Mouse)
-        => new(Key(prefix, info), NameOf(info, fallback), Devices.Named(info.ProductName) is { } named and not DeviceKind.Other ? named : kind, DeviceSource.Hid, battery.Percent)
-        { Charging = battery.Charging, Coarse = battery.Coarse, Hardware = Devices.Hardware(info.Vendor, info.Product) };
+    private static DeviceBattery Mouse(string prefix, HidInfo info, string fallback, BatteryRead battery, DeviceKind kind = DeviceKind.Mouse, string? preferredName = null)
+        => new(Key(prefix, info), preferredName is { Length: > 0 } ? preferredName : NameOf(info, fallback),
+            Devices.Named(info.ProductName) is { } named and not DeviceKind.Other ? named : kind, DeviceSource.Hid, battery.Percent)
+        { Charging = battery.Charging, Coarse = battery.Coarse, Asleep = battery.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product) };
 
     private static IEnumerable<DeviceBattery> BitMouse(HidInfo info, HashSet<string> claimed)
     {
@@ -464,6 +471,25 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             return [Mouse("mchose", info, "MCHOSE", battery)];
         }
         return [];
+    }
+
+    // AJAZZ AJ179: WriteFile interrupt OUT (report-id 0 + 32-byte 0x10), read until an info or online status frame.
+    // The receiver answers 0x10 while the mouse sleeps and still carries the last battery — mark Asleep, never invent 0 %.
+    private static IEnumerable<DeviceBattery> Ajazz(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info) { StripZero = true };
+        var reading = Hid.Transact<object>([device], () => device.Write(Dongles.AjazzInfoRequest()), r =>
+        {
+            if (Dongles.AjazzParseInfo(r) is { } infoReply) return infoReply;
+            // A passive 0xC0 while waiting: only take it when the mouse is online and the battery byte is valid.
+            if (Dongles.AjazzParseStatus(r) is { Online: true, Percent: { } percent })
+                return new Dongles.AjazzInfo(percent, Charging: false, Connected: true, DeviceId: "");
+            return null;
+        }, 1500);
+        if (reading is not Dongles.AjazzInfo parsed || Dongles.AjazzBattery(parsed) is not { } battery) return [];
+        claimed.Add(info.Path);
+        string name = parsed.DeviceId.Length > 0 ? parsed.DeviceId : NameOf(info, "AJAZZ");
+        return [Mouse("ajazz", info, "AJAZZ", battery, preferredName: name)];
     }
 
     // ----- The standard battery usages -----

@@ -10,15 +10,19 @@ namespace BrimDeck.Core;
 //   see ThirdPartyNotices.txt): the 90-byte report, its checksum and the catalog of models and transaction ids.
 // - ATK/VXE (Nordic "BitMouse") and Compx frames: after Lkig/ATK-A9-Battery and cobanov/atkctl (MIT); Inphic IN9: after
 //   InphicBatteryTray by Tan-TanZi (MIT). See ThirdPartyNotices.txt.
+// - AJAZZ / AJ179 (XCTECH 249A:5C2F receiver, documented wired 248A:5C2E/5D2E/5E2E): interrupt report framing after
+//   Rockeyxx/aj179-linux (MIT; see ThirdPartyNotices.txt) and a read-only PoC on a 249A:5C2F / M041 dongle — not the AJ 8K
+//   Feature 0xF7 path.
 // - SteelSeries, HyperX and MCHOSE headsets, MCHOSE mice, VGN keyboards, Endgame Gear, VAXEE, Nordic receivers and the
 //   PlayStation controllers: written from the documented bytes alone (HeadsetControl, the Linux drivers and the vendors' own
 //   web drivers are look-only).
 // - AirPods and Beats: the proximity pairing advertisement's layout as OpenPods and AirPodsDesktop read it (GPL; look-only,
 //   facts only).
 
-// One battery reading from a protocol: the percentage (null: the device answered without one), whether it charges, and whether
-// the level is coarse (a voltage, or a few steps).
-public readonly record struct BatteryRead(int? Percent, bool Charging = false, bool Coarse = false);
+// One battery reading from a protocol: the percentage (null: the device answered without one), whether it charges, whether
+// the level is coarse (a voltage, or a few steps), and whether the mouse is asleep / not answering (Asleep): the last percent
+// still stands; never invent 0 % for that case.
+public readonly record struct BatteryRead(int? Percent, bool Charging = false, bool Coarse = false, bool Asleep = false);
 
 public static class Hidpp
 {
@@ -284,6 +288,83 @@ public static class Dongles
         if (reply.Length < 21 || reply[0] != 0x4D || reply[4] != 0x00 || reply[5] != 0x09 || reply[8] == 0xFF) return null;
         int level = reply[8 + 12];
         return level is > 0 and <= 100 ? new(level, reply[8 + 11] != 0) : null;
+    }
+
+    // AJAZZ AJ179-family dual-mode mice on the XCTECH 2.4 GHz receiver (VID 0x249A PID 0x5C2F, HID MI_02) and the documented
+    // USB-cable PIDs on vendor 0x248A (5C2E / 5D2E / 5E2E — from aj179-linux PROTOCOL.md; the reporter's Zero PC verified the
+    // wireless 249A:5C2F / device id M041 only). Framing is a 32-byte vendor report on interrupt IN/OUT (Windows WriteFile
+    // buffer length = OutputReportByteLength with a leading report-id 0). Command 0x10 is answered by the receiver even while
+    // the mouse sleeps: battery at byte 13, charging at 12, connected at 14; unsolicited 0xC0 carries online at 1 and battery
+    // at 2. Sleep must keep the last percent (Asleep), never a false 0 %.
+    public const int AjazzWirelessVendor = 0x249A, AjazzReceiverProduct = 0x5C2F;
+    public const int AjazzWiredVendor = 0x248A;
+    public static readonly int[] AjazzWiredProducts = [0x5C2E, 0x5D2E, 0x5E2E];
+    public const int AjazzReportLength = 32;
+    public const byte AjazzCmdInfo = 0x10, AjazzStatus = 0xC0;
+
+    public static bool IsAjazzReceiver(int product) => product == AjazzReceiverProduct;
+    public static bool IsAjazzWired(int product) => Array.IndexOf(AjazzWiredProducts, product) >= 0;
+    public static bool IsAjazz(int vendor, int product)
+        => vendor == AjazzWirelessVendor && IsAjazzReceiver(product)
+        || vendor == AjazzWiredVendor && IsAjazzWired(product);
+
+    // The config collection: MI_02 (UsagePage 0x0001 / Usage 0x0000), In/Out report length 33 with report-id 0 on Windows.
+    public static bool AjazzCollection(int iface, int usagePage, int usage, int inputLength, int outputLength)
+    {
+        if (outputLength < 32 || inputLength < 32) return false;
+        if (iface == 2) return true;
+        return usagePage == 0x01 && usage == 0x00 && outputLength >= 33 && inputLength >= 33;
+    }
+
+    // Report-id 0 + 32-byte vendor frame: cmd at [1], seq/len 0, checksum = sum(payload bytes [5..31]) & 0xFF at [32].
+    public static byte[] AjazzInfoRequest()
+    {
+        var frame = new byte[AjazzReportLength + 1];
+        frame[1] = AjazzCmdInfo;
+        int sum = 0;
+        for (int i = 5; i < frame.Length - 1; i++) sum += frame[i];
+        frame[^1] = (byte)(sum & 0xFF);
+        return frame;
+    }
+
+    // Parsed 0x10 info. DeviceId is the four ASCII chars at bytes 4..7 (e.g. M041 / M179) when printable.
+    public readonly record struct AjazzInfo(int Percent, bool Charging, bool Connected, string DeviceId);
+
+    public static AjazzInfo? AjazzParseInfo(byte[] reply)
+    {
+        int o = reply.Length > 15 && reply[0] == 0 && reply[1] == AjazzCmdInfo ? 1 : 0;
+        if (reply.Length < o + 15 || reply[o] != AjazzCmdInfo) return null;
+        int bat = reply[o + 13];
+        if (bat > 100) return null;
+        bool connected = reply[o + 14] != 0;
+        // Asleep + 0 % with no other evidence is not reported as empty — avoids a false zero while the link is down.
+        if (!connected && bat == 0) return null;
+        return new(bat, reply[o + 12] != 0, connected, AjazzDeviceId(reply, o + 4));
+    }
+
+    public static (bool Online, int? Percent)? AjazzParseStatus(byte[] reply)
+    {
+        int o = reply.Length > 2 && reply[0] == 0 && reply[1] == AjazzStatus ? 1 : 0;
+        if (reply.Length < o + 3 || reply[o] != AjazzStatus) return null;
+        int bat = reply[o + 2];
+        return (reply[o + 1] == 1, bat <= 100 ? bat : null);
+    }
+
+    public static BatteryRead? AjazzBattery(AjazzInfo info)
+        => new(info.Percent, info.Charging, Asleep: !info.Connected);
+
+    private static string AjazzDeviceId(byte[] reply, int at)
+    {
+        if (reply.Length < at + 4) return "";
+        Span<char> chars = stackalloc char[4];
+        int n = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            byte b = reply[at + i];
+            if (b is < 0x20 or > 0x7E) break;
+            chars[n++] = (char)b;
+        }
+        return n == 0 ? "" : new string(chars[..n]);
     }
 }
 
