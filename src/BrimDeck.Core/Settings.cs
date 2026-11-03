@@ -463,6 +463,9 @@ public sealed class DeckSettings
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;
     public bool ForceTopmost { get; set; }
+    // The panel window can be captured on its own by recording apps (OBS window capture). Off, the window keeps the no-activate
+    // style that recording apps cannot capture, and that keeps it out of Alt+Tab.
+    public bool WindowCapture { get; set; }
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
