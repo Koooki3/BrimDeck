@@ -84,6 +84,7 @@ try
     StripAdmissionTests.Run(Check);
     DevicesTests.Run(Check);
     DeviceProtocolTests.Run(Check);
+    DeviceSafetyTests.Run(Check);
     PowerTests.Run(Check);
     DevicesPageTests.Run(Check);
     FrameRateTests.Run(Check);
