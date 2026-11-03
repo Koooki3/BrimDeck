@@ -8,6 +8,37 @@ static class DeviceSafetyTests
     {
         SoftwareId(check);
         RequestTargets(check);
+        VendorPrograms(check);
+    }
+
+    // The brands whose query is two steps stand aside while the vendor's software runs (HidBatteries.Scan asks BrandOf for the
+    // device's vendor, then whether that brand is among VendorSoftware.Running of the process names). The process lists here are
+    // injected; the matching is the real one.
+    private static void VendorPrograms(Action<string, bool> check)
+    {
+        // Exactly Scan's decision for a device of this vendor, given the executable names that are running.
+        bool Aside(int vendor, params string[] processes) => VendorSoftware.BrandOf(vendor) is { } brand && VendorSoftware.Running(processes).Contains(brand);
+
+        string[] desktop = ["explorer.exe", "chrome.exe", "BrimDeck.exe", "steam.exe", "Discord.exe", "svchost.exe"];
+        check("Vendor software: nothing of the four brands among ordinary processes, so every brand is read",
+            !Aside(Razer.Vendor, desktop) && !Aside(Dongles.EndgameVendor, desktop) && !Aside(Dongles.VaxeeVendor, desktop) && !Aside(Dongles.InphicVendor, desktop) && !Aside(Dongles.InphicWireless, desktop));
+        check("Vendor software: Razer stands aside for Synapse 3 and 4 and their background parts",
+            Aside(Razer.Vendor, [.. desktop, "Razer Synapse.exe"]) && Aside(Razer.Vendor, [.. desktop, "Razer Synapse 4.exe"])
+            && Aside(Razer.Vendor, [.. desktop, "RazerCentralService.exe"]) && Aside(Razer.Vendor, [.. desktop, "Razer Synapse Service.exe"]) && Aside(Razer.Vendor, [.. desktop, "RazerAppEngine.exe"])
+            && Aside(Razer.Vendor, ["RAZERSYNAPSE.EXE"]));
+        check("Vendor software: Endgame Gear, VAXEE and Inphic stand aside for their own programs and not for each other's",
+            Aside(Dongles.EndgameVendor, "EndgameGearConfigurator.exe") && !Aside(Dongles.EndgameVendor, "Razer Synapse.exe", "VAXEE Tool.exe")
+            && Aside(Dongles.VaxeeVendor, "VAXEE Mouse Config.exe") && !Aside(Dongles.VaxeeVendor, "EndgameGear.exe")
+            && Aside(Dongles.InphicVendor, "InphicDriver.exe") && Aside(Dongles.InphicWireless, "英菲克驱动.exe") && !Aside(Dongles.InphicVendor, "Razer Synapse.exe"));
+        check("Vendor software: the one-step brands and HID++ never stand aside",
+            VendorSoftware.BrandOf(Hidpp.Vendor) is null && VendorSoftware.BrandOf(Dongles.AtkVendor) is null && VendorSoftware.BrandOf(Dongles.VgnVendor) is null
+            && VendorSoftware.BrandOf(Dongles.MchoseVendor) is null && VendorSoftware.BrandOf(0x054C) is null);
+        // The brands' vendor ids are the ones their readers are chosen by, so no reader of a two-step brand escapes the check.
+        check("Vendor software: every two-step reader's vendor is covered",
+            Dongles.Find(Dongles.EndgameVendor, 1, 0xFF01, "", 0) is { } && VendorSoftware.BrandOf(Dongles.EndgameVendor) is not null
+            && Dongles.Find(Dongles.VaxeeVendor, 1, 0xFF05, "", 0) is { } && VendorSoftware.BrandOf(Dongles.VaxeeVendor) is not null
+            && Dongles.Find(Dongles.InphicVendor, 0x5B2E, 0xFF00, "", 33) is { } && VendorSoftware.BrandOf(Dongles.InphicVendor) is not null
+            && Dongles.Find(Dongles.InphicWireless, 1, 0xFF00, "", 33) is { } && VendorSoftware.BrandOf(Dongles.InphicWireless) is not null);
     }
 
     // Which collections a battery request is sent to (Dongles.Find, which HidBatteries asks). A shared vendor id is not enough.

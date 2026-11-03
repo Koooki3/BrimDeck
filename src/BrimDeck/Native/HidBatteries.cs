@@ -217,16 +217,26 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             catch { }
         }
 
+        // The brands whose request and reply are two steps another program can come between stand aside while that brand's own
+        // software runs (VendorSoftware). The processes are looked up once, and only if such a device is here.
+        HashSet<DeviceBrand>? software = null;
+        bool Aside(int vendor)
+        {
+            if (VendorSoftware.BrandOf(vendor) is not { } brand) return false;
+            software ??= RunningSoftware();
+            return software.Contains(brand);
+        }
+
         Try(() => _logitech.Read(infos.Where(info => info.Vendor == Hidpp.Vendor && info.UsagePage == 0xFF00).ToList(), claimed));
         foreach (var group in infos.Where(info => info.Vendor == Razer.Vendor).GroupBy(info => info.Product))
-            if (Razer.Find(group.Key) is { } model) Try(() => ReadRazer(model, [.. group], claimed));
+            if (Razer.Find(group.Key) is { } model && !Aside(Razer.Vendor)) Try(() => ReadRazer(model, [.. group], claimed));
         foreach (var info in infos)
         {
             if (claimed.Contains(info.Path)) continue;
             if (Headsets.Find(info.Vendor, info.Product) is { } headset) { if (Matches(info, Headsets.Channel(headset))) Try(() => ReadHeadset(headset, info, claimed)); continue; }
             if (info.Vendor == PlayStation.Vendor && (PlayStation.IsDualSense(info.Product) || PlayStation.IsDualShock(info.Product)) && info.UsagePage == 0x01 && info.Usage == 0x05)
             { Try(() => ReadPlayStation(info, claimed)); continue; }
-            if (Dongle(info) is { } dongle) Try(() => dongle(info, claimed));
+            if (Dongle(info) is { } dongle && !Aside(info.Vendor)) Try(() => dongle(info, claimed));
         }
         // The standard battery usages, on whatever no vendor protocol read. Bluetooth collections are left out (their level comes
         // from Windows, and a feature report over the air can wait on a sleeping device), and so is one that timed out lately.
@@ -255,6 +265,14 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         _previous = found;
         return found;
     }
+    // The brands whose software is running, from one snapshot of the process names (nothing is opened or allocated per process).
+    private static HashSet<DeviceBrand> RunningSoftware()
+    {
+        var running = new HashSet<DeviceBrand>();
+        ProcessSnapshot.Any(file => { VendorSoftware.Note(file, running); return false; });
+        return running;
+    }
+
     // Whether a collection still present belongs to the device a key names (its vendor and product are in the key; a Logitech
     // device's key names its unit, so any Logitech collection will do).
     private static bool KeyOwner(HidInfo info, string key) => key.Contains($"{info.Vendor:X4}:{info.Product:X4}", StringComparison.Ordinal);
