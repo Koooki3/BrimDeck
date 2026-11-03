@@ -79,10 +79,8 @@ public sealed partial class SettingsWindow
             list.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
             list.Children.Add(ExceptionRow(exception));
         }
-        // The list's slot. While the row is open its minimum height is the height the list last took, so removing an app
-        // leaves the rest of the page where it was instead of pulling it up. A closed row reserves nothing: the height
-        // was kept for the open list's sake, and holding it while the list is hidden left a blank block under the row
-        // that grew with every app added (the height only ever rose, and every rebuild of this page re-applied it).
+        // The list's slot. While the row is open its minimum height is the height the list last took; a closed row reserves
+        // nothing, so hiding the list leaves no blank block above the groups below it.
         var space = new Border { Child = list, MinHeight = 0 };
         var label = TextLine(title, 13, TextPrimary, FontWeights.SemiBold); label.VerticalAlignment = VerticalAlignment.Center;
         var info = HelpIcon(title, () => Loc.T("为单个应用分别指定三种情境下面板的行为；选“跟随全局”的情境沿用上面的三项设置。",
