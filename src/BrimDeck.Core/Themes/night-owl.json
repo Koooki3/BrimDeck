@@ -24,7 +24,7 @@
     "equalizer": "#7FDBCA",
     "hairline": "#122D42",
     "track": "#253E51",
-    "ringTrack": "#1D3B53",
+    "ringTrack": "#253E51",
     "fill": "#0B2942",
     "fillSelected": "#1D3B53",
     "hover": "#0B2942",

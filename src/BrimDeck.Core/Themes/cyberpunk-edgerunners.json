@@ -32,7 +32,7 @@
     "equalizer": "#00F0FF",
     "hairline": "#2EB0D0F0",
     "track": "#3600F0FF",
-    "ringTrack": "#3800F0FF",
+    "ringTrack": "#3600F0FF",
     "fill": "#14B0D0F0",
     "fillSelected": "#2EB0D0F0",
     "hover": "#1FB0D0F0",
