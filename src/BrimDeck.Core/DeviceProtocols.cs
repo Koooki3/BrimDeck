@@ -23,7 +23,12 @@ public readonly record struct BatteryRead(int? Percent, bool Charging = false, b
 public static class Hidpp
 {
     public const int Vendor = 0x046D;
-    public const byte Short = 0x10, Long = 0x11, SoftwareId = 0x0D;
+    public const byte Short = 0x10, Long = 0x11;
+    // The software id (low nibble of a request's byte 3) is what tells a reply to one program's request from another's, since a
+    // receiver sends every reply to every program that has it open. It must be one nobody else uses: OpenRGB 0x07, LGSTrayEx
+    // 0x0A, Solaar 0x0B, Logitech G HUB 0x0D and the firmware's 0x0F are taken (Solaar's lib/logitech_receiver/base.py lists
+    // them); 0x0E is free.
+    public const byte SoftwareId = 0x0E;
     public const int ShortLength = 7, LongLength = 20;
     public const int DeviceInfo = 0x0003, DeviceName = 0x0005, BatteryStatus = 0x1000, BatteryVoltage = 0x1001, UnifiedBattery = 0x1004, AdcMeasurement = 0x1F20;
     // HID++ 1.0's error for a request it does not know: the device speaks only HID++ 1.0.

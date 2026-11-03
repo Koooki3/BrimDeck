@@ -25,7 +25,7 @@ static class DeviceProtocolTests
 
     private static void Logitech(Action<string, bool> check)
     {
-        check("HID++: a long request, padded", Hidpp.Request(1, 0x00, 1, 0, 0, 0x5A).SequenceEqual(new byte[] { 0x11, 1, 0, 0x1D, 0, 0, 0x5A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
+        check("HID++: a long request, padded", Hidpp.Request(1, 0x00, 1, 0, 0, 0x5A).SequenceEqual(new byte[] { 0x11, 1, 0, 0x1E, 0, 0, 0x5A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
         check("HID++: the reply to its request", Hidpp.Match(Long(1, 0x08, 1, 55, 4, 1), 1, 0x08, 1).Reply is [55, 4, 1, ..]);
         check("HID++: another device's or another function's report is not the reply", Hidpp.Match(Long(2, 0x08, 1, 55), 1, 0x08, 1) == (null, null)
             && Hidpp.Match(Long(1, 0x08, 0, 55), 1, 0x08, 1) == (null, null));
