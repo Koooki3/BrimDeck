@@ -44,6 +44,10 @@ public sealed class ProviderSnapshot(ProviderId id)
     public DateTime? UsageStart { get; set; }
     public List<Quota> Quotas { get; set; } = [];
     public List<TokenEntry> Entries { get; set; } = [];
+    // A merged Cursor plan, whose included records share the weekly amount used (CursorPrices), and the prices per token
+    // worked out from it; null until they are.
+    public bool WeeklyShares { get; set; }
+    public TokenPrices? WeeklyPrices { get; set; }
     // A shallow copy: setting a property of the copy leaves this snapshot as it was, but the two share their lists.
     public ProviderSnapshot Copy() => (ProviderSnapshot)MemberwiseClone();
 }

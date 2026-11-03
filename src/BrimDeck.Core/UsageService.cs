@@ -860,6 +860,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException ||
             ex is OperationCanceledException && !ct.IsCancellationRequested) { }
+        Dictionary<string, decimal>? costs = null;
         if (unified)
         {
             // A reading's records are complete when every day from its week's start to it was read well after it.
@@ -869,16 +870,20 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     if (!_cursorDays.TryGetValue(day, out var read) || read.ReadAt < to + CursorPrices.RecordsLate) return false;
                 return true;
             }
-            _cursorPrices.Update(_cursorDays.Values.SelectMany(read => read.Entries).Where(entry => entry.ReportedCostUsd is null).ToList(), Covered, now);
+            var included = _cursorDays.Values.SelectMany(read => read.Entries).Where(entry => entry.ReportedCostUsd is null).ToList();
+            _cursorPrices.Update(included, Covered, now);
             _cursorPrices.Save();
+            costs = _cursorPrices.Costs(included);
+            snapshot.WeeklyShares = true;
+            snapshot.WeeklyPrices = _cursorPrices.Prices;
         }
         int days = (int)(last - shown).TotalDays + 1, missing = Enumerable.Range(0, days).Count(i => !_cursorDays.ContainsKey(shown.AddDays(i)));
         if (missing == days)
         { snapshot.UsageAvailable = false; snapshot.UsageNote = Loc.T("配额已读取，账户 Token 明细暂时不可用或尚未读取完整。", "The quota was read, but the account's token details are unavailable or not fully read yet."); return; }
         snapshot.Entries = _cursorDays.Values.SelectMany(read => read.Entries).Where(entry => entry.Time >= start && entry.Time <= now).OrderBy(entry => entry.Time)
-            .Select(entry => unified && entry.ReportedCostUsd is null && _cursorPrices.Cost(entry) is { } cost ? entry with { ReportedCostUsd = cost, FittedCost = true } : entry).ToList();
-        if (unified) snapshot.UsageNote += _cursorPrices.Prices is null ? Loc.T("费用需积累更多刷新记录后才能推算。", " Costs can be worked out once more refreshes have been recorded.")
-            : Loc.T("费用按每周已用金额推算，为近似值。", " Costs are worked out from the weekly amount used and are approximate.");
+            .Select(entry => costs is not null && entry.ReportedCostUsd is null && costs.TryGetValue(entry.Key, out var cost) ? entry with { ReportedCostUsd = cost, FittedCost = true } : entry).ToList();
+        if (unified) snapshot.UsageNote += Loc.T("费用按每周已用金额分摊到各条记录；最新的用量在下次读到金额后计入。",
+            " Costs share out the weekly amount used among the records; the latest usage counts once the next amount is read.");
         snapshot.UsageAvailable = true;
         snapshot.UsageComplete = missing == 0;
         if (missing > 0) snapshot.UsageNote += Loc.T($"其中 {missing} 天的明细尚未读取，将在之后的刷新中补全。", " " + Loc.Count(missing, "day", "days") + " not read yet; later refreshes fill them in.");

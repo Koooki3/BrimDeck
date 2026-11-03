@@ -5,26 +5,30 @@ using System.Text.Json;
 namespace BrimDeck.Core;
 
 // One reading of a merged Cursor plan's weekly included usage: the amount used (UsedCents) held from First to Last within
-// the week that began at PeriodStart. Tokens is the included tokens of that week up to Last, by kind (input, output, cache
-// read, cache write), filled in once the records up to Last are known; Checked marks a reading that was looked at for it,
-// whether or not it could be used.
+// the week that began at PeriodStart. Tokens is the included tokens of that week, by kind (input, output, cache read, cache
+// write), up to a moment between First and Last that no record came shortly before (CursorPrices.Cutoff, kept as Cutoff),
+// filled in once the records up to it are known: the week's amount stood at UsedCents then. Checked marks a reading that is no longer looked at: a later one has begun, and it was
+// either used or had no such moment.
 public sealed record CursorSpendSample(DateTimeOffset PeriodStart, long UsedCents, DateTimeOffset First, DateTimeOffset Last)
 {
     public long[]? Tokens { get; init; }
+    public DateTimeOffset? Cutoff { get; init; }
     public bool Checked { get; init; }
 }
 
 // A merged Cursor plan prices nothing per record: its billing items charge included usage at zero, and only the week's
-// included usage as a whole has an amount (usage-status, whole cents). Each reading of that amount is the sum of the
-// week's included tokens up to then, times a fixed price per token kind, so readings over time, across weeks, fix those
-// prices by least squares, as Pricing.FromReported does with per-record amounts. Readings and prices are kept on disk,
-// because the amount starts again from zero every week and the readings of a week cannot be had later.
+// included usage as a whole has an amount (usage-status, whole cents). The amount at each usable reading, and zero at the
+// start of the week, fix what the records between two such moments cost together; that is shared out among them (Costs).
+// Each reading is also the sum of the week's included tokens up to then times a fixed price per token kind, so readings
+// over time, across weeks, fix those prices by least squares, as Pricing.FromReported does with per-record amounts; once
+// known, they decide each record's share and price records outside any two readings. Readings and prices are kept on
+// disk, because the amount starts again from zero every week and the readings of a week cannot be had later.
 public sealed class CursorPrices
 {
     public const string FileName = "cursor-prices.json";
     // Readings older than this are dropped, so prices that changed are soon worked out again.
     public static readonly TimeSpan KeepFor = TimeSpan.FromDays(28);
-    // The amount trails the records: a reading counts only when no record came within this time before it.
+    // The amount trails the records: a moment counts only when no record came within this time before it.
     public static readonly TimeSpan Settle = TimeSpan.FromMinutes(3);
     // A reading's records are taken as complete once a day read this long after the reading has them.
     public static readonly TimeSpan RecordsLate = TimeSpan.FromMinutes(10);
@@ -33,7 +37,7 @@ public sealed class CursorPrices
     private const int MaxSamples = 5000;
 
     private sealed record Stored(string? Account, List<StoredSample?>? Samples, StoredPrices? Prices);
-    private sealed record StoredSample(DateTimeOffset PeriodStart, long UsedCents, DateTimeOffset First, DateTimeOffset Last, long[]? Tokens, bool Checked);
+    private sealed record StoredSample(DateTimeOffset PeriodStart, long UsedCents, DateTimeOffset First, DateTimeOffset Last, long[]? Tokens, bool Checked, DateTimeOffset? Cutoff = null);
     private sealed record StoredPrices(decimal Input, decimal Output, decimal? CacheRead, decimal? CacheWrite);
 
     private readonly string? _path;
@@ -60,8 +64,11 @@ public sealed class CursorPrices
             if (!File.Exists(_path)) return;
             var stored = JsonSerializer.Deserialize<Stored>(File.ReadAllText(_path));
             if (stored?.Account != hash) return;
+            // A reading kept unused, or used without its moment (as earlier versions kept them), is looked at again.
             Samples = (stored.Samples ?? []).Where(s => s is not null && s.UsedCents >= 0 && s.Last >= s.First && (s.Tokens is null || s.Tokens.Length == 4))
-                .Select(s => new CursorSpendSample(s!.PeriodStart, s.UsedCents, s.First, s.Last) { Tokens = s.Tokens, Checked = s.Checked }).OrderBy(s => s.First).ToList();
+                .Select(s => s!.Tokens is not null && s.Cutoff is not null
+                    ? new CursorSpendSample(s.PeriodStart, s.UsedCents, s.First, s.Last) { Tokens = s.Tokens, Cutoff = s.Cutoff, Checked = s.Checked }
+                    : new CursorSpendSample(s.PeriodStart, s.UsedCents, s.First, s.Last)).OrderBy(s => s.First).ToList();
             if (stored.Prices is { } p && p.Input >= 0 && p.Output >= 0) Prices = new(p.Input, p.Output, p.CacheRead, p.CacheWrite, null);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
@@ -87,19 +94,87 @@ public sealed class CursorPrices
         Samples.RemoveAll(s => now - s.Last > KeepFor);
         if (Samples.Count > MaxSamples) Samples.RemoveRange(0, Samples.Count - MaxSamples);
         _changed |= Samples.Count != before;
+        var times = entries.Select(e => e.Time).Order().ToList();
         for (int i = 0; i < Samples.Count; i++)
         {
             var sample = Samples[i];
-            // The newest reading may still be extended; it is used once a later one has begun or it has stood for a while.
-            if (sample.Checked || (i == Samples.Count - 1 && now - sample.Last < RecordsLate) || !covered(sample.PeriodStart, sample.Last)) continue;
-            var week = entries.Where(e => e.Time >= sample.PeriodStart && e.Time <= sample.Last).ToList();
-            bool settled = !week.Any(e => e.Time > sample.Last - Settle);
-            Samples[i] = sample with { Checked = true, Tokens = settled ? [week.Sum(e => e.Input), week.Sum(e => e.Output), week.Sum(e => e.CacheRead), week.Sum(e => e.CacheWrite + e.CacheWriteHour)] : null };
+            // The newest reading may still be extended, so it is worked out again on each update and never marked checked;
+            // an earlier one is worked out once the records up to its end have had time to arrive.
+            bool newest = i == Samples.Count - 1;
+            if (sample.Checked || !newest && now - sample.Last < RecordsLate) continue;
+            // Records reach the billing items late, so the moment is one whose records have had time to arrive.
+            var cutoff = Cutoff(sample, times, now - RecordsLate);
+            if (cutoff is { } moment && !covered(sample.PeriodStart, moment)) continue;
+            long[]? tokens = null;
+            if (cutoff is { } at)
+            {
+                var week = entries.Where(e => e.Time >= sample.PeriodStart && e.Time <= at).ToList();
+                tokens = [week.Sum(e => e.Input), week.Sum(e => e.Output), week.Sum(e => e.CacheRead), week.Sum(e => e.CacheWrite + e.CacheWriteHour)];
+            }
+            if (newest && cutoff == sample.Cutoff && (tokens is null ? sample.Tokens is null : sample.Tokens is not null && tokens.SequenceEqual(sample.Tokens))) continue;
+            Samples[i] = sample with { Checked = !newest, Tokens = tokens, Cutoff = tokens is null ? null : cutoff };
             _changed = true;
         }
         if (Fit(Samples.Where(s => s.Tokens is not null).Select(s => (s.Tokens!, (double)s.UsedCents)).ToList()) is { } prices && prices != Prices)
         { Prices = prices; _changed = true; }
     }
+
+    // The latest moment from First to Last, and no later than latest, that no record came within Settle before: the amount
+    // held then, and every record up to it was in it. Null when records came all through the reading. times are the records'
+    // times in order.
+    public static DateTimeOffset? Cutoff(CursorSpendSample sample, IReadOnlyList<DateTimeOffset> times, DateTimeOffset latest)
+    {
+        var moment = sample.Last < latest ? sample.Last : latest;
+        while (moment >= sample.First)
+        {
+            // The earliest record within Settle before the moment; the moment moves to just before it.
+            int index = After(times, moment - Settle);
+            if (index >= times.Count || times[index] > moment) return moment;
+            moment = times[index].AddTicks(-1);
+        }
+        return null;
+    }
+
+    // The index of the first time after the given one.
+    private static int After(IReadOnlyList<DateTimeOffset> times, DateTimeOffset time)
+    {
+        int low = 0, high = times.Count;
+        while (low < high)
+        {
+            int middle = (low + high) / 2;
+            if (times[middle] <= time) low = middle + 1; else high = middle;
+        }
+        return low;
+    }
+
+    // The amount of each included record, in USD, by key. Within a week, the amount added between two usable readings (the
+    // first from zero at the week's start) is shared out among the records between their moments, in proportion to their
+    // cost at the worked-out prices, or to their tokens until there are prices. A record after the week's last usable
+    // reading, or in a week without one, is priced at the worked-out prices, and has no amount until there are some.
+    public Dictionary<string, decimal> Costs(IReadOnlyCollection<TokenEntry> entries)
+    {
+        var costs = new Dictionary<string, decimal>();
+        foreach (var week in Samples.Where(s => s.Tokens is not null && s.Cutoff is not null).GroupBy(s => s.PeriodStart))
+        {
+            var marks = week.Select(s => (Time: s.Cutoff!.Value, Cents: (decimal)s.UsedCents)).OrderBy(m => m.Time).Prepend((Time: week.Key.AddTicks(-1), Cents: 0m)).ToList();
+            decimal reached = 0;
+            for (int k = 1; k < marks.Count; k++)
+            {
+                // The amount only grows; a reading below an earlier one adds nothing.
+                decimal added = Math.Max(0, marks[k].Cents - reached);
+                reached = Math.Max(reached, marks[k].Cents);
+                var span = entries.Where(e => e.Time > marks[k - 1].Time && e.Time <= marks[k].Time).ToList();
+                decimal weights = span.Sum(Weight);
+                if (weights <= 0) continue;
+                foreach (var entry in span) costs[entry.Key] = added / 100 * Weight(entry) / weights;
+            }
+        }
+        foreach (var entry in entries)
+            if (!costs.ContainsKey(entry.Key) && Cost(entry) is { } cost) costs[entry.Key] = cost;
+        return costs;
+    }
+
+    private decimal Weight(TokenEntry entry) => Cost(entry) ?? entry.Total;
 
     // The amount of an included record at the worked-out prices; null until there are prices.
     public decimal? Cost(TokenEntry entry) => Prices is not { } p ? null
@@ -112,7 +187,7 @@ public sealed class CursorPrices
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            var stored = new Stored(_account, Samples.Select(s => (StoredSample?)new StoredSample(s.PeriodStart, s.UsedCents, s.First, s.Last, s.Tokens, s.Checked)).ToList(),
+            var stored = new Stored(_account, Samples.Select(s => (StoredSample?)new StoredSample(s.PeriodStart, s.UsedCents, s.First, s.Last, s.Tokens, s.Checked, s.Cutoff)).ToList(),
                 Prices is { } p ? new StoredPrices(p.Input, p.Output, p.CacheRead, p.CacheWrite) : null);
             var temporary = _path + ".tmp";
             File.WriteAllText(temporary, JsonSerializer.Serialize(stored));

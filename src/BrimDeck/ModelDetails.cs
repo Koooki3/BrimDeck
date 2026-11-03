@@ -262,7 +262,8 @@ public partial class MainWindow
 
     // Every record in a row shares one model name and application, so the first record finds the row's prices.
     // A price table: one column per prompt-size tier, so standard and long-context prices sit side by side.
-    private FrameworkElement PriceBreakdown(ModelUsageRow record)
+    // source is the snapshot the row's records came from.
+    private FrameworkElement PriceBreakdown(ModelUsageRow record, ProviderSnapshot? source)
     {
         var grid = new Grid();
         void Cell(string text, int row, int column, string? color = null, bool right = false, int span = 1, Thickness margin = default)
@@ -275,9 +276,11 @@ public partial class MainWindow
         }
         // When every cost comes from the API, only the prices recovered from those amounts are the ones actually charged;
         // catalog prices would describe a cost that was never calculated.
-        var recovery = record.Entries.All(t => t.ReportedCostUsd is not null) ? Pricing.FromReported(record.Entries) : null;
-        var derived = recovery?.Prices;
-        var model = recovery is null ? _app.Prices.Match(record.Entries[0]) : null;
+        // A merged Cursor plan's included records share its weekly amount; their prices are the ones worked out from it.
+        bool shared = source?.WeeklyShares == true && record.Entries.All(t => t.FittedCost || t.ReportedCostUsd is null);
+        var recovery = !shared && record.Entries.All(t => t.ReportedCostUsd is not null) ? Pricing.FromReported(record.Entries) : null;
+        var derived = shared ? source!.WeeklyPrices : recovery?.Prices;
+        var model = recovery is null && !shared ? _app.Prices.Match(record.Entries[0]) : null;
         var tiers = model?.Tiers.Where(t => t.MinimumPromptTokens > 0).ToArray() ?? [];
         var columns = derived is not null ? [derived] : model is null ? [] : tiers.Select(t => t.Prices).Prepend(model.Tiers.LastOrDefault(t => t.MinimumPromptTokens <= 0)?.Prices ?? model.Prices)
             .Select(prices => _app.Prices.Effective(model, prices)).ToArray();
@@ -302,9 +305,9 @@ public partial class MainWindow
                     line, i + 1, right: true, margin: new Thickness(16, 0, 0, 0));
             line++;
         }
-        string note = recovery switch
+        string note = shared ? derived is null ? Loc.T("单价尚未推算出来", "The prices have not been worked out yet")
+            : Loc.T("USD / 百万 Token · 根据每周已用金额推算", "USD per million tokens · worked out from the weekly amount used") : recovery switch
         {
-            { Status: RecoveryStatus.Recovered } when record.Entries.All(t => t.FittedCost) => Loc.T("USD / 百万 Token · 根据每周已用金额推算", "USD per million tokens · worked out from the weekly amount used"),
             { Status: RecoveryStatus.Recovered } => Loc.T("USD / 百万 Token · 根据接口金额推算", "USD per million tokens · worked out from the API amounts"),
             { Status: RecoveryStatus.TooFewRecords, Records: var count } => Loc.T($"所选时段只有 {count} 条记录，不足以推算单价",
                 $"The selected period has only {Loc.Count(count, "record", "records")}, too few to work out the prices"),
@@ -397,7 +400,7 @@ public partial class MainWindow
             foreach (var text in row.Children.OfType<TextBlock>())
             {
                 int column = Grid.GetColumn(text) / 2;
-                text.ToolTip = column == 1 ? PriceBreakdown(record) : column >= 2 ? tips[column - 2] : (object?)null;
+                text.ToolTip = column == 1 ? PriceBreakdown(record, snapshots.FirstOrDefault(s => s.Id == record.Provider)) : column >= 2 ? tips[column - 2] : (object?)null;
             }
             var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush(PanelTheme.Hex("rowDivider")), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
             item.MouseEnter += (_, _) => item.Background = UI.Brush(PanelTheme.Hex("rowHover")); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;

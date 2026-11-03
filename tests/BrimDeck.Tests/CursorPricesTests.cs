@@ -29,14 +29,31 @@ static class CursorPricesTests
         var near = new TokenEntry("near", start.AddHours(2).AddMinutes(-1), "Grok Bot", 1, 0, 0, 0, 1);
         kept.Add(start, 12, start.AddHours(3));
         kept.Update([near], (_, _) => true, start.AddHours(4));
-        check("A reading with a record just before it is left out of the fit", kept.Samples[0] is { Checked: true, Tokens: null } && kept.Samples[1].Tokens is not null);
+        check("A reading with a record just before its end is taken from before that record",
+            kept.Samples[0] is { Checked: true, Tokens: [0, 0, 0, 0] } && kept.Samples[1] is { Checked: false, Tokens: [1, 1, 0, 0] });
+        var busy = new CursorSpendSample(start, 30, start.AddHours(5), start.AddHours(5).AddMinutes(2));
+        check("A reading with records all through it has no moment to use",
+            CursorPrices.Cutoff(busy, [start.AddHours(5).AddMinutes(-2), start.AddHours(5).AddMinutes(-1), start.AddHours(5).AddMinutes(1), start.AddHours(5).AddMinutes(2)], start.AddDays(1)) is null);
+        check("The newest reading is taken no later than its records can have arrived",
+            CursorPrices.Cutoff(busy with { First = start.AddHours(4) }, [], start.AddHours(5)) == start.AddHours(5));
         kept.Save();
         var again = new CursorPrices(path);
         again.Use("auth0|A");
-        check("Readings are kept on disk for the same account", again.Samples.Count == 2 && again.Samples[1].Tokens is not null);
+        check("Readings are kept on disk for the same account, with the moment each was taken at",
+            again.Samples.Count == 2 && again.Samples[0].Checked && again.Samples[0].Cutoff is not null && again.Samples[1].Tokens is not null);
         again.Use("auth0|B");
         check("Another account's readings are not used", again.Samples.Count == 0 && again.Prices is null);
         check("The file names no account", !File.ReadAllText(path).Contains("auth0|A", StringComparison.Ordinal));
+
+        // Zero at the week's start, 30 cents at t1 and 50 at t2: the records up to t1 share 30 cents by their tokens, the
+        // record between shares 20, and the record after t2 waits for the next reading.
+        var shares = new CursorPrices(null);
+        DateTimeOffset t1 = start.AddHours(2), t2 = start.AddHours(5);
+        shares.Samples.AddRange([new(start, 30, t1, t1) { Tokens = [1, 1, 1, 1], Cutoff = t1 }, new(start, 50, t2, t2) { Tokens = [2, 2, 2, 2], Cutoff = t2 }]);
+        var costs = shares.Costs([Entry("a", start.AddHours(1), 100), Entry("b", t1, 300), Entry("c", start.AddHours(3), 1000), Entry("d", t2.AddMinutes(1), 50)]);
+        check("The amount added between two readings is shared among the records between them by their tokens",
+            costs.Count == 3 && costs["a"] == 0.075m && costs["b"] == 0.225m && costs["c"] == 0.2m);
+        check("A week's first records share the amount from zero at the week's start", costs["a"] + costs["b"] == 0.3m);
 
         await Refreshes(root, check);
     }
@@ -64,6 +81,9 @@ static class CursorPricesTests
                 handler.Records.Add(Record(i, clock.AddMinutes(-6)));
                 handler.Now = clock;
                 last = await Refresh(service);
+                if (i == 2)
+                    check("Before prices are worked out, the records up to the last usable reading already share its amount",
+                        last.Entries.Count == 3 && last.Entries.Take(2).All(e => e.FittedCost && e.ReportedCostUsd > 0) && last.Entries[2].ReportedCostUsd is null);
             }
         }
         decimal truth = handler.Records.Sum(Cost), shown = last.Entries.Sum(e => e.ReportedCostUsd ?? 0);
@@ -79,6 +99,8 @@ static class CursorPricesTests
 
         async Task<ProviderSnapshot> Refresh(UsageService service) => (await service.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Cursor);
     }
+
+    private static TokenEntry Entry(string key, DateTimeOffset time, long tokens) => new(key, time, "Grok Bot", 0, tokens, 0, 0, 0);
 
     // Token mixes that vary from record to record, mostly cache reads as Grok Bot's are.
     private static TokenEntry Record(int i, DateTimeOffset time) => new($"cursor:r{i}", time, "Grok Bot",
