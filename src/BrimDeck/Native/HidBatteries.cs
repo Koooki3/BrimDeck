@@ -400,13 +400,22 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         return [];
     }
 
+    // The receivers Dongles.Find sends the Compx frame to (the ATK A9 Ultra). atkctl sends it as feature report 8, set then get,
+    // which is tried first; only if that gives no reading is it written as an output report, with the overlapped write that has a
+    // timeout (Write). Never HidD_SetOutputReport: it is synchronous and has no timeout, and Microsoft documents that some devices
+    // do not support it and stop responding after it.
     private static IEnumerable<DeviceBattery> Compx(HidInfo info, HashSet<string> claimed)
     {
         using var device = new HidDevice(info);
         var request = Dongles.CompxRequest(0x04);
-        // Most send it as an output report; the A9 Ultra as a feature report.
-        var read = Hid.Transact<object>([device], () => { if (!device.SetOutput(request)) device.Write(request); }, r => Dongles.CompxBattery(r) is { } b ? b : null, 500);
-        if (read is null && device.SetFeature(request) && device.GetFeature(0x08, Math.Max(17, device.FeatureLength)) is { } feature) read = Dongles.CompxBattery(feature);
+        object? read = null;
+        if (device.SetFeature(request) && device.GetFeature(0x08, Math.Max(17, device.FeatureLength)) is { } feature) read = Dongles.CompxBattery(feature);
+        if (read is null)
+        {
+            try { read = Hid.Transact<object>([device], () => device.Write(request), r => Dongles.CompxBattery(r) is { } b ? b : null, 500); }
+            // A collection with no output report: no reading, and nothing more to try.
+            catch (System.ComponentModel.Win32Exception) { }
+        }
         if (read is not BatteryRead battery) return [];
         claimed.Add(info.Path);
         return [Mouse("compx", info, "VXE", battery)];
