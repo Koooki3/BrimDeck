@@ -6,7 +6,7 @@ using Windows.Devices.Enumeration;
 namespace BrimDeck.Native;
 
 // The batteries that only the devices' own protocols tell, over HID: Logitech receivers and cables (HID++), Razer mice, the
-// 2.4 GHz mice and keyboards of ATK, VXE, VGN, MCHOSE, Endgame Gear, VAXEE, Inphic and Nordic receivers, SteelSeries, HyperX
+// 2.4 GHz mice and keyboards of ATK, VXE, VGN, MCHOSE, Endgame Gear, VAXEE, and Inphic receivers (those whose vendor and product are known), SteelSeries, HyperX
 // and MCHOSE headsets, PlayStation controllers, and any device that carries the standard HID battery usages. The protocols
 // themselves are in Core (DeviceProtocols.cs); this sends them. Every request only reads: nothing is set on any device.
 // One worker thread at below normal priority does the I/O, so a slow device never holds the panel: once a minute while the
@@ -213,16 +213,26 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             catch { }
         }
 
+        // The brands whose request and reply are two steps another program can come between stand aside while that brand's own
+        // software runs (VendorSoftware). The processes are looked up once, and only if such a device is here.
+        HashSet<DeviceBrand>? software = null;
+        bool Aside(int vendor)
+        {
+            if (VendorSoftware.BrandOf(vendor) is not { } brand) return false;
+            software ??= RunningSoftware();
+            return software.Contains(brand);
+        }
+
         Try(() => _logitech.Read(infos.Where(info => info.Vendor == Hidpp.Vendor && info.UsagePage == 0xFF00).ToList(), claimed));
         foreach (var group in infos.Where(info => info.Vendor == Razer.Vendor).GroupBy(info => info.Product))
-            if (Razer.Find(group.Key) is { } model) Try(() => ReadRazer(model, [.. group], claimed));
+            if (Razer.Find(group.Key) is { } model && !Aside(Razer.Vendor)) Try(() => ReadRazer(model, [.. group], claimed));
         foreach (var info in infos)
         {
             if (claimed.Contains(info.Path)) continue;
             if (Headsets.Find(info.Vendor, info.Product) is { } headset) { if (Matches(info, Headsets.Channel(headset))) Try(() => ReadHeadset(headset, info, claimed)); continue; }
             if (info.Vendor == PlayStation.Vendor && (PlayStation.IsDualSense(info.Product) || PlayStation.IsDualShock(info.Product)) && info.UsagePage == 0x01 && info.Usage == 0x05)
             { Try(() => ReadPlayStation(info, claimed)); continue; }
-            if (Dongle(info) is { } dongle) Try(() => dongle(info, claimed));
+            if (Dongle(info) is { } dongle && !Aside(info.Vendor)) Try(() => dongle(info, claimed));
         }
         // The standard battery usages, on whatever no vendor protocol read. Bluetooth collections are left out (their level comes
         // from Windows, and a feature report over the air can wait on a sleeping device), and so is one that timed out lately.
@@ -251,6 +261,14 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         _previous = found;
         return found;
     }
+    // The brands whose software is running, from one snapshot of the process names (nothing is opened or allocated per process).
+    private static HashSet<DeviceBrand> RunningSoftware()
+    {
+        var running = new HashSet<DeviceBrand>();
+        ProcessSnapshot.Any(file => { VendorSoftware.Note(file, running); return false; });
+        return running;
+    }
+
     // Whether a collection still present belongs to the device a key names (its vendor and product are in the key; a Logitech
     // device's key names its unit, so any Logitech collection will do).
     private static bool KeyOwner(HidInfo info, string key) => key.Contains($"{info.Vendor:X4}:{info.Product:X4}", StringComparison.Ordinal);
@@ -366,24 +384,20 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
 
     // ----- The 2.4 GHz brands -----
 
-    // On their dongles only: a request is never sent to a Bluetooth collection that happens to share a vendor and page.
-    private static Func<HidInfo, HashSet<string>, IEnumerable<DeviceBattery>>? Dongle(HidInfo info) => info.Bluetooth ? null : (info.Vendor, info.UsagePage) switch
-    {
-        (Dongles.AtkVendor, 0xFF05) => BitMouse,
-        (Dongles.CompxVendor or Dongles.AtkVendor, 0xFF02 or 0xFF04) => Compx,
-        (Dongles.VgnVendor, 0xFF1C) when info.Product == 0x5088 => Vgn,
-        (Dongles.EndgameVendor, 0xFF01) => Endgame,
-        (Dongles.VaxeeVendor, 0xFF05) => Vaxee,
-        (Dongles.NordicVendor, 0xFFA0) => Nordic,
-        (Dongles.InphicVendor, _) when info.Product is 0x5B2E or 0x5B2F && info.FeatureLength >= 33 => Inphic,
-        // The 2.4 GHz receiver's product is not fixed: only its vendor collection.
-        (Dongles.InphicWireless, >= 0xFF00) when info.FeatureLength >= 33 => Inphic,
-        // MCHOSE's mouse protocol only on its mice: Realtek's 0x4762 dongle, and MCHOSE devices that call themselves a mouse (its
-        // keyboards, headsets and the MagDock speak other protocols).
-        (0x0BDA, 0xFF01 or 0xFF0B) when info.Product == 0x4762 => Mchose,
-        (Dongles.MchoseVendor, 0xFF01 or 0xFF0B) when Dongles.IsMchoseMouse(info.Product, info.ProductName) => Mchose,
-        _ => null
-    };
+    // On their dongles only: a request is never sent to a Bluetooth collection that happens to share a vendor and page. Which
+    // collections get which protocol is Dongles.Find's decision (vendor and product pairs that are known, not vendor ids alone).
+    private static Func<HidInfo, HashSet<string>, IEnumerable<DeviceBattery>>? Dongle(HidInfo info) => info.Bluetooth ? null
+        : Dongles.Find(info.Vendor, info.Product, info.UsagePage, info.ProductName, info.FeatureLength) switch
+        {
+            Dongles.Protocol.BitMouse => BitMouse,
+            Dongles.Protocol.Compx => Compx,
+            Dongles.Protocol.Vgn => Vgn,
+            Dongles.Protocol.Endgame => Endgame,
+            Dongles.Protocol.Vaxee => Vaxee,
+            Dongles.Protocol.Inphic => Inphic,
+            Dongles.Protocol.Mchose => Mchose,
+            _ => null
+        };
 
     private static DeviceBattery Mouse(string prefix, HidInfo info, string fallback, BatteryRead battery, DeviceKind kind = DeviceKind.Mouse)
         => new(Key(prefix, info), NameOf(info, fallback), Devices.Named(info.ProductName) is { } named and not DeviceKind.Other ? named : kind, DeviceSource.Hid, battery.Percent)
@@ -404,13 +418,22 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         return [];
     }
 
+    // The receivers Dongles.Find sends the Compx frame to (the ATK A9 Ultra). atkctl sends it as feature report 8, set then get,
+    // which is tried first; only if that gives no reading is it written as an output report, with the overlapped write that has a
+    // timeout (Write). Never HidD_SetOutputReport: it is synchronous and has no timeout, and Microsoft documents that some devices
+    // do not support it and stop responding after it.
     private static IEnumerable<DeviceBattery> Compx(HidInfo info, HashSet<string> claimed)
     {
         using var device = new HidDevice(info);
         var request = Dongles.CompxRequest(0x04);
-        // Most send it as an output report; the A9 Ultra as a feature report.
-        var read = Hid.Transact<object>([device], () => { if (!device.SetOutput(request)) device.Write(request); }, r => Dongles.CompxBattery(r) is { } b ? b : null, 500);
-        if (read is null && device.SetFeature(request) && device.GetFeature(0x08, Math.Max(17, device.FeatureLength)) is { } feature) read = Dongles.CompxBattery(feature);
+        object? read = null;
+        if (device.SetFeature(request) && device.GetFeature(0x08, Math.Max(17, device.FeatureLength)) is { } feature) read = Dongles.CompxBattery(feature);
+        if (read is null)
+        {
+            try { read = Hid.Transact<object>([device], () => device.Write(request), r => Dongles.CompxBattery(r) is { } b ? b : null, 500); }
+            // A collection with no output report: no reading, and nothing more to try.
+            catch (System.ComponentModel.Win32Exception) { }
+        }
         if (read is not BatteryRead battery) return [];
         claimed.Add(info.Path);
         return [Mouse("compx", info, "VXE", battery)];
@@ -437,7 +460,6 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     }
     private static IEnumerable<DeviceBattery> Endgame(HidInfo info, HashSet<string> claimed) => Feature(info, claimed, "endgame", "Endgame Gear", Dongles.EndgameRequest(info.FeatureLength), 350, Dongles.EndgameBattery);
     private static IEnumerable<DeviceBattery> Vaxee(HidInfo info, HashSet<string> claimed) => Feature(info, claimed, "vaxee", "VAXEE", Dongles.VaxeeRequest(info.FeatureLength), 120, Dongles.VaxeeBattery);
-    private static IEnumerable<DeviceBattery> Nordic(HidInfo info, HashSet<string> claimed) => Feature(info, claimed, "nordic", "2.4G", Dongles.NordicRequest(info.FeatureLength), 90, Dongles.NordicBattery);
 
     // Inphic IN9: the handshake, then the battery, with one sequence number (InphicBatteryTray's order).
     private static IEnumerable<DeviceBattery> Inphic(HidInfo info, HashSet<string> claimed)
