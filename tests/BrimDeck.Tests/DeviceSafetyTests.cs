@@ -7,6 +7,46 @@ static class DeviceSafetyTests
     public static void Run(Action<string, bool> check)
     {
         SoftwareId(check);
+        RequestTargets(check);
+    }
+
+    // Which collections a battery request is sent to (Dongles.Find, which HidBatteries asks). A shared vendor id is not enough.
+    private static void RequestTargets(Action<string, bool> check)
+    {
+        int[] pages = [0xFF00, 0xFF01, 0xFF02, 0xFF04, 0xFF05, 0xFF0B, 0xFF1C, 0xFFA0, 0x01, 0x0C];
+        // Every vendor and product of the three shared ids, on every page a protocol here uses: none is sent to.
+        bool shared = true;
+        foreach (int vendor in new[] { 0x3554, 0x1915, 0x0BDA })
+            for (int product = 0; product <= 0xFFFF && shared; product++)
+                foreach (int page in pages)
+                    if (Dongles.Find(vendor, product, page, "Wireless Mouse", 64) is not null) { shared = false; break; }
+        check("Requests: Compx's 0x3554, Nordic's 0x1915 and Realtek's 0x0BDA are sent to on no product or page", shared);
+        check("Requests: Realtek 0BDA:4762 and a Nordic 1915 receiver, the cases the review named, are not sent to",
+            Dongles.Find(0x0BDA, 0x4762, 0xFF01, "MCHOSE Mouse", 64) is null && Dongles.Find(0x0BDA, 0x4762, 0xFF0B, "2.4G Mouse", 64) is null
+            && Dongles.Find(0x1915, 0x0001, 0xFFA0, "Crazyradio", 64) is null && Dongles.Find(0x1915, 0x520F, 0xFFA0, "HP Prime", 64) is null);
+
+        // ATK's 0x373B: Compx's frame only to the two receivers atkctl documents, on the page it documents.
+        var compx = new List<(int Product, int Page)>();
+        for (int product = 0; product <= 0xFFFF; product++)
+            foreach (int page in pages)
+                if (Dongles.Find(0x373B, product, page, "", 0) == Dongles.Protocol.Compx) compx.Add((product, page));
+        check("Requests: the Compx frame goes to 373B:1119 and 373B:111A on page 0xFF04 and nowhere else",
+            compx.SequenceEqual(new[] { (0x1119, 0xFF04), (0x111A, 0xFF04) }));
+        check("Requests: the Compx page 0xFF02 on ATK's vendor and the other pages of the A9 are not sent to",
+            Dongles.Find(0x373B, 0x1119, 0xFF02, "", 0) is null && Dongles.Find(0x373B, 0x111A, 0xFF01, "", 0) is null && Dongles.Find(0x373B, 0x1120, 0xFF04, "", 0) is null);
+
+        // The vendors' own ids keep their readers.
+        check("Requests: ATK's BitMouse page, VGN's keyboard, Endgame Gear and VAXEE are still read",
+            Dongles.Find(0x373B, 0x1001, 0xFF05, "", 0) == Dongles.Protocol.BitMouse && Dongles.Find(0x320F, 0x5088, 0xFF1C, "", 0) == Dongles.Protocol.Vgn
+            && Dongles.Find(0x320F, 0x5089, 0xFF1C, "", 0) is null && Dongles.Find(0x3367, 0x1234, 0xFF01, "", 0) == Dongles.Protocol.Endgame
+            && Dongles.Find(0x3057, 0x1234, 0xFF05, "", 0) == Dongles.Protocol.Vaxee);
+        check("Requests: Inphic by product on its cable, by vendor on its receiver, both only with the 33-byte report",
+            Dongles.Find(0x248A, 0x5B2E, 0xFF00, "", 33) == Dongles.Protocol.Inphic && Dongles.Find(0x248A, 0x5B2E, 0xFF00, "", 8) is null
+            && Dongles.Find(0x248A, 0x0001, 0xFF00, "", 33) is null && Dongles.Find(0x249A, 0x0123, 0xFF00, "", 33) == Dongles.Protocol.Inphic
+            && Dongles.Find(0x249A, 0x0123, 0x01, "", 33) is null);
+        check("Requests: MCHOSE's mouse frame only to a MCHOSE mouse on its vendor pages",
+            Dongles.Find(0x3837, 0x5011, 0xFF01, "MCHOSE G7 Mouse", 64) == Dongles.Protocol.Mchose && Dongles.Find(0x3837, 0x5011, 0xFF02, "MCHOSE G7 Mouse", 64) is null
+            && Dongles.Find(0x3837, 0x1012, 0xFF01, "MCHOSE MagDock Mouse", 64) is null && Dongles.Find(0x3837, 0x4001, 0xFF0B, "MCHOSE K99", 64) is null);
     }
 
     // A receiver sends every reply to every program that has it open, and only the software id tells a program its own reply.

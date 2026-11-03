@@ -216,10 +216,10 @@ public static class Dongles
     public static bool? BitMouseCharging(byte[] reply) => reply.Length >= 8 && reply[0] == 0x08 && reply[1] == 0x72 && reply[5] == 0x0F && reply[2] == 0 ? reply[7] == 1 : null;
 
     // Compx receivers, report 0x08, 17 bytes: [0x08, command, status, address high, address low, length, data × 10, checksum],
-    // the checksum making the sum of all seventeen bytes 0x55. Battery is command 0x04. atkctl documents the ATK A9 Ultra
-    // (373B:1119 and 111A, usage page 0xFF04, the request sent as feature report 8); the other vendor and page (0x3554, 0xFF02:
-    // VXE R1, VGN F1) are not from atkctl and are unverified on those receivers.
-    public const int CompxVendor = 0x3554;
+    // the checksum making the sum of all seventeen bytes 0x55. Battery is command 0x04. The request goes only to the receivers
+    // atkctl documents: the ATK A9 Ultra (373B:1119 and 373B:111A, usage page 0xFF04, sent as feature report 8). Compx's own
+    // vendor id 0x3554 and the page 0xFF02 (the VXE R1 and VGN F1 receivers) are not in atkctl, are not tested by us on those
+    // receivers, and are NOT sent to: the same command byte could mean something else in another firmware.
     public static byte[] CompxRequest(byte command)
     {
         var frame = new byte[17];
@@ -248,7 +248,9 @@ public static class Dongles
     public static byte[] VaxeeRequest(int length) { var frame = new byte[Math.Max(5, length)]; frame[0] = 0x0E; frame[1] = 0xA5; frame[2] = 0x0B; frame[3] = 0x01; frame[4] = 0x01; return frame; }
     public static BatteryRead? VaxeeBattery(byte[] reply) => reply.Length >= 6 && reply[0] == 0x0E && reply[5] <= 20 ? new(reply[5] * 5, Coarse: true) : null;
 
-    // Nordic's own receivers (VID 0x1915, usage page 0xFFA0, feature 0x05): 05 15 00 00 01; the percentage at 9.
+    // Nordic's own receivers (VID 0x1915, usage page 0xFFA0, feature 0x05): 05 15 00 00 01; the percentage at 9. NOT sent to
+    // anything yet: 0x1915 is the chip maker's id, which unrelated products also carry (the HP Prime wireless kit, Crazyradio),
+    // and no vendor and product is verified for this frame. A product is added to Find once one is.
     public const int NordicVendor = 0x1915;
     public static byte[] NordicRequest(int length) { var frame = new byte[Math.Max(5, length)]; frame[0] = 0x05; frame[1] = 0x15; frame[4] = 0x01; return frame; }
     public static BatteryRead? NordicBattery(byte[] reply) => reply.Length >= 10 && reply[0] == 0x05 && reply[9] <= 100 ? new(reply[9]) : null;
@@ -267,7 +269,9 @@ public static class Dongles
     }
     public static BatteryRead? InphicBattery(byte[] reply) => reply.Length >= 0x14 && reply[0] == 0x0C && reply[2] == 0x20 && reply[6] != 0 && reply[0x12] <= 100 ? new(reply[0x12], reply[0x13] == 2) : null;
 
-    // MCHOSE mice (VID 0x3837, or Realtek's 0x0BDA:0x4762; usage page 0xFF01 or 0xFF0B; output report 0x4D, 64 bytes):
+    // MCHOSE mice (VID 0x3837; usage page 0xFF01 or 0xFF0B; output report 0x4D, 64 bytes), from the vendor's web driver. Not
+    // tested by us on a receiver. Realtek's 0x0BDA:0x4762 is not sent to: Realtek's id is on countless products and the pair is
+    // not verified:
     // [0x4D, 0x01, flags 1 (checksummed), length, command low, command high, 0, 0, data..., XOR of bytes 2 to 7 + length].
     // Device info is command 0x0900: its payload (from byte 8) holds the connection at 10, charging at 11 and the level at 12;
     // a level of 0 means the mouse is not connected, and a first byte of 0xFF that the receiver is not ready.
@@ -289,6 +293,33 @@ public static class Dongles
         if (reply.Length < 21 || reply[0] != 0x4D || reply[4] != 0x00 || reply[5] != 0x09 || reply[8] == 0xFF) return null;
         int level = reply[8 + 12];
         return level is > 0 and <= 100 ? new(level, reply[8 + 11] != 0) : null;
+    }
+
+    // The 2.4 GHz protocols a request is sent with.
+    public enum Protocol { BitMouse, Compx, Vgn, Endgame, Vaxee, Inphic, Mchose }
+
+    // The Compx receivers atkctl documents (the ATK A9 Ultra), by vendor, product and usage page.
+    private static readonly (int Vendor, int Product, int UsagePage)[] CompxVerified = [(AtkVendor, 0x1119, 0xFF04), (AtkVendor, 0x111A, 0xFF04)];
+
+    // Which protocol, if any, a USB collection is sent a battery request with. A vendor id and a usage page alone are not
+    // enough where the id is shared with other products (Compx's 0x3554, Nordic's 0x1915, Realtek's 0x0BDA): "read only" holds
+    // only if the protocol is the right one, and the same command byte can be another operation in another firmware. So those
+    // go only to a vendor and product pair that is verified (CompxVerified), and the rest of the list is the vendors' own ids.
+    // Their frames come from the sources named above and have not been tried by us on every receiver.
+    public static Protocol? Find(int vendor, int product, int usagePage, string productName, int featureLength)
+    {
+        if (vendor == AtkVendor && usagePage == 0xFF05) return Protocol.BitMouse;
+        if (CompxVerified.Contains((vendor, product, usagePage))) return Protocol.Compx;
+        if (vendor == VgnVendor && usagePage == 0xFF1C && product == 0x5088) return Protocol.Vgn;
+        if (vendor == EndgameVendor && usagePage == 0xFF01) return Protocol.Endgame;
+        if (vendor == VaxeeVendor && usagePage == 0xFF05) return Protocol.Vaxee;
+        if (vendor == InphicVendor && product is 0x5B2E or 0x5B2F && featureLength >= 33) return Protocol.Inphic;
+        // The 2.4 GHz receiver's product is not fixed (InphicBatteryTray): only its vendor collection.
+        if (vendor == InphicWireless && usagePage >= 0xFF00 && featureLength >= 33) return Protocol.Inphic;
+        // MCHOSE's mouse protocol only on MCHOSE devices that call themselves a mouse (its keyboards, headsets and the MagDock
+        // speak other protocols).
+        if (vendor == MchoseVendor && usagePage is 0xFF01 or 0xFF0B && IsMchoseMouse(product, productName)) return Protocol.Mchose;
+        return null;
     }
 }
 
