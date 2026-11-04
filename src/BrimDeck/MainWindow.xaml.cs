@@ -157,7 +157,7 @@ public partial class MainWindow : Window
             ApplySettings(!_expanded);
         };
         // Esc also leaves move mode (MainWindow.Move.cs).
-        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else SetExpanded(false, keyboard: true); }); };
+        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this, Settings.WindowCapture); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else SetExpanded(false, keyboard: true); }); };
         Loaded += async (_, _) =>
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
@@ -251,6 +251,7 @@ public partial class MainWindow : Window
         var shapeBefore = Collapsed; double dipBefore = _pixelsPerDip;
         ApplyLanguage();
         ApplyTheme();
+        WindowsHost.SetCapturable(this, Settings.WindowCapture);
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();

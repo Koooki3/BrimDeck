@@ -394,13 +394,23 @@ public sealed class WindowsHost : IDisposable
         }
         processName = cachedName; imagePath = cachedPath;
     }
-    public static void ConfigureOverlay(Window window)
+    public static void ConfigureOverlay(Window window, bool capturable)
     {
         var handle = new WindowInteropHelper(window).Handle;
-        // WS_EX_NOACTIVATE makes WGC CreateForWindow fail with E_INVALIDARG. Keep the
-        // window capturable and reject mouse activation without swallowing the click.
-        // ShowActivated=False separately prevents activation when the window is shown.
+        // Mouse activation is rejected without swallowing the click, which keeps focus where it was whether or not the window
+        // is capturable. ShowActivated=False separately prevents activation when the window is shown.
         HwndSource.FromHwnd(handle)?.AddHook(OverlayMessages);
+        SetCapturable(window, capturable);
+    }
+    // WS_EX_NOACTIVATE keeps the window out of Alt+Tab, but makes WGC CreateForWindow fail with E_INVALIDARG, so recording
+    // apps cannot capture the window on its own. Capturable drops it (DeckSettings.WindowCapture).
+    public static void SetCapturable(Window window, bool capturable)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero) return;
+        long style = GetWindowLongPtr(handle, -20).ToInt64();
+        long wanted = capturable ? style & ~0x08000000L : style | 0x08000000L;
+        if (wanted != style) SetWindowLongPtr(handle, -20, new IntPtr(wanted));
     }
     private static IntPtr OverlayMessages(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
@@ -441,4 +451,5 @@ public sealed class WindowsHost : IDisposable
     [DllImport("dwmapi")] private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
     [DllImport("user32")] private static extern IntPtr GetWindow(IntPtr window, uint command);
     [DllImport("user32", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+    [DllImport("user32", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
     [DllImport("user32")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);}

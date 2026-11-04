@@ -108,7 +108,7 @@ public partial class App : Application
         Secrets = new ProviderSecrets(folder);
         Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
         Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
-            kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
+            kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         WindowDrags = new WindowDrags();
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
