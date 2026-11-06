@@ -236,9 +236,15 @@ internal sealed class StorageReader
     {
         var device = Open($@"\\.\PhysicalDrive{number}");
         if (device == InvalidHandle) return null;
+        var query = Marshal.AllocHGlobal(QuerySize);
         var output = Marshal.AllocHGlobal(OutputSize);
-        try { return HealthLogTemperature(device, output); }
-        finally { Marshal.FreeHGlobal(output); CloseHandle(device); }
+        try
+        {
+            // As in the sampler, only an NVMe drive that may be asked for its temperature is queried (not one behind a RAID controller).
+            if (Describe(device, query, output) is not { } disk || disk.Bus != Core.Storage.BusNvme || !Core.Storage.AsksTemperature(disk)) return null;
+            return HealthLogTemperature(device, output);
+        }
+        finally { Marshal.FreeHGlobal(query); Marshal.FreeHGlobal(output); CloseHandle(device); }
     }
 
     // STORAGE_PROPERTY_QUERY: PropertyId, QueryType (0, the standard query), one byte of parameters.
