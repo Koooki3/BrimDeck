@@ -1,8 +1,9 @@
 namespace BrimDeck.Core;
 
 // The sensors behind the collapsed row's temperatures and drives, as the sampler knows them: the processor's thermal zones, the
-// graphics adapters, the drives listed, and the drives' temperatures.
-public readonly record struct SensorStates(SensorState Cpu, SensorState Gpu, SensorState Storage, SensorState DiskTemperatures)
+// graphics adapters, the drives listed, and the drives' temperatures; and the devices' batteries (Found while a device reports a
+// charge, None once the devices are listed and none does), which the devices give, not the sampler.
+public readonly record struct SensorStates(SensorState Cpu, SensorState Gpu, SensorState Storage, SensorState DiskTemperatures, SensorState Battery = SensorState.Unknown)
 {
     // Whether the machine gives a power reading (PowerResolver), and whether it has a battery of its own (BatteryModel).
     public SensorState Power { get; init; }

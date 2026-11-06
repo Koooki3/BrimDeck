@@ -66,6 +66,8 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
 - By default it turns into the Indicator when a window is maximized, and hides during full-screen games or video so it never opens by accident.
 
+- It stays above other windows by default. It can instead be covered by other windows like any window, and comes to the front when it expands (Settings › General › Window behavior).
+
 ### AI usage
 
 <img src="docs/en-US/images/usage.png" width="100%" alt="AI usage page: quotas of Claude, Codex, Cursor and Antigravity in four columns">
@@ -100,6 +102,13 @@ Works with players that use Windows media controls, with extra support for some 
 - Colors follow the panel theme by default; several preset color schemes are offered, and you can make your own.
 
 The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT License), a system monitor for macOS.
+
+### Devices
+
+- Shows the battery of the connected wireless keyboards, mice, headphones, controllers and pens; AirPods show each bud and the case. A low battery changes color and carries a mark; a charging one shows a bolt.
+- Reads the Bluetooth battery Windows reads (as Windows Settings shows it), Logitech Unifying, Bolt and Lightspeed receivers, Razer wireless mice, SteelSeries and HyperX wireless headsets, 2.4 GHz mice by ATK, VXE, VGN, MCHOSE and others, and Xbox and PlayStation controllers. Read only: nothing on the devices or in Windows is changed.
+- The notch or capsule can show the device with the lowest charge; a battery at or under the threshold (15% by default) shows as low. Devices can be switched off one by one under Settings › Devices.
+- Parts of the protocols are ported from [device-battery-viewer](https://github.com/CharlesGool/device-battery-viewer), [razer-battery-report](https://github.com/xzeldon/razer-battery-report), [ATK-A9-Battery](https://github.com/Lkig/ATK-A9-Battery), [atkctl](https://github.com/cobanov/atkctl) and [InphicBatteryTray](https://github.com/Tan-TanZi/InphicBatteryTray) (all MIT License; see ThirdPartyNotices.txt).
 
 ### Panel themes
 
