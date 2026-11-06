@@ -359,8 +359,18 @@ public static class Dongles
         return (reply[o + 1] == 1, bat <= 100 ? bat : null);
     }
 
-    public static BatteryRead? AjazzBattery(AjazzInfo info)
-        => new(info.Percent, info.Charging, Asleep: !info.Connected);
+    // cable: read on the mouse's own cable. There the mouse answers for itself and has no idle or asleep status (aj179-linux
+    // PROTOCOL.md), so it is never asleep, whatever byte 14 says.
+    public static BatteryRead? AjazzBattery(AjazzInfo info, bool cable = false)
+        => new(info.Percent, info.Charging, Asleep: !cable && !info.Connected);
+
+    // A mouse on its cable with its receiver also plugged in is read twice: on the cable, and through the receiver, which then
+    // reports it not connected (aj179-linux PROTOCOL.md), so asleep. The receiver's entry is left out when the cable read the
+    // mouse of the same id in the same pass.
+    public static bool AjazzShadowed(DeviceBattery device, IEnumerable<DeviceBattery> devices)
+        => device.Asleep && device.Hardware == Devices.Hardware(AjazzWirelessVendor, AjazzReceiverProduct)
+        && devices.Any(other => other.Hardware is { } hardware && IsAjazzCable(hardware) && !other.Asleep && other.Percent is not null && other.Name == device.Name);
+    private static bool IsAjazzCable(string hardware) => AjazzWiredProducts.Any(product => hardware == Devices.Hardware(AjazzWiredVendor, product));
 
     private static string AjazzDeviceId(byte[] reply, int at)
     {
