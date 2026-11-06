@@ -54,6 +54,9 @@ internal static class Fonts
         _ => "FontPanel"
     };
 
+    // The app's own families whatever the user chose, for what the settings window builds or draws later (a dialog, a popup, a tick label), outside Plain().
+    public static FontFamily PlainOf(UiFontRole role) { lock (Sync) return PlainFamilies[(int)role] ??= new FontFamily(UiFonts.Chain(role, "")); }
+
     public static FontFamily Of(UiFontRole role)
     {
         lock (Sync) return _plain ? PlainFamilies[(int)role] ??= new FontFamily(UiFonts.Chain(role, "")) : Families[(int)role] ??= new FontFamily(UiFonts.Chain(role, _custom));

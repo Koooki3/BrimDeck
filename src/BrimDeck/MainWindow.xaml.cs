@@ -285,8 +285,8 @@ public partial class MainWindow : Window
         bool wasVisible = IsVisible;
         var shapeBefore = Collapsed; double dipBefore = _pixelsPerDip;
         ApplyLanguage();
-        // The music page's text was set in the font of its day: it is set again.
-        if (_fontSeen != Fonts.Version) { _fontSeen = Fonts.Version; _musicRenderKey = ""; }
+        // The music page's text was set in the font of its day, and the monitor's column widths were measured in it: both are built again.
+        if (_fontSeen != Fonts.Version) { _fontSeen = Fonts.Version; _musicRenderKey = ""; _monitorKey = ""; }
         ApplyTheme();
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
