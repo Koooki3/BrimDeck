@@ -27,6 +27,7 @@ try
     CompactSpacingTests.Run(Check);
     CompactDragTests.Run(Check);
     RingLetterTests.Run(root, Check);
+    QuotaRingTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     PanelThemeEditorTests.Run(root, Check);
     PixelBlocksTests.Run(root, Check);
