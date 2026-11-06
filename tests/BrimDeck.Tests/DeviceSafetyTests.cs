@@ -75,6 +75,11 @@ static class DeviceSafetyTests
             Dongles.Find(0x248A, 0x5B2E, 0xFF00, "", 33) == Dongles.Protocol.Inphic && Dongles.Find(0x248A, 0x5B2E, 0xFF00, "", 8) is null
             && Dongles.Find(0x248A, 0x0001, 0xFF00, "", 33) is null && Dongles.Find(0x249A, 0x0123, 0xFF00, "", 33) == Dongles.Protocol.Inphic
             && Dongles.Find(0x249A, 0x0123, 0x01, "", 33) is null);
+        check("Requests: AJAZZ's frame only to the configuration collection of its receiver and cables, and Inphic's frame never to its receiver",
+            Dongles.Find(0x249A, 0x5C2F, 0x01, "", 0, iface: 2, usage: 0x00, inputLength: 33, outputLength: 33) == Dongles.Protocol.Ajazz
+            && Dongles.Find(0x248A, 0x5C2E, 0x01, "", 0, iface: 2, usage: 0x00, inputLength: 33, outputLength: 33) == Dongles.Protocol.Ajazz
+            && Dongles.Find(0x249A, 0x5C2F, 0x01, "", 0, iface: 0, usage: 0x02, inputLength: 8, outputLength: 0) is null
+            && Dongles.Find(0x249A, 0x5C2F, 0xFF00, "", 33, iface: 1, usage: 0x01, inputLength: 8, outputLength: 8) is null);
         check("Requests: MCHOSE's mouse frame only to a MCHOSE mouse on its vendor pages",
             Dongles.Find(0x3837, 0x5011, 0xFF01, "MCHOSE G7 Mouse", 64) == Dongles.Protocol.Mchose && Dongles.Find(0x3837, 0x5011, 0xFF02, "MCHOSE G7 Mouse", 64) is null
             && Dongles.Find(0x3837, 0x1012, 0xFF01, "MCHOSE MagDock Mouse", 64) is null && Dongles.Find(0x3837, 0x4001, 0xFF0B, "MCHOSE K99", 64) is null);
