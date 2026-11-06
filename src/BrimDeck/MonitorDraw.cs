@@ -36,7 +36,7 @@ internal static class MonitorDraw
     private static Typeface Regular => Fonts.Face(UiFontRole.Panel);
     private static Typeface Strong => Fonts.Face(UiFontRole.Panel, FontWeights.SemiBold);
     private static Typeface Display => Fonts.Face(UiFontRole.Display, FontWeights.SemiBold);
-    private static int _fontSeen;
+    private static int _fontSeen = -1;
     private static void KeepFresh() { if (_fontSeen == Fonts.Version) return; _fontSeen = Fonts.Version; Texts.Clear(); Letters.Clear(); }
 
     public static FormattedText Text(string text, double size, string color, double pixelsPerDip, bool strong = false, bool display = false)
