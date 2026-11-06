@@ -45,8 +45,8 @@ public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
-// (MainWindow.Move.cs); moving is the default. Saved as numbers, so new members go at the end.
-public enum GripDoubleClick { AutoWidth, Move }
+// (MainWindow.Move.cs); moving is the default. Off shows no handle at its ends at all. Saved as numbers, so new members go at the end.
+public enum GripDoubleClick { AutoWidth, Move, Off }
 public enum CompactMusicText { None, Title, Lyrics }
 // What the collapsed music hides while the song is paused: the title or lyric, the cover, or both. Saved as numbers, so new
 // members go at the end.
