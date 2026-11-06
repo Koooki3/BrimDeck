@@ -18,7 +18,7 @@ public static class SettingsMigrations
     [
         (new Version(0, 1, 0), To0_1_0),
         (new Version(1, 2, 3), To1_2_3),
-        (new Version(1, 2, 5), To1_2_5),
+        (new Version(1, 3, 0), To1_3_0),
     ];
 
     // Upgrades the settings object in place and reads it. A file saved by a newer version runs no step.
@@ -77,11 +77,11 @@ public static class SettingsMigrations
         root.Remove("MusicCoverColor");
     }
 
-    // 1.2.5: a device is no longer only on or off but shows in the collapsed row and on the page each, in an order and under a
+    // 1.3.0: a device is no longer only on or off but shows in the collapsed row and on the page each, in an order and under a
     // name of the user's (DeviceChoices). A device switched off was off in both. The collapsed row's battery reading (256 among the
     // system readings) is a part of the row of its own (NotchDevices, CapsuleDevices), on where the readings showed it. Getting low
     // was ten points above low; it has its own threshold.
-    private static void To1_2_5(JsonObject root)
+    private static void To1_3_0(JsonObject root)
     {
         if (root["CompactReadings"] is JsonArray readings)
         {

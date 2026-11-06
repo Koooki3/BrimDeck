@@ -25,7 +25,7 @@ public enum CompactMonitorItems
     // joined CPU, GPU and the drives (CompactFigures); never released, it is dropped from saved tables and its number not reused.
     All = Columns | Cpu | Memory | Gpu | Download | Upload,
     Temperature = 64, Storage = 128,
-    // Was the lowest battery among the wireless devices; the devices are a part of the row of their own since 1.2.5
+    // Was the lowest battery among the wireless devices; the devices are a part of the row of their own since 1.3.0
     // (CompactPart.Devices), so it is dropped from saved tables and its number not reused.
     Battery = 256,
     // The whole machine's power draw in watts (PowerResolver) and the machine's own battery (BatteryModel): outside the presets like

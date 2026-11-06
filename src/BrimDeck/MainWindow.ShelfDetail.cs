@@ -13,7 +13,7 @@ using Path = System.Windows.Shapes.Path;
 namespace BrimDeck;
 
 // The clipboard page's full-content view, its header (back, position, previous and next; or the search box), typing (the search,
-// phrases, category names) and its menus. Typing needs the keyboard, so the panel takes the focus while the user types and gives it
+// editing a text entry) and its menus. Typing needs the keyboard, so the panel takes the focus while the user types and gives it
 // back to the window it came from (ShelfService.TypingTarget), where a paste then goes.
 public partial class MainWindow
 {
@@ -46,21 +46,44 @@ public partial class MainWindow
         if (_shelfSearching)
         {
             ShelfSearchButton.Visibility = Visibility.Collapsed;
-            double boxWidth = ShelfLayout.SearchWidth(width), height = _header.SwitchHeight;
+            // The box takes the room right of the clock, up to its usual width (ShelfLayout.SearchWidth); only when that room is under
+            // 140 does it keep 140 and cover the clock.
+            double clock = ClockLabel.Text.Length > 0 ? TextWidth(ClockLabel.Text, 12, FontWeights.Normal) : 34;
+            double room = width - right - (width + clock) / 2 - 12;
+            double boxWidth = Math.Min(ShelfLayout.SearchWidth(width), Math.Max(room, 140)), height = _header.SwitchHeight;
             var box = _searchBox ??= NewSearchBox();
             (box.Parent as Panel)?.Children.Remove(box);
             var host = new Grid { Width = boxWidth, Height = height, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, right, 0) };
-            box.FontSize = 12.5; box.Padding = new Thickness(26, 0, 8, 0); box.VerticalContentAlignment = VerticalAlignment.Center;
+            box.FontSize = 12.5; box.Padding = new Thickness(26, 0, 28, 0); box.VerticalContentAlignment = VerticalAlignment.Center;
             host.Children.Add(box);
+            // "×" at the right: it empties the box, or closes the search when the box is already empty.
+            // A plain cross, drawn in a 20 DIP square about its middle (10, 10) so it sits centered; a cross laid out by its own bounds
+            // is pushed off by its pen. The square is what takes the press.
+            var cross = new Path { Data = Geometry.Parse("M 6.5,6.5 L 13.5,13.5 M 13.5,6.5 L 6.5,13.5"), Stroke = UI.Brush(UI.Tertiary), StrokeThickness = 1.4,
+                StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
+            var clear = new Border { Width = 20, Height = 20, Background = Brushes.Transparent, Child = cross, Cursor = Cursors.Hand,
+                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) };
+            AutomationProperties.SetName(clear, Loc.T("清空搜索", "Clear search"));
+            clear.MouseEnter += (_, _) => cross.Stroke = UI.Brush(UI.Primary);
+            clear.MouseLeave += (_, _) => cross.Stroke = UI.Brush(UI.Tertiary);
+            clear.MouseLeftButtonDown += (_, e) => e.Handled = true;
+            clear.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                if (box.Text.Length == 0) { CloseSearch(); return; }
+                box.Text = ""; box.Focus();
+            };
+            host.Children.Add(clear);
             host.Children.Add(new Path { Data = Geometry.Parse("M 10.5,3.5 A 7,7 0 1 1 10.5,17.5 A 7,7 0 1 1 10.5,3.5 Z M 15.6,15.6 L 21,21"), Stroke = UI.Brush(UI.Tertiary), StrokeThickness = 2,
                 Stretch = Stretch.Uniform, Width = 12, Height = 12, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 0, 0), IsHitTestVisible = false });
-            var hint = Label(Loc.T("搜索剪贴板与文件", "Search clipboard and files"), 12.5, UI.Tertiary, HorizontalAlignment.Left, left: 27);
+            // The text starts 28 in (the box's padding 26 and the text box's own 2), where the caret blinks; the hint starts just after
+            // it, so the caret does not cross its first letter.
+            var hint = Label(Loc.T("搜索剪贴板与文件", "Search clipboard and files"), 12.5, UI.Tertiary, HorizontalAlignment.Left, left: 30);
             hint.IsHitTestVisible = false; hint.Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; hint.Tag = "hint";
             host.Children.Add(hint);
             ShelfToolbar.Children.Add(host);
-            // The clock is hidden when the box reaches it.
-            bool overlap = width - right - boxWidth < width / 2 + 34;
-            ClockLabel.Visibility = overlap ? Visibility.Collapsed : Visibility.Visible;
+            // The clock is hidden only when the box reaches it.
+            ClockLabel.Visibility = boxWidth > room ? Visibility.Collapsed : Visibility.Visible;
             return;
         }
         ShelfSearchButton.Visibility = Visibility.Visible;
@@ -82,6 +105,7 @@ public partial class MainWindow
     {
         var box = new TextBox { Style = (Style)FindResource("ShelfTextBox") };
         AutomationProperties.SetName(box, Loc.T("搜索剪贴板与文件", "Search clipboard and files"));
+        TakeKeyboardOnClick(box);
         box.TextChanged += (_, _) =>
         {
             _shelfQuery = box.Text;
@@ -133,6 +157,9 @@ public partial class MainWindow
         Activate();
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () => { box.Focus(); Keyboard.Focus(box); if (box is TextBox text) text.CaretIndex = text.Text.Length; });
     }
+    // The panel opens without taking the keyboard, so a box that lost it (the panel closed and opened again, or another window was
+    // used) takes it back when it is clicked.
+    private void TakeKeyboardOnClick(TextBox box) => box.PreviewMouseLeftButtonDown += (_, _) => { if (!IsActive || !box.IsKeyboardFocusWithin) BeginTyping(box); };
     private void EndTyping()
     {
         if (IsActive && PasteInput.IsOther(_app.Shelf.TypingTarget)) PasteInput.Activate(_app.Shelf.TypingTarget);
@@ -140,73 +167,28 @@ public partial class MainWindow
     private void RefocusTyping()
     {
         if (!IsActive) return;
-        Control? box = _shelfEdit is { Kind: ShelfEditKind.NewPhrase or ShelfEditKind.EditText } ? _editBox : _shelfEdit is not null ? _nameBox : _shelfSearching ? _searchBox : null;
+        Control? box = _shelfEdit is not null ? _editBox : _shelfSearching ? _searchBox : null;
         if (box is not null) Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () => { if (box.IsVisible) { box.Focus(); Keyboard.Focus(box); } });
     }
-    private void BeginEdit(ShelfEdit edit)
+    private void BeginEdit(Guid id)
     {
-        _shelfEdit = edit; _shelfDetail = null;
-        if (edit.Kind is ShelfEditKind.NewPhrase or ShelfEditKind.EditText)
-        {
-            _editBox = NewEditBox();
-            _editBox.Text = edit.Kind == ShelfEditKind.EditText ? ShelfData.Clips.FirstOrDefault(c => c.Id == edit.Id)?.Text ?? "" : "";
-        }
-        else
-        {
-            _nameBox = NewNameBox();
-            _nameBox.Text = edit.Kind == ShelfEditKind.RenameCategory ? ShelfData.Categories(edit.Side).FirstOrDefault(c => c.Id == edit.Id)?.Name ?? "" : "";
-            _nameBox.SelectAll();
-        }
+        _shelfEdit = id; _shelfDetail = null;
+        _editBox = NewEditBox();
+        _editBox.Text = ShelfData.Clips.FirstOrDefault(c => c.Id == id)?.Text ?? "";
         RenderShelf();
-        BeginTyping(edit.Kind is ShelfEditKind.NewPhrase or ShelfEditKind.EditText ? _editBox : _nameBox);
-    }
-    private TextBox NewNameBox()
-    {
-        var box = new TextBox { Style = (Style)FindResource("ShelfTextBox"), Width = 104, Height = 22, FontSize = 12, Padding = new Thickness(6, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center, MaxLength = 24 };
-        AutomationProperties.SetName(box, Loc.T("分类名称", "Category name"));
-        box.KeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; CommitName(); } };
-        return box;
-    }
-    private FrameworkElement NameBox(ShelfEdit edit, string text, ShelfLayout layout)
-    {
-        var box = _nameBox ??= NewNameBox();
-        (box.Parent as Panel)?.Children.Remove(box);
-        box.Margin = new Thickness(2, 0, 2, 0);
-        return box;
-    }
-    private void CommitName()
-    {
-        if (_shelfEdit is not { Kind: ShelfEditKind.NewCategory or ShelfEditKind.RenameCategory } edit || _nameBox is null) return;
-        string name = _nameBox.Text.Trim();
-        _editCommitting = true;
-        _shelfEdit = null;
-        if (name.Length > 0)
-        {
-            var categories = ShelfData.Categories(edit.Side);
-            if (edit.Kind == ShelfEditKind.RenameCategory) { if (categories.FirstOrDefault(c => c.Id == edit.Id) is { } category) category.Name = name; }
-            else
-            {
-                var swatches = PanelTheme.Current.Swatches.Take(8).Select(color => color.WithAlpha(255).ToString()).ToList();
-                var category = new ShelfCategory { Name = name, Color = swatches.Count > 0 ? swatches[categories.Count % swatches.Count] : "#9CB9FF" };
-                categories.Add(category);
-                if (edit.ForItems is { Count: > 0 } items) Assign(edit.Side, items, category.Id);
-            }
-        }
-        EndTyping();
-        _editCommitting = false;
-        _app.Shelf.Edited();
-        RenderShelf();
+        BeginTyping(_editBox);
     }
     private TextBox NewEditBox()
     {
         var box = new TextBox { Style = (Style)FindResource("ShelfTextBox"), AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Padding = new Thickness(8, 6, 8, 6), VerticalContentAlignment = VerticalAlignment.Top };
-        AutomationProperties.SetName(box, Loc.T("常用语内容", "Phrase text"));
-        box.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter && Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) { e.Handled = true; CommitPhrase(); } };
+        AutomationProperties.SetName(box, Loc.T("文字内容", "Text"));
+        TakeKeyboardOnClick(box);
+        box.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter && Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) { e.Handled = true; CommitText(); } };
         return box;
     }
-    // A phrase is written here and kept until it is deleted; any text entry can be edited the same way. Ctrl+Enter saves, Esc cancels.
-    private FrameworkElement PhraseEditor(ShelfEdit edit, ShelfLayout layout)
+    // A text entry edited in place of the list. Ctrl+Enter saves, Esc cancels. New phrases are written in the settings.
+    private FrameworkElement TextEditor(ShelfLayout layout)
     {
         var box = _editBox ??= NewEditBox();
         (box.Parent as Panel)?.Children.Remove(box);
@@ -217,32 +199,22 @@ public partial class MainWindow
         grid.Children.Add(box);
         var bar = new Grid { Margin = new Thickness(0, 6, 0, 0) };
         bar.ColumnDefinitions.Add(new ColumnDefinition()); bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        string what = edit.Kind == ShelfEditKind.EditText ? Loc.T("编辑", "Edit") : Loc.T("新建常用语", "New phrase");
-        bar.Children.Add(Label(what + Loc.T(" · Ctrl+Enter 保存 · Esc 取消", " · Ctrl+Enter saves · Esc cancels"), layout.Aux, UI.Tertiary, HorizontalAlignment.Left));
+        bar.Children.Add(Label(Loc.T("编辑 · Ctrl+Enter 保存 · Esc 取消", "Edit · Ctrl+Enter saves · Esc cancels"), layout.Aux, UI.Tertiary, HorizontalAlignment.Left));
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         var cancel = PillButton(Loc.T("取消", "Cancel"), false, () => { _shelfEdit = null; EndTyping(); RenderShelf(); });
-        var save = PillButton(Loc.T("保存", "Save"), true, CommitPhrase); save.Margin = new Thickness(6, 0, 0, 0);
+        var save = PillButton(Loc.T("保存", "Save"), true, CommitText); save.Margin = new Thickness(6, 0, 0, 0);
         buttons.Children.Add(cancel); buttons.Children.Add(save);
         Grid.SetColumn(buttons, 1); bar.Children.Add(buttons);
         Grid.SetRow(bar, 1); grid.Children.Add(bar);
         return grid;
     }
-    private void CommitPhrase()
+    private void CommitText()
     {
-        if (_shelfEdit is not { Kind: ShelfEditKind.NewPhrase or ShelfEditKind.EditText } edit || _editBox is null) return;
+        if (_shelfEdit is not { } id || _editBox is null) return;
         string text = _editBox.Text;
         _editCommitting = true;
         _shelfEdit = null;
-        if (text.Trim().Length > 0)
-        {
-            if (edit.Kind == ShelfEditKind.NewPhrase)
-            {
-                ShelfData.Clips.Insert(0, new ClipEntry { Kind = Shelf.Classify(text), Text = text, Manual = true, Copied = DateTimeOffset.Now, Category = edit.Category });
-                if (edit.Category is not null) _clipTab = edit.Category;
-                _clipOffset = 0;
-            }
-            else if (ShelfData.Clips.FirstOrDefault(c => c.Id == edit.Id) is { } clip) { clip.Text = text; clip.Kind = Shelf.Classify(text); clip.Html = ""; clip.Rtf = ""; }
-        }
+        if (text.Trim().Length > 0 && ShelfData.Clips.FirstOrDefault(c => c.Id == id) is { } clip) { clip.Text = text; clip.Kind = Shelf.Classify(text); clip.Html = ""; clip.Rtf = ""; }
         EndTyping();
         _editCommitting = false;
         _app.Shelf.Edited();
@@ -280,9 +252,14 @@ public partial class MainWindow
         if (wide)
         {
             grid.ColumnDefinitions.Add(new ColumnDefinition());
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.Gap / 2) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.Gap) });
+            // 200 wide, or as wide as its buttons when they need more (a file's three), so the last is not cut off.
+            actions.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(200, Math.Ceiling(actions.DesiredSize.Width) + 2)) });
             grid.Children.Add(content);
+            // The page's own divider between the content and its facts, as between the two columns.
+            var divider = new Border { Width = 1, Background = UI.Brush(UI.Hairline), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 4) };
+            Grid.SetColumn(divider, 1); grid.Children.Add(divider);
             var info = new DockPanel { LastChildFill = false };
             actions.Margin = new Thickness(0, 8, 0, 0);
             DockPanel.SetDock(actions, System.Windows.Controls.Dock.Bottom); info.Children.Add(actions);
@@ -320,14 +297,20 @@ public partial class MainWindow
         Grid.SetRow(bottom, 1); grid.Children.Add(bottom);
         return grid;
     }
-    private TextBlock LinkText(string text, double size, Action<FrameworkElement> click)
+    // The value and the settings window's chevron, which is centered on the text where the "⌄" character sat low.
+    private FrameworkElement LinkText(string text, double size, Action<FrameworkElement> click)
     {
-        var block = Label(text + " ⌄", size, UI.Secondary, HorizontalAlignment.Left);
-        block.Cursor = Cursors.Hand;
-        block.MouseEnter += (_, _) => block.Foreground = UI.Brush(UI.Primary);
-        block.MouseLeave += (_, _) => block.Foreground = UI.Brush(UI.Secondary);
-        block.MouseLeftButtonUp += (_, e) => { e.Handled = true; click(block); };
-        return block;
+        var label = Label(text, size, UI.Secondary, HorizontalAlignment.Left);
+        var chevron = SettingsWindow.Chevron();
+        chevron.FontSize = size; chevron.Foreground = UI.Brush(UI.Secondary);
+        chevron.Margin = new Thickness(4, SettingsWindow.ChevronDrop.Top, 0, SettingsWindow.ChevronDrop.Bottom);
+        var link = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        link.Children.Add(label); link.Children.Add(chevron);
+        void Paint(string color) { label.Foreground = UI.Brush(color); chevron.Foreground = UI.Brush(color); }
+        link.MouseEnter += (_, _) => Paint(UI.Primary);
+        link.MouseLeave += (_, _) => Paint(UI.Secondary);
+        link.MouseLeftButtonUp += (_, e) => { e.Handled = true; click(link); };
+        return link;
     }
     // A read-only text box, so the text can be selected; the whole entry is pasted with the button.
     private static TextBox ReadOnlyText(string text, double size, FontFamily font) => new()
@@ -378,7 +361,7 @@ public partial class MainWindow
                 panel.Children.Add(url);
                 var open = PillButton(Loc.T("在浏览器中打开", "Open in browser"), false, () => { if (Shelf.IsLink(clip.Text.Trim())) OpenFile(clip.Text.Trim()); });
                 open.HorizontalAlignment = HorizontalAlignment.Left; panel.Children.Add(open);
-                return new ScrollViewer { Content = panel, Focusable = false };
+                return PassWheel(new ScrollViewer { Content = panel, Focusable = false });
             }
             case ClipKind.Code:
             {
@@ -390,10 +373,10 @@ public partial class MainWindow
                     TextAlignment = TextAlignment.Right, Margin = new Thickness(0, 0, 12, 0) };
                 var code = ReadOnlyText(string.Join("\n", lines), size - 1.5, font); code.TextWrapping = TextWrapping.NoWrap;
                 Grid.SetColumn(code, 1); grid.Children.Add(numbers); grid.Children.Add(code);
-                return new ScrollViewer { Content = grid, Focusable = false, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
+                return PassWheel(new ScrollViewer { Content = grid, Focusable = false, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto });
             }
             default:
-                return new ScrollViewer { Content = ReadOnlyText(clip.Text, size, UI.PanelFont), Focusable = false };
+                return PassWheel(new ScrollViewer { Content = ReadOnlyText(clip.Text, size, UI.PanelFont), Focusable = false });
         }
     }
     private FrameworkElement FileDetail(TransferFile file, ShelfLayout layout)
@@ -413,7 +396,7 @@ public partial class MainWindow
         var folder = ReadOnlyText(System.IO.Path.GetDirectoryName(file.Path) ?? "", layout.Aux, UI.PanelFont); folder.Foreground = UI.Brush(UI.Tertiary); folder.Margin = new Thickness(0, 4, 0, 0);
         text.Children.Add(folder);
         Grid.SetColumn(text, 1); grid.Children.Add(text);
-        return new ScrollViewer { Content = grid, Focusable = false };
+        return PassWheel(new ScrollViewer { Content = grid, Focusable = false });
     }
 
     private List<(string Label, string Value, Action<FrameworkElement>? Change)> ClipFacts(ClipEntry clip)
@@ -436,22 +419,27 @@ public partial class MainWindow
         facts.Add((Loc.T("分类", "Category"), CategoryName(ShelfSide.Files, file.Category), target => OpenMenu(CategoryChoices(ShelfSide.Files, [file.Id], file.Category), target)));
         return facts;
     }
-    private string CategoryName(ShelfSide side, Guid? id) => id is { } known && ShelfData.Categories(side).FirstOrDefault(c => c.Id == known) is { } category ? category.Name : Loc.T("无", "None");
+    private string CategoryName(ShelfSide side, Guid? id) => id is { } known && ShelfData.Categories(side).FirstOrDefault(c => c.Id == known) is { } category ? Shelf.CategoryName(category) : Loc.T("无", "None");
 
     private StackPanel ClipActions(ClipEntry clip)
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom };
         panel.Children.Add(PillButton(Loc.T("粘贴", "Paste"), true, () => PasteClip(clip)));
+        // Text pastes as plain text from a button of its own beside "粘贴".
+        if (clip.Kind != ClipKind.Image)
+        {
+            var plain = PillButton(Loc.T("粘贴为纯文本", "Paste as plain text"), false, () => PasteClip(clip, plain: true)); plain.Margin = new Thickness(6, 0, 0, 0);
+            panel.Children.Add(plain);
+        }
         Button more = null!;
         more = PillButton("⋯", false, () =>
         {
             var menu = NewMenu();
-            menu.Items.Add(Item(Loc.T("只复制，不粘贴", "Copy only"), () => CopyClip(clip)));
-            if (clip.Kind != ClipKind.Image && (clip.Html.Length > 0 || clip.Rtf.Length > 0)) menu.Items.Add(Item(Loc.T("粘贴为纯文本", "Paste as plain text"), () => PasteClip(clip, plain: true)));
-            if (clip.Kind != ClipKind.Image) menu.Items.Add(Item(Loc.T("编辑…", "Edit…"), () => BeginEdit(new ShelfEdit(ShelfEditKind.EditText, ShelfSide.Clipboard, clip.Id))));
-            menu.Items.Add(Submenu(Loc.T("加入分类", "Add to category"), CategoryItems(ShelfSide.Clipboard, [clip.Id], clip.Category)));
+            menu.Items.Add(Item(Loc.T("只复制，不粘贴", "Copy only"), () => CopyClip(clip), MenuIcons.Copy));
+            if (clip.Kind != ClipKind.Image) menu.Items.Add(Item(Loc.T("编辑…", "Edit…"), () => BeginEdit(clip.Id), MenuIcons.Edit));
+            AddFiling(menu, clip);
             menu.Items.Add(Separator());
-            menu.Items.Add(Item(Loc.T("删除", "Delete"), () => DeleteClips([clip]), danger: true));
+            menu.Items.Add(Item(Loc.T("删除", "Delete"), () => DeleteClips([clip]), MenuIcons.Delete, danger: true));
             OpenMenu(menu, more);
         });
         more.Margin = new Thickness(6, 0, 0, 0);
@@ -461,7 +449,7 @@ public partial class MainWindow
     private StackPanel FileActions(TransferFile file)
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom };
-        if (!ShelfFiles.Exists(file.Path)) { panel.Children.Add(PillButton(Loc.T("从文件中转移除", "Remove"), false, () => RemoveFiles([file]))); return panel; }
+        if (!ShelfFiles.Exists(file.Path)) { panel.Children.Add(PillButton(Loc.T("移除", "Remove"), false, () => RemoveFiles([file]))); return panel; }
         panel.Children.Add(PillButton(Loc.T("打开", "Open"), true, () => OpenFile(file.Path)));
         var show = PillButton(Loc.T("在文件夹中显示", "Show in folder"), false, () => ShowInFolder(file.Path)); show.Margin = new Thickness(6, 0, 0, 0);
         panel.Children.Add(show);
@@ -469,11 +457,11 @@ public partial class MainWindow
         more = PillButton("⋯", false, () =>
         {
             var menu = NewMenu();
-            menu.Items.Add(Item(Loc.T("粘贴到当前窗口", "Paste into the current window"), () => PasteFiles([file])));
-            menu.Items.Add(Item(Loc.T("复制路径", "Copy path"), () => { if (_app.Shelf.Put(ShelfService.TextData(file.Path))) Flash(file.Id, Loc.T("已复制路径", "Path copied")); }));
-            menu.Items.Add(Submenu(Loc.T("加入分类", "Add to category"), CategoryItems(ShelfSide.Files, [file.Id], file.Category)));
+            menu.Items.Add(Item(Loc.T("粘贴", "Paste"), () => PasteFiles([file]), MenuIcons.Paste));
+            menu.Items.Add(Item(Loc.T("复制路径", "Copy path"), () => CopyPath(file), MenuIcons.FilePath));
+            if (FilingMenu(ShelfSide.Files, [file.Id], file.Category) is { } filing) { menu.Items.Add(Separator()); menu.Items.Add(filing); }
             menu.Items.Add(Separator());
-            menu.Items.Add(Item(Loc.T("从文件中转移除", "Remove"), () => RemoveFiles([file]), hint: Loc.T("原文件保留", "Original kept"), danger: true));
+            AddRemoval(menu, [file]);
             OpenMenu(menu, more);
         });
         more.Margin = new Thickness(6, 0, 0, 0);
@@ -492,35 +480,99 @@ public partial class MainWindow
         foreach (var file in files) _picked.Remove(file.Id);
         _app.Shelf.RemoveFiles(files);
     }
+    // Taking files off the list: "移除" only forgets them; "删除原文件", in red, sends the files themselves to the Recycle Bin
+    // (so they can be brought back) and forgets them too.
+    private void AddRemoval(ContextMenu menu, IReadOnlyList<TransferFile> files)
+    {
+        bool many = files.Count > 1;
+        menu.Items.Add(Item(many ? Loc.T($"移除 {files.Count} 项", $"Remove {files.Count} files") : Loc.T("移除", "Remove"), () => RemoveFiles(files), MenuIcons.Remove));
+        menu.Items.Add(Item(many ? Loc.T($"删除 {files.Count} 个原文件", $"Delete {files.Count} original files") : Loc.T("删除原文件", "Delete the original"), () => DeleteOriginals(files), MenuIcons.Delete, danger: true));
+    }
+    // A file the shell will not delete (in use, or no permission) stays on the list and says so.
+    private void DeleteOriginals(IReadOnlyList<TransferFile> files)
+    {
+        var gone = new List<TransferFile>();
+        foreach (var file in files)
+        {
+            if (ShelfFiles.Exists(file.Path) && !Native.RecycleBin.Send(file.Path)) { Flash(file.Id, Loc.T("无法删除", "Not deleted")); continue; }
+            ShelfFiles.Forget(file.Path); gone.Add(file);
+        }
+        if (gone.Count > 0) RemoveFiles(gone);
+    }
+    private void CopyPath(TransferFile file) { if (_app.Shelf.Put(ShelfService.TextData(file.Path))) Flash(file.Id, Loc.T("已复制路径", "Path copied")); }
 
     // ---- Menus ----
-    private ContextMenu NewMenu() => new() { Style = (Style)FindResource("ShelfMenu") };
-    private MenuItem Item(string label, Action act, string? hint = null, bool danger = false, bool check = false, bool enabled = true, string? dot = null)
+    // The panel's menus only use and file what is here; categories and phrases are made and changed in the settings. A row has an
+    // icon at the left; a choice (a category) has a check column instead. Only a row that opens more rows has an arrow.
+    private static class MenuIcons
     {
-        var header = new StackPanel { Orientation = Orientation.Horizontal };
-        if (dot is not null) header.Children.Add(new Ellipse { Width = 7, Height = 7, Fill = UI.Brush(dot), Margin = new Thickness(0, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center });
-        header.Children.Add(new TextBlock { Text = label, Foreground = UI.Brush(danger ? PanelTheme.Hex("danger") : UI.Primary), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
-        var item = new MenuItem { Style = (Style)FindResource("ShelfMenuItem"), Header = header, InputGestureText = hint ?? "", IsChecked = check, IsEnabled = enabled };
+        public const string Paste = "M 4.5,2.5 H 11.5 A 1.5,1.5 0 0 1 13,4 V 13 A 1.5,1.5 0 0 1 11.5,14.5 H 4.5 A 1.5,1.5 0 0 1 3,13 V 4 A 1.5,1.5 0 0 1 4.5,2.5 Z M 6,2.5 H 10 V 4.5 H 6 Z";
+        public const string PlainText = "M 3,3.5 H 13 M 8,3.5 V 13.5 M 6,13.5 H 10";
+        public const string Copy = "M 6.5,5 H 12 A 1.5,1.5 0 0 1 13.5,6.5 V 12 A 1.5,1.5 0 0 1 12,13.5 H 6.5 A 1.5,1.5 0 0 1 5,12 V 6.5 A 1.5,1.5 0 0 1 6.5,5 Z M 11,5 V 3.5 A 1,1 0 0 0 10,2.5 H 3.5 A 1,1 0 0 0 2.5,3.5 V 10 A 1,1 0 0 0 3.5,11 H 5";
+        public const string Details = "M 4.5,2.5 H 11.5 A 2,2 0 0 1 13.5,4.5 V 11.5 A 2,2 0 0 1 11.5,13.5 H 4.5 A 2,2 0 0 1 2.5,11.5 V 4.5 A 2,2 0 0 1 4.5,2.5 Z M 5.5,6 H 10.5 M 5.5,8.5 H 10.5 M 5.5,11 H 8.5";
+        public const string Edit = "M 10.5,2.5 L 13.5,5.5 L 6,13 H 3 V 10 Z";
+        public const string Category = "M 2.5,2.5 H 7.7 L 13.7,8.5 L 8.5,13.7 L 2.5,7.7 Z M 4.3,5.3 A 1,1 0 1 1 6.3,5.3 A 1,1 0 1 1 4.3,5.3";
+        public const string Delete = "M 2.5,4.5 H 13.5 M 6,4.5 V 3 H 10 V 4.5 M 4,4.5 L 4.7,13.5 H 11.3 L 12,4.5";
+        public const string Open = "M 9,2.5 H 13.5 V 7 M 13.5,2.5 L 7.5,8.5 M 11.5,9.5 V 12.5 A 1,1 0 0 1 10.5,13.5 H 3.5 A 1,1 0 0 1 2.5,12.5 V 5.5 A 1,1 0 0 1 3.5,4.5 H 6.5";
+        public const string Folder = "M 2,4.5 A 1,1 0 0 1 3,3.5 H 6.2 L 7.7,5 H 13 A 1,1 0 0 1 14,6 V 12 A 1,1 0 0 1 13,13 H 3 A 1,1 0 0 1 2,12 Z";
+        public const string FilePath = "M 6.5,9.5 L 9.5,6.5 M 7,4.5 L 8,3.5 A 2.8,2.8 0 0 1 12,7.5 L 11,8.5 M 9,11.5 L 8,12.5 A 2.8,2.8 0 0 1 4,8.5 L 5,7.5";
+        public const string Remove = "M 2.5,8 A 5.5,5.5 0 1 1 13.5,8 A 5.5,5.5 0 1 1 2.5,8 Z M 5.5,8 H 10.5";
+    }
+    private ContextMenu NewMenu() => new() { Style = (Style)FindResource("ShelfMenu") };
+    // check: null for an action; false or true for a choice, whose check column shows the one chosen.
+    private MenuItem Item(string label, Action act, string? icon = null, string? hint = null, bool danger = false, bool? check = null, bool enabled = true, string? dot = null, bool star = false)
+    {
+        string color = danger ? PanelTheme.Hex("danger") : UI.Primary;
+        var header = new DockPanel { LastChildFill = true };
+        void Lead(FrameworkElement part) { DockPanel.SetDock(part, System.Windows.Controls.Dock.Left); header.Children.Add(part); }
+        if (check is { } chosen)
+            Lead(new Path { Data = Geometry.Parse("M 1.5,5.2 L 4,7.7 L 8.5,2.5"), Stroke = UI.Brush(UI.Primary), StrokeThickness = 1.6, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round, Width = 10, Height = 10, Margin = new Thickness(1, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Visibility = chosen ? Visibility.Visible : Visibility.Hidden });
+        if (icon is not null) Lead(MenuGlyph(icon, danger ? color : UI.Secondary));
+        if (star) { var mark = StarGlyph(10, UI.Secondary, filled: false); mark.Margin = new Thickness(0, 0, 7, 0); mark.VerticalAlignment = VerticalAlignment.Center; Lead(mark); }
+        if (dot is not null) Lead(new Ellipse { Width = 7, Height = 7, Fill = UI.Brush(dot), Margin = new Thickness(1, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center });
+        header.Children.Add(new TextBlock { Text = label, Foreground = UI.Brush(color), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+        var item = new MenuItem { Style = (Style)FindResource("ShelfMenuItem"), Header = header, InputGestureText = hint ?? "", IsEnabled = enabled };
         AutomationProperties.SetName(item, label);
+        if (check == true) AutomationProperties.SetItemStatus(item, Loc.T("已选中", "Selected"));
         item.Click += (_, e) => { e.Handled = true; CloseMenu(); act(); };
+        // Another row's menu beside it closes as soon as the pointer comes onto this row.
+        item.MouseEnter += (_, _) =>
+        {
+            if (item.Parent is ItemsControl owner)
+                foreach (var other in owner.Items.OfType<MenuItem>().Where(other => other != item && other.IsSubmenuOpen)) other.IsSubmenuOpen = false;
+        };
         return item;
     }
-    private MenuItem Submenu(string label, IEnumerable<object> items)
+    private MenuItem Submenu(string label, string icon, IEnumerable<object> items)
     {
-        var item = new MenuItem { Style = (Style)FindResource("ShelfMenuItem"), Header = new TextBlock { Text = label, Foreground = UI.Brush(UI.Primary), VerticalAlignment = VerticalAlignment.Center } };
+        var header = new DockPanel { LastChildFill = true };
+        var glyph = MenuGlyph(icon, UI.Secondary); DockPanel.SetDock(glyph, System.Windows.Controls.Dock.Left); header.Children.Add(glyph);
+        header.Children.Add(new TextBlock { Text = label, Foreground = UI.Brush(UI.Primary), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+        var item = new MenuItem { Style = (Style)FindResource("ShelfMenuItem"), Header = header };
         AutomationProperties.SetName(item, label);
         foreach (var child in items) item.Items.Add(child);
+        // Opens as soon as the pointer is on it, without the system's menu delay (400 ms by default).
+        item.MouseEnter += (_, _) => { if (!item.IsSubmenuOpen) item.IsSubmenuOpen = true; };
         return item;
     }
+    // A 14 DIP line icon drawn on a 16 grid.
+    private static Path MenuGlyph(string data, string color) => new()
+    {
+        Data = Geometry.Parse(data), Stroke = UI.Brush(color), StrokeThickness = 1.4, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round,
+        Width = 16, Height = 16, LayoutTransform = new ScaleTransform(.875, .875), Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center
+    };
     private Separator Separator() => new() { Style = (Style)FindResource("ShelfMenuSeparator") };
     private void CloseMenu() { if (_shelfMenu is { IsOpen: true } menu) menu.IsOpen = false; }
+    // The menu's frame keeps 12 DIP around it for its shadow (ShelfResources.xaml); the offsets take that back.
     private void OpenMenu(ContextMenu menu, FrameworkElement target, bool atPointer = false)
     {
         CloseMenu();
         _shelfMenu = menu;
         menu.PlacementTarget = target;
         menu.Placement = atPointer ? PlacementMode.MousePoint : PlacementMode.Bottom;
-        if (!atPointer) menu.VerticalOffset = 4 * _scale;
+        menu.HorizontalOffset = -12 * _scale;
+        menu.VerticalOffset = (atPointer ? -12 : 4 - 12) * _scale;
         UI.Scale(menu, _scale);
         menu.Closed += (_, _) =>
         {
@@ -534,122 +586,89 @@ public partial class MainWindow
     {
         var menu = NewMenu();
         bool textual = clip.Kind != ClipKind.Image;
-        menu.Items.Add(Item(Loc.T("粘贴", "Paste"), () => PasteClip(clip), hint: Loc.T("单击", "Click")));
-        if (textual && (clip.Html.Length > 0 || clip.Rtf.Length > 0)) menu.Items.Add(Item(Loc.T("粘贴为纯文本", "Paste as plain text"), () => PasteClip(clip, plain: true)));
-        menu.Items.Add(Item(Loc.T("只复制，不粘贴", "Copy only"), () => CopyClip(clip)));
-        menu.Items.Add(Item(Loc.T("查看完整内容", "Show all"), () => OpenDetail(ShelfSide.Clipboard, clip.Id), hint: "›"));
-        if (textual) menu.Items.Add(Item(Loc.T("编辑…", "Edit…"), () => BeginEdit(new ShelfEdit(ShelfEditKind.EditText, ShelfSide.Clipboard, clip.Id))));
+        menu.Items.Add(Item(Loc.T("粘贴", "Paste"), () => PasteClip(clip), MenuIcons.Paste));
+        // Every text entry, as on its row and in its details.
+        if (textual) menu.Items.Add(Item(Loc.T("粘贴为纯文本", "Paste as plain text"), () => PasteClip(clip, plain: true), MenuIcons.PlainText));
+        menu.Items.Add(Item(Loc.T("只复制，不粘贴", "Copy only"), () => CopyClip(clip), MenuIcons.Copy));
         menu.Items.Add(Separator());
-        menu.Items.Add(Submenu(Loc.T("加入分类", "Add to category"), CategoryItems(ShelfSide.Clipboard, [clip.Id], clip.Category)));
+        menu.Items.Add(Item(Loc.T("查看详情", "Details"), () => OpenDetail(ShelfSide.Clipboard, clip.Id), MenuIcons.Details));
+        if (textual) menu.Items.Add(Item(Loc.T("编辑…", "Edit…"), () => BeginEdit(clip.Id), MenuIcons.Edit));
+        AddFiling(menu, clip);
         menu.Items.Add(Separator());
-        menu.Items.Add(Item(Loc.T("删除", "Delete"), () => DeleteClips([clip]), danger: true));
+        menu.Items.Add(Item(Loc.T("删除", "Delete"), () => DeleteClips([clip]), MenuIcons.Delete, danger: true));
         return menu;
+    }
+    // "加入常用" (or "移出常用") on its own row, and the user's categories, when there are any, in a menu beside it.
+    private void AddFiling(ContextMenu menu, ClipEntry clip)
+    {
+        menu.Items.Add(Separator());
+        bool favorite = clip.Category == ShelfData.Favorites;
+        menu.Items.Add(Item(favorite ? Loc.T("移出常用", "Remove from favorites") : Loc.T("加入常用", "Add to favorites"),
+            () => Assign(ShelfSide.Clipboard, [clip.Id], favorite ? null : ShelfData.Favorites), StarData));
+        if (FilingMenu(ShelfSide.Clipboard, [clip.Id], clip.Category) is { } filing) menu.Items.Add(filing);
+    }
+    // "加入分类" with the user's categories, or nothing when the user has made none.
+    private MenuItem? FilingMenu(ShelfSide side, IReadOnlyList<Guid> ids, Guid? current)
+    {
+        var own = ShelfData.OwnCategories(side).ToList();
+        if (own.Count == 0) return null;
+        // The check column only when the entries are in one of these categories.
+        bool inOwn = own.Any(category => category.Id == current);
+        var items = own.Select(category => (object)Item(category.Name, () => Assign(side, ids, category.Id), check: inOwn ? current == category.Id : null, dot: category.Color)).ToList();
+        if (inOwn) { items.Add(Separator()); items.Add(Item(Loc.T("移出分类", "Remove from category"), () => Assign(side, ids, null), check: false)); }
+        return Submenu(Loc.T("加入分类", "Add to category"), MenuIcons.Category, items);
     }
     private ContextMenu FileMenu(TransferFile file)
     {
         var menu = NewMenu();
         if (!ShelfFiles.Exists(file.Path))
         {
-            menu.Items.Add(Item(Loc.T("查看详情", "Details"), () => OpenDetail(ShelfSide.Files, file.Id), hint: "›"));
-            menu.Items.Add(Submenu(Loc.T("加入分类", "Add to category"), CategoryItems(ShelfSide.Files, [file.Id], file.Category)));
+            menu.Items.Add(Item(Loc.T("查看详情", "Details"), () => OpenDetail(ShelfSide.Files, file.Id), MenuIcons.Details));
+            if (FilingMenu(ShelfSide.Files, [file.Id], file.Category) is { } lost) menu.Items.Add(lost);
             menu.Items.Add(Separator());
-            menu.Items.Add(Item(Loc.T("从文件中转移除", "Remove"), () => RemoveFiles([file]), danger: true));
+            menu.Items.Add(Item(Loc.T("移除", "Remove"), () => RemoveFiles([file]), MenuIcons.Remove));
             return menu;
         }
         var files = _picked.Contains(file.Id) && _picked.Count > 1 ? ShelfData.Files.Where(f => _picked.Contains(f.Id)).ToList() : [file];
         bool many = files.Count > 1;
-        menu.Items.Add(Item(many ? Loc.T($"粘贴所选 {files.Count} 项到当前窗口", $"Paste {files.Count} files into the current window") : Loc.T("粘贴到当前窗口", "Paste into the current window"),
-            () => PasteFiles(files), hint: many ? null : Loc.T("单击", "Click")));
+        menu.Items.Add(Item(many ? Loc.T($"粘贴所选 {files.Count} 项", $"Paste {files.Count} files") : Loc.T("粘贴", "Paste"),
+            () => PasteFiles(files), MenuIcons.Paste));
         if (!many)
         {
-            menu.Items.Add(Item(Loc.T("打开", "Open"), () => OpenFile(file.Path)));
-            menu.Items.Add(Item(Loc.T("在文件夹中显示", "Show in folder"), () => ShowInFolder(file.Path)));
-            menu.Items.Add(Item(Loc.T("复制路径", "Copy path"), () => { if (_app.Shelf.Put(ShelfService.TextData(file.Path))) Flash(file.Id, Loc.T("已复制路径", "Path copied")); }));
-            menu.Items.Add(Item(Loc.T("查看详情", "Details"), () => OpenDetail(ShelfSide.Files, file.Id), hint: "›"));
+            menu.Items.Add(Item(Loc.T("打开", "Open"), () => OpenFile(file.Path), MenuIcons.Open));
+            menu.Items.Add(Item(Loc.T("在文件夹中显示", "Show in folder"), () => ShowInFolder(file.Path), MenuIcons.Folder));
+            menu.Items.Add(Item(Loc.T("复制路径", "Copy path"), () => CopyPath(file), MenuIcons.FilePath));
+            menu.Items.Add(Separator());
+            menu.Items.Add(Item(Loc.T("查看详情", "Details"), () => OpenDetail(ShelfSide.Files, file.Id), MenuIcons.Details));
         }
+        if (FilingMenu(ShelfSide.Files, files.Select(f => f.Id).ToList(), many ? null : file.Category) is { } filing) { if (many) menu.Items.Add(Separator()); menu.Items.Add(filing); }
         menu.Items.Add(Separator());
-        menu.Items.Add(Submenu(Loc.T("加入分类", "Add to category"), CategoryItems(ShelfSide.Files, files.Select(f => f.Id).ToList(), many ? null : file.Category)));
-        menu.Items.Add(Separator());
-        menu.Items.Add(Item(many ? Loc.T($"从文件中转移除 {files.Count} 项", $"Remove {files.Count} files") : Loc.T("从文件中转移除", "Remove"), () => RemoveFiles(files), hint: Loc.T("原文件保留", "Original kept"), danger: true));
+        AddRemoval(menu, files);
         return menu;
     }
-    // The categories to put entries in, the one they are in checked; then taking them out, and a new category for them.
-    private List<object> CategoryItems(ShelfSide side, IReadOnlyList<Guid> ids, Guid? current)
-    {
-        var items = new List<object>();
-        foreach (var category in ShelfData.Categories(side))
-            items.Add(Item(category.Name, () => Assign(side, ids, category.Id), check: current == category.Id, dot: category.Color));
-        if (items.Count > 0) items.Add(Separator());
-        if (current is not null) items.Add(Item(Loc.T("移出分类", "Remove from category"), () => Assign(side, ids, null)));
-        items.Add(Item(Loc.T("新建分类…", "New category…"), () => BeginEdit(new ShelfEdit(ShelfEditKind.NewCategory, side, ForItems: ids))));
-        return items;
-    }
+    // The details' "分类": every category, "常用" too, the one the entry is in checked, and "无".
     private ContextMenu CategoryChoices(ShelfSide side, IReadOnlyList<Guid> ids, Guid? current)
     {
         var menu = NewMenu();
-        foreach (var item in CategoryItems(side, ids, current)) menu.Items.Add(item);
+        menu.Items.Add(Item(Loc.T("无", "None"), () => Assign(side, ids, null), check: current is null));
+        foreach (var category in ShelfData.Categories(side))
+            menu.Items.Add(category.Id == ShelfData.Favorites
+                ? Item(Shelf.CategoryName(category), () => Assign(side, ids, category.Id), check: current == category.Id, star: true)
+                : Item(category.Name, () => Assign(side, ids, category.Id), check: current == category.Id, dot: category.Color));
         return menu;
     }
-    private ContextMenu CategoryMenu(ShelfSide side, ShelfCategory category)
-    {
-        var menu = NewMenu();
-        if (side == ShelfSide.Clipboard)
-        {
-            menu.Items.Add(Item(Loc.T("在这个分类中新建常用语…", "New phrase in this category…"), () => BeginEdit(new ShelfEdit(ShelfEditKind.NewPhrase, side, Category: category.Id))));
-            menu.Items.Add(Separator());
-        }
-        menu.Items.Add(Item(Loc.T("重命名", "Rename"), () => BeginEdit(new ShelfEdit(ShelfEditKind.RenameCategory, side, category.Id))));
-        var colors = PanelTheme.Current.Swatches.Take(8).Select(color => color.WithAlpha(255).ToString()).ToList();
-        menu.Items.Add(Submenu(Loc.T("颜色", "Color"), colors.Select(color => (object)Item(color, () => { category.Color = color; _app.Shelf.Edited(); }, check: string.Equals(category.Color, color, StringComparison.OrdinalIgnoreCase), dot: color))));
-        menu.Items.Add(Separator());
-        menu.Items.Add(Item(Loc.T("删除分类", "Delete category"), () =>
-        {
-            Shelf.DeleteCategory(ShelfData, side, category.Id);
-            if (side == ShelfSide.Clipboard && _clipTab == category.Id) _clipTab = null;
-            if (side == ShelfSide.Files && _fileTab == category.Id) _fileTab = null;
-            _app.Shelf.Edited();
-        }, hint: Loc.T("内容回到全部", "Entries stay"), danger: true));
-        return menu;
-    }
+    // The user's categories, with their counts, when they do not fit beside "全部" and "常用".
     private ContextMenu CategoryListMenu(ShelfSide side)
     {
         var menu = NewMenu();
         var selected = side == ShelfSide.Clipboard ? _clipTab : _fileTab;
-        int Count(Guid? id) => side == ShelfSide.Clipboard ? ShelfData.Clips.Count(c => id is null || c.Category == id) : ShelfData.Files.Count(f => id is null || f.Category == id);
-        void Choose(Guid? id) { if (side == ShelfSide.Clipboard) _clipTab = id; else { _fileTab = id; _picked.Clear(); } RenderShelf(); }
-        menu.Items.Add(Item(side == ShelfSide.Clipboard ? Loc.T("全部记录", "All entries") : Loc.T("全部文件", "All files"), () => Choose(null), hint: Count(null).ToString(CultureInfo.InvariantCulture), check: selected is null));
-        foreach (var category in ShelfData.Categories(side))
-            menu.Items.Add(Item(category.Name, () => Choose(category.Id), hint: Count(category.Id).ToString(CultureInfo.InvariantCulture), check: selected == category.Id, dot: category.Color));
-        menu.Items.Add(Separator());
-        if (side == ShelfSide.Clipboard) menu.Items.Add(Item(Loc.T("新建常用语…", "New phrase…"), () => BeginEdit(new ShelfEdit(ShelfEditKind.NewPhrase, side, Category: _clipTab))));
-        menu.Items.Add(Item(Loc.T("新建分类…", "New category…"), () => BeginEdit(new ShelfEdit(ShelfEditKind.NewCategory, side))));
-        if (selected is { } chosen && ShelfData.Categories(side).FirstOrDefault(c => c.Id == chosen) is { } current)
-        {
-            menu.Items.Add(Separator());
-            foreach (var item in CategoryMenu(side, current).Items.Cast<object>().ToList()) { CategoryMenuDetach(item); menu.Items.Add(item); }
-        }
-        return menu;
-    }
-    private static void CategoryMenuDetach(object item) { if (item is FrameworkElement { Parent: ItemsControl owner } element) owner.Items.Remove(element); }
-    private ContextMenu ClipMoreMenu()
-    {
-        var menu = NewMenu();
-        menu.Items.Add(Item(Loc.T("新建常用语…", "New phrase…"), () => BeginEdit(new ShelfEdit(ShelfEditKind.NewPhrase, ShelfSide.Clipboard, Category: _clipTab))));
-        menu.Items.Add(Separator());
-        if (!Settings.ClipboardRecord) menu.Items.Add(Item(Loc.T("开启记录", "Turn on recording"), () => _app.UpdateSettings(SettingsWith(s => s.ClipboardRecord = true))));
-        else menu.Items.Add(Item(_app.Shelf.Paused ? Loc.T("继续记录", "Resume recording") : Loc.T("暂停记录", "Pause recording"), () => _app.Shelf.SetPaused(!_app.Shelf.Paused)));
-        menu.Items.Add(Item(Loc.T("清除历史记录", "Clear history"), () => _app.Shelf.ClearHistory(), hint: Loc.T("分类和常用语保留", "Categories and phrases stay"), danger: true,
-            enabled: Shelf.History(ShelfData).Count > 0));
-        menu.Items.Add(Separator());
-        menu.Items.Add(Item(Loc.T("剪贴板设置…", "Clipboard settings…"), () => _app.OpenExpandedSettings()));
-        return menu;
-    }
-    private ContextMenu FileMoreMenu()
-    {
-        var menu = NewMenu();
-        menu.Items.Add(Item(Loc.T("全部移除", "Remove all"), () => RemoveFiles([.. ShelfData.Files]), hint: Loc.T("原文件保留", "Originals kept"), danger: true, enabled: ShelfData.Files.Count > 0));
-        menu.Items.Add(Separator());
-        menu.Items.Add(Item(Loc.T("文件中转设置…", "File transfer settings…"), () => _app.OpenExpandedSettings()));
+        string Number(Guid id) => (side == ShelfSide.Clipboard ? ShelfData.Clips.Count(c => c.Category == id) : ShelfData.Files.Count(f => f.Category == id)).ToString(CultureInfo.InvariantCulture);
+        void Choose(Guid id) { if (side == ShelfSide.Clipboard) _clipTab = id; else { _fileTab = id; _picked.Clear(); } RenderShelf(); }
+        // The check column only when one of them is the one shown, so the menu has no empty column at its left.
+        var own = ShelfData.OwnCategories(side).ToList();
+        bool chosen = own.Any(category => category.Id == selected);
+        foreach (var category in own)
+            menu.Items.Add(Item(category.Name, () => Choose(category.Id), hint: Number(category.Id), check: chosen ? selected == category.Id : null, dot: category.Color));
         return menu;
     }
 }

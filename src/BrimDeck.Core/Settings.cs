@@ -45,8 +45,8 @@ public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
-// (MainWindow.Move.cs); moving is the default. Saved as numbers, so new members go at the end.
-public enum GripDoubleClick { AutoWidth, Move }
+// (MainWindow.Move.cs); moving is the default. Off shows no handle at its ends at all. Saved as numbers, so new members go at the end.
+public enum GripDoubleClick { AutoWidth, Move, Off }
 public enum CompactMusicText { None, Title, Lyrics }
 // What the collapsed music hides while the song is paused: the title or lyric, the cover, or both. Saved as numbers, so new
 // members go at the end.
@@ -61,7 +61,7 @@ public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Dev
 public static class CompactParts
 {
     // A file saved before the equalizer and the clock were put in order adds them after its parts, the clock last, where they stood.
-    // The devices' batteries (1.2.5) join last.
+    // The devices' batteries (1.3.0) join last.
     public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices];
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
@@ -358,12 +358,21 @@ public sealed class DeckSettings
     public string Page1Hotkey { get; set; } = "";
     public string Page2Hotkey { get; set; } = "";
     public string Page3Hotkey { get; set; } = "";
+    public string Page4Hotkey { get; set; } = "";
+    public string Page5Hotkey { get; set; } = "";
+    public string Page6Hotkey { get; set; } = "";
+    public string Page7Hotkey { get; set; } = "";
+    public string Page8Hotkey { get; set; } = "";
+    public string Page9Hotkey { get; set; } = "";
+    public string Page10Hotkey { get; set; } = "";
     public string RefreshHotkey { get; set; } = "";
     public string Hotkey(HotkeyKind kind) => (kind switch
     {
         HotkeyKind.Hide => HideHotkey, HotkeyKind.Expand => ExpandHotkey, HotkeyKind.Resize => ResizeHotkey, HotkeyKind.Move => MoveHotkey,
         HotkeyKind.ClickThrough => ClickThroughHotkey, HotkeyKind.OpenSettings => SettingsHotkey, HotkeyKind.Page1 => Page1Hotkey,
-        HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Refresh => RefreshHotkey, _ => ""
+        HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Page4 => Page4Hotkey,
+        HotkeyKind.Page5 => Page5Hotkey, HotkeyKind.Page6 => Page6Hotkey, HotkeyKind.Page7 => Page7Hotkey, HotkeyKind.Page8 => Page8Hotkey,
+        HotkeyKind.Page9 => Page9Hotkey, HotkeyKind.Page10 => Page10Hotkey, HotkeyKind.Refresh => RefreshHotkey, _ => ""
     }) ?? "";
     public void SetHotkey(HotkeyKind kind, string value)
     {
@@ -378,6 +387,13 @@ public sealed class DeckSettings
             case HotkeyKind.Page1: Page1Hotkey = value; break;
             case HotkeyKind.Page2: Page2Hotkey = value; break;
             case HotkeyKind.Page3: Page3Hotkey = value; break;
+            case HotkeyKind.Page4: Page4Hotkey = value; break;
+            case HotkeyKind.Page5: Page5Hotkey = value; break;
+            case HotkeyKind.Page6: Page6Hotkey = value; break;
+            case HotkeyKind.Page7: Page7Hotkey = value; break;
+            case HotkeyKind.Page8: Page8Hotkey = value; break;
+            case HotkeyKind.Page9: Page9Hotkey = value; break;
+            case HotkeyKind.Page10: Page10Hotkey = value; break;
             case HotkeyKind.Refresh: RefreshHotkey = value; break;
         }
     }
@@ -501,11 +517,11 @@ public sealed class DeckSettings
     // The system monitor page; it reads the system only while it is open on screen.
     public bool MonitorPage { get; set; } = true;
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
-    // The clipboard and file transfer page. The clipboard is recorded only once the user turns it on (ClipboardRecord).
+    // The clipboard and file transfer page. The clipboard is recorded from the start; a settings file saved before keeps its choice.
     public bool ClipboardPage { get; set; } = true;
     public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
     public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
-    public bool ClipboardRecord { get; set; }
+    public bool ClipboardRecord { get; set; } = true;
     public ClipRetention ClipboardRetention { get; set; } = ClipRetention.Month;
     // Applications whose copies are not recorded, by process name without ".exe".
     public List<string> ClipboardExcluded { get; set; } = [];

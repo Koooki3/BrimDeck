@@ -70,23 +70,23 @@ static class DevicesPageTests
         DeckPages.SetSize(sized, DeckPage.Devices, 600, 250);
         check("Devices settings: a drag sizes the devices page alone", DeckPages.Size(sized, DeckPage.Devices) == (600, 250) && sized.Width == new DeckSettings().Width);
         // A file saved before the devices page has none of its members and needs no migration step: the page takes its defaults, joins
-        // the page order at the end and the scale and the other settings read as they were.
+        // its default place in the page order and the scale and the other settings read as they were.
         var older = SettingsMigrations.Read("""{"AppVersion":"1.2.2","MonitorPage":true,"PanelScale":150,"PageOrder":[2,0,1]}""");
-        check("Devices settings: a file from before the page reads with the page's defaults, last in the order",
+        check("Devices settings: a file from before the page reads with the page's defaults, in its default place",
             older.DevicesPage && older.DevicesWidth == 460 && older.DevicesHeight == 200 && older.DeviceChoices.Count == 0 && older.DeviceLowPercent == Devices.DefaultLowPercent
-            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices, DeckPage.Clipboard]) && older.PanelScale == 150);
-        // 1.2.5: a device switched off was off on the page and in the collapsed row; the battery reading among the system readings
+            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard, DeckPage.Devices]) && older.PanelScale == 150);
+        // 1.3.0: a device switched off was off on the page and in the collapsed row; the battery reading among the system readings
         // becomes the devices' own part where the readings showed it; getting low was ten points above low.
         var hidden = SettingsMigrations.Read("""
             {"AppVersion":"1.2.4","HiddenDevices":[{"Key":"bt:AA","Name":"Mouse"}],"DeviceLowPercent":20,"NotchMonitor":false,"CapsuleMonitor":true,
              "CompactReadings":[{"Item":2,"Visible":true},{"Item":256,"Visible":true}],"CapsuleOrder":[2,0,1]}
-            """, new Version(1, 2, 5), out _);
-        check("Devices settings: a device switched off before 1.2.5 stays off everywhere",
+            """, new Version(1, 3, 0), out _);
+        check("Devices settings: a device switched off before 1.3.0 stays off everywhere",
             hidden.DeviceChoices.Single() is { Key: "bt:AA", Name: "Mouse", Collapsed: false, Expanded: false, Label: null });
         check("Devices settings: the battery reading becomes the devices' part where the readings showed",
             hidden.CapsuleDevices && !hidden.NotchDevices && hidden.CompactReadings.All(r => r.Item != CompactMonitorItems.Battery)
             && hidden.CapsuleOrder.Last() == CompactPart.Devices && hidden.DeviceWarningPercent == 30);
-        var unshown = SettingsMigrations.Read("""{"AppVersion":"1.2.4","CapsuleMonitor":true,"CompactReadings":[{"Item":256,"Visible":false}]}""", new Version(1, 2, 5), out _);
+        var unshown = SettingsMigrations.Read("""{"AppVersion":"1.2.4","CapsuleMonitor":true,"CompactReadings":[{"Item":256,"Visible":false}]}""", new Version(1, 3, 0), out _);
         check("Devices settings: a battery reading that was hidden leaves the part off", !unshown.CapsuleDevices && !unshown.NotchDevices);
 
         static DeviceBattery Device(string key, string name, int? percent, DeviceKind kind = DeviceKind.Mouse) => new(key, name, kind, DeviceSource.Bluetooth, percent);

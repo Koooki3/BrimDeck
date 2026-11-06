@@ -53,12 +53,17 @@ public enum ShelfSide { Clipboard, Files }
 
 public sealed class ShelfData
 {
+    // "常用", the clipboard's own category: always first, never renamed or deleted; the phrases the user writes go there.
+    public static readonly Guid Favorites = new("5f1c2b7e-0c4a-4f2e-9a61-3d2f8e1b6c01");
+
     public List<ClipEntry> Clips { get; set; } = [];
     public List<TransferFile> Files { get; set; } = [];
-    public List<ShelfCategory> ClipCategories { get; set; } = [];
+    public List<ShelfCategory> ClipCategories { get; set; } = [new ShelfCategory { Id = Favorites, Name = "常用" }];
     public List<ShelfCategory> FileCategories { get; set; } = [];
 
     public List<ShelfCategory> Categories(ShelfSide side) => side == ShelfSide.Clipboard ? ClipCategories : FileCategories;
+    // The categories the user made, which can be renamed, colored, reordered and deleted.
+    public IEnumerable<ShelfCategory> OwnCategories(ShelfSide side) => Categories(side).Where(category => category.Id != Favorites);
 
     private static readonly JsonSerializerOptions Options = new() { Converters = { new JsonStringEnumConverter() } };
     public byte[] Serialize() => JsonSerializer.SerializeToUtf8Bytes(this, Options);
@@ -68,7 +73,11 @@ public sealed class ShelfData
         data.Clips = [.. (data.Clips ?? []).Where(clip => clip is not null && (clip.Kind == ClipKind.Image || clip.Text.Length > 0))];
         data.Files = [.. (data.Files ?? []).Where(file => file is not null && file.Path.Length > 0)];
         data.ClipCategories = [.. (data.ClipCategories ?? []).Where(category => category is not null)];
-        data.FileCategories = [.. (data.FileCategories ?? []).Where(category => category is not null)];
+        data.FileCategories = [.. (data.FileCategories ?? []).Where(category => category is not null && category.Id != Favorites)];
+        // "常用" comes first, also in history saved before it existed, and the phrases written then are in it.
+        data.ClipCategories.RemoveAll(category => category.Id == Favorites);
+        data.ClipCategories.Insert(0, new ShelfCategory { Id = Favorites, Name = "常用" });
+        foreach (var clip in data.Clips) if (clip.Manual && clip.Category is null) clip.Category = Favorites;
         // An entry whose category is gone goes back to the whole list.
         var clips = data.ClipCategories.Select(category => category.Id).ToHashSet();
         foreach (var clip in data.Clips) if (clip.Category is { } id && !clips.Contains(id)) clip.Category = null;
@@ -199,6 +208,19 @@ public static class Shelf
         return entry;
     }
 
+    // The same for the file transfer, which has no "常用": every file in "全部", a category's files in it. Only the records go; the
+    // files themselves stay where they are.
+    public static List<TransferFile> ClearableFiles(ShelfData data, Guid? category)
+        => data.Files.Where(file => category is null || file.Category == category).ToList();
+
+    // An entry copied again from the page: it goes to the top as a new copy would, with the time of this copy; it keeps its category.
+    public static void Recopied(ShelfData data, ClipEntry entry, DateTimeOffset now)
+    {
+        if (!data.Clips.Remove(entry)) return;
+        entry.Copied = now;
+        data.Clips.Insert(0, entry);
+    }
+
     // The history entries the rules clear: older than a week or a month, or past the most recent 500. Kept entries never are.
     public static List<ClipEntry> Expired(ShelfData data, ClipRetention retention, DateTimeOffset now)
     {
@@ -212,8 +234,17 @@ public static class Shelf
         };
     }
 
-    // The history, without what is kept: "清除历史记录", and leaving with UntilExit.
+    // The history, without what is kept: leaving with UntilExit.
     public static List<ClipEntry> History(ShelfData data) => data.Clips.Where(clip => !clip.Kept).ToList();
+
+    // What "清除" takes away where it is pressed: in "全部" everything but "常用"; in one of the user's categories, what is in it.
+    // Nothing in "常用".
+    public static List<ClipEntry> Clearable(ShelfData data, Guid? category) => category switch
+    {
+        null => data.Clips.Where(clip => clip.Category != ShelfData.Favorites).ToList(),
+        { } id when id == ShelfData.Favorites => [],
+        { } id => data.Clips.Where(clip => clip.Category == id).ToList()
+    };
 
     // Files are added at the top in the order they were dropped; a file already on the shelf moves up rather than appearing twice.
     public static void AddFiles(ShelfData data, IEnumerable<string> paths, Guid? category, DateTimeOffset now)
@@ -230,8 +261,42 @@ public static class Shelf
         }
     }
 
+    // The name shown for a category; "常用" in the language of the interface.
+    public static string CategoryName(ShelfCategory category) => category.Id == ShelfData.Favorites ? Loc.T("常用", "Favorites") : category.Name;
+
+    // A category the user makes goes last, in the next of the colors given (the panel theme's swatches).
+    public static ShelfCategory AddCategory(ShelfData data, ShelfSide side, string name, IReadOnlyList<string> colors)
+    {
+        var categories = data.Categories(side);
+        int own = data.OwnCategories(side).Count();
+        var category = new ShelfCategory { Name = name, Color = colors.Count > 0 ? colors[own % colors.Count] : "#9CB9FF" };
+        categories.Add(category);
+        return category;
+    }
+
+    // The user's categories in a new order; "常用" stays first, and a category missing from the order keeps its place at the end.
+    public static void Reorder(ShelfData data, ShelfSide side, IReadOnlyList<Guid> order)
+    {
+        var categories = data.Categories(side);
+        var rank = new Dictionary<Guid, int>();
+        for (int i = 0; i < order.Count; i++) rank.TryAdd(order[i], i);
+        var sorted = categories.Where(category => category.Id != ShelfData.Favorites)
+            .OrderBy(category => rank.TryGetValue(category.Id, out int at) ? at : int.MaxValue).ToList();
+        categories.RemoveAll(category => category.Id != ShelfData.Favorites);
+        categories.AddRange(sorted);
+    }
+
+    // A phrase the user writes goes to the top of "常用".
+    public static ClipEntry AddPhrase(ShelfData data, string text, DateTimeOffset now)
+    {
+        var phrase = new ClipEntry { Kind = Classify(text), Text = text, Manual = true, Copied = now, Category = ShelfData.Favorites };
+        data.Clips.Insert(0, phrase);
+        return phrase;
+    }
+
     public static void DeleteCategory(ShelfData data, ShelfSide side, Guid id)
     {
+        if (id == ShelfData.Favorites) return;
         data.Categories(side).RemoveAll(category => category.Id == id);
         if (side == ShelfSide.Clipboard) foreach (var clip in data.Clips.Where(clip => clip.Category == id)) clip.Category = null;
         else foreach (var file in data.Files.Where(file => file.Category == id)) file.Category = null;
@@ -270,26 +335,6 @@ public static class Shelf
         if (local.Date == today.AddDays(-1)) return Loc.T("昨天", "Yesterday");
         return local.Year == today.Year ? local.ToString(Loc.T("M月d日", "MMM d"), CultureInfo.CurrentCulture) : local.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     }
-
-    // A file name shortened in the middle when it does not fit: the start and the extension stay. fits says whether a candidate fits.
-    public static string MiddleEllipsis(string name, Func<string, bool> fits)
-    {
-        if (fits(name)) return name;
-        string extension = System.IO.Path.GetExtension(name);
-        if (extension.Length > 12 || extension.Length == name.Length) extension = "";
-        string stem = name[..^extension.Length];
-        // Keep a little of the stem's end before the extension, as Finder does, when there is room for it.
-        int low = 0, high = stem.Length;
-        string best = "…" + extension;
-        while (low <= high)
-        {
-            int keep = (low + high) / 2;
-            int tail = Math.Min(keep / 4, 4), head = keep - tail;
-            string candidate = stem[..head] + "…" + stem[^tail..] + extension;
-            if (fits(candidate)) { best = candidate; low = keep + 1; } else high = keep - 1;
-        }
-        return best;
-    }
 }
 
 // The sizes of the page at a height and width (the table in the design): margins, row and header heights, type sizes and what the
@@ -310,8 +355,10 @@ public sealed record ShelfLayout(ShelfTier Tier, double Side, double Gap, double
         double files = Math.Round(Math.Clamp(inner * .4, 170, 340)), clips = Math.Max(0, inner - files);
         bool spacious = tier == ShelfTier.Spacious;
         return new(tier, side, gap, header, row, body, aux, title, files, clips, files >= 210, spacious && files >= 300, spacious,
-            spacious ? 48 : 34, spacious ? 30 : Math.Max(14, row - 8), spacious ? 18 : 16, tier switch { ShelfTier.Compact => 12.5, ShelfTier.Standard => 13.5, _ => 14.5 });
+            spacious ? 48 : 34, spacious ? 30 : Math.Max(14, row - 8), spacious ? 18 : 16, DetailText);
     }
+    // The details' text is one size, whatever the panel's: reading a whole entry, the text should not grow and shrink with it.
+    public const double DetailText = 13.5;
     // The details show their facts in a column at the right from this width on, else in a line at the bottom.
     public static bool DetailSide(double width) => width >= 560;
     // The search box: 36 % of the panel's width, between 180 and 280.

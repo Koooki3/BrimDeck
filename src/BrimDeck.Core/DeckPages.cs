@@ -4,8 +4,9 @@ namespace BrimDeck.Core;
 // and which page the panel falls back to. The panel and the settings window ask here instead of comparing pages themselves.
 public static class DeckPages
 {
-    // The page switch, left to right, until the order is changed in the settings (DeckSettings.PageOrder).
-    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Devices, DeckPage.Clipboard];
+    // The page switch, left to right, until the order is changed in the settings (DeckSettings.PageOrder). The clipboard comes
+    // before the devices, as their groups do in the settings' list.
+    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices];
     // Each known page once, in the saved order; a page missing from the file takes its default place after the others.
     public static List<DeckPage> Normalize(IEnumerable<DeckPage>? order) => [.. (order ?? []).Where(page => Enum.IsDefined(page)).Concat(Order).Distinct()];
 

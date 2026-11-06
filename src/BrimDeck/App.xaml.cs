@@ -163,8 +163,8 @@ public partial class App : Application
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
     public void OpenSettings() => ShowSettings(false);
-    // The clipboard page's menus open the settings at the expanded pages, where its options are.
-    internal void OpenExpandedSettings() { ShowSettings(false); _settingsWindow?.ShowPage(2); }
+    // The clipboard page's menus open the settings at its own pages (SettingsWindow.ClipboardSettingsPage, TransferSettingsPage).
+    internal void OpenSettingsPage(int page) { ShowSettings(false); _settingsWindow?.ShowPage(page); }
     // Starting BrimDeck while it runs shows the hidden panels as well as the settings, so the panels come back even without
     // the tray icon.
     private void ShowFromRelaunch()

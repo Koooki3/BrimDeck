@@ -294,7 +294,7 @@ static class SystemMonitorTests
     private static void Pages(Action<string, bool> check)
     {
         var settings = new DeckSettings();
-        check("Pages: monitor comes after usage and music, the devices page after it, then the clipboard", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Devices, DeckPage.Clipboard]));
+        check("Pages: monitor comes after usage and music, the clipboard after it, then the devices page", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Clipboard, DeckPage.Devices]));
         var sized = new DeckSettings();
         DeckPages.SetSize(sized, DeckPage.Music, 700, 300); DeckPages.SetSize(sized, DeckPage.Monitor, 800, 320); DeckPages.SetSize(sized, DeckPage.Usage, 900, 260);
         check("Pages: a drag sets the size of the page it is on and of no other",
@@ -323,7 +323,7 @@ static class SystemMonitorTests
         ordered.DevicesPage = false;
         check("Pages: the devices page leaves the switch with its page off, in whatever place it stands", DeckPages.Resolve(ordered, DeckPage.Devices) == DeckPage.Usage);
         var odd = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"PageOrder":[2,9,2]}""")!;
-        check("Pages: unknown and repeated pages are dropped and missing ones added", odd.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices, DeckPage.Clipboard]));
+        check("Pages: unknown and repeated pages are dropped and missing ones added", odd.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard, DeckPage.Devices]));
         var copy = ordered.Copy(); copy.PageOrder = [.. DeckPages.Order];
         var orderRead = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>(System.Text.Json.JsonSerializer.Serialize(ordered))!;
         check("Pages: the order is copied deeply and survives saving and reading", ordered.PageOrder[0] == DeckPage.Devices && orderRead.PageOrder.SequenceEqual([DeckPage.Devices, DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard])

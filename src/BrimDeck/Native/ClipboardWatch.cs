@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using BrimDeck.Core;
@@ -105,9 +106,21 @@ internal sealed class ClipboardWatch : IDisposable
         }
         if (image is null && data.GetDataPresent(DataFormats.Bitmap)) image = data.GetData(DataFormats.Bitmap) as BitmapSource;
         if (image is null || image.PixelWidth is <= 0 or > MaxSide || image.PixelHeight is <= 0 or > MaxSide || (long)image.PixelWidth * image.PixelHeight > MaxPixels) return null;
+        image = Opaque(image);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image));
         using var output = new MemoryStream(); encoder.Save(output);
         return output.Length > MaxBytes ? null : (output.ToArray(), image.PixelWidth, image.PixelHeight);
+    }
+    // Screenshots copied only as a bitmap are read with every pixel's alpha at 0, which would show black and paste as fully
+    // transparent: such a picture is taken as opaque.
+    private static BitmapSource Opaque(BitmapSource image)
+    {
+        if (image.Format != PixelFormats.Bgra32) return image;
+        int stride = image.PixelWidth * 4;
+        var pixels = new byte[stride * image.PixelHeight];
+        image.CopyPixels(pixels, stride, 0);
+        for (int i = 3; i < pixels.Length; i += 4) if (pixels[i] != 0) return image;
+        return new FormatConvertedBitmap(image, PixelFormats.Bgr32, null, 0);
     }
 
     // ExcludeClipboardContentFromMonitorProcessing present, or CanIncludeInClipboardHistory set to 0: the copy asks not to be kept.
