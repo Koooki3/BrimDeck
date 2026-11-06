@@ -25,8 +25,10 @@ public enum CompactMonitorItems
     // joined CPU, GPU and the drives (CompactFigures); never released, it is dropped from saved tables and its number not reused.
     All = Columns | Cpu | Memory | Gpu | Download | Upload,
     Temperature = 64, Storage = 128,
+    // The lowest battery among the wireless devices shown on the devices page (Devices).
+    Battery = 256,
     // The whole machine's power draw in watts (PowerResolver) and the machine's own battery (BatteryModel): outside the presets like
-    // Storage. 256 is left unused.
+    // Storage.
     Power = 512, Charge = 1024,
     // The frame rate of the program in front (FrameRates): one figure for every panel. Outside the presets too.
     Frames = 2048
@@ -76,11 +78,11 @@ public static class CompactMonitor
     // Left to right by default; the settings' table can reorder them.
     public static readonly IReadOnlyList<CompactMonitorItems> Order =
         [CompactMonitorItems.Columns, CompactMonitorItems.Cpu, CompactMonitorItems.Memory, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Upload,
-            CompactMonitorItems.Storage, CompactMonitorItems.Power, CompactMonitorItems.Charge, CompactMonitorItems.Frames];
-    public const CompactMonitorItems Every = CompactMonitorItems.All | CompactMonitorItems.Storage | CompactMonitorItems.Power | CompactMonitorItems.Charge | CompactMonitorItems.Frames;
+            CompactMonitorItems.Storage, CompactMonitorItems.Power, CompactMonitorItems.Charge, CompactMonitorItems.Battery, CompactMonitorItems.Frames];
+    public const CompactMonitorItems Every = CompactMonitorItems.All | CompactMonitorItems.Storage | CompactMonitorItems.Power | CompactMonitorItems.Charge | CompactMonitorItems.Battery | CompactMonitorItems.Frames;
     // When the row is too short, readings leave in this order.
     public static readonly IReadOnlyList<CompactMonitorItems> LeaveOrder =
-        [CompactMonitorItems.Frames, CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge, CompactMonitorItems.Upload, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Columns, CompactMonitorItems.Memory, CompactMonitorItems.Cpu];
+        [CompactMonitorItems.Frames, CompactMonitorItems.Battery, CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge, CompactMonitorItems.Upload, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Columns, CompactMonitorItems.Memory, CompactMonitorItems.Cpu];
 
     // The readings with a figure that can be hidden.
     public const CompactMonitorItems Rings = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu;
@@ -99,6 +101,8 @@ public static class CompactMonitor
         // gives them their own.
         [CompactMonitorItems.Storage] = [MonitorRole.Storage],
         [CompactMonitorItems.Power] = [MonitorRole.Power], [CompactMonitorItems.Charge] = [MonitorRole.Battery],
+        // The devices' lowest battery takes the CPU color, as the devices page fills a battery.
+        [CompactMonitorItems.Battery] = [MonitorRole.Cpu],
         // The frame rate takes the GPU color unless the custom scheme gives it its own.
         [CompactMonitorItems.Frames] = [MonitorRole.Frames]
     };
@@ -202,8 +206,9 @@ public static class CompactMonitor
     }
 
     // The width of each reading: a ring with its figure (the ring and the room after it) or alone, the core columns, a rate, the
-    // drives, power, the battery, the frame rate. figure: the room after a ring, by ring (a ring showing its temperature too takes more).
-    public static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values, double ring, Func<CompactMonitorItems, double> figure, double bareRing, double columns, double rate, double storage = 0, double power = 0, double charge = 0, double frames = 0) => item => item switch
+    // drives, power, the machine's battery, the devices' lowest battery, the frame rate. figure: the room after a ring, by ring (a ring
+    // showing its temperature too takes more).
+    public static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values, double ring, Func<CompactMonitorItems, double> figure, double bareRing, double columns, double rate, double storage = 0, double power = 0, double charge = 0, double battery = 0, double frames = 0) => item => item switch
     {
         CompactMonitorItems.Columns => columns,
         CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu => (values & item) != 0 ? ring + figure(item) : bareRing,
@@ -211,6 +216,7 @@ public static class CompactMonitor
         CompactMonitorItems.Storage => storage,
         CompactMonitorItems.Power => power,
         CompactMonitorItems.Charge => charge,
+        CompactMonitorItems.Battery => battery,
         CompactMonitorItems.Frames => frames,
         _ => 0
     };

@@ -20,6 +20,7 @@ public partial class MainWindow
     private readonly Button AIUsageButton = new() { Content = "Usage", Width = 60, Height = 24 };
     private readonly Button MusicPageButton = new() { Content = "Music", Width = 60, Height = 24 };
     private readonly Button MonitorPageButton = new() { Content = "Monitor", Width = 60, Height = 24 };
+    private readonly Button DevicesPageButton = new() { Content = "Devices", Width = 60, Height = 24 };
     private readonly Grid PageSwitch = new();
     private readonly Border PageCapsule = new() { Width = 60, Height = 24 };
     private readonly TranslateTransform PageCapsuleShift = new();

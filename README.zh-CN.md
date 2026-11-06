@@ -101,6 +101,13 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 本页参考并改编自 Nongfsq 的 macOS 系统监控 [ftop](https://github.com/Nongfsq/ftop)（MIT 许可证）。
 
+### 设备
+
+- 显示已连接的无线键盘、鼠标、耳机、手柄和触控笔的电量；AirPods 分别显示左右耳与充电盒。电量低时变色并带标记，充电时显示闪电。
+- 支持 Windows 读取的蓝牙电量（与 Windows 设置中一致）、罗技 Unifying/Bolt/Lightspeed 接收器、雷蛇无线鼠标、赛睿与 HyperX 无线耳机、ATK/VXE/VGN/迈从等 2.4G 鼠标、Xbox 与 PlayStation 手柄。只读取，不会改动设备或系统设置。
+- 可在刘海或胶囊中显示电量最低的设备；电量不高于阈值（默认 15%）时显示为低电量。可在“设置 › 设备”中逐个关闭不想显示的设备。
+- 部分协议移植自 [device-battery-viewer](https://github.com/CharlesGool/device-battery-viewer)、[razer-battery-report](https://github.com/xzeldon/razer-battery-report)、[ATK-A9-Battery](https://github.com/Lkig/ATK-A9-Battery)、[atkctl](https://github.com/cobanov/atkctl) 与 [InphicBatteryTray](https://github.com/Tan-TanZi/InphicBatteryTray)（均为 MIT 许可证，见 ThirdPartyNotices.txt）。
+
 ### 面板主题
 
 <img src="docs/zh-CN/images/themes.png" width="100%" alt="同一个 AI 用量页在深色、浅色、Night Owl、Dracula、赛博朋克：边缘行者主题，以及一个自定义主题示例下的样子">

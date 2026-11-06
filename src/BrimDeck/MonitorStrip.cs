@@ -33,6 +33,8 @@ internal sealed class MonitorStrip : FrameworkElement
     private MonitorSnapshot? _snapshot;
     // The look of the power and charge readings on the theme in use.
     private readonly PowerStyle _powerStyle;
+    // The lowest battery among the devices shown (MainWindow.LowestBattery), for the battery reading.
+    private BatteryReading? _battery;
     // Made once, as the strip measures and draws on every reading: the readings in order, each once, the delegates it hands to
     // CompactMonitor (a method group or a lambda passed each time would be allocated each time), and the list they are
     // arranged into.
@@ -104,6 +106,7 @@ internal sealed class MonitorStrip : FrameworkElement
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
+            BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
             FramesSlot + Math.Round(3 * _scale) + FigureWidth(WidestFrames) + Math.Round(2 * _scale) + SmallWidth(FramesUnit));
     }
 
@@ -190,6 +193,15 @@ internal sealed class MonitorStrip : FrameworkElement
         return widths;
     }
 
+    // A new lowest battery, drawn at once in the room kept for its widest figure ("100%"), as a new snapshot's figures are.
+    public void SetBattery(BatteryReading? battery)
+    {
+        if (_battery == battery) return;
+        _battery = battery;
+        InvalidateVisual();
+    }
+    private static string BatteryFigure(BatteryReading? battery) => battery is { } b ? Percents[Devices.Clamp(b.Percent)] : "—";
+
     // frames: the frames a second the dials and the core columns are drawn at while they ease (CompactSmoothing).
     public void Update(MonitorSnapshot? snapshot, bool motion, int frames)
     {
@@ -265,7 +277,8 @@ internal sealed class MonitorStrip : FrameworkElement
             }
             double left = Math.Round(x);
             // Each reading in the color of its level (ReadingLevels); the core columns take theirs core by core.
-            var level = item == CompactMonitorItems.Charge ? BatteryModel.Level(s?.Battery.OrDefault, BatteryModel.LowPercent) : ReadingLevels.Of(item, s);
+            var level = item == CompactMonitorItems.Battery ? _battery?.Level ?? MemoryLevel.Normal
+                : item == CompactMonitorItems.Charge ? BatteryModel.Level(s?.Battery.OrDefault, BatteryModel.LowPercent) : ReadingLevels.Of(item, s);
             string color = _colors.At(item, level);
             switch (item)
             {
@@ -280,6 +293,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Storage: Drives(drawing, left, center, s, ppd); break;
                 case CompactMonitorItems.Power: Power(drawing, left, center, s?.Power.OrDefault, ppd); break;
                 case CompactMonitorItems.Charge: Charge(drawing, left, center, s?.Battery.OrDefault, level, ppd); break;
+                case CompactMonitorItems.Battery: Battery(drawing, left, center, _battery, color, level, ppd); break;
                 case CompactMonitorItems.Frames: Frames(drawing, left, center, FrameOf(s), color, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
@@ -396,6 +410,35 @@ internal sealed class MonitorStrip : FrameworkElement
             // Each letter keeps the room of the widest figures it can show.
             at += Column(item, _letterUsage[i], _letterHeat[i]);
         }
+    }
+
+    // A small battery on its side, as tall as the drive glyph beside it and outlined in the reading's color as the drive is, filled
+    // to the lowest charge (none at 0%, as on the page); then the figure: "15%". On whole device pixels. Too small to carry a mark
+    // over its fill, the battery takes a bolt in place of its tip while that device charges (its body that much shorter), and
+    // an exclamation mark in its empty part when low, so color is not the only sign, as on the page. As wide as the machine's
+    // battery (BatteryWidth, below).
+    private void Battery(DrawingContext drawing, double x, double center, BatteryReading? battery, string color, MemoryLevel level, double ppd)
+    {
+        double Snap(double value) => Math.Round(value * ppd) / ppd;
+        bool charging = battery is { Charging: true };
+        double width = BatteryWidth, height = Snap(9 * _scale), stroke = Math.Max(1, Math.Round(1.2 * _scale * ppd)) / ppd;
+        double tip = charging ? Snap(height * 15 / 23) : Snap(Math.Max(1, 1.5 * _scale));
+        var body = new Rect(Snap(x) + stroke / 2, Snap(center - height / 2) + stroke / 2, Snap(width - tip - 1) - stroke, height - stroke);
+        string ink = battery is null ? UI.Tertiary : color;
+        double radius = PanelTheme.Corner(1.5 * _scale), tipX = Snap(body.Right + stroke / 2 + 1 / ppd);
+        drawing.DrawRoundedRectangle(null, DeviceGlyphs.Stroke(ink, stroke), body, radius, radius);
+        if (charging) DeviceGlyphs.Bolt(drawing, new Rect(tipX, Snap(center - height / 2), tip, height), ink);
+        else drawing.DrawRectangle(UI.Brush(ink), null, new Rect(tipX, Snap(center - height * .2), tip, Snap(height * .4)));
+        if (battery is { } b)
+        {
+            double inset = stroke + 1 / ppd, room = Math.Max(0, body.Width - 2 * inset + stroke), left = body.X - stroke / 2 + inset;
+            double fill = b.Percent <= 0 ? 0 : Snap(Math.Max(Math.Min(room, 1.5 * _scale), room * Math.Clamp(b.Percent / 100.0, 0, 1)));
+            if (fill > 0) drawing.DrawRectangle(UI.Brush(color), null, new Rect(left, body.Y - stroke / 2 + inset, fill, Math.Max(1, body.Height + stroke - 2 * inset)));
+            if (!b.Charging && b.Level != MemoryLevel.Normal)
+                DeviceGlyphs.Exclamation(drawing, new Rect(left + fill, body.Y + stroke / 2, Math.Max(0, room - fill), Math.Max(0, body.Height - stroke)), color, null, ppd);
+        }
+        var text = MonitorDraw.Text(BatteryFigure(battery), _font, FigureColor(level, color), ppd);
+        MonitorDraw.Baseline(drawing, text, x + width + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 
     // The figure of a reading that is a share: "83%", one size, weight and baseline for every reading that has one (the dials' figures,
