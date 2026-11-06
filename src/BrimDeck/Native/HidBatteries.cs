@@ -248,7 +248,9 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             catch (TimeoutException) { _slow[info.Path] = now + 10 * 60_000; }
             catch { }
         }
-        if (onlyNew) return _previous = found;
+        // An AJAZZ mouse on its cable is not listed a second time through its receiver (Dongles.AjazzShadowed).
+        void DropShadowed() { if (found.TryGetValue(DeviceSource.Hid, out var hid)) hid.RemoveAll(device => Dongles.AjazzShadowed(device, hid)); }
+        if (onlyNew) { DropShadowed(); return _previous = found; }
 
         // A device that missed one reading (asleep for a moment, busy with its own software) keeps its last one until the next
         // pass; missing twice, it is gone.
@@ -260,6 +262,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             _lastRead[key] = (device, missed + 1);
             Add(device);
         }
+        DropShadowed();
         _previous = found;
         return found;
     }
@@ -506,7 +509,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 return new Dongles.AjazzInfo(percent, Charging: false, Connected: true, DeviceId: "");
             return null;
         }, 1500);
-        if (reading is not Dongles.AjazzInfo parsed || Dongles.AjazzBattery(parsed) is not { } battery) return [];
+        bool cable = info.Vendor == Dongles.AjazzWiredVendor && Dongles.IsAjazzWired(info.Product);
+        if (reading is not Dongles.AjazzInfo parsed || Dongles.AjazzBattery(parsed, cable) is not { } battery) return [];
         claimed.Add(info.Path);
         string name = parsed.DeviceId.Length > 0 ? parsed.DeviceId : NameOf(info, "AJAZZ");
         return [Mouse("ajazz", info, "AJAZZ", battery, preferredName: name)];

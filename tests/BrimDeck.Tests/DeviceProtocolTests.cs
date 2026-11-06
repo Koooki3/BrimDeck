@@ -119,6 +119,16 @@ static class DeviceProtocolTests
         check("AJAZZ: passive 0xC0 online/offline", Dongles.AjazzParseStatus([0xC0, 1, 55]) == (true, 55)
             && Dongles.AjazzParseStatus([0x00, 0xC0, 0, 40]) == (false, 40)
             && Dongles.AjazzParseStatus([0xC0, 1, 200]) == (true, null));
+        check("AJAZZ: on its cable a mouse is never asleep, whatever the connected byte says",
+            Dongles.AjazzBattery(Dongles.AjazzParseInfo(asleep)!.Value, cable: true) == new BatteryRead(82));
+        // The mouse on its cable, with its receiver plugged in too: the receiver reports it not connected.
+        DeviceBattery Ajazz(string hardware, string name, bool asleep) => new("ajazz:" + hardware, name, DeviceKind.Mouse, DeviceSource.Hid, 82) { Asleep = asleep, Hardware = hardware };
+        var receiver = Ajazz("249A:5C2F", "M041", asleep: true);
+        check("AJAZZ: the receiver's entry of a mouse its cable reads is left out, and only that one",
+            Dongles.AjazzShadowed(receiver, [receiver, Ajazz("248A:5C2E", "M041", asleep: false)])
+            && !Dongles.AjazzShadowed(receiver, [receiver])
+            && !Dongles.AjazzShadowed(receiver, [receiver, Ajazz("248A:5C2E", "M179", asleep: false)])
+            && !Dongles.AjazzShadowed(Ajazz("249A:5C2F", "M041", asleep: false), [Ajazz("248A:5C2E", "M041", asleep: false)]));
     }
 
     private static void HeadsetReplies(Action<string, bool> check)
