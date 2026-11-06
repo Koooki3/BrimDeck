@@ -122,6 +122,7 @@ public partial class MainWindow : Window
         InitializeMusic();
         InitializeMonitor();
         InitializeShelf();
+        InitializeDevices();
         InitializeResize();
         InitializeScale();
         InitializeShadow();
@@ -531,6 +532,7 @@ public partial class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
         System.Windows.Automation.AutomationProperties.SetName(ShelfPageButton, Loc.T("剪贴板与文件中转", "Clipboard and file transfer"));
         System.Windows.Automation.AutomationProperties.SetName(ShelfSearchButton, Loc.T("搜索剪贴板与文件中转", "Search the clipboard and file transfer"));
+        System.Windows.Automation.AutomationProperties.SetName(DevicesPageButton, Loc.T("设备", "Devices"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }

@@ -39,7 +39,7 @@ internal static class Program
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
-            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, frame rate, temperature and power readings, and the application identity the shell resolves (they read this machine or its shell).");
+            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, frame rate, temperature, device battery and power readings, and the application identity the shell resolves (they read this machine or its shell).");
             else
             {
                 CheckGpus();
@@ -49,6 +49,7 @@ internal static class Program
                 AppIdentityChecks.Run(Check);
                 FrameRateChecks.Run(Check);
                 TemperatureChecks.Run(Check);
+                DeviceChecks.Run(Check);
                 PowerChecks.Run(Check);
             }
             SensorGuardChecks.Run(Check);

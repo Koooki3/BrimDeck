@@ -103,6 +103,6 @@ internal static class ShelfTests
         check("Shelf settings: excluded applications lose .exe and repeats, and a bad size returns to the default",
             normalized.ClipboardExcluded.SequenceEqual(["KeePass", "1Password"]) && normalized.ClipboardWidth == ShelfSizes.Default.Width);
         check("Shelf settings: the page order of an older file gains the page at the end",
-            DeckPages.Normalize([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music]).SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard]));
+            DeckPages.Normalize([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music]).SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices, DeckPage.Clipboard]));
     }
 }

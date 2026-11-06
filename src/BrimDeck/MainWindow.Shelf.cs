@@ -125,7 +125,7 @@ public partial class MainWindow
         // Built while the panel is closed as well: the panel opens on what was built last.
         _shelfStale = false;
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed;
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed;
         ShelfContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
