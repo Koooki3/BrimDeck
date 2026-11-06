@@ -6,9 +6,10 @@ using Windows.Devices.Enumeration;
 namespace BrimDeck.Native;
 
 // The batteries that only the devices' own protocols tell, over HID: Logitech receivers and cables (HID++), Razer mice, the
-// 2.4 GHz mice and keyboards of ATK, VXE, VGN, MCHOSE, Endgame Gear, VAXEE, and Inphic receivers (those whose vendor and product are known), SteelSeries, HyperX
-// and MCHOSE headsets, PlayStation controllers, and any device that carries the standard HID battery usages. The protocols
-// themselves are in Core (DeviceProtocols.cs); this sends them. Every request only reads: nothing is set on any device.
+// 2.4 GHz mice and keyboards of ATK, VXE, VGN, MCHOSE, Endgame Gear, VAXEE, Inphic and AJAZZ receivers (those whose vendor and
+// product are known), SteelSeries, HyperX and MCHOSE headsets, PlayStation controllers, and any device that carries the standard
+// HID battery usages. The protocols themselves are in Core (DeviceProtocols.cs); this sends them. Every request only reads:
+// nothing is set on any device.
 // One worker thread at below normal priority does the I/O, so a slow device never holds the panel: once a minute while the
 // page or the collapsed reading shows (DeviceDemand.Watch), and not at all otherwise, when it lets every handle go and ends
 // (the next start makes a new one). A device plugged in while the page shows is read within a moment (a watcher over the HID
@@ -232,7 +233,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             if (Headsets.Find(info.Vendor, info.Product) is { } headset) { if (Matches(info, Headsets.Channel(headset))) Try(() => ReadHeadset(headset, info, claimed)); continue; }
             if (info.Vendor == PlayStation.Vendor && (PlayStation.IsDualSense(info.Product) || PlayStation.IsDualShock(info.Product)) && info.UsagePage == 0x01 && info.Usage == 0x05)
             { Try(() => ReadPlayStation(info, claimed)); continue; }
-            if (Dongle(info) is { } dongle && !Aside(info.Vendor)) Try(() => dongle(info, claimed));
+            // AJAZZ shares Inphic's vendor ids: it does not stand aside for Inphic's software.
+            if (Dongle(info) is { } dongle && (Dongles.IsAjazz(info.Vendor, info.Product) || !Aside(info.Vendor))) Try(() => dongle(info, claimed));
         }
         // The standard battery usages, on whatever no vendor protocol read. Bluetooth collections are left out (their level comes
         // from Windows, and a feature report over the air can wait on a sleeping device), and so is one that timed out lately.
@@ -387,7 +389,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     // On their dongles only: a request is never sent to a Bluetooth collection that happens to share a vendor and page. Which
     // collections get which protocol is Dongles.Find's decision (vendor and product pairs that are known, not vendor ids alone).
     private static Func<HidInfo, HashSet<string>, IEnumerable<DeviceBattery>>? Dongle(HidInfo info) => info.Bluetooth ? null
-        : Dongles.Find(info.Vendor, info.Product, info.UsagePage, info.ProductName, info.FeatureLength) switch
+        : Dongles.Find(info.Vendor, info.Product, info.UsagePage, info.ProductName, info.FeatureLength, info.Interface, info.Usage,
+            info.InputLength, info.OutputLength) switch
         {
             Dongles.Protocol.BitMouse => BitMouse,
             Dongles.Protocol.Compx => Compx,
@@ -396,12 +399,14 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             Dongles.Protocol.Vaxee => Vaxee,
             Dongles.Protocol.Inphic => Inphic,
             Dongles.Protocol.Mchose => Mchose,
+            Dongles.Protocol.Ajazz => Ajazz,
             _ => null
         };
 
-    private static DeviceBattery Mouse(string prefix, HidInfo info, string fallback, BatteryRead battery, DeviceKind kind = DeviceKind.Mouse)
-        => new(Key(prefix, info), NameOf(info, fallback), Devices.Named(info.ProductName) is { } named and not DeviceKind.Other ? named : kind, DeviceSource.Hid, battery.Percent)
-        { Charging = battery.Charging, Coarse = battery.Coarse, Hardware = Devices.Hardware(info.Vendor, info.Product) };
+    private static DeviceBattery Mouse(string prefix, HidInfo info, string fallback, BatteryRead battery, DeviceKind kind = DeviceKind.Mouse, string? preferredName = null)
+        => new(Key(prefix, info), preferredName is { Length: > 0 } ? preferredName : NameOf(info, fallback),
+            Devices.Named(info.ProductName) is { } named and not DeviceKind.Other ? named : kind, DeviceSource.Hid, battery.Percent)
+        { Charging = battery.Charging, Coarse = battery.Coarse, Asleep = battery.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product) };
 
     private static IEnumerable<DeviceBattery> BitMouse(HidInfo info, HashSet<string> claimed)
     {
@@ -486,6 +491,25 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             return [Mouse("mchose", info, "MCHOSE", battery)];
         }
         return [];
+    }
+
+    // AJAZZ AJ179: WriteFile interrupt OUT (report-id 0 + 32-byte 0x10), read until an info or online status frame.
+    // The receiver answers 0x10 while the mouse sleeps and still carries the last battery — mark Asleep, never invent 0 %.
+    private static IEnumerable<DeviceBattery> Ajazz(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info) { StripZero = true };
+        var reading = Hid.Transact<object>([device], () => device.Write(Dongles.AjazzInfoRequest()), r =>
+        {
+            if (Dongles.AjazzParseInfo(r) is { } infoReply) return infoReply;
+            // A passive 0xC0 while waiting: only take it when the mouse is online and the battery byte is valid.
+            if (Dongles.AjazzParseStatus(r) is { Online: true, Percent: { } percent })
+                return new Dongles.AjazzInfo(percent, Charging: false, Connected: true, DeviceId: "");
+            return null;
+        }, 1500);
+        if (reading is not Dongles.AjazzInfo parsed || Dongles.AjazzBattery(parsed) is not { } battery) return [];
+        claimed.Add(info.Path);
+        string name = parsed.DeviceId.Length > 0 ? parsed.DeviceId : NameOf(info, "AJAZZ");
+        return [Mouse("ajazz", info, "AJAZZ", battery, preferredName: name)];
     }
 
     // ----- The standard battery usages -----

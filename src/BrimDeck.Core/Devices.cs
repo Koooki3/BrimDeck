@@ -24,6 +24,8 @@ public sealed record DeviceBattery(string Key, string Name, DeviceKind Kind, Dev
 {
     public bool Charging { get; init; }
     public bool Coarse { get; init; }
+    // The wireless mouse is asleep / out of range while the receiver still reports the last battery: show that percent, never 0 %.
+    public bool Asleep { get; init; }
     public string? Address { get; init; }
     // "VVVV:PPPP", the USB or Bluetooth vendor and product, when the source knows them: a controller seen both as a game
     // controller and as a Bluetooth device is one device.
@@ -32,7 +34,7 @@ public sealed record DeviceBattery(string Key, string Name, DeviceKind Kind, Dev
     // The lowest of the parts with a reading (the earbuds, not the case), or the device's own.
     public int? Lowest => Parts.Where(part => part.Part != BatteryPart.Case && part.Percent is not null).Select(part => part.Percent).Min() ?? Percent;
     public bool Same(DeviceBattery other) => Key == other.Key && Name == other.Name && Kind == other.Kind && Source == other.Source && Percent == other.Percent
-        && Charging == other.Charging && Coarse == other.Coarse && Parts.SequenceEqual(other.Parts);
+        && Charging == other.Charging && Coarse == other.Coarse && Asleep == other.Asleep && Parts.SequenceEqual(other.Parts);
 }
 
 // A device switched off in the settings (DeckSettings.HiddenDevices).
@@ -136,6 +138,7 @@ public static class Devices
         var parts = new List<string>();
         if (device.Parts.Count > 0) parts.AddRange(device.Parts.Select(part => PartName(part.Part) + " " + Figure(part.Percent) + (part.Charging ? Loc.T("（充电）", " (charging)") : "")));
         else parts.Add(device.Percent is null ? Loc.T("未报告电量", "No battery reported") : Figure(device.Percent) + (device.Coarse ? Loc.T("（约）", " (approx.)") : ""));
+        if (device.Asleep) parts.Add(Loc.T("休眠", "Sleeping"));
         if (device.Charging) parts.Add(Loc.T("充电中", "Charging"));
         parts.Add(SourceName(device.Source));
         return device.Name + "\n" + string.Join(" · ", parts);
