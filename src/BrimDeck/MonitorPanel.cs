@@ -41,8 +41,9 @@ public partial class MainWindow
         bool page = shown && !DisplayPower.Off;
         // A row whose chosen readings all wait for their first figures has no width, yet must be read for them (StripAwaits). A row
         // only hidden for now (the panel open, or a notice in its place, which leaves no row built: RenderCompact) keeps its
-        // temperatures read while the sampler runs (App.UpdateMonitorExtras).
-        bool heldStrip = (_compactStrip is not null || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !DisplayPower.Off && EffectiveStyle != CompactStyle.Line;
+        // temperatures read while the sampler runs (App.UpdateMonitorExtras). A row whose only chosen reading is the battery reads the
+        // devices (UpdateDevicesDemand), not the system.
+        bool heldStrip = StripNeedsSystem && (_compactStrip is not null || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !DisplayPower.Off && EffectiveStyle != CompactStyle.Line;
         bool strip = heldStrip && !_expanded && _alert is null;
         if (!shown)
         {
@@ -60,17 +61,20 @@ public partial class MainWindow
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         if (strip && !_stripShowing) UpdateCompactStrips(_app.Monitor?.Latest, motion: false);
         _monitorShowing = page; _stripShowing = strip;
+        // The devices page and the collapsed battery reading ask on the same occasions.
+        UpdateDevicesDemand();
     }
     // The collapsed readings the row was last built without (StripAdmission.Hidden): the drives until their first figures, and for
     // good on a machine without them; and the temperatures and letters it was built with (StripAdmission.Layout).
     private CompactMonitorItems _stripUnavailable;
     private string _stripLayout = "";
     // A laptop on mains that gave no power reading may give one on battery (the discharge rate): its power is asked again then.
-    private SensorStates StripSensors => _app.Monitor is { } monitor ? new(monitor.CpuSensor, monitor.GpuSensor, monitor.StorageState, monitor.DriveSensor)
+    // The devices' battery state comes from the devices, also while the sampler does not run.
+    private SensorStates StripSensors => _app.Monitor is { } monitor ? new(monitor.CpuSensor, monitor.GpuSensor, monitor.StorageState, monitor.DriveSensor, BatteryState())
     {
         Power = monitor.PowerSensor == SensorState.None && Native.BatteryProvider.SystemHasBattery && !Native.BatteryProvider.OnMains ? SensorState.Unknown : monitor.PowerSensor,
         Charge = monitor.BatterySensor, Frames = monitor.FramesSensor
-    } : SensorStates.Unknown;
+    } : SensorStates.Unknown with { Battery = BatteryState() };
     // Whether this panel's open page shows the frame rate's line (its layout had room for it): the frame rate is read for it then.
     internal bool PageShowsFrames => _monitorView?.ShowsFrames == true;
     // Whether this surface shows the system readings and waits for the first figures of one it does not show yet.
@@ -90,13 +94,13 @@ public partial class MainWindow
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
         Motion.Enabled = MonitorMotion;
-        var (hidden, arriving) = _stripAdmission.Update(snapshot, Settings.CompactReadings, StripSensors);
+        bool admitted = AdmitStrip(snapshot);
         if (!_expanded)
         {
-            // The drives got their first figure: the row is built again with them, and they come in with the row's own entrance
-            // while the others slide aside. Until then the row did not show them, so nothing else changes. A temperature or a letter
-            // that joins or leaves changes its reading's width, and the row is built again for it.
-            if ((_compactStrip is not null || Settings.ShowsMonitor(EffectiveStyle)) && (hidden != _stripUnavailable || _stripAdmission.Layout != _stripLayout)) { _stripPresence.Arrive(arriving); RenderCompact(); return; }
+            // The drives or the battery got their first figure: the row is built again with them, and they come in with the row's own
+            // entrance while the others slide aside. Until then the row did not show them, so nothing else changes. A temperature or
+            // a letter that joins or leaves changes its reading's width, and the row is built again for it.
+            if (admitted) return;
             // A row still waiting for its first figures stops asking for readings once its sensors turn out to be missing.
             if (_compactStrip is null) { UpdateMonitorDemand(); return; }
             UpdateCompactStrips(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off); return;
@@ -110,6 +114,24 @@ public partial class MainWindow
         }
         _monitorView.Update(snapshot, MonitorMotion);
     }
+
+    // Which later parts the collapsed row shows now (StripAdmission); builds the row again, and returns true, when one joins or
+    // leaves or a reading's width changes. Asked on every system reading and every change of the devices.
+    private bool AdmitStrip(MonitorSnapshot? snapshot)
+    {
+        var (hidden, arriving) = UpdateStripAdmission(snapshot);
+        // Open, the row is not on screen; it is built with the new readings when the panel collapses.
+        if (_expanded || !(_compactStrip is not null || Settings.ShowsMonitor(EffectiveStyle)) || hidden == _stripUnavailable && _stripAdmission.Layout == _stripLayout) return false;
+        _stripPresence.Arrive(arriving); RenderCompact();
+        return true;
+    }
+    private (CompactMonitorItems Hidden, CompactMonitorItems Arriving) UpdateStripAdmission(MonitorSnapshot? snapshot)
+        => _stripAdmission.Update(snapshot, Settings.CompactReadings, StripSensors);
+    // Whether the collapsed row's chosen readings need the system sampler: any but the battery.
+    private bool StripNeedsSystem => (CompactMonitor.Shown(Settings.CompactReadings) & ~CompactMonitorItems.Battery) != 0;
+    // The battery reading's state: Found while a shown device reports a charge, None once the devices are listed and none
+    // does, Unknown before (or while nothing reads them).
+    private SensorState BatteryState() => LowestBattery() is not null ? SensorState.Found : DevicesSettled ? SensorState.None : SensorState.Unknown;
 
     // The page's bottom margin for a page of this height; its sides are the header's inset.
     private static double MonitorBottom(double height) => height < 170 ? 10 : 16;
@@ -160,7 +182,7 @@ public partial class MainWindow
         // the new one with a crossfade; a page opened from another one appears as it always has.
         bool shown = MonitorContent.Visibility == Visibility.Visible && _monitorView is not null && MonitorContent.Children.Contains(_monitorView);
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
