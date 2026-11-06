@@ -235,6 +235,7 @@ public partial class MainWindow : Window
         ClockLabel.Text = now.ToString("HH:mm");
         if (_compactClock is not null) _compactClock.Time = now;
     }
+    private int _fontSeen = -1;
     public void ApplySettings() => ApplySettings(false);
     // animatePage also animates the collapsed shape, which is how a screen-context change (maximized window, full screen)
     // moves between the notch, the capsule and the indicator.
@@ -250,6 +251,8 @@ public partial class MainWindow : Window
         bool wasVisible = IsVisible;
         var shapeBefore = Collapsed; double dipBefore = _pixelsPerDip;
         ApplyLanguage();
+        // The music page's text was set in the font of its day: it is set again.
+        if (_fontSeen != Fonts.Version) { _fontSeen = Fonts.Version; _musicRenderKey = ""; }
         ApplyTheme();
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();

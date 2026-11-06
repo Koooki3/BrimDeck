@@ -36,9 +36,12 @@ internal static class MonitorDraw
     private static Typeface Regular => Fonts.Face(UiFontRole.Panel);
     private static Typeface Strong => Fonts.Face(UiFontRole.Panel, FontWeights.SemiBold);
     private static Typeface Display => Fonts.Face(UiFontRole.Display, FontWeights.SemiBold);
+    private static int _fontSeen;
+    private static void KeepFresh() { if (_fontSeen == Fonts.Version) return; _fontSeen = Fonts.Version; Texts.Clear(); Letters.Clear(); }
 
     public static FormattedText Text(string text, double size, string color, double pixelsPerDip, bool strong = false, bool display = false)
     {
+        KeepFresh();
         var key = (text, size, strong, display, color, pixelsPerDip);
         if (Texts.TryGetValue(key, out var known)) return known;
         if (Texts.Count > 768) Texts.Clear();
@@ -209,10 +212,13 @@ internal sealed class DrawingCache<TKey> where TKey : struct, IEquatable<TKey>
 {
     private TKey _key;
     private DrawingGroup? _drawing;
+    // The text in it was laid out in the font of its day: another font draws it again.
+    private int _font = -1;
 
     public Drawing Get(TKey key, Action<DrawingContext> draw)
     {
-        if (_drawing is not null && key.Equals(_key)) return _drawing;
+        if (_drawing is not null && key.Equals(_key) && _font == Fonts.Version) return _drawing;
+        _font = Fonts.Version;
         var group = new DrawingGroup();
         using (var context = group.Open()) draw(context);
         group.Freeze();
