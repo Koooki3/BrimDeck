@@ -49,11 +49,11 @@ static class DevicesPageTests
         DeckPages.SetSize(sized, DeckPage.Devices, 600, 250);
         check("Devices settings: a drag sizes the devices page alone", DeckPages.Size(sized, DeckPage.Devices) == (600, 250) && sized.Width == new DeckSettings().Width);
         // A file saved before the devices page has none of its members and needs no migration step: the page takes its defaults, joins
-        // the page order at the end and the scale and the other settings read as they were.
+        // its default place in the page order and the scale and the other settings read as they were.
         var older = SettingsMigrations.Read("""{"AppVersion":"1.2.2","MonitorPage":true,"PanelScale":150,"PageOrder":[2,0,1]}""");
-        check("Devices settings: a file from before the page reads with the page's defaults, last in the order",
+        check("Devices settings: a file from before the page reads with the page's defaults, in its default place",
             older.DevicesPage && older.DevicesWidth == 460 && older.DevicesHeight == 200 && older.HiddenDevices.Count == 0 && older.DeviceLowPercent == Devices.DefaultLowPercent
-            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices, DeckPage.Clipboard]) && older.PanelScale == 150);
+            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Clipboard, DeckPage.Devices]) && older.PanelScale == 150);
         check("Devices settings: the collapsed battery reading joins an older table hidden", older.CompactReadings.Single(r => r.Item == CompactMonitorItems.Battery) is { Visible: false });
     }
 
