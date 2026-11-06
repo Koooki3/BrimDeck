@@ -85,9 +85,9 @@ static class DevicesTests
 
     private static void Levels(Action<string, bool> check)
     {
-        check("Devices: levels at the threshold and ten above", Devices.Level(15, false, 15) == MemoryLevel.Critical && Devices.Level(16, false, 15) == MemoryLevel.Elevated
-            && Devices.Level(25, false, 15) == MemoryLevel.Elevated && Devices.Level(26, false, 15) == MemoryLevel.Normal);
-        check("Devices: a charging or unreported battery is never low", Devices.Level(3, true, 15) == MemoryLevel.Normal && Devices.Level(null, false, 15) == MemoryLevel.Normal);
+        check("Devices: levels at the low and the warning thresholds", Devices.Level(15, false, 25, 15) == MemoryLevel.Critical && Devices.Level(16, false, 25, 15) == MemoryLevel.Elevated
+            && Devices.Level(25, false, 25, 15) == MemoryLevel.Elevated && Devices.Level(26, false, 25, 15) == MemoryLevel.Normal);
+        check("Devices: a charging or unreported battery is never low", Devices.Level(3, true, 25, 15) == MemoryLevel.Normal && Devices.Level(null, false, 25, 15) == MemoryLevel.Normal);
         check("Devices: figures", Devices.Figure(42) == "42%" && Devices.Figure(null) == "—" && Devices.Figure(130) == "100%");
     }
 }

@@ -47,9 +47,10 @@ public partial class MainWindow
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         var transfer = TransferBadge(scale);
+        var devices = CompactDevices(scale);
         // The rings' size follows every enabled application, track notice or not, as in the row.
         double ringDiameter = QuotaRing.Diameter(Settings.ShowsSummary(EffectiveStyle) && QuotaRings(Settings.EnabledApps).Any(item => item.Inner is not null));
-        var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, FixedFace(clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, scale), 0, equalizer, Settings.EqualizerBars, ring: ringDiameter); CurrentCompactLayout = layout;
+        var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, FixedFace(scale, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0), 0, equalizer, Settings.EqualizerBars, ring: ringDiameter); CurrentCompactLayout = layout;
         // One strip per reading, each alone on its line and centred in it. The drives show no glyph here: each drive has a line with its
         // letter and its figures, stacked or side by side as chosen in the settings, so any number of drives stand one below the other.
         var strips = new List<MonitorStrip>();
@@ -119,6 +120,17 @@ public partial class MainWindow
                     clock.Width = clock.ReservedWidth; Add(clock, clock.Height); _compactClock = clock; break;
                 case CompactPart.Transfer when transfer is not null:
                     Add(transfer, transfer.Height); break;
+                // The devices on a line of their own, scrolling as the readings do when wider than the column.
+                case CompactPart.Devices when devices is not null:
+                    if (devices.PreferredWidth > column + .5)
+                    {
+                        devices.Width = devices.PreferredWidth;
+                        var carousel = new ReadingsCarousel(devices, column, devices.PreferredWidth - column, edge, _stripElapsed, animate);
+                        _columnReadings.Add(carousel);
+                        Add(carousel, devices.Height);
+                    }
+                    else { devices.Width = column; Add(devices, devices.Height); }
+                    break;
             }
         }
         _columnStrips.AddRange(strips);

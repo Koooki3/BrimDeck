@@ -7,7 +7,7 @@ namespace BrimDeck.Native;
 // Game controllers through Windows.Gaming.Input: Xbox controllers on the Xbox Wireless adapter or a cable, and others Windows
 // gives a battery report for (RawGameController.TryGetBatteryReport: remaining and full capacity, and whether it charges).
 // Only while the page or the collapsed reading shows (DeviceDemand.Watch): the reports carry no event, so they are read when
-// a controller arrives and once a minute. A controller that is also a connected Bluetooth device merges with that entry by
+// a controller arrives and every 15 seconds (DevicePolling.Ask). A controller that is also a connected Bluetooth device merges with that entry by
 // its vendor and product (DeviceRoster).
 internal sealed class GamingBatteries(Dispatcher dispatcher, Action<DeviceSource, IReadOnlyList<DeviceBattery>> report) : IDeviceSource
 {
@@ -27,7 +27,7 @@ internal sealed class GamingBatteries(Dispatcher dispatcher, Action<DeviceSource
             RawGameController.RawGameControllerRemoved += Changed;
         }
         catch { }
-        _poll ??= new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = DevicePolling.Interval };
+        _poll ??= new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = DevicePolling.Ask };
         _poll.Tick -= Tick; _poll.Tick += Tick; _poll.Start();
         Read();
     }
@@ -47,6 +47,7 @@ internal sealed class GamingBatteries(Dispatcher dispatcher, Action<DeviceSource
     }
 
     public void Refresh() { if (_running) Read(); }
+    public void ReadNow() => Refresh();
     private void Tick(object? sender, EventArgs e) => Read();
     private void Changed(object? sender, RawGameController controller) => dispatcher.BeginInvoke(DispatcherPriority.Background, () => { if (_running) Read(); });
 

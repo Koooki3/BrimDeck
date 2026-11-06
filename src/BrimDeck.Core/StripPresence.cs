@@ -46,7 +46,7 @@ public sealed class StripPresence
 // stays (a figure missing for a moment shows a dash) until its sensor is known to be missing.
 public sealed class StripAdmission
 {
-    public const CompactMonitorItems Later = CompactMonitorItems.Storage | CompactMonitorItems.Power | CompactMonitorItems.Charge | CompactMonitorItems.Battery | CompactMonitorItems.Frames;
+    public const CompactMonitorItems Later = CompactMonitorItems.Storage | CompactMonitorItems.Power | CompactMonitorItems.Charge | CompactMonitorItems.Frames;
     // A part: a ring's temperature (Heat), a letter's space ("C:"), a letter's temperature ("C:" + Heat), or the devices' battery ("").
     public const string Heat = "°";
     private readonly HashSet<(CompactMonitorItems Item, string Part)> _seen = [], _showing = [];
@@ -64,8 +64,6 @@ public sealed class StripAdmission
     {
         foreach (var reading in readings)
         {
-            // The battery is the devices' (DeviceBatteries): it joins once a device reports a charge.
-            if (reading.Item == CompactMonitorItems.Battery) { yield return (reading.Item, "", states.Battery == SensorState.None); continue; }
             if (!CompactFigures.Has(reading.Item)) continue;
             bool usage = CompactFigures.Shows(reading, CompactFigures.Usage), heat = CompactFigures.Shows(reading, CompactFigures.Temperature);
             if (reading.Item == CompactMonitorItems.Storage)
@@ -78,9 +76,7 @@ public sealed class StripAdmission
                 yield return (reading.Item, Heat, (reading.Item == CompactMonitorItems.Cpu ? states.Cpu : states.Gpu) == SensorState.None);
         }
     }
-    private static bool Seen(CompactMonitorItems item, string part, MonitorSnapshot? latest, SensorStates states) => item == CompactMonitorItems.Battery
-        ? states.Battery == SensorState.Found
-        : item == CompactMonitorItems.Storage
+    private static bool Seen(CompactMonitorItems item, string part, MonitorSnapshot? latest, SensorStates states) => item == CompactMonitorItems.Storage
         ? part.EndsWith(Heat, StringComparison.Ordinal) ? CompactSources.Heat(part[..^Heat.Length], latest) is not null : CompactSources.Share(part, latest) is not null
         : CompactFigures.Heat(item, latest) is not null;
 

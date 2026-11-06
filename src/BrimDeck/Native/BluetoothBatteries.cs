@@ -10,11 +10,12 @@ namespace BrimDeck.Native;
 // Paired Bluetooth devices and the battery Windows itself reads for them, as Settings › Bluetooth shows it: the device node's
 // DEVPKEY_Bluetooth_Battery ({104EA319-6EE2-4701-BD47-8DDBF425BBE5}, 2), which Windows keeps for hands-free headsets (the
 // AT+IPHONEACCEV/+BIEV level on the HFP node) and for Bluetooth LE devices with a battery service (on the BTHLE node). Two
-// watchers keep everything current without polling: the paired devices (association endpoints, for the name, the kind and
-// whether each is connected) and the Bluetooth device nodes (for the level). Windows leaves the last level on a node after the
-// device disconnects, so only connected devices are listed. A connected LE device whose node has no level is read through
-// its GATT battery service (0x180F, level 0x2A19) instead, once when it connects and once a minute while the page shows: read
-// only, nothing is written to the device.
+// watchers follow the paired devices (association endpoints, for the name, the kind and whether each is connected) and the
+// Bluetooth device nodes (for the level). Windows does not tell when a node's level changes (BlueGauge's notes), so the
+// connected devices' levels are read again from its cache every 5 seconds (DevicePolling.Cached), which reaches no device.
+// Windows leaves the last level on a node after the device disconnects, so only connected devices are listed. Every connected
+// LE device's own battery service (GattBattery) is followed too: its level where Windows has none, and whether it charges where
+// the device tells it (Battery Level Status), which Windows never keeps.
 internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSource, IReadOnlyList<DeviceBattery>> report) : IDeviceSource
 {
     private const string BatteryKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2";
@@ -45,8 +46,6 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
         _demand = demand;
         if (!running)
         {
-            // The watchers' first listing, and each GATT reader's first read, count as a reading for Refresh.
-            _readAt = Environment.TickCount64;
             int generation = ++_generation;
             Watch(BluetoothDevice.GetDeviceSelectorFromPairingState(true), EndpointProperties, DeviceInformationKind.AssociationEndpoint, generation, lowEnergy: false);
             Watch(BluetoothLEDevice.GetDeviceSelectorFromPairingState(true), EndpointProperties, DeviceInformationKind.AssociationEndpoint, generation, lowEnergy: true);
@@ -55,7 +54,7 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
         // The page and the collapsed reading poll the GATT levels.
         if (demand == DeviceDemand.Watch)
         {
-            _poll ??= new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = DevicePolling.Interval };
+            _poll ??= new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = DevicePolling.Cached };
             _poll.Tick -= PollTick; _poll.Tick += PollTick; _poll.Start();
         }
         else _poll?.Stop();
@@ -76,23 +75,16 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
         report(DeviceSource.Bluetooth, []); report(DeviceSource.Gatt, []);
     }
 
-    // The page opened: read again, unless the last reading is under a minute old (each GATT read wakes the device over the
-    // air). The minute's poll then counts from this reading.
-    public void Refresh()
-    {
-        if (_demand != DeviceDemand.Watch || Environment.TickCount64 - _readAt < (long)DevicePolling.Interval.TotalMilliseconds) return;
-        ReadAll();
-        if (_poll is { IsEnabled: true }) { _poll.Stop(); _poll.Start(); }
-    }
-    private long _readAt;
+    // The page opened: Windows' levels at once, the GATT ones that send no notices as their minute allows.
+    public void Refresh() => ReadAll(force: false);
+    public void ReadNow() => ReadAll(force: true);
 
-    // The GATT levels, and Windows' own levels for the connected devices: whether the node watcher reports a level that changes
-    // is not documented, so they are read again too (a property read, about half a millisecond each).
-    private void ReadAll()
+    // Windows' own levels for the connected devices (a property read from its cache, about half a millisecond each), and the
+    // GATT values whose devices send no notices, once a minute or (force) now.
+    private void ReadAll(bool force = false)
     {
         if (_demand != DeviceDemand.Watch) return;
-        _readAt = Environment.TickCount64;
-        foreach (var gatt in _gatt.Values) gatt.Read();
+        foreach (var gatt in _gatt.Values) gatt.Poll(force);
         var connected = _endpoints.Values.Where(endpoint => endpoint.Connected).Select(endpoint => Devices.AddressIn(endpoint.Id)).ToHashSet();
         int generation = _generation;
         foreach (var (id, node) in _nodes.Where(node => node.Value.Level is not null && connected.Contains(node.Value.Address)).ToList()) Reread(id, generation);
@@ -165,21 +157,32 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
             int? level = _nodes.Values.Where(node => node.Address == address && node.Level is not null).Select(node => node.Level).FirstOrDefault();
             string? hardware = _nodes.Where(node => node.Value.Address == address).Select(node => Devices.HardwareIn(node.Key)).FirstOrDefault(found => found is not null);
             var kind = Devices.Kind(endpoint.Category, endpoint.Appearance, endpoint.Name);
-            // A connected LE device without Windows' level is read through its battery service, once the nodes are listed.
-            if (level is null && endpoint.LowEnergy && _nodesListed && _demand == DeviceDemand.Watch)
+            // A connected LE device is followed through its own battery service once the nodes are listed: its level where Windows
+            // has none, and whether it charges where it tells.
+            bool charging = false;
+            if (endpoint.LowEnergy && _nodesListed && _demand == DeviceDemand.Watch)
             {
                 wanted.Add(address);
                 if (!_gatt.TryGetValue(address, out var reader))
                 {
                     reader = new GattBattery(ulong.Parse(address, System.Globalization.NumberStyles.HexNumber), dispatcher, () => Publish());
-                    _gatt[address] = reader; reader.Read();
+                    _gatt[address] = reader; reader.Open();
                 }
-                if (reader.Level is { } read) { gatt.Add(new DeviceBattery("bt:" + address, endpoint.Name, kind, DeviceSource.Gatt, Devices.Clamp(read)) { Address = address, Hardware = hardware }); continue; }
-                if (!reader.Done) continue;
+                charging = reader.Charging == true;
+                if (level is null)
+                {
+                    if (reader.Level is { } read)
+                    {
+                        gatt.Add(new DeviceBattery("bt:" + address, endpoint.Name, kind, DeviceSource.Gatt, Devices.Clamp(read)) { Address = address, Hardware = hardware, Charging = charging });
+                        continue;
+                    }
+                    if (!reader.Done) continue;
+                }
             }
             // A device that reports nothing shows as not available, unless it is not a kind worth listing.
             if (level is null && kind == DeviceKind.Other) continue;
-            plain.Add(new DeviceBattery("bt:" + address, endpoint.Name, kind, DeviceSource.Bluetooth, level is { } l ? Devices.Clamp(l) : null) { Address = address, Hardware = hardware });
+            plain.Add(new DeviceBattery("bt:" + address, endpoint.Name, kind, DeviceSource.Bluetooth, level is { } l ? Devices.Clamp(l) : null)
+                { Address = address, Hardware = hardware, Charging = charging });
         }
         foreach (var gone in _gatt.Keys.Where(address => !wanted.Contains(address)).ToList()) { _gatt[gone].Dispose(); _gatt.Remove(gone); }
         report(DeviceSource.Bluetooth, plain);
@@ -188,62 +191,135 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
 
     public void Dispose() => Stop();
 
-    // One LE device's battery service, read on demand. Each read opens the device, reads the level and lets the device go again,
-    // so BrimDeck never holds a connection open and the device sleeps as it would without BrimDeck. Done once the first read has
-    // finished, with or without a level.
+    // One LE device's battery service: its level (0x2A19) and, where the device has it, its Battery Level Status (Battery Service
+    // 1.1, whose power state says whether it charges), each read once and then followed through its notices, as BlueZ, Android
+    // and BlueGauge follow the level. Asking for the notices is the one thing written (the characteristics' client configuration,
+    // which every Bluetooth host writes; BleBatterySubscribe writes the same so that Windows' own reading stays current). A value
+    // whose device cannot send notices is read again once a minute at most (DevicePolling.Gatt): each read reaches the device.
+    // Done once the first read has finished, with or without a level.
     private sealed class GattBattery(ulong address, Dispatcher dispatcher, Action changed) : IDisposable
     {
-        private bool _reading, _disposed;
+        private BluetoothLEDevice? _device;
+        private GattDeviceService? _service;
+        private GattCharacteristic? _level, _status;
+        private bool _levelNotifies, _statusNotifies, _busy, _disposed;
+        private long _readAt;
         public int? Level { get; private set; }
+        public bool? Charging { get; private set; }
         public bool Done { get; private set; }
 
-        public async void Read()
+        public async void Open()
         {
-            if (_reading || _disposed) return;
-            _reading = true;
-            int? level = null;
-            BluetoothLEDevice? device = null;
-            GattDeviceServicesResult? services = null;
+            if (_busy || _disposed) return;
+            _busy = true;
             try
             {
-                device = await BluetoothLEDevice.FromBluetoothAddressAsync(address);
-                if (device is not null && !_disposed)
+                _device = await BluetoothLEDevice.FromBluetoothAddressAsync(address);
+                if (_device is not null && !_disposed)
                 {
-                    services = await device.GetGattServicesForUuidAsync(GattServiceUuids.Battery, BluetoothCacheMode.Cached);
+                    var services = await _device.GetGattServicesForUuidAsync(GattServiceUuids.Battery, BluetoothCacheMode.Cached);
                     if (services.Status == GattCommunicationStatus.Success && services.Services.Count > 0)
                     {
-                        var characteristics = await services.Services[0].GetCharacteristicsForUuidAsync(GattCharacteristicUuids.BatteryLevel, BluetoothCacheMode.Cached);
-                        if (characteristics.Status == GattCommunicationStatus.Success && characteristics.Characteristics.Count > 0 && !_disposed)
+                        _service = services.Services[0];
+                        foreach (var other in services.Services.Skip(1)) other.Dispose();
+                        var characteristics = await _service.GetCharacteristicsAsync(BluetoothCacheMode.Cached);
+                        if (characteristics.Status == GattCommunicationStatus.Success)
                         {
-                            var result = await characteristics.Characteristics[0].ReadValueAsync(BluetoothCacheMode.Uncached);
-                            if (result.Status == GattCommunicationStatus.Success && result.Value.Length > 0) level = result.Value.ToArray()[0];
+                            _level = characteristics.Characteristics.FirstOrDefault(c => c.Uuid == GattCharacteristicUuids.BatteryLevel);
+                            _status = characteristics.Characteristics.FirstOrDefault(c => c.Uuid == BatteryService.LevelStatus);
                         }
                     }
                 }
+                if (_level is not null && !_disposed) _levelNotifies = await Follow(_level);
+                if (_status is not null && !_disposed) _statusNotifies = await Follow(_status);
+                await Read(all: true);
             }
             catch { }
-            finally
-            {
-                try { if (services is not null) foreach (var service in services.Services) service.Dispose(); device?.Dispose(); } catch { }
-            }
             await dispatcher.InvokeAsync(() =>
             {
-                _reading = false;
-                if (_disposed) return;
-                bool moved = level is not null && level != Level || !Done;
-                if (level is not null) Level = level;
+                _busy = false;
+                if (_disposed) { Close(); return; }
                 Done = true;
-                if (moved) changed();
+                changed();
             });
         }
 
-        public void Dispose() => _disposed = true;
+        // Notices asked for, where the characteristic sends them; true when the device took the request.
+        private async Task<bool> Follow(GattCharacteristic characteristic)
+        {
+            var properties = characteristic.CharacteristicProperties;
+            var mode = properties.HasFlag(GattCharacteristicProperties.Notify) ? GattClientCharacteristicConfigurationDescriptorValue.Notify
+                : properties.HasFlag(GattCharacteristicProperties.Indicate) ? GattClientCharacteristicConfigurationDescriptorValue.Indicate
+                : GattClientCharacteristicConfigurationDescriptorValue.None;
+            if (mode == GattClientCharacteristicConfigurationDescriptorValue.None) return false;
+            characteristic.ValueChanged += ValueChanged;
+            try { return await characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(mode) == GattCommunicationStatus.Success; }
+            catch { return false; }
+        }
+
+        private void ValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args)
+        {
+            var value = args.CharacteristicValue.ToArray();
+            bool level = sender.Uuid == GattCharacteristicUuids.BatteryLevel;
+            dispatcher.BeginInvoke(DispatcherPriority.Background, () => Take(level, value));
+        }
+
+        // The values whose devices send no notices, once a minute or (force) now.
+        public async void Poll(bool force)
+        {
+            if (!Done || _busy || _disposed) return;
+            bool quiet = _level is not null && !_levelNotifies || _status is not null && !_statusNotifies;
+            if (!quiet || !force && Environment.TickCount64 - _readAt < (long)DevicePolling.Gatt.TotalMilliseconds) return;
+            _busy = true;
+            try { await Read(all: false); } catch { }
+            _busy = false;
+            if (_disposed) Close();
+        }
+
+        private async Task Read(bool all)
+        {
+            _readAt = Environment.TickCount64;
+            foreach (var (characteristic, notifies, level) in new[] { (_level, _levelNotifies, true), (_status, _statusNotifies, false) })
+            {
+                if (characteristic is null || notifies && !all || _disposed) continue;
+                var result = await characteristic.ReadValueAsync(BluetoothCacheMode.Uncached);
+                if (result.Status == GattCommunicationStatus.Success && result.Value is { } value)
+                {
+                    var bytes = value.ToArray();
+                    await dispatcher.InvokeAsync(() => Take(level, bytes));
+                }
+            }
+        }
+
+        private void Take(bool level, byte[] value)
+        {
+            if (_disposed) return;
+            int? newLevel = Level;
+            bool? newCharging = Charging;
+            if (level) { if (value.Length > 0) newLevel = value[0]; }
+            else newCharging = BatteryService.Charging(value);
+            if (newLevel == Level && newCharging == Charging) return;
+            Level = newLevel; Charging = newCharging;
+            if (Done) changed();
+        }
+
+        public void Dispose()
+        {
+            _disposed = true;
+            if (!_busy) Close();
+        }
+
+        private void Close()
+        {
+            try
+            {
+                if (_level is not null) _level.ValueChanged -= ValueChanged;
+                if (_status is not null) _status.ValueChanged -= ValueChanged;
+                _service?.Dispose(); _device?.Dispose();
+            }
+            catch { }
+            _level = _status = null; _service = null; _device = null;
+        }
     }
 }
 
-// How often the sources without events of their own are read while the page or the collapsed reading shows. A battery moves a
-// point in minutes; a minute keeps the page current without waking the devices more than their own software does.
-internal static class DevicePolling
-{
-    public static readonly TimeSpan Interval = TimeSpan.FromSeconds(60);
-}

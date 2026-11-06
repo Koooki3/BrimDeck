@@ -755,12 +755,17 @@ internal sealed class ReadingsCarousel : GlideCarousel
     // cut: while the surface is dragged the window is not whole readings and nothing glides (travel 0); the reading it cuts fades over
     // this many DIPs inside it (CompactSpacing.CutFade). A window narrower than the readings that cuts none still clips them.
     public ReadingsCarousel(MonitorStrip strip, double window, double travel, double edge, TimeSpan elapsed, bool animate, double cut = 0)
+        : this(strip, strip.PreferredWidth, window, travel, edge, elapsed, animate, cut) { }
+    // The devices' batteries on a column line too wide for it scroll the same way.
+    public ReadingsCarousel(DeviceStrip strip, double window, double travel, double edge, TimeSpan elapsed, bool animate)
+        : this(strip, strip.PreferredWidth, window, travel, edge, elapsed, animate, 0) { }
+    private ReadingsCarousel(FrameworkElement strip, double width, double window, double travel, double edge, TimeSpan elapsed, bool animate, double cut)
     {
         window = Math.Max(0, window); travel = Math.Max(0, travel); cut = Math.Max(0, cut);
         Rotates = travel > 0;
         edge = Rotates || cut > 0 ? Math.Max(0, edge) : 0;
         Width = edge + window + edge; Height = strip.Height; ClipToBounds = true;
-        strip.Width = strip.PreferredWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        strip.Width = width; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
         strip.RenderTransform = new TranslateTransform();
         Canvas.SetLeft(strip, edge);
         // A Canvas measures the strip at its full width, as for the rings.

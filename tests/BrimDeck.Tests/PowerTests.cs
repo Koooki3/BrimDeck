@@ -259,8 +259,8 @@ static class PowerTests
         check("Readings: Power and Charge are last in the table but for the devices' battery and the frame rate, hidden",
             table.Select(reading => reading.Item).Where(item => item is not (CompactMonitorItems.Battery or CompactMonitorItems.Frames)).TakeLast(2).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Charge]) && table.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
         check("Readings: they leave a short row early, after the frame rate and the devices' battery, the machine's battery after the drives",
-            CompactMonitor.LeaveOrder.Take(2).SequenceEqual([CompactMonitorItems.Frames, CompactMonitorItems.Battery])
-            && CompactMonitor.LeaveOrder.Where(item => item is not (CompactMonitorItems.Battery or CompactMonitorItems.Frames)).Take(3).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge]) && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
+            CompactMonitor.LeaveOrder.Take(1).SequenceEqual([CompactMonitorItems.Frames])
+            && CompactMonitor.LeaveOrder.Where(item => item is not CompactMonitorItems.Frames).Take(3).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge]) && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
 
         // Full turns the new readings on, Brief turns them off.
         var full = CompactMonitor.Normalize(null);
