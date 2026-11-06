@@ -43,6 +43,8 @@ public static class Storage
     public const int BusUsb = 7, BusSd = 12, BusMmc = 13, BusVirtual = 14, BusFileBackedVirtual = 15;
     // A drive behind a RAID controller (Intel Rapid Storage Technology, a vendor's RAID mode).
     public const int BusRaid = 8;
+    // An NVMe drive: asked for its health log when its temperature property gives nothing (NvmeHealth).
+    public const int BusNvme = 17;
     public const ulong SmallestVolume = 1UL << 30;
     // The letter of the volume holding Windows, "C:".
     public static string? WindowsLetter { get; } = Path.GetPathRoot(Environment.SystemDirectory)?.TrimEnd('\\', '/') is { Length: > 0 } root ? root : null;
@@ -55,6 +57,17 @@ public static class Storage
     // Storage Technology on one laptop never answered at all, which froze the whole machine. Windows' own settings show no
     // temperature for such a drive either. Its space is listed as any other drive's.
     public static bool AsksTemperature(StorageDisk disk) => disk.Bus != BusRaid;
+
+    // A drive's temperature: what the storage stack's temperature property gives, or, for an NVMe drive whose property fails or
+    // has no sensor (some answer with ERROR_IO_DEVICE), the Composite Temperature in its health log. Other drives, a SATA SSD
+    // among them, are asked the property only. Both readings are passed in so the choice is made apart from the drive; the log
+    // is not asked for while the property answers. A log without a plausible temperature is no reading.
+    public static DiskTemperature? ReadTemperature(StorageDisk disk, Func<DiskTemperature?> property, Func<double?> healthLog)
+    {
+        if (property() is { } own) return own;
+        if (disk.Bus != BusNvme) return null;
+        return healthLog() is { } celsius ? Temperatures.Disk(disk.Model.Length > 0 ? disk.Model : "SSD", celsius, double.NaN, double.NaN) : null;
+    }
 
     // The drives from the volumes and the physical drive each lies on (null when it spans drives or its drive is unknown), the
     // drives Windows describes, the temperatures by drive number and the solid-state drives' numbers. A volume on a drive that is

@@ -105,6 +105,15 @@ internal static class TemperatureChecks
         check("drives: the Windows drive is among them", drives.Count == 0 || Storage.System(drives, Storage.WindowsLetter)?.Volumes.Any(volume => volume.Letter.Equals(Storage.WindowsLetter, StringComparison.OrdinalIgnoreCase)) == true);
         check("drives: temperatures plausible, in order, and their drive's own", drives.All(drive => drive.Temperature is not { } heat
             || Temperatures.Plausible(heat.Celsius) is not null && heat.Number == drive.Number && (heat.Warning is not { } w || heat.Critical is not { } c || w <= c)));
+        // The NVMe health log asked of each drive on this machine, which a drive that answers the temperature property too must agree
+        // with; a drive that does not answer it (a SATA drive) gives nothing, without an error.
+        foreach (var drive in drives.Where(drive => drive.Number >= 0))
+        {
+            var log = StorageReader.HealthLogCelsius(drive.Number);
+            Console.WriteLine($"  Drive {drive.Number} {drive.Model}: health log {(log is { } c ? $"{c:0.00} °C" : "none")}");
+            check($"drive {drive.Number}: the health log gives a plausible temperature or nothing", log is null || Temperatures.Plausible(log.Value) is not null);
+            if (log is { } logged && drive.Temperature is { } own) check($"drive {drive.Number}: the health log and the temperature property agree to within 10 degrees", Math.Abs(logged - own.Celsius) <= 10);
+        }
         check("drives: temperatures known once read", reader.Temperatures == (drives.Any(drive => drive.Temperature is not null) ? SensorState.Found : SensorState.None));
         if (drives.Count > 0 && !elevated) check("drives: read without administrator rights", true);
         check("drives: without temperatures asked for, the same drives without them", reader.Sample(2, false) is var plain
