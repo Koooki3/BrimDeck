@@ -473,6 +473,9 @@ public sealed class DeckSettings
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;
+    // The panel stays above other windows. Off, it is an ordinary window that others cover: it comes to the front when it
+    // opens, and over the desktop while the desktop is shown; the window rules and ForceTopmost then do not apply.
+    public bool AlwaysOnTop { get; set; } = true;
     public bool ForceTopmost { get; set; }
     // The panel window can be captured on its own by recording apps (OBS window capture). Off, the window keeps the no-activate
     // style that recording apps cannot capture, and that keeps it out of Alt+Tab.
@@ -647,6 +650,8 @@ public sealed class DeckSettings
     public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null,
         ScreenContext? backgroundKind = null)
     {
+        // An ordinary window is covered by the full-screen window anyway, so no rule applies.
+        if (!AlwaysOnTop) return WindowBehavior.Normal;
         var kind = context == ScreenContext.BackgroundFullscreen ? backgroundKind ?? ScreenContext.Desktop : context;
         if (processName is not null || imagePath is not null)
             foreach (var rule in FullscreenRules)

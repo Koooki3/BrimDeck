@@ -89,7 +89,7 @@ public partial class MainWindow : Window
     {
         _app = app; _lead = lead;
         _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
-            () => Settings.ForceTopmost, () => Settings.BackgroundWindows);
+            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => Settings.AlwaysOnTop);
         Rect? IslandStrip()
         {
             // The island border is what is drawn, in every style and whether the panel is collapsed or open — its size
@@ -254,6 +254,8 @@ public partial class MainWindow : Window
         ApplyLanguage();
         ApplyTheme();
         WindowsHost.SetCapturable(this, Settings.WindowCapture);
+        // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one.
+        if (Topmost != Settings.AlwaysOnTop) { Topmost = Settings.AlwaysOnTop; if (!Topmost && !_expanded) _host.Front(false); }
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
@@ -650,6 +652,9 @@ public partial class MainWindow : Window
         // A hand-over cut short by closing the panel leaves nothing behind for the next opening.
         if (expanded && !_expanded) _handover.Drop();
         bool wasExpanded = _expanded;
+        // An ordinary panel comes in front of the other windows while it is open (DeckSettings.AlwaysOnTop). Compared with the
+        // host's own state, as a new screen context closes the panel without passing here.
+        if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
         _escapeDismissal?.SetEnabled(expanded && !_preview || _moveArmed);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); if (wasExpanded) ResetShelf(); }
@@ -893,7 +898,10 @@ public partial class MainWindow : Window
         if (area.IsEmpty) return;
         // The surface's ends resize it (MainWindow.Resize.cs); pointing there does not open the panel.
         var grip = TrackGrips(cursor);
-        bool inCompact = area.Contains(cursor) && grip == ResizeEdges.None;
+        // An ordinary panel under another window is out of the pointer's reach (DeckSettings.AlwaysOnTop); asked only where
+        // the pointer would otherwise count as inside.
+        bool Covered() => !Settings.AlwaysOnTop && WindowsHost.CoveredAt(this, cursor);
+        bool inCompact = area.Contains(cursor) && grip == ResizeEdges.None && !Covered();
         double dx = Math.Max(0, Math.Max(area.Left - cursor.X, cursor.X - area.Right)), dy = Math.Max(0, Math.Max(area.Top - cursor.Y, cursor.Y - area.Bottom));
         // Whole 20 ms steps, so small movements far away do not reschedule the timer on every check.
         double wait = _expanded ? TrackNear : Math.Clamp(Math.Floor(Math.Sqrt(dx * dx + dy * dy) / ApproachSpeed / 20) * 20, TrackNear, TrackFar);
@@ -913,7 +921,7 @@ public partial class MainWindow : Window
             // A jump straight out of the panel can leave without any mouse message reaching the window.
             // Inside means over the panel itself or the collapsed hover area (InsideOpenPanel); HoverZone's bounds would also
             // count its top margin above a lowered panel.
-            bool inside = Island.IsMouseOver || InsideOpenPanel(cursor);
+            bool inside = (Island.IsMouseOver || InsideOpenPanel(cursor)) && !Covered();
             // The expand hotkey's pin holds the panel open until the pointer is inside once. If that first entry is seen here
             // rather than by Island_MouseEnter (for example in the hover area beside the panel), record it, so leaving later closes
             // the panel as usual. An entry by MouseEnter already went through PointerChanged, which released the pin.

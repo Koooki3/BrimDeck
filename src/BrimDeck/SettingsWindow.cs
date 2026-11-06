@@ -636,7 +636,7 @@ public sealed partial class SettingsWindow : Window
         {
             switch(_page)
             {
-                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.TrimMemoryWhenIdle=defaults.TrimMemoryWhenIdle;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;
+                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.TrimMemoryWhenIdle=defaults.TrimMemoryWhenIdle;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;
                     s.ClickThrough=defaults.ClickThrough;s.ClickThroughPanel=defaults.ClickThroughPanel;s.WindowCapture=defaults.WindowCapture;break;
                 case HotkeysPage:foreach(var kind in Enum.GetValues<HotkeyKind>())s.SetHotkey(kind,defaults.Hotkey(kind));break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.QuotaRingLetters=defaults.QuotaRingLetters;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
@@ -697,26 +697,49 @@ public sealed partial class SettingsWindow : Window
     private void WindowRules()
     {
         SectionTitle(Loc.T("窗口行为", "Window behavior"));
-        Group(BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"), S.Maximized, value => Change(s => s.Maximized = value)),
+        // The window rules and Keep on top only concern a panel above other windows, so they leave with the switch.
+        var rules = new StackPanel { Visibility = S.AlwaysOnTop ? Visibility.Visible : Visibility.Collapsed };
+        foreach (var row in new[]
+        {
+            BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"), S.Maximized, value => Change(s => s.Maximized = value)),
             BehaviorRow(Loc.T("有应用处于无边框全屏时", "When an app is in borderless full screen"), S.Borderless, value => Change(s => s.Borderless = value)),
             BehaviorRow(Loc.T("有应用处于独占全屏时", "When an app is in exclusive full screen"), S.Exclusive, value => Change(s => s.Exclusive = value)),
             Toggle(Loc.T("同时检测后方窗口", "Also check windows behind"), S.BackgroundWindows, value => Change(s => s.BackgroundWindows = value),
                 help: Loc.T("开启后，正在使用的窗口后方有窗口最大化或无边框全屏时，也按上面对应的规则处理。关闭后只检测正在使用的窗口。",
                     "When on, a maximized or borderless full-screen window behind the window you are using also follows the matching rule above. When off, only the window you are using is checked.")),
-            ExceptionsRow());
+            ExceptionsRow()
+        })
+        {
+            rules.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
+            rules.Children.Add(row);
+        }
+        var keep = new StackPanel { Visibility = rules.Visibility };
+        var onTop = Toggle(Loc.T("显示在其他窗口上方", "Keep above other windows"), S.AlwaysOnTop, value =>
+        {
+            if (S.AlwaysOnTop != value) Change(s => s.AlwaysOnTop = value);
+            rules.Visibility = keep.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+        }, help: Loc.T("关闭后，面板像普通窗口一样会被其他窗口遮挡，展开时显示在最前面，显示桌面时仍然可见。",
+            "When off, other windows can cover the panel like any window. It comes to the front when it expands and stays visible when you show the desktop."));
+        var behavior = new StackPanel();
+        behavior.Children.Add(onTop); behavior.Children.Add(rules);
+        Group(behavior);
         SectionTitle(Loc.T("兼容性", "Compatibility"));
         var raise = ActionButton(Loc.T("立即置顶", "Raise now"), () =>
         {
-            foreach (var deck in _app.Decks.ToList()) Native.WindowsHost.RaiseOnce(deck);
+            foreach (var deck in _app.Decks.ToList()) Native.WindowsHost.RaiseOnce(deck, S.AlwaysOnTop);
         });
         raise.BorderBrush = UI.Brush(_palette.Border);
         raise.Background = UI.Brush(_palette.Input);
-        Group(Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost,
+        keep.Children.Add(Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost,
             value => Change(s => s.ForceTopmost = value), help:
             Loc.T("开启后，面板被其他置顶窗口遮挡时会立即恢复到上方，其他应用打开的菜单除外。仍遵循上面的显示与隐藏规则。若其他应用反复置顶自己，面板会暂停恢复几秒。",
-                "Restores the panel above other always-on-top windows as soon as it is covered, except for menus other apps open. Display and hide rules above still apply. If an app keeps raising itself, the panel pauses for a few seconds.")),
-            Row(Loc.T("单次置顶", "Raise once"), raise, help: () => Loc.T("每次点击仅置顶一次。若面板再次被其他窗口遮挡，需要重新点击。",
-                "Each click raises the panel once. If another window covers it again, click again.")),
+                "Restores the panel above other always-on-top windows as soon as it is covered, except for menus other apps open. Display and hide rules above still apply. If an app keeps raising itself, the panel pauses for a few seconds.")));
+        keep.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
+        var topRows = new StackPanel();
+        topRows.Children.Add(keep);
+        topRows.Children.Add(Row(Loc.T("单次置顶", "Raise once"), raise, help: () => Loc.T("每次点击仅置顶一次。若面板再次被其他窗口遮挡，需要重新点击。",
+            "Each click raises the panel once. If another window covers it again, click again.")));
+        Group(topRows,
             ClickThroughRows(),
             Toggle(Loc.T("允许录制软件捕获窗口", "Allow window capture"), S.WindowCapture, value => Change(s => s.WindowCapture = value), help:
                 Loc.T("开启后，OBS 等录制软件可以用“窗口采集”单独捕获面板，同时面板会出现在 Alt + Tab 的窗口列表中。",
