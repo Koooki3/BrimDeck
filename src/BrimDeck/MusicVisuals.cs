@@ -197,8 +197,8 @@ internal sealed class MusicEqualizer : FrameworkElement
 
 internal sealed class MusicMarquee : FrameworkElement
 {
-    private static readonly Typeface Plain = new(UI.PanelFont, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
-    private Typeface _typeface = Plain;
+    private FontWeight _weight = FontWeights.Normal;
+    private Typeface _typeface => Fonts.Face(UiFontRole.Panel, _weight);
     // Width of the edge fade, and the scroll speed in DIP per second.
     internal const double Edge = 6, Speed = 24;
     private readonly TranslateTransform _shift = new();
@@ -255,7 +255,7 @@ internal sealed class MusicMarquee : FrameworkElement
         set { if (_fontSize == value) return; _fontSize = value; ResetText(); }
     }
     // The open page's title is semibold; the collapsed row and the lyrics are regular.
-    public FontWeight FontWeight { init => _typeface = new Typeface(UI.PanelFont, FontStyles.Normal, value, FontStretches.Normal); }
+    public FontWeight FontWeight { init => _weight = value; }
     // A second run after the text in its own size and color: the merged title of a short page ("title · artist"). It scrolls with
     // the text as one line. Over a gradient or scan lines (InkFade) it fades at its ends like the text, in its own color, so it
     // is the same color whether the line fits or scrolls.

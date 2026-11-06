@@ -32,9 +32,10 @@ internal static class MonitorDraw
 
     // Text set once per string, size, weight and color: the same figures come back every second, so they are not laid out again.
     private static readonly Dictionary<(string, double, bool, bool, string, double), FormattedText> Texts = [];
-    private static readonly Typeface Regular = new(UI.PanelFont, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
-    private static readonly Typeface Strong = new(UI.PanelFont, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
-    private static readonly Typeface Display = new(UI.DisplayFont, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+    // Looked up per use: the user's font may change (Fonts.Version), and the texts and letters kept here were set in the old one.
+    private static Typeface Regular => Fonts.Face(UiFontRole.Panel);
+    private static Typeface Strong => Fonts.Face(UiFontRole.Panel, FontWeights.SemiBold);
+    private static Typeface Display => Fonts.Face(UiFontRole.Display, FontWeights.SemiBold);
 
     public static FormattedText Text(string text, double size, string color, double pixelsPerDip, bool strong = false, bool display = false)
     {
