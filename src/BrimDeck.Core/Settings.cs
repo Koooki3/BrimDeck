@@ -516,11 +516,11 @@ public sealed class DeckSettings
     // The system monitor page; it reads the system only while it is open on screen.
     public bool MonitorPage { get; set; } = true;
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
-    // The clipboard and file transfer page. The clipboard is recorded only once the user turns it on (ClipboardRecord).
+    // The clipboard and file transfer page. The clipboard is recorded from the start; a settings file saved before keeps its choice.
     public bool ClipboardPage { get; set; } = true;
     public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
     public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
-    public bool ClipboardRecord { get; set; }
+    public bool ClipboardRecord { get; set; } = true;
     public ClipRetention ClipboardRetention { get; set; } = ClipRetention.Month;
     // Applications whose copies are not recorded, by process name without ".exe".
     public List<string> ClipboardExcluded { get; set; } = [];

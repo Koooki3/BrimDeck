@@ -20,9 +20,6 @@ internal sealed class ShelfService : IDisposable
     private ClipboardWatch? _watch;
     private bool _unreadable;
     public ShelfData Data { get; private set; } = new();
-    // Recording paused from the page's menu; it lasts until BrimDeck exits or the user resumes it.
-    public bool Paused { get; private set; }
-    public bool Recording => _watch is not null && !Paused;
     // A copy was recorded, an entry changed, files were added: the panels show the page again.
     public event Action? Changed;
     private Func<DeckSettings> _settings = () => new();
@@ -52,11 +49,9 @@ internal sealed class ShelfService : IDisposable
         if (_watch is not null) _prune.Start(); else _prune.Stop();
         Prune();
     }
-    public void SetPaused(bool paused) { Paused = paused; Raise(); }
 
     private void Copied(ClipCopy copy)
     {
-        if (Paused) return;
         var now = DateTimeOffset.Now;
         ClipEntry entry;
         if (copy.Png is { } png)
@@ -91,7 +86,6 @@ internal sealed class ShelfService : IDisposable
         if (raise) Changed?.Invoke();
         QueueSave();
     }
-    public void ClearHistory() => Remove(Shelf.History(Data));
 
     public void AddFiles(IEnumerable<string> paths, Guid? category)
     {
@@ -173,11 +167,34 @@ internal sealed class ShelfService : IDisposable
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException) { }
     }
-    // Leaving BrimDeck: the history goes when the rules keep it only until then; what is kept stays.
+    // Leaving BrimDeck: the history goes when the rules keep it only until then; what is kept stays. The pictures written for
+    // dragging go too.
     public void Exit()
     {
         if (_settings().ClipboardRetention == ClipRetention.UntilExit) Remove(Shelf.History(Data), raise: false);
         Save();
+        try { if (Directory.Exists(DragFolder)) Directory.Delete(DragFolder, true); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+
+    // ---- Dragging a picture out ----
+    // Browsers and Electron applications (Claude, chat clients) take a dropped picture only as a file, not as picture data, so a
+    // picture dragged out is also written, unencrypted, to a file of its own under the temporary folder. Files older than ten
+    // minutes are cleared at each drag and the folder at exit.
+    private static string DragFolder => Path.Combine(Path.GetTempPath(), "BrimDeck", "Drag");
+    public string? PictureFile(ClipEntry entry)
+    {
+        if (entry.Kind != ClipKind.Image || PictureBytes(entry.Id) is not { } png) return null;
+        try
+        {
+            Directory.CreateDirectory(DragFolder);
+            foreach (var old in Directory.EnumerateFiles(DragFolder).Where(file => DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > TimeSpan.FromMinutes(10)).ToList())
+                try { File.Delete(old); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            string path = Path.Combine(DragFolder, Loc.T("图片 ", "Picture ") + entry.Copied.ToLocalTime().ToString("yyyy-MM-dd HHmmss", System.Globalization.CultureInfo.InvariantCulture) + ".png");
+            File.WriteAllBytes(path, png);
+            return path;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
     }
 
     // ---- Putting on the clipboard ----
