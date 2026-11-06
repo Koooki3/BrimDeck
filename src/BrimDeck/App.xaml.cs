@@ -34,6 +34,8 @@ public partial class App : Application
     internal MediaSessions? Media { get; private set; }
     internal event Action? MediaChanged;
     internal LyricsService Lyrics { get; private set; } = null!;
+    // The clipboard history and the file transfer, shared by every panel (ShelfService).
+    internal ShelfService Shelf { get; private set; } = null!;
     // A window being dragged by its title bar or edge; the panels do not open on it (see MainWindow.TrackPointer).
     internal WindowDrags WindowDrags { get; private set; } = null!;
     private readonly HashSet<MainWindow> _presentingMedia = [], _presentingSystemAudio = [];
@@ -110,6 +112,7 @@ public partial class App : Application
         Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         WindowDrags = new WindowDrags();
+        Shelf = new ShelfService(folder, Dispatcher); Shelf.Apply(Settings);
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
@@ -155,6 +158,8 @@ public partial class App : Application
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
     public void OpenSettings() => ShowSettings(false);
+    // The clipboard page's menus open the settings at the expanded pages, where its options are.
+    internal void OpenExpandedSettings() { ShowSettings(false); _settingsWindow?.ShowPage(2); }
     // Starting BrimDeck while it runs shows the hidden panels as well as the settings, so the panels come back even without
     // the tray icon.
     private void ShowFromRelaunch()
@@ -211,6 +216,7 @@ public partial class App : Application
         // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
         bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
+        Shelf.Apply(settings);
         ApplyHotkeys();
         ApplyTray();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
@@ -430,6 +436,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
         Media?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);

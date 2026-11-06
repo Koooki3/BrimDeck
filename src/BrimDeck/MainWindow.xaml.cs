@@ -121,6 +121,7 @@ public partial class MainWindow : Window
         _handover = new PageHandover(LeavingContent);
         InitializeMusic();
         InitializeMonitor();
+        InitializeShelf();
         InitializeResize();
         InitializeScale();
         InitializeShadow();
@@ -135,7 +136,7 @@ public partial class MainWindow : Window
         _host.ContextChanged += context =>
         {
             _context = context;
-            if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true)
+            if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true && !ShelfHolds)
             {
                 if (_expanded) ReplayCompactTitle();
                 _expanded = false;
@@ -157,7 +158,7 @@ public partial class MainWindow : Window
             ApplySettings(!_expanded);
         };
         // Esc also leaves move mode (MainWindow.Move.cs).
-        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this, Settings.WindowCapture); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else SetExpanded(false, keyboard: true); }); };
+        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this, Settings.WindowCapture); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else if (!ShelfEscape()) SetExpanded(false, keyboard: true); }); };
         Loaded += async (_, _) =>
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
@@ -528,6 +529,8 @@ public partial class MainWindow : Window
     {
         System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
         System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
+        System.Windows.Automation.AutomationProperties.SetName(ShelfPageButton, Loc.T("剪贴板与文件中转", "Clipboard and file transfer"));
+        System.Windows.Automation.AutomationProperties.SetName(ShelfSearchButton, Loc.T("搜索剪贴板与文件中转", "Search the clipboard and file transfer"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
@@ -647,7 +650,7 @@ public partial class MainWindow : Window
         bool wasExpanded = _expanded;
         _expanded = expanded;
         _escapeDismissal?.SetEnabled(expanded && !_preview || _moveArmed);
-        if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
+        if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); if (wasExpanded) ResetShelf(); }
         if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); }
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
@@ -948,7 +951,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
+            _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) return;
             int delay = Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay);
             _leftAt = Environment.TickCount64;
             _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(delay); _leave.Start();
@@ -957,7 +960,7 @@ public partial class MainWindow : Window
     internal void CheckPointerExit(Point screenPoint)
     {
         if (IsHotkeyPinned || Resizing) { _leave.Stop(); return; }
-        if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) { _leave.Stop(); return; }
+        if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) { _leave.Stop(); return; }
         // Closing a calendar with either button must leave a path back to the results.
         // Keep checking until the cursor leaves that area; entering the island restores normal hover behavior.
         if (_popupReturnArea is { } area && area.Contains(screenPoint)) return;

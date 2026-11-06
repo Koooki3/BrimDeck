@@ -23,6 +23,7 @@ try
     EqualizerSpectrumTests.Run(Check);
     EqualizerModeTests.Run(root, Check);
     ColorMathTests.Run(Check);
+    ShelfTests.Run(Check);
     CompactSpacingTests.Run(Check);
     CompactDragTests.Run(Check);
     RingLetterTests.Run(root, Check);
