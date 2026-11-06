@@ -148,7 +148,9 @@ public partial class App : Application
         TaskScheduler.UnobservedTaskException += (_, args) => { Write(args.Exception); args.SetObserved(); };
     }
     // The user's own font goes in front of the interface's families (Fonts); false when it is the one already in use.
-    private bool UseFont() => Fonts.Use(Settings.UiFont);
+    // The families are published at the start whatever is chosen, so the XAML defaults are never what the text is drawn in by accident.
+    private bool UseFont() { bool changed = Fonts.Use(Settings.UiFont); if (!_fontsPublished) { _fontsPublished = true; Fonts.Publish(Resources); } return changed; }
+    private bool _fontsPublished;
     // Names used by XAML templates follow the language through these resources.
     private void UseLanguage()
     {

@@ -6,6 +6,9 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
+// A window built with the app's own fonts, which a change of the user's font leaves alone (the settings window).
+internal interface IKeepsAppFonts { }
+
 // The one entry for fonts: every family BrimDeck draws text in comes from here (UI.TextFont, UI.PanelFont and UI.DisplayFont are
 // these, kept for the call sites that already use them), and nothing else names a font.
 //
@@ -106,7 +109,7 @@ internal static class Fonts
     {
         var seen = new HashSet<DependencyObject>(ReferenceEqualityComparer.Instance);
         var pending = new Stack<DependencyObject>();
-        foreach (Window window in app.Windows) if (window is not SettingsWindow) pending.Push(window);
+        foreach (Window window in app.Windows) if (window is not IKeepsAppFonts) pending.Push(window);
         while (pending.Count > 0)
         {
             var node = pending.Pop();

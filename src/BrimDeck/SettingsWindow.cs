@@ -13,7 +13,7 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-public sealed partial class SettingsWindow : Window
+public sealed partial class SettingsWindow : Window, IKeepsAppFonts
 {
     private SettingsPalette _palette = new(false);
     private string Surface => _palette.Surface;
