@@ -85,17 +85,31 @@ static class CursorPricesTests
                     check("Before prices are worked out, the records up to the last usable reading already share its amount",
                         last.Entries.Count == 3 && last.Entries.Take(2).All(e => e.FittedCost && e.ReportedCostUsd > 0) && last.Entries[2].ReportedCostUsd is null);
             }
-        }
-        decimal truth = handler.Records.Sum(Cost), shown = last.Entries.Sum(e => e.ReportedCostUsd ?? 0);
-        check("A merged plan's records are priced from the weekly amount once enough readings are known",
-            last.Entries.Count == 14 && last.Entries.All(e => e.FittedCost) && Math.Abs(shown - truth) <= truth * 0.03m && File.Exists(cache));
+            decimal truth = handler.Records.Sum(Cost), shown = last.Entries.Sum(e => e.ReportedCostUsd ?? 0);
+            check("A merged plan's records are priced from the weekly amount once enough readings are known",
+                last.Entries.Count == 14 && last.Entries.All(e => e.FittedCost) && Math.Abs(shown - truth) <= truth * 0.03m && File.Exists(cache));
 
-        // A week later the amount is zero again and nothing new was used; the kept prices still price last week.
+            // The next day, after a record at 09:00, the amount is read at 10:00 and 10:15. The day before was read in full
+            // at 10:00 and is not read again, yet the reading counts.
+            var nextDay = new DateTimeOffset(today.AddDays(1));
+            handler.Records.Add(Record(20, nextDay.AddHours(9)));
+            clock = nextDay.AddHours(10); handler.Now = clock;
+            await Refresh(service);
+            clock = clock.AddMinutes(15); handler.Now = clock;
+            await Refresh(service);
+            var kept = new CursorPrices(cache);
+            kept.Use("auth0|A");
+            check("A reading the day after the week began counts once that day's records have arrived",
+                kept.Samples[^1] is { First: var first, Tokens: not null, Cutoff: { } cutoff } && first == nextDay.AddHours(10) && cutoff == nextDay.AddHours(10).AddMinutes(5));
+        }
+
+        // A week later the amount is zero again and nothing new was used; the kept prices still price the last one.
+        decimal all = handler.Records.Sum(Cost);
         clock = clock.AddDays(7); handler.Week = week.AddDays(7); handler.Now = clock;
         using (var restarted = new UsageService(new Desktop(), locations, http, () => clock, cursorPriceCache: cache))
             last = await Refresh(restarted);
         check("After a restart and the weekly reset, last week's records keep their worked-out prices",
-            last.Entries.Count == 14 && last.Entries.All(e => e.FittedCost) && Math.Abs(last.Entries.Sum(e => e.ReportedCostUsd ?? 0) - truth) <= truth * 0.03m);
+            last.Entries.Count == 15 && last.Entries.All(e => e.FittedCost) && Math.Abs(last.Entries.Sum(e => e.ReportedCostUsd ?? 0) - all) <= all * 0.03m);
 
         async Task<ProviderSnapshot> Refresh(UsageService service) => (await service.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Cursor);
     }

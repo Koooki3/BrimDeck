@@ -863,11 +863,16 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         Dictionary<string, decimal>? costs = null;
         if (unified)
         {
-            // A reading's records are complete when every day from its week's start to it was read well after it.
+            // A reading's records are complete when every day from its week's start to it was read well after it, or, for a
+            // day that ended before, read in full an hour after it ended as the days kept are.
             bool Covered(DateTimeOffset from, DateTimeOffset to)
             {
                 for (var day = from.LocalDateTime.Date; day <= to.LocalDateTime.Date; day = day.AddDays(1))
-                    if (!_cursorDays.TryGetValue(day, out var read) || read.ReadAt < to + CursorPrices.RecordsLate) return false;
+                {
+                    var settled = new DateTimeOffset(day.AddDays(1)).AddHours(1);
+                    var needed = to + CursorPrices.RecordsLate < settled ? to + CursorPrices.RecordsLate : settled;
+                    if (!_cursorDays.TryGetValue(day, out var read) || read.ReadAt < needed) return false;
+                }
                 return true;
             }
             var included = _cursorDays.Values.SelectMany(read => read.Entries).Where(entry => entry.ReportedCostUsd is null).ToList();
