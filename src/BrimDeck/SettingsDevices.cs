@@ -11,7 +11,7 @@ namespace BrimDeck;
 // other pages under 展开外观.
 public partial class SettingsWindow
 {
-    private const int DevicesSettingsPage = 13;
+    private const int DevicesSettingsPage = 12;
 
     private void DevicesSettings()
     {

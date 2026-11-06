@@ -37,6 +37,8 @@ public partial class App : Application
     internal MediaSessions? Media { get; private set; }
     internal event Action? MediaChanged;
     internal LyricsService Lyrics { get; private set; } = null!;
+    // The clipboard history and the file transfer, shared by every panel (ShelfService).
+    internal ShelfService Shelf { get; private set; } = null!;
     // A window being dragged by its title bar or edge; the panels do not open on it (see MainWindow.TrackPointer).
     internal WindowDrags WindowDrags { get; private set; } = null!;
     private readonly HashSet<MainWindow> _presentingMedia = [], _presentingSystemAudio = [];
@@ -126,7 +128,7 @@ public partial class App : Application
         Secrets = new ProviderSecrets(folder);
         Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
         Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
-            kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
+            kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         WindowDrags = new WindowDrags();
         InteractionFx.Install(this);
         Notices = new NoticeCenter(this);
@@ -142,6 +144,7 @@ public partial class App : Application
         else if (LiquidTheme.Renders && GlassBackdrop.Refraction && LiquidPossible && GlanceRegion() is { } region) LiquidGlass.SourceStart.Prepare(region, measure: false);
         MotionEnvironment.Changed += GlassEnvironmentChanged;
         GlassBackdrop.LiquidFailed += GlassEnvironmentChanged;
+        Shelf = new ShelfService(folder, Dispatcher); Shelf.Apply(Settings);
         Deck = new MainWindow(this); MainWindow = Deck;
         AssignDisplays();
         Deck.Show();
@@ -217,8 +220,8 @@ public partial class App : Application
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
     public void OpenSettings() => ShowSettings(false);
-    // Opens the settings on one of their pages (SettingsWindow.ShowPage).
-    internal void OpenSettings(int page) { ShowSettings(false); _settingsWindow?.ShowPage(page); }
+    // The clipboard page's menus open the settings at its own pages (SettingsWindow.ClipboardSettingsPage, TransferSettingsPage).
+    internal void OpenSettingsPage(int page) { ShowSettings(false); _settingsWindow?.ShowPage(page); }
     // Starting BrimDeck while it runs shows the hidden panels as well as the settings, so the panels come back even without
     // the tray icon.
     private void ShowFromRelaunch()
@@ -278,6 +281,7 @@ public partial class App : Application
         settings.Normalize(); Settings = settings;
         // A different interface font is published at once and reaches every window already made (Fonts.Use); the panels below lay out again with it.
         UseFont();
+        Shelf.Apply(settings);
         ApplyHotkeys();
         ApplyTray();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
@@ -639,7 +643,8 @@ public partial class App : Application
     {
         // A settings change still waiting for its timer (made during the exit animation) is written before the last wait (life-L13).
         Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); if (_save.IsEnabled) FlushSettings(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; MotionEnvironment.Changed -= GlassEnvironmentChanged; GlassBackdrop.LiquidFailed -= GlassEnvironmentChanged; InteractionFx.Uninstall(); UnwatchSurface(); _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose(); _exitListener?.Unregister(null); _exitEvent?.Dispose();
-        Media?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
+        Media?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
     [DllImport("user32")] private static extern int GetSystemMetrics(int index);

@@ -88,7 +88,7 @@ internal sealed class IslandNotice : Window
         _hit.MouseLeave += (_, _) => PointerLeft();
         _hit.MouseLeftButtonUp += (_, e) => { e.Handled = true; if (_item is not null && !_leaving) OpenPage(byKey: false); };
         _hit.MouseRightButtonUp += (_, e) => e.Handled = true;
-        SourceInitialized += (_, _) => WindowsHost.ConfigureOverlay(this);
+        SourceInitialized += (_, _) => WindowsHost.ConfigureOverlay(this, capturable: false);
         _app.Notices.Icons.Loaded += IconLoaded;
         Closed += (_, _) => { _closed = true; StopMotion(); _hoverOpen.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
         DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };

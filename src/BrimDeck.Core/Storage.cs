@@ -43,8 +43,6 @@ public static class Storage
     public const int BusUsb = 7, BusSd = 12, BusMmc = 13, BusVirtual = 14, BusFileBackedVirtual = 15;
     // A drive behind a RAID controller (Intel Rapid Storage Technology, a vendor's RAID mode).
     public const int BusRaid = 8;
-    // An NVMe drive: asked for its health log when its temperature property gives nothing (NvmeHealth).
-    public const int BusNvme = 17;
     public const ulong SmallestVolume = 1UL << 30;
     // The letter of the volume holding Windows, "C:".
     public static string? WindowsLetter { get; } = Path.GetPathRoot(Environment.SystemDirectory)?.TrimEnd('\\', '/') is { Length: > 0 } root ? root : null;
@@ -58,15 +56,22 @@ public static class Storage
     // temperature for such a drive either. Its space is listed as any other drive's.
     public static bool AsksTemperature(StorageDisk disk) => disk.Bus != BusRaid;
 
-    // A drive's temperature: what the storage stack's temperature property gives, or, for an NVMe drive whose property fails or
-    // has no sensor (some answer with ERROR_IO_DEVICE), the Composite Temperature in its health log. Other drives, a SATA SSD
-    // among them, are asked the property only. Both readings are passed in so the choice is made apart from the drive; the log
-    // is not asked for while the property answers. A log without a plausible temperature is no reading.
-    public static DiskTemperature? ReadTemperature(StorageDisk disk, Func<DiskTemperature?> property, Func<double?> healthLog)
+    // An NVMe drive, whose SMART / health information log is asked when its temperature property gives none.
+    public const int BusNvme = 17;
+
+    // The composite temperature of an NVMe drive's SMART / health information log, as the device's protocol-specific property
+    // returns it: a STORAGE_PROTOCOL_DATA_DESCRIPTOR (Version and Size both 48, then the STORAGE_PROTOCOL_SPECIFIC_DATA from 8, whose
+    // ProtocolDataOffset at 24 and ProtocolDataLength at 28 place the log from 8), the temperature at bytes 1 and 2 of the log, in
+    // kelvin, less 273 as Windows' own temperature property gives it. Zero is a drive that reports none; null where the reply is not
+    // such a log.
+    public static double? HealthLogCelsius(ReadOnlySpan<byte> reply)
     {
-        if (property() is { } own) return own;
-        if (disk.Bus != BusNvme) return null;
-        return healthLog() is { } celsius ? Temperatures.Disk(disk.Model.Length > 0 ? disk.Model : "SSD", celsius, double.NaN, double.NaN) : null;
+        const int Descriptor = 48, SpecificData = 40, Log = 512;
+        if (reply.Length < Descriptor || BitConverter.ToInt32(reply) != Descriptor || BitConverter.ToInt32(reply[4..]) != Descriptor) return null;
+        int offset = BitConverter.ToInt32(reply[24..]), length = BitConverter.ToInt32(reply[28..]);
+        if (offset < SpecificData || length < Log || 8L + offset + Log > reply.Length) return null;
+        int kelvin = reply[8 + offset + 1] | reply[8 + offset + 2] << 8;
+        return kelvin == 0 ? null : Temperatures.Plausible(kelvin - 273);
     }
 
     // The drives from the volumes and the physical drive each lies on (null when it spans drives or its drive is unknown), the

@@ -66,6 +66,8 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 - 窗口最大化时默认切换为指示条，全屏游戏或视频播放时默认隐藏，避免误触展开。
 
+- 默认显示在其他窗口上方；也可以改为像普通窗口一样被其他窗口遮挡，展开时显示在最前面（设置 › 常规 › 窗口行为）。
+
 ### AI 用量
 
 <img src="docs/zh-CN/images/usage.png" width="100%" alt="AI 用量页：Claude、Codex、Cursor、Antigravity 四列配额">

@@ -14,6 +14,7 @@ namespace BrimDeck;
 //   instead of opening the panel. The content reflows as the width changes: the readings, the rings and the lyric take what
 //   fits. A width set this way is kept, so the surface no longer widens to its content; a double click on an end turns that
 //   back on or off (the line returns to its usual length), or starts moving the surface, as the settings choose (MainWindow.Move.cs).
+//   The settings can also turn the ends' handles off; the resize shortcut still changes the width then.
 // The grips and their hints are a layer over the window (ResizeGripLayer); where they are is ResizeGrips's. The pointer is
 // followed both by mouse messages on the layer and by TrackPointer's polling, which also sees it when the messages go to another
 // window, and arms the collapsed surface's end before the pointer reaches it.
@@ -98,9 +99,10 @@ public partial class MainWindow
     {
         if (_grips is null) return;
         if (_moveArmed) { ShowMoveGrips(); return; }
-        // Under mouse pass-through the grips are not offered; the resize shortcut still works.
+        // Under mouse pass-through the grips are not offered, nor the collapsed ones when the settings turn them off; the resize
+        // shortcut still works.
         var form = PanelResizable && !PanelIgnoresPointer ? ResizeGripLayer.Form.Panel
-            : CompactResizable && !ClickThrough || Resizing && _resizeCompact ? ResizeGripLayer.Form.Compact : ResizeGripLayer.Form.None;
+            : CompactResizable && !ClickThrough && Settings.GripDoubleClick != GripDoubleClick.Off || Resizing && _resizeCompact ? ResizeGripLayer.Form.Compact : ResizeGripLayer.Form.None;
         if (Resizing && !_resizeCompact) form = ResizeGripLayer.Form.Panel;
         _grips.Show(form, IslandBox(), _header.Row * _scale * Zoom, PanelRadius, EffectiveStyle == CompactStyle.Line);
         if (form == ResizeGripLayer.Form.None && _hoverEdge != ResizeEdges.None && !Dragging) SetHoverEdge(ResizeEdges.None);

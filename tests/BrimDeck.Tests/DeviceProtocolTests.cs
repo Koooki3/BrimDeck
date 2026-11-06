@@ -93,6 +93,42 @@ static class DeviceProtocolTests
         check("MCHOSE: a reply's level; a disconnected mouse is none", Dongles.MchoseBattery(mchose) == new BatteryRead(91) && Dongles.MchoseBattery(off) is null);
         check("MCHOSE: the mouse protocol only for its mice, never the MagDock or the X9", Dongles.IsMchoseMouse(0x5011, "MCHOSE G7 Mouse") && Dongles.IsMchoseMouse(0x5011, "迈从无线鼠标")
             && !Dongles.IsMchoseMouse(0x1012, "MCHOSE MagDock Mouse") && !Dongles.IsMchoseMouse(0x6045, "X9") && !Dongles.IsMchoseMouse(0x4001, "MCHOSE K99"));
+        // AJAZZ AJ179 / XCTECH: report-id 0 + 0x10; asleep keeps last %, never a false 0 %.
+        var ajazzReq = Dongles.AjazzInfoRequest();
+        check("AJAZZ: 0x10 request is report-id 0, cmd 0x10, zero checksum", ajazzReq.Length == 33 && ajazzReq[0] == 0 && ajazzReq[1] == 0x10 && ajazzReq[2] == 0 && ajazzReq[3] == 0
+            && ajazzReq[32] == 0 && ajazzReq.Skip(4).Take(28).All(b => b == 0));
+        check("AJAZZ: supported IDs (verified wireless + documented wired)", Dongles.IsAjazz(0x249A, 0x5C2F) && Dongles.IsAjazz(0x248A, 0x5C2E)
+            && Dongles.IsAjazz(0x248A, 0x5D2E) && Dongles.IsAjazz(0x248A, 0x5E2E)
+            && !Dongles.IsAjazz(0x249A, 0x5B2F) && !Dongles.IsAjazz(0x248A, 0x5B2E));
+        check("AJAZZ: MI_02 / UsagePage 1 Usage 0 collection", Dongles.AjazzCollection(2, 0x01, 0x00, 33, 33) && Dongles.AjazzCollection(-1, 0x01, 0x00, 33, 33)
+            && !Dongles.AjazzCollection(0, 0x01, 0x02, 33, 33) && !Dongles.AjazzCollection(2, 0x01, 0x00, 8, 8));
+        // Live sample shape from PROTOCOL.md / Zero PoC: id M041, 92 %, not charging, connected; asleep keeps 82 %.
+        var awake = new byte[32]; awake[0] = 0x10; awake[1] = 0x00; awake[2] = 0x01; awake[3] = 0x0b;
+        awake[4] = (byte)'M'; awake[5] = (byte)'0'; awake[6] = (byte)'4'; awake[7] = (byte)'1';
+        awake[10] = 0x11; awake[12] = 0; awake[13] = 92; awake[14] = 1;
+        var asleep = (byte[])awake.Clone(); asleep[13] = 82; asleep[14] = 0;
+        var withId = new byte[33]; withId[0] = 0; awake.CopyTo(withId, 1);
+        check("AJAZZ: 0x10 awake and asleep (last %, never 0); leading report-id stripped shape",
+            Dongles.AjazzParseInfo(awake) == new Dongles.AjazzInfo(92, false, true, "M041")
+            && Dongles.AjazzParseInfo(asleep) == new Dongles.AjazzInfo(82, false, false, "M041")
+            && Dongles.AjazzParseInfo(withId) == new Dongles.AjazzInfo(92, false, true, "M041")
+            && Dongles.AjazzBattery(Dongles.AjazzParseInfo(asleep)!.Value) == new BatteryRead(82, Asleep: true)
+            && Dongles.AjazzBattery(Dongles.AjazzParseInfo(awake)!.Value) == new BatteryRead(92)
+            && Dongles.AjazzParseInfo([0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) is null
+            && Dongles.AjazzParseInfo([0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 101, 1]) is null);
+        check("AJAZZ: passive 0xC0 online/offline", Dongles.AjazzParseStatus([0xC0, 1, 55]) == (true, 55)
+            && Dongles.AjazzParseStatus([0x00, 0xC0, 0, 40]) == (false, 40)
+            && Dongles.AjazzParseStatus([0xC0, 1, 200]) == (true, null));
+        check("AJAZZ: on its cable a mouse is never asleep, whatever the connected byte says",
+            Dongles.AjazzBattery(Dongles.AjazzParseInfo(asleep)!.Value, cable: true) == new BatteryRead(82));
+        // The mouse on its cable, with its receiver plugged in too: the receiver reports it not connected.
+        DeviceBattery Ajazz(string hardware, string name, bool asleep) => new("ajazz:" + hardware, name, DeviceKind.Mouse, DeviceSource.Hid, 82) { Asleep = asleep, Hardware = hardware };
+        var receiver = Ajazz("249A:5C2F", "M041", asleep: true);
+        check("AJAZZ: the receiver's entry of a mouse its cable reads is left out, and only that one",
+            Dongles.AjazzShadowed(receiver, [receiver, Ajazz("248A:5C2E", "M041", asleep: false)])
+            && !Dongles.AjazzShadowed(receiver, [receiver])
+            && !Dongles.AjazzShadowed(receiver, [receiver, Ajazz("248A:5C2E", "M179", asleep: false)])
+            && !Dongles.AjazzShadowed(Ajazz("249A:5C2F", "M041", asleep: false), [Ajazz("248A:5C2E", "M041", asleep: false)]));
     }
 
     private static void HeadsetReplies(Action<string, bool> check)

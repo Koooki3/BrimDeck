@@ -1,9 +1,9 @@
 namespace BrimDeck.Core;
 
-// Resize and Move are each one setting for four registrations: their modifiers with each arrow key (see Arrows). Page1 to Page3
+// Resize and Move are each one setting for four registrations: their modifiers with each arrow key (see Arrows). Page1 to Page10
 // open the shown pages in the order of the page switch. Notices opens the shown notice's details for the keyboard, or the recent
 // notices page; it is last, so every other hotkey keeps its place and ids.
-public enum HotkeyKind { Hide, Expand, Resize, Move, ClickThrough, OpenSettings, Page1, Page2, Page3, Refresh, Notices }
+public enum HotkeyKind { Hide, Expand, Resize, Move, ClickThrough, OpenSettings, Page1, Page2, Page3, Page4, Page5, Page6, Page7, Page8, Page9, Page10, Refresh, Notices }
 
 // Unset: no combination saved. Active: registered. InUse: another program holds the combination. Invalid: the text is not
 // an allowed combination. Duplicate: a combination another hotkey has, which keeps it (see Plan and PlanArrows).

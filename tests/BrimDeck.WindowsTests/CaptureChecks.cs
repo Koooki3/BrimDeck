@@ -11,26 +11,18 @@ internal static class CaptureChecks
         var window = new Window { Title = "BrimDeck capture test", Width = 160, Height = 80,
             WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Black,
             ShowInTaskbar = false, ShowActivated = false, Topmost = true };
-        window.SourceInitialized += (_, _) => WindowsHost.ConfigureOverlay(window);
+        window.SourceInitialized += (_, _) => WindowsHost.ConfigureOverlay(window, false);
         try
         {
             window.Show();
             var handle = new WindowInteropHelper(window).Handle;
             check("overlay delivers mouse clicks without activation", SendMessage(handle, 0x21, IntPtr.Zero, new IntPtr(0x02010001)) == new IntPtr(3));
-            long style = GetWindowLongPtrW(handle, -20).ToInt64();
-            check("overlay has no WGC-incompatible no-activate style", (style & 0x08000000) == 0);
-            check("transparent overlay supports WGC", CreateItem(handle) == 0);
-            try
-            {
-                SetWindowLongPtrW(handle, -20, new IntPtr(style | 0x08000000));
-                // Only proves the old style was the cause where the system still rejects it: a Windows build that accepts it
-                // (10.0.26300) has nothing to reproduce, and the checks above are the ones that guard the overlay.
-                int old = CreateItem(handle);
-                if (old == 0) Console.WriteLine("SKIP: this Windows accepts the old overlay style for WGC; the reproduction does not apply.");
-                else check("old overlay style reproduces WGC E_INVALIDARG", old == unchecked((int)0x80070057));
-            }
-            finally { SetWindowLongPtrW(handle, -20, new IntPtr(style)); }
-            check("restoring capturable style restores WGC", CreateItem(handle) == 0);
+            check("overlay keeps the no-activate style by default", (GetWindowLongPtrW(handle, -20).ToInt64() & 0x08000000) != 0);
+            WindowsHost.SetCapturable(window, true);
+            check("capturable overlay drops the no-activate style", (GetWindowLongPtrW(handle, -20).ToInt64() & 0x08000000) == 0);
+            check("capturable transparent overlay supports WGC", CreateItem(handle) == 0);
+            WindowsHost.SetCapturable(window, false);
+            check("overlay takes the no-activate style back", (GetWindowLongPtrW(handle, -20).ToInt64() & 0x08000000) != 0);
         }
         finally { window.Close(); }
     }
