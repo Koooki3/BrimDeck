@@ -57,11 +57,12 @@ public enum PausedMusicHide { None, Text, Cover, Both }
 public enum EqualizerMode { Flow = 0, Spectrum = 1 }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
 // only the title or lyric. Saved as numbers, so new members go at the end.
-public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer }
+public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock, Transfer, Devices }
 public static class CompactParts
 {
     // A file saved before the equalizer and the clock were put in order adds them after its parts, the clock last, where they stood.
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer];
+    // The devices' batteries (1.2.5) join last.
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices];
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
 }
@@ -540,12 +541,17 @@ public sealed class DeckSettings
     public bool DevicesPage { get; set; } = true;
     public double DevicesWidth { get; set; } = 460;
     public double DevicesHeight { get; set; } = 200;
-    // The devices left off the page and the collapsed reading, by their key (DeviceBattery.Key), with the name they had, so the
-    // settings can list one that is not connected.
-    public List<HiddenDevice> HiddenDevices { get; set; } = [];
-    public bool Hides(string key) => HiddenDevices.Any(device => device.Key == key);
-    // At or under this charge a battery shows as low, within ten points above it as getting low (Devices.Level).
+    // The devices' order, names and where each shows (DeviceLists), by their key (DeviceBattery.Key). Empty until the user changes
+    // the list; a device not in it shows everywhere, after those that are.
+    public List<DeviceChoice> DeviceChoices { get; set; } = [];
+    // The collapsed row shows each device's figure after its ring.
+    public bool DeviceFigures { get; set; } = true;
+    // At or under these charges a battery shows as low and as getting low (Devices.Level).
     public int DeviceLowPercent { get; set; } = Devices.DefaultLowPercent;
+    public int DeviceWarningPercent { get; set; } = Devices.DefaultWarningPercent;
+    // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
+    public bool NotchDevices { get; set; }
+    public bool CapsuleDevices { get; set; }
     // The expanded page shows a line under memory and network with the frame rate of the program in front, its name and its display's
     // refresh rate (FrameRates). Off by default; read only while the page is open, and only where the user may read Windows' frame
     // events (the Performance Log Users group, or BrimDeck elevated).
@@ -603,6 +609,7 @@ public sealed class DeckSettings
     public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
+    public bool ShowsDevices(CompactStyle style) => style switch { CompactStyle.Notch => NotchDevices, CompactStyle.Capsule => CapsuleDevices, _ => false };
     // The file transfer's count needs the page: with the page off, nothing can be dropped there.
     public bool ShowsTransfer(CompactStyle style) => ClipboardPage && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
     public IReadOnlyList<CompactPart> CompactOrder(CompactStyle style) => style == CompactStyle.Capsule ? CapsuleOrder : NotchOrder;
@@ -682,6 +689,7 @@ public sealed class DeckSettings
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
+        copy.DeviceChoices = [.. (DeviceChoices ?? []).Select(device => device.Copy())];
         return copy;
     }
     public void Normalize()
@@ -712,9 +720,20 @@ public sealed class DeckSettings
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         DevicesWidth = double.IsFinite(DevicesWidth) ? Math.Clamp(DevicesWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 460;
         DevicesHeight = double.IsFinite(DevicesHeight) ? Math.Clamp(DevicesHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
-        HiddenDevices = [.. (HiddenDevices ?? []).OfType<HiddenDevice>().Where(device => !string.IsNullOrWhiteSpace(device.Key)).DistinctBy(device => device.Key).Take(256)
-            .Select(device => device with { Name = device.Name ?? "" })];
+        DeviceChoices = [.. (DeviceChoices ?? []).OfType<DeviceChoice>().Where(device => !string.IsNullOrWhiteSpace(device.Key)).DistinctBy(device => device.Key).Take(256)];
+        foreach (var device in DeviceChoices)
+        {
+            device.Name ??= "";
+            device.Kind = Enum.IsDefined(device.Kind) ? device.Kind : DeviceKind.Other;
+            var label = device.Label?.Trim();
+            device.Label = string.IsNullOrEmpty(label) ? null : label.Length > DeviceLists.MaximumLabel ? label[..DeviceLists.MaximumLabel] : label;
+            static string? Hex(string? color) => AppPresets.NormalizeColor(color) is { Length: > 0 } valid ? valid : null;
+            device.Color = Hex(device.Color); device.ChargeColor = Hex(device.ChargeColor); device.WarningColor = Hex(device.WarningColor); device.CriticalColor = Hex(device.CriticalColor);
+        }
         DeviceLowPercent = Devices.LowChoices.Contains(DeviceLowPercent) ? DeviceLowPercent : Devices.DefaultLowPercent;
+        // Getting low starts above low: a warning at or under the low threshold takes the next choice above it.
+        DeviceWarningPercent = Devices.WarningChoices.Contains(DeviceWarningPercent) ? DeviceWarningPercent : Devices.DefaultWarningPercent;
+        if (DeviceWarningPercent <= DeviceLowPercent) DeviceWarningPercent = Devices.WarningChoices.First(percent => percent > DeviceLowPercent);
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
         ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;

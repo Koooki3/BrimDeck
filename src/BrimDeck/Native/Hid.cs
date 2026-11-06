@@ -25,6 +25,9 @@ internal sealed class HidInfo
     // MI_xx in the path: the USB interface; -1 when the path has none.
     public int Interface => System.Text.RegularExpressions.Regex.Match(Path, "mi_([0-9a-f]{2})", System.Text.RegularExpressions.RegexOptions.IgnoreCase) is { Success: true } m
         ? Convert.ToInt32(m.Groups[1].Value, 16) : -1;
+    // COLxx in the path: the top-level collection where the interface has several; -1 when the path has none.
+    public int Collection => System.Text.RegularExpressions.Regex.Match(Path, "&col([0-9a-f]{2})", System.Text.RegularExpressions.RegexOptions.IgnoreCase) is { Success: true } m
+        ? Convert.ToInt32(m.Groups[1].Value, 16) : -1;
     // Reached through Bluetooth (classic or LE) rather than USB.
     public bool Bluetooth => Hid.IsBluetooth(Path);
 }
@@ -307,7 +310,15 @@ internal sealed class HidDevice : IDisposable
         Array.Copy(data, buffer, data.Length);
         return Control(IOCTL_HID_SET_FEATURE, buffer, output: false, timeoutMs);
     }
-    private const uint IOCTL_HID_SET_FEATURE = 0xB0191, IOCTL_HID_GET_FEATURE = 0xB0192;
+    // An input report got on request (HidD_GetInputReport's IOCTL, with the same timeout), for a device that answers through
+    // the report it holds rather than by sending one (Rapoo's first generation).
+    public byte[]? GetInput(byte reportId, int length, int timeoutMs = 500)
+    {
+        var buffer = new byte[Math.Max(length, 2)];
+        buffer[0] = reportId;
+        return Control(IOCTL_HID_GET_INPUT_REPORT, buffer, output: true, timeoutMs) ? buffer : null;
+    }
+    private const uint IOCTL_HID_SET_FEATURE = 0xB0191, IOCTL_HID_GET_FEATURE = 0xB0192, IOCTL_HID_GET_INPUT_REPORT = 0xB01A2;
     private bool Control(uint code, byte[] buffer, bool output, int timeoutMs)
     {
         if (_abandoned) throw new IOException("A cancelled read is still pending.");

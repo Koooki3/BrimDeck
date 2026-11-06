@@ -82,8 +82,11 @@ public partial class MainWindow
 
     // ---- The collapsed count ----
     // The width the count keeps: the tray and "9+", so the surface does not change width as files come and go (CompactMusicLayout).
-    private static double FixedFace(double clock, double transfer, double scale)
-        => clock > 0 && transfer > 0 ? clock + CompactMusicLayout.Gap(scale) + transfer : clock + transfer;
+    private static double FixedFace(double scale, params double[] widths)
+    {
+        var shown = widths.Where(width => width > 0).ToArray();
+        return shown.Sum() + Math.Max(0, shown.Length - 1) * CompactMusicLayout.Gap(scale);
+    }
     private FrameworkElement? _compactTransfer;
     private FrameworkElement? TransferBadge(double scale)
     {

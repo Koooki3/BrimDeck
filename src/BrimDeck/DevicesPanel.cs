@@ -4,7 +4,7 @@ using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// The devices page and the collapsed battery reading. The sources (App.Devices) run while any panel shows either; every panel
+// The devices page and the collapsed devices' reading. The sources (App.Devices) run while any panel shows either; every panel
 // draws the same readings. As the monitor page, the page is built once per layout step (DevicesLayout), theme and language,
 // stretches within a step and crossfades into a new build of itself (MonitorCrossfade); readings only change what it draws.
 public partial class MainWindow
@@ -20,25 +20,28 @@ public partial class MainWindow
         Closed += (_, _) => { _app.DevicesChanged -= DevicesChanged; _app.PresentDevices(this, false, false); };
     }
 
-    // The devices shown: every device read, without those switched off in the settings. Made once per roster and per list of
-    // hidden devices (each change of either is a new list), as it is asked several times for each change.
+    // The devices the page shows, in the settings' order and under their names (DeviceLists.Expanded). Made once per roster and
+    // per settings (each change of either is a new object), as it is asked several times for each change.
     internal IReadOnlyList<DeviceBattery> ShownDevices
     {
         get
         {
             var all = _app.Devices?.All ?? [];
-            var hidden = Settings.HiddenDevices;
-            if (!ReferenceEquals(all, _shownFrom.All) || !ReferenceEquals(hidden, _shownFrom.Hidden))
+            var choices = Settings.DeviceChoices;
+            if (!ReferenceEquals(all, _shownFrom.All) || !ReferenceEquals(choices, _shownFrom.Choices))
             {
-                _shown = hidden.Count == 0 ? all : [.. all.Where(device => !Settings.Hides(device.Key))];
-                _shownFrom = (all, hidden);
+                _shown = DeviceLists.Expanded(all, choices);
+                _shownFrom = (all, choices);
             }
             return _shown;
         }
     }
     private IReadOnlyList<DeviceBattery> _shown = [];
-    private (IReadOnlyList<DeviceBattery>? All, List<HiddenDevice>? Hidden) _shownFrom;
+    private (IReadOnlyList<DeviceBattery>? All, List<DeviceChoice>? Choices) _shownFrom;
     private bool DevicesSettled => _app.Devices?.Settled == true;
+
+    // Each device's colors and levels as the settings give them.
+    private DeviceInks Inks => new(MonitorThemeColors.For(Settings), Settings.DeviceChoices, Settings.DeviceWarningPercent, Settings.DeviceLowPercent);
 
     // Asked with the monitor's demand (UpdateMonitorDemand): whenever the panel opens, closes, changes page or is hidden, and
     // whenever the collapsed row is built.
@@ -46,8 +49,8 @@ public partial class MainWindow
     {
         bool seen = IsVisible && !IsSuppressed && !DisplayPower.Off;
         bool page = _expanded && CurrentPage == DeckPage.Devices && seen;
-        // The collapsed reading is read for while it is chosen, before it shows: it joins the row only once a device reports.
-        bool strip = !_expanded && StripChoosesBattery && seen && _alert is null && EffectiveStyle != CompactStyle.Line;
+        // The collapsed part is read for while it is chosen, before it shows: it joins the row only once a device reports.
+        bool strip = !_expanded && Settings.ShowsDevices(EffectiveStyle) && seen && _alert is null;
         _app.PresentDevices(this, page, strip);
         // Opened again, the page shows the readings as they are now, not as it left them.
         if (page && !_devicesShowing) { _devicesView?.Update(ShownDevices, DevicesSettled, motion: false); _app.Devices?.Refresh(); }
@@ -58,7 +61,13 @@ public partial class MainWindow
     {
         if (!_expanded)
         {
-            if (StripChoosesBattery && !AdmitStrip(_app.Monitor?.Latest)) _compactStrip?.SetBattery(StripBattery());
+            if (!Settings.ShowsDevices(EffectiveStyle)) return;
+            // The part joins with the first charge reported and leaves with the last; a device more or fewer changes its width: the
+            // row is built again for either. Otherwise the part takes the new readings in place.
+            var devices = StripDevices();
+            bool shows = devices.Devices.Any(device => device.Percent is not null);
+            if (_compactDevices is { } strip && shows && strip.Holds(devices)) strip.SetDevices(devices);
+            else if (shows || _compactDevices is not null) RenderCompact();
             return;
         }
         if (CurrentPage != DeckPage.Devices || _devicesView is null) return;
@@ -66,24 +75,30 @@ public partial class MainWindow
         _devicesView.Update(ShownDevices, DevicesSettled, Soft.Enabled);
     }
 
-    // Whether this surface's collapsed row chooses the battery reading (the system readings are on and the table shows it).
-    private bool StripChoosesBattery => Settings.ShowsMonitor(EffectiveStyle) && (CompactMonitor.Shown(Settings.CompactReadings) & CompactMonitorItems.Battery) != 0;
-
-    // The collapsed reading: the device with the lowest charge among those shown, null while none reports one.
-    internal BatteryReading? LowestBattery()
+    // The devices the collapsed row shows (DeviceLists.Collapsed), with their colors.
+    private StripDevices CurrentStripDevices()
     {
-        var lowest = ShownDevices.Where(device => device.Lowest is not null).OrderBy(device => device.Lowest).FirstOrDefault();
-        return lowest is null ? null : new BatteryReading(lowest.Lowest!.Value, lowest.Charging, Devices.Level(lowest.Lowest, lowest.Charging, Settings.DeviceLowPercent), lowest.Name);
+        var inks = Inks;
+        return new([.. DeviceLists.Collapsed(_app.Devices?.All ?? [], Settings.DeviceChoices).Select(device => StripDevice.Of(device, inks))], Settings.DeviceFigures);
     }
-    // What the collapsed row shows: the lowest battery, kept while the devices are being listed again (the display came back
-    // on, a suppression ended), so the reading does not drop to a dash for the moment the sources take to report.
-    private BatteryReading? StripBattery()
+    // What the collapsed row shows: the devices as they are, kept while they are being listed again (the display came back on, a
+    // suppression ended), so the part does not drop out for the moment the sources take to report.
+    private StripDevices StripDevices()
     {
-        var lowest = LowestBattery();
-        if (lowest is not null || DevicesSettled) _stripBattery = lowest;
-        return _stripBattery;
+        var devices = CurrentStripDevices();
+        if (devices.Devices.Any(device => device.Percent is not null) || DevicesSettled || _stripDevices.Figures != devices.Figures) _stripDevices = devices;
+        return _stripDevices;
     }
-    private BatteryReading? _stripBattery;
+    private StripDevices _stripDevices = BrimDeck.StripDevices.None;
+    // The collapsed part as the row is built: none while the surface does not show it or no device reports a charge.
+    private DeviceStrip? _compactDevices;
+    private DeviceStrip? CompactDevices(double scale)
+    {
+        _compactDevices = null;
+        if (!Settings.ShowsDevices(EffectiveStyle)) return null;
+        var devices = StripDevices();
+        return devices.Devices.Any(device => device.Percent is not null) ? _compactDevices = new DeviceStrip(devices, scale) : null;
+    }
 
     private DevicesLayout CurrentDevicesLayout()
     {
@@ -91,7 +106,7 @@ public partial class MainWindow
         return DevicesLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), ShownDevices.Count, _devicesView is not null ? _devicesLayout : null);
     }
     private string DevicesKey() => string.Join("|", CurrentDevicesLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "",
-        Settings.DeviceLowPercent, Loc.Language, PanelTheme.Generation, SystemParameters.HighContrast);
+        Inks.Key, Loc.Language, PanelTheme.Generation, SystemParameters.HighContrast);
 
     private void RenderDevices()
     {
@@ -112,12 +127,9 @@ public partial class MainWindow
         var layout = CurrentDevicesLayout();
         _devicesKey = key; _devicesLayout = layout;
         var old = shown ? _devicesView : null;
-        _devicesView = new DevicesView(layout, MonitorThemeColors.For(Settings), Settings.DeviceLowPercent);
+        _devicesView = new DevicesView(layout, Inks);
         _devicesView.Update(ShownDevices, DevicesSettled, motion: false);
         if (old is not null) MonitorCrossfade.Swap(DevicesContent, _devicesView, old, MonitorMotion);
         else { DevicesContent.Children.Clear(); DevicesContent.Children.Add(_devicesView); }
     }
 }
-
-// The collapsed row's battery reading: the lowest charge among the devices shown, and the device it is.
-internal readonly record struct BatteryReading(int Percent, bool Charging, MemoryLevel Level, string Name);

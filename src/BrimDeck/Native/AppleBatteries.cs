@@ -34,6 +34,7 @@ internal sealed class AppleBatteries(Dispatcher dispatcher, Action<DeviceSource,
     public void Start(DeviceDemand demand) { _demand = demand; Update(); }
     public void Stop() { _demand = DeviceDemand.None; _target = null; _last = null; Update(); report(DeviceSource.Apple, []); }
     public void Refresh() { }
+    public void ReadNow() { }
     public void Dispose() => Stop();
 
     // Every list the Bluetooth source reports: whether an Apple device is connected, which the scan is for.
