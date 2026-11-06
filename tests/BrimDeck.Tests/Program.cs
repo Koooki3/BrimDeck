@@ -46,6 +46,9 @@ try
     StorageTests.Run(Check);
     SensorStopTests.Run(Check);
     StripAdmissionTests.Run(Check);
+    DevicesTests.Run(Check);
+    DeviceProtocolTests.Run(Check);
+    DeviceSafetyTests.Run(Check);
     PowerTests.Run(Check);
     FrameRateTests.Run(Check);
     ResizeMotionTests.Run(Check);
