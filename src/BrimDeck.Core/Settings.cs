@@ -357,12 +357,21 @@ public sealed class DeckSettings
     public string Page1Hotkey { get; set; } = "";
     public string Page2Hotkey { get; set; } = "";
     public string Page3Hotkey { get; set; } = "";
+    public string Page4Hotkey { get; set; } = "";
+    public string Page5Hotkey { get; set; } = "";
+    public string Page6Hotkey { get; set; } = "";
+    public string Page7Hotkey { get; set; } = "";
+    public string Page8Hotkey { get; set; } = "";
+    public string Page9Hotkey { get; set; } = "";
+    public string Page10Hotkey { get; set; } = "";
     public string RefreshHotkey { get; set; } = "";
     public string Hotkey(HotkeyKind kind) => (kind switch
     {
         HotkeyKind.Hide => HideHotkey, HotkeyKind.Expand => ExpandHotkey, HotkeyKind.Resize => ResizeHotkey, HotkeyKind.Move => MoveHotkey,
         HotkeyKind.ClickThrough => ClickThroughHotkey, HotkeyKind.OpenSettings => SettingsHotkey, HotkeyKind.Page1 => Page1Hotkey,
-        HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Refresh => RefreshHotkey, _ => ""
+        HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Page4 => Page4Hotkey,
+        HotkeyKind.Page5 => Page5Hotkey, HotkeyKind.Page6 => Page6Hotkey, HotkeyKind.Page7 => Page7Hotkey, HotkeyKind.Page8 => Page8Hotkey,
+        HotkeyKind.Page9 => Page9Hotkey, HotkeyKind.Page10 => Page10Hotkey, HotkeyKind.Refresh => RefreshHotkey, _ => ""
     }) ?? "";
     public void SetHotkey(HotkeyKind kind, string value)
     {
@@ -377,6 +386,13 @@ public sealed class DeckSettings
             case HotkeyKind.Page1: Page1Hotkey = value; break;
             case HotkeyKind.Page2: Page2Hotkey = value; break;
             case HotkeyKind.Page3: Page3Hotkey = value; break;
+            case HotkeyKind.Page4: Page4Hotkey = value; break;
+            case HotkeyKind.Page5: Page5Hotkey = value; break;
+            case HotkeyKind.Page6: Page6Hotkey = value; break;
+            case HotkeyKind.Page7: Page7Hotkey = value; break;
+            case HotkeyKind.Page8: Page8Hotkey = value; break;
+            case HotkeyKind.Page9: Page9Hotkey = value; break;
+            case HotkeyKind.Page10: Page10Hotkey = value; break;
             case HotkeyKind.Refresh: RefreshHotkey = value; break;
         }
     }
