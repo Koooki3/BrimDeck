@@ -365,7 +365,7 @@ public partial class MainWindow
         fresh |= NoticesContent.Visibility != Visibility.Visible;
         SubscribeNotices();
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         ApplyHeader(Settings.UsagePage ? UsageHeader(UsageLayoutWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
         double offset = fresh ? 0 : _pageScroll?.VerticalOffset ?? 0;
