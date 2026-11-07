@@ -5,19 +5,27 @@ using Windows.Devices.Enumeration;
 
 namespace BrimDeck.Native;
 
-// The batteries that only the devices' own protocols tell, over HID: Logitech receivers and cables (HID++), Razer mice, the
-// 2.4 GHz mice and keyboards of ATK, VXE, VGN, MCHOSE, Endgame Gear, VAXEE, Inphic and AJAZZ receivers (those whose vendor and
-// product are known), SteelSeries, HyperX and MCHOSE headsets, PlayStation controllers, and any device that carries the standard
-// HID battery usages. The protocols themselves are in Core (DeviceProtocols.cs); this sends them. Every request only reads:
-// nothing is set on any device.
-// One worker thread at below normal priority does the I/O, so a slow device never holds the panel: once a minute while the
-// page or the collapsed reading shows (DeviceDemand.Watch), once every fifteen minutes while only the low battery notice
-// listens, and not at all otherwise, when it lets every handle go and ends (the next start makes a new one). A device plugged
-// in while the page shows is read within a moment (a watcher over the HID collections). On Bluetooth, only the collections a
-// reader here speaks to are opened (Spoken).
+// The batteries that only the devices' own protocols tell, over HID: Logitech receivers and cables (HID++), Razer mice and
+// keyboards, the 2.4 GHz mice and keyboards of ATK, VXE, VGN, Pulsar, MCHOSE, Endgame Gear, VAXEE, Inphic, AJAZZ, WLmouse,
+// G-Wolves, LAMZU, Ninjutso, LINGBAO, NZXT, CHERRY and HECATE (those whose vendor and product are known), ASUS ROG mice,
+// keyboards and headsets (the ROG Omni receiver's paired devices too), SteelSeries mice, Rapoo's first generation, SteelSeries,
+// HyperX and MCHOSE headsets, Corsair's receivers (CorsairReader), the receivers that send their battery unasked (Attack Shark,
+// DELUX, Inphic ZHEN, Rapoo, AULA G9, the Steam Controller puck, JBL Quantum 910, PULSE 3D, Cloud Flight 2: only listened to,
+// PushEvents), PlayStation controllers, and any device that carries the standard HID battery usages. The protocols themselves
+// are in Core (DeviceProtocols.cs); this sends them. Every request only reads: nothing is set on any device (a Logitech
+// receiver's wireless notices aside, HidppEvents).
+// One worker thread at below normal priority does the I/O, so a slow device never holds the panel, while the page or the
+// collapsed reading shows (DeviceDemand.Watch), and not at all otherwise, when it lets every handle go and ends (the next start
+// makes a new one). Each kind is read as often as DevicePolling has it: the brands that only answer when asked every 15
+// seconds, the PlayStation controllers (only listened to) every 5, and the Logitech devices every 30, their own events
+// (HidppEvents) bringing a change in between at once. Two threads of their own take what would hold that pass: the receivers
+// that send their battery unasked are listened to all the time (PushEvents), each reading standing until the device sends
+// another, and the Corsair receivers, whose answer takes seconds, are read once a minute (CorsairReader); both hand their
+// readings back to the worker, which lists them at once. A device or a cable plugged in or pulled out has every device read
+// again within a moment, and twice more a few seconds later (a watcher over the HID collections); so do the computer waking
+// and the user coming back (ReadNow). On Bluetooth, only the collections a reader here speaks to are opened (Spoken).
 internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, IReadOnlyList<DeviceBattery>> report) : IDeviceSource
 {
-    private static readonly TimeSpan ListenInterval = TimeSpan.FromMinutes(15);
     private static readonly DeviceSource[] Sources = [DeviceSource.Logitech, DeviceSource.Razer, DeviceSource.SteelSeries, DeviceSource.HyperX, DeviceSource.Sony, DeviceSource.Hid];
     private readonly AutoResetEvent _wake = new(false);
     // Guards _thread between Start and the worker ending itself.
@@ -35,14 +43,16 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private volatile bool _listed;
     public bool Listed => _listed;
 
-    // Started, or asked for more, the worker reads at once unless its last full pass is under a minute old; going from the page
-    // down to the notice reads nothing more until the notice's own interval comes round.
+    // Started, the worker reads at once whatever is due (DevicePolling).
     public void Start(DeviceDemand demand)
     {
         var was = _demand;
         lock (_gate)
         {
             _demand = demand;
+            _events ??= new HidppEvents(Received);
+            _pushes ??= new PushEvents(Side);
+            _corsair ??= new CorsairReader(Side);
             if (_thread is null)
             {
                 _thread = new Thread(Run) { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "BrimDeck HID batteries" };
@@ -50,7 +60,6 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             }
         }
         if (demand == DeviceDemand.Watch) WatchArrivals(); else StopArrivals();
-        // Any change wakes the worker, which reads only what its own intervals allow (a minute between full passes).
         if (demand != was) Wake();
     }
 
@@ -58,34 +67,127 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     {
         _demand = DeviceDemand.None;
         // Started again before the worker has noticed, it lists afresh rather than from where it was.
-        _listed = false; Interlocked.Exchange(ref _lastScan, Never); _restart = true;
-        StopArrivals();
+        _listed = false; _restart = true;
+        StopArrivals(); StopListeners();
         Wake();
         foreach (var source in Sources) report(source, []);
     }
 
-    // The page opened: read now, unless the last full pass is under a minute old (no HID++ request comes faster than that).
-    public void Refresh() { if (_demand == DeviceDemand.Watch && Stale) Wake(); }
+    // The page opened: the worker reads what is due. ReadNow: every device at once (the computer woke, the user came back).
+    public void Refresh() { if (_demand == DeviceDemand.Watch) Wake(); }
+    public void ReadNow() { if (_demand == DeviceDemand.Watch) { _forced = true; _corsair?.ReadNow(); Wake(); } }
 
     public void Dispose()
     {
         _disposed = true; _demand = DeviceDemand.None;
-        StopArrivals();
+        StopArrivals(); StopListeners();
         Wake();
     }
+    private void StopListeners() { _events?.Stop(); _pushes?.Stop(); _corsair?.Stop(); }
 
     // The worker's event lives as long as the process: set from the UI thread and the watcher's threads, it is never disposed
     // under them.
     private void Wake() => _wake.Set();
-    // When the last full pass ended (Environment.TickCount64); Never before the first.
     private const long Never = -1;
-    private long _lastScan = Never;
-    private volatile bool _arrived;
+    // When each kind of reading was last taken (Environment.TickCount64), the worker's own: the Logitech devices, those only
+    // asked (every other brand and the standard usages) and those only listened to (the PlayStation controllers).
+    private long _logitechAt = Never, _askAt = Never, _listenAt = Never;
+    private volatile bool _arrived, _removed, _forced;
     // The worker's own: whether it has made a full pass since it started (_listed waits for the UI thread to take the result).
     private bool _scanned;
     private volatile bool _restart;
-    private long SinceScan => Interlocked.Read(ref _lastScan) is var at && at == Never ? long.MaxValue : Environment.TickCount64 - at;
-    private bool Stale => SinceScan >= (long)DevicePolling.Interval.TotalMilliseconds;
+    // The worker's own: each source's current list, as last reported.
+    private readonly Dictionary<DeviceSource, List<DeviceBattery>> _current = [];
+
+    // ----- Logitech events (HidppEvents) -----
+
+    private HidppEvents? _events;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(string Group, byte[] Report)> _pending = new();
+    // Each Logitech slot's battery feature index, from the worker's reads, for the listener's thread to tell a battery event
+    // from the rest.
+    private volatile Dictionary<(string Group, byte Index), (byte Feature, int Battery)> _indices = [];
+
+    // On the listener's thread: a battery event or a link notice is queued for the worker, which is woken; every other report
+    // (another program's reply, another feature's event) is dropped here.
+    private void Received(string group, byte[] report)
+    {
+        if (Hidpp.Connection(report) is null
+            && !(Hidpp.Event(report) is { Event: 0 } e && _indices.TryGetValue((group, e.Device), out var battery) && battery.Feature == e.Feature)) return;
+        _pending.Enqueue((group, report));
+        Wake();
+    }
+
+    // The worker applies what came: a battery event is the device's reading at once; a link lost leaves its last reading,
+    // asleep; a link made has the Logitech devices read now. True when a reading changed.
+    private bool ApplyEvents(ref bool linkUp)
+    {
+        bool changed = false;
+        while (_pending.TryDequeue(out var item))
+        {
+            var (group, report) = item;
+            DeviceBattery? device = null;
+            if (Hidpp.Connection(report) is { } connection)
+            {
+                if (connection.Linked) { linkUp = true; continue; }
+                device = _logitech.LinkLost(group, connection.Device);
+            }
+            else if (Hidpp.Event(report) is { } e && _indices.TryGetValue((group, e.Device), out var battery) && battery.Feature == e.Feature)
+                device = _logitech.Event(group, e.Device, battery.Battery, e.Parameters);
+            if (device is null) continue;
+            if (!_current.TryGetValue(DeviceSource.Logitech, out var list)) _current[DeviceSource.Logitech] = list = [];
+            int at = list.FindIndex(known => known.Key == device.Key);
+            if (at >= 0 && list[at] == device) continue;
+            if (at >= 0) list[at] = device; else list.Add(device);
+            _lastRead[device.Key] = (device, 0);
+            changed = true;
+        }
+        return changed;
+    }
+
+    // ----- Readings from the worker's two helpers (PushEvents, CorsairReader) -----
+
+    private PushEvents? _pushes;
+    private CorsairReader? _corsair;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(string Origin, DeviceBattery Device)> _sideQueue = new();
+    // The worker's own: the helpers' current readings, by where each came from (a pushed collection's path, a Corsair device's
+    // key). A reading stands until its device sends another or its collection goes (Scan).
+    private readonly Dictionary<string, DeviceBattery> _side = new(StringComparer.OrdinalIgnoreCase);
+
+    // On a helper's thread: queued for the worker, which is woken.
+    private void Side(string origin, DeviceBattery device)
+    {
+        _sideQueue.Enqueue((origin, device));
+        Wake();
+    }
+
+    // The worker takes what came into its current lists. True when a reading changed.
+    private bool ApplySide()
+    {
+        bool changed = false;
+        while (_sideQueue.TryDequeue(out var item))
+        {
+            var (origin, device) = item;
+            if (_demand == DeviceDemand.None || !Attached(device)) continue;
+            _side[origin] = device;
+            if (!_current.TryGetValue(device.Source, out var list)) _current[device.Source] = list = [];
+            int at = list.FindIndex(known => known.Key == device.Key);
+            if (at >= 0 && list[at] == device) continue;
+            if (at >= 0) list[at] = device; else list.Add(device);
+            _lastRead[device.Key] = (device, 0);
+            changed = true;
+        }
+        return changed;
+    }
+    // Whether the collection a helper's reading came through is still there (its vendor and product).
+    private bool Attached(DeviceBattery device) => _infos.Values.Any(info => Devices.Hardware(info.Vendor, info.Product) == device.Hardware);
+
+    // A pushed reading as the device it is (PushEvents): the Steam puck holds a controller per interface.
+    internal static DeviceBattery Pushed(HidInfo info, Pushes.Kind kind, BatteryRead state, string? name)
+    {
+        string key = Key("push", info) + (kind == Pushes.Kind.SteamPuck ? ":" + info.Interface : "");
+        return new DeviceBattery(key, name ?? Pushes.Name(kind, null), Pushes.KindOf(kind), Pushes.Source(kind), state.Percent)
+            { Charging = state.Charging, Coarse = state.Coarse, Asleep = state.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product) };
+    }
 
     // HID collections that come or go while the page shows wake the worker; the first listing (every collection there is) does not.
     private void WatchArrivals()
@@ -100,7 +202,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             // Set and read on the watcher's threads.
             watcher.EnumerationCompleted += (_, _) => Volatile.Write(ref listed, true);
             watcher.Added += (_, _) => { if (Volatile.Read(ref listed) && generation == Volatile.Read(ref _generation)) { _arrived = true; Wake(); } };
-            watcher.Removed += (_, _) => { if (Volatile.Read(ref listed) && generation == Volatile.Read(ref _generation)) { _arrived = true; Wake(); } };
+            watcher.Removed += (_, _) => { if (Volatile.Read(ref listed) && generation == Volatile.Read(ref _generation)) { _removed = true; Wake(); } };
             // A watcher that does not handle updates stops reporting arrivals after its first listing.
             watcher.Updated += (_, _) => { };
             watcher.Start();
@@ -120,43 +222,57 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         while (!_disposed)
         {
             try { if (!Pass()) return; }
-            catch { _wake.WaitOne(DevicePolling.Interval); }
+            catch { _wake.WaitOne(DevicePolling.Ask); }
         }
     }
 
-    // One round of the worker: a pass if one is due, then the wait for the next. False once nothing is wanted: the thread ends.
+    // One round of the worker: the events that came, the readings that are due, then the wait for the next. False once nothing
+    // is wanted: the thread ends.
     private bool Pass()
     {
         var demand = _demand;
         if (_restart) { _restart = false; _scanned = false; }
         if (demand != DeviceDemand.None)
         {
-            // A burst of arrivals (a receiver brings several collections) is read once.
-            Thread.Sleep(300);
-            var interval = demand == DeviceDemand.Watch ? DevicePolling.Interval : ListenInterval;
-            bool full = SinceScan >= (long)interval.TotalMilliseconds || !_scanned;
-            // Between full passes, a collection that arrived is read alone; the devices already known are not asked again.
-            bool arrivals = _arrived; _arrived = false;
-            if (full || arrivals)
+            // A collection that came or went (a cable put into or pulled out of a device that also has a receiver) reads every device
+            // again at once, and twice more a few seconds apart: the device stays through its receiver, its charging changes with the
+            // cable, and a collection that has just arrived often cannot be opened yet. A burst of arrivals (a receiver brings
+            // several collections) is read once.
+            bool changed = _arrived || _removed; _arrived = _removed = false;
+            if (changed || !_scanned) Thread.Sleep(300);
+            if (changed) _followUps = FollowUps;
+            if (changed || _forced) _corsair?.ReadNow();
+            bool followUp = !changed && _followUps > 0 && Due(_askAt, FollowUpDelay);
+            if (followUp) _followUps--;
+            bool forced = _forced; _forced = false;
+            bool linkUp = false;
+            bool moved = ApplyEvents(ref linkUp) | ApplySide();
+            bool all = changed || followUp || forced || !_scanned;
+            bool logitech = all || linkUp || Due(_logitechAt, Every(DevicePolling.Logitech));
+            bool ask = all || Due(_askAt, Every(DevicePolling.Ask));
+            // Listened to only while a PlayStation controller is there; a new one is found by the next full pass.
+            bool listen = all || _current.TryGetValue(DeviceSource.Sony, out var sony) && sony.Count > 0 && Due(_listenAt, Every(DevicePolling.Listen));
+            if (logitech || ask || listen)
             {
-                Dictionary<DeviceSource, List<DeviceBattery>>? found = null;
-                try { found = Scan(onlyNew: !full); }
+                try { Scan(logitech, ask, listen); moved = true; }
                 catch { }
-                // A full pass counts as done even when it failed, so a failing one is tried again at the next interval, not at once.
-                if (full) { Interlocked.Exchange(ref _lastScan, Environment.TickCount64); _scanned = true; }
-                // A pass that failed as a whole reports nothing: the last readings stay.
-                if (found is not null && _demand != DeviceDemand.None && !_disposed)
-                    dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
-                    {
-                        if (_demand == DeviceDemand.None || _disposed) return;
-                        foreach (var source in Sources) report(source, found.TryGetValue(source, out var list) ? list : []);
-                        _listed = true;
-                    });
+                // A pass counts as done even when it failed, so a failing one is tried again at its next interval, not at once.
+                long now = Environment.TickCount64;
+                if (logitech) _logitechAt = now;
+                if (ask) _askAt = now;
+                if (listen) _listenAt = now;
+                _scanned = true;
+                if (logitech) { _indices = _logitech.BatteryIndices(); _events?.Watch([.. _logitech.Groups]); }
             }
+            // A pass that failed as a whole reports nothing: the last readings stay.
+            if (moved && _demand != DeviceDemand.None && !_disposed) Publish();
         }
         else
         {
-            _infos.Clear(); _logitech.Clear(); _lastRead.Clear(); _previous.Clear(); _slow.Clear(); _listed = false; _scanned = false; Interlocked.Exchange(ref _lastScan, Never);
+            _infos.Clear(); _logitech.Clear(); _lastRead.Clear(); _slow.Clear(); _current.Clear(); _pending.Clear(); _indices = [];
+            _side.Clear(); _sideQueue.Clear();
+            _listed = false; _scanned = false; _followUps = 0; _logitechAt = _askAt = _listenAt = Never;
+            StopListeners();
             // Nothing is wanted: the thread ends rather than wait, and the next Start makes a new one. Started again meanwhile,
             // it goes round at once.
             lock (_gate)
@@ -166,33 +282,66 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 return false;
             }
         }
-        var wait = demand == DeviceDemand.Watch ? DevicePolling.Interval : ListenInterval;
-        _wake.WaitOne(TimeSpan.FromMilliseconds(Math.Clamp(wait.TotalMilliseconds - Math.Min(SinceScan, int.MaxValue), 1000, wait.TotalMilliseconds)));
+        _wake.WaitOne(NextWait());
         return true;
+    }
+    // The passes still to make after a collection came or went, and the wait before each.
+    private const int FollowUps = 2;
+    private static readonly TimeSpan FollowUpDelay = TimeSpan.FromSeconds(2);
+    private int _followUps;
+
+    // While only the low battery notice listens (DeviceDemand.Listen) every interval is at least fifteen minutes; the devices'
+    // own events (HidppEvents, PushEvents) still bring a change at once.
+    private static readonly TimeSpan ListenInterval = TimeSpan.FromMinutes(15);
+    private TimeSpan Every(TimeSpan interval) => _demand == DeviceDemand.Listen && interval < ListenInterval ? ListenInterval : interval;
+    private static bool Due(long at, TimeSpan interval) => at == Never || Environment.TickCount64 - at >= (long)interval.TotalMilliseconds - 50;
+    private static long Left(long at, TimeSpan interval) => at == Never ? 0 : (long)interval.TotalMilliseconds - (Environment.TickCount64 - at);
+    private TimeSpan NextWait()
+    {
+        if (_followUps > 0) return FollowUpDelay;
+        long wait = Math.Min(Left(_logitechAt, Every(DevicePolling.Logitech)), Left(_askAt, Every(DevicePolling.Ask)));
+        if (_current.TryGetValue(DeviceSource.Sony, out var sony) && sony.Count > 0) wait = Math.Min(wait, Left(_listenAt, Every(DevicePolling.Listen)));
+        return TimeSpan.FromMilliseconds(Math.Clamp(wait, 500, (long)Every(DevicePolling.Ask).TotalMilliseconds));
+    }
+
+    // Every source's current list, to the UI thread.
+    private void Publish()
+    {
+        var lists = Sources.Select(source => (source, (IReadOnlyList<DeviceBattery>)(_current.TryGetValue(source, out var list) ? [.. list] : []))).ToList();
+        dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            if (_demand == DeviceDemand.None || _disposed) return;
+            foreach (var (source, list) in lists) report(source, list);
+            _listed = true;
+        });
     }
 
     // ----- One pass over the collections -----
 
-    // The last full pass's readings, which a pass over new collections alone adds to.
-    private Dictionary<DeviceSource, List<DeviceBattery>> _previous = [];
     // Collections whose feature reports timed out, left alone until then (Environment.TickCount64).
     private readonly Dictionary<string, long> _slow = [];
 
-    private Dictionary<DeviceSource, List<DeviceBattery>> Scan(bool onlyNew)
+    // The sources each kind of reading lists.
+    private static readonly DeviceSource[] Asked = [DeviceSource.Razer, DeviceSource.SteelSeries, DeviceSource.HyperX, DeviceSource.Hid];
+
+    // One pass over the collections, reading the kinds that are due (Pass) into the current lists; the others keep theirs.
+    private void Scan(bool logitech, bool ask, bool listen)
     {
-        var found = onlyNew ? _previous.ToDictionary(pair => pair.Key, pair => pair.Value.ToList()) : new Dictionary<DeviceSource, List<DeviceBattery>>();
+        var found = new Dictionary<DeviceSource, List<DeviceBattery>>();
+        // A device read on two collections is one entry: a reading it answered beats one that found it asleep.
         void Add(DeviceBattery device)
         {
             if (!found.TryGetValue(device.Source, out var list)) found[device.Source] = list = [];
-            if (list.All(known => known.Key != device.Key)) list.Add(device);
+            int same = list.FindIndex(known => known.Key == device.Key);
+            if (same < 0) list.Add(device);
+            else if (list[same].Asleep && !device.Asleep) list[same] = device;
         }
         var paths = Hid.Paths();
         foreach (var gone in _infos.Keys.Except(paths).ToList()) _infos.Remove(gone);
         var infos = new List<HidInfo>();
         foreach (var path in paths)
         {
-            bool known = _infos.TryGetValue(path, out var info);
-            if (!known)
+            if (!_infos.TryGetValue(path, out var info))
             {
                 // A Bluetooth collection no reader here speaks to is not opened at all (its level comes from Windows). One that
                 // is has its name and serial read as on USB: the serial keeps two pads of one model apart (a classic Bluetooth
@@ -203,13 +352,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 info = Hid.Query(path, batteries: !bluetooth);
                 if (info is not null) _infos[path] = info;
             }
-            if (info is not null && (!onlyNew || !known)) infos.Add(info);
-        }
-        // Between full passes the last readings stand, without the devices whose collections have gone (a receiver pulled out).
-        if (onlyNew)
-        {
-            foreach (var list in found.Values) list.RemoveAll(device => !Present(device.Key));
-            if (infos.Count == 0) return _previous = found;
+            if (info is not null) infos.Add(info);
         }
         var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         void Try(Func<IEnumerable<DeviceBattery>> read)
@@ -228,47 +371,119 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             return software.Contains(brand);
         }
 
-        Try(() => _logitech.Read(infos.Where(info => info.Vendor == Hidpp.Vendor && info.UsagePage == 0xFF00).ToList(), claimed));
-        foreach (var group in infos.Where(info => info.Vendor == Razer.Vendor).GroupBy(info => info.Product))
-            if (Razer.Find(group.Key) is { } model && !Aside(Razer.Vendor)) Try(() => ReadRazer(model, [.. group], claimed));
+        // A kind not due this pass still claims its collections, so no other reader takes them.
+        var hidpp = infos.Where(info => info.Vendor == Hidpp.Vendor && info.UsagePage == 0xFF00).ToList();
+        if (logitech) Try(() => _logitech.Read(hidpp, claimed));
+        else foreach (var info in hidpp) claimed.Add(info.Path);
+        if (ask)
+            foreach (var group in infos.Where(info => info.Vendor == Razer.Vendor).GroupBy(info => info.Product))
+                if (Razer.Find(group.Key) is { } model && !Aside(Razer.Vendor)) Try(() => ReadRazer(model, [.. group], claimed));
+        // The devices (GroupKey) a dongle protocol has read this pass.
+        var answered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // The ROG Omni receivers, each read as a whole (its pairing table, then its paired devices).
+        foreach (var receiver in infos.Where(info => info.Vendor == Asus.Vendor && info.Product == Asus.OmniReceiver && !info.Bluetooth).GroupBy(info => GroupKey(info.Path)))
+            if (ask) Try(() => ReadOmni([.. receiver], claimed)); else foreach (var each in receiver) claimed.Add(each.Path);
         foreach (var info in infos)
         {
             if (claimed.Contains(info.Path)) continue;
-            if (Headsets.Find(info.Vendor, info.Product) is { } headset) { if (Matches(info, Headsets.Channel(headset))) Try(() => ReadHeadset(headset, info, claimed)); continue; }
             if (info.Vendor == PlayStation.Vendor && (PlayStation.IsDualSense(info.Product) || PlayStation.IsDualShock(info.Product)) && info.UsagePage == 0x01 && info.Usage == 0x05)
-            { Try(() => ReadPlayStation(info, claimed)); continue; }
-            // AJAZZ shares Inphic's vendor ids: it does not stand aside for Inphic's software.
-            if (Dongle(info) is { } dongle && (Dongles.IsAjazz(info.Vendor, info.Product) || !Aside(info.Vendor))) Try(() => dongle(info, claimed));
+            {
+                if (listen) Try(() => ReadPlayStation(info, claimed)); else claimed.Add(info.Path);
+                continue;
+            }
+            if (!ask) continue;
+            if (Headsets.Find(info.Vendor, info.Product) is { } headset) { if (Matches(info, Headsets.Channel(headset))) Try(() => ReadHeadset(headset, info, claimed, infos)); continue; }
+            // AJAZZ shares Inphic's vendor ids: it does not stand aside for Inphic's software. A receiver whose mouse has answered on
+            // one collection is not asked again on its others (G-Wolves' receiver has more than one that would take the request).
+            if (Dongle(info) is { } dongle && !answered.Contains(GroupKey(info.Path)) && (Dongles.IsAjazz(info.Vendor, info.Product) || !Aside(info.Vendor)))
+            {
+                Try(() => dongle(info, claimed));
+                if (claimed.Contains(info.Path)) answered.Add(GroupKey(info.Path));
+            }
+        }
+        // The receivers that send their battery unasked are listened to all the time (PushEvents), and Corsair's receivers are
+        // read on a thread of their own (CorsairReader): this pass only hands them their collections, and lists the readings
+        // they have given, while their collections are there.
+        var pushes = new List<PushEvents.Collection>();
+        var corsair = new List<HidInfo>();
+        // A Corsair receiver without the 0xFF42 collection is tried on its other vendor collections (as HaloBattery does).
+        var bragi = infos.Where(info => Corsair.Find(info.Vendor, info.Product) is not null && Corsair.Collection(info.UsagePage)).Select(info => GroupKey(info.Path)).ToHashSet();
+        foreach (var info in infos.Where(info => !claimed.Contains(info.Path) && !info.Bluetooth))
+        {
+            if (Pushes.Find(info.Vendor, info.Product, info.UsagePage, info.Usage, info.Interface, info.InputLength) is { } kind) pushes.Add(new(info, kind));
+            else if (Corsair.Find(info.Vendor, info.Product) is not null
+                && (Corsair.Collection(info.UsagePage) || !bragi.Contains(GroupKey(info.Path)) && info.UsagePage >= 0xFF00)) corsair.Add(info);
+            else continue;
+            claimed.Add(info.Path);
+        }
+        _pushes?.Watch(pushes);
+        // Listening for the low battery notice leaves the Corsair receivers (slow, asked twice) alone, as the page is closed.
+        if (_demand == DeviceDemand.Watch) _corsair?.Watch(corsair); else _corsair?.Stop();
+        foreach (var (origin, device) in _side.ToList())
+        {
+            if (!Attached(device)) { _side.Remove(origin); continue; }
+            Add(device);
         }
         // The standard battery usages, on whatever no vendor protocol read. Bluetooth collections are left out (their level comes
         // from Windows, and a feature report over the air can wait on a sleeping device), and so is one that timed out lately.
         // So are power devices (a UPS on the Power Device or Battery System page, 0x84 and 0x85), which are not wireless
         // devices and often count their charge in capacity units rather than percent.
         long now = Environment.TickCount64;
-        foreach (var info in infos.Where(info => info.FeatureBatteries.Count > 0 && !claimed.Contains(info.Path) && !info.Bluetooth && info.UsagePage is not (0x84 or 0x85)
+        foreach (var info in infos.Where(info => ask && info.FeatureBatteries.Count > 0 && !claimed.Contains(info.Path) && !info.Bluetooth && info.UsagePage is not (0x84 or 0x85)
             && (!_slow.TryGetValue(info.Path, out var until) || now >= until)))
         {
             try { foreach (var device in ReadUsage(info)) Add(device); }
             catch (TimeoutException) { _slow[info.Path] = now + 10 * 60_000; }
             catch { }
         }
-        // An AJAZZ mouse on its cable is not listed a second time through its receiver (Dongles.AjazzShadowed).
-        void DropShadowed() { if (found.TryGetValue(DeviceSource.Hid, out var hid)) hid.RemoveAll(device => Dongles.AjazzShadowed(device, hid)); }
-        if (onlyNew) { DropShadowed(); return _previous = found; }
+        // A mouse on its cable is not listed a second time through its receiver, which finds it asleep (Dongles.AjazzShadowed,
+        // Dongles.Shadowed).
+        void DropShadowed()
+        {
+            foreach (var source in new[] { DeviceSource.Hid, DeviceSource.SteelSeries })
+                if (found.TryGetValue(source, out var list))
+                {
+                    var shadowed = list.Where(device => Dongles.AjazzShadowed(device, list) || Dongles.Shadowed(device, list)).ToList();
+                    list.RemoveAll(shadowed.Contains);
+                }
+        }
 
-        // A device that missed one reading (asleep for a moment, busy with its own software) keeps its last one until the next
-        // pass; missing twice, it is gone.
+        var read = new HashSet<DeviceSource>();
+        if (logitech) read.Add(DeviceSource.Logitech);
+        if (ask) read.UnionWith(Asked);
+        if (listen) read.Add(DeviceSource.Sony);
+
+        // A receiver that answers for a mouse asleep or switched off says 0 % and not charging (G-Helper, vigil-watt and HaloBattery
+        // read it so): that is no reading, so the last one stands, asleep, rather than an empty battery. A reader that found the
+        // mouse asleep without a level (the receiver said so) keeps its last reading the same way; one never read is not listed.
+        foreach (var source in Asked)
+        {
+            if (!found.TryGetValue(source, out var list)) continue;
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                if (list[i] is { Percent: 0, Charging: false } placeholder)
+                    list[i] = _lastRead.TryGetValue(placeholder.Key, out var last) && last.Device.Percent > 0
+                        ? last.Device with { Charging = false, Asleep = true } : placeholder with { Percent = null, Asleep = true };
+                else if (list[i] is { Percent: null, Asleep: true } asleep)
+                {
+                    if (_lastRead.TryGetValue(asleep.Key, out var last) && last.Device.Percent > 0) list[i] = last.Device with { Charging = false, Asleep = true };
+                    else list.RemoveAt(i);
+                }
+            }
+        }
+
+        // A device that missed one reading (asleep for a moment, busy with its own software) keeps its last one, not charging,
+        // until the next pass of its kind; missing twice, it is gone.
         foreach (var list in found.Values) foreach (var device in list) _lastRead[device.Key] = (device, 0);
         foreach (var (key, (device, missed)) in _lastRead.ToList())
         {
-            if (found.Values.SelectMany(list => list).Any(seen => seen.Key == key)) continue;
+            if (!read.Contains(device.Source) || found.Values.SelectMany(list => list).Any(seen => seen.Key == key)) continue;
             if (missed >= 1 || !Present(key)) { _lastRead.Remove(key); continue; }
             _lastRead[key] = (device, missed + 1);
-            Add(device);
+            Add(device with { Charging = false });
         }
-        DropShadowed();
-        _previous = found;
-        return found;
+        if (ask) DropShadowed();
+        foreach (var source in read) _current[source] = found.TryGetValue(source, out var list) ? list : [];
     }
     // The brands whose software is running, from one snapshot of the process names (nothing is opened or allocated per process).
     private static HashSet<DeviceBrand> RunningSoftware()
@@ -299,7 +514,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
 
     // A stable key for a device on a collection: its vendor and product, and its serial where it has one, else its Bluetooth
     // address where the path carries one (LE). Not the path, which names the USB port: a receiver moved to another port is the same
-    // device, still switched off or already noticed. The price: two receivers of one model without serials are listed as one device.
+    // device, still switched off. The price: two receivers of one model without serials are listed as one device.
     private static string Key(string prefix, HidInfo info)
         => $"{prefix}:{info.Vendor:X4}:{info.Product:X4}" + (info.Serial.Length > 0 ? ":" + info.Serial : AddressOf(info) is { } address ? ":" + address : "");
     internal static string GroupKey(string path)
@@ -315,9 +530,10 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
 
     private IEnumerable<DeviceBattery> ReadRazer(Razer.Model model, List<HidInfo> collections, HashSet<string> claimed)
     {
-        // On the model's interface: the mouse collection first, then the vendor one; the first that answers.
+        // On the model's interface: the mouse's (or keyboard's) own collection first, then the vendor one; the first that answers.
+        int usage = model.Kind == DeviceKind.Keyboard ? 0x06 : 0x02;
         var candidates = collections.Where(info => info.Interface < 0 || info.Interface == model.Interface)
-            .OrderBy(info => info.UsagePage == 0x01 && info.Usage == 0x02 ? 0 : info.UsagePage >= 0xFF00 ? 1 : 2).ToList();
+            .OrderBy(info => info.UsagePage == 0x01 && info.Usage == usage ? 0 : info.UsagePage >= 0xFF00 ? 1 : 2).ToList();
         foreach (var info in candidates)
         {
             HidDevice device;
@@ -329,7 +545,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 if (battery is null) continue;
                 bool charging = model.Charging && RazerQuery(device, model, Razer.ChargingState) is { } state && state != 0;
                 foreach (var each in collections) claimed.Add(each.Path);
-                yield return new DeviceBattery(Key("razer", info), model.Name, DeviceKind.Mouse, DeviceSource.Razer, Razer.Percent(battery.Value))
+                yield return new DeviceBattery(Key("razer", info), model.Name, model.Kind, DeviceSource.Razer, Razer.Percent(battery.Value))
                 { Charging = charging, Hardware = Devices.Hardware(info.Vendor, info.Product) };
                 yield break;
             }
@@ -355,20 +571,35 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
 
     // ----- Headsets on their own dongles -----
 
-    private static IEnumerable<DeviceBattery> ReadHeadset(Headsets.Kind kind, HidInfo info, HashSet<string> claimed)
+    private static IEnumerable<DeviceBattery> ReadHeadset(Headsets.Kind kind, HidInfo info, HashSet<string> claimed, List<HidInfo> infos)
     {
         using var device = new HidDevice(info) { StripZero = true };
-        // A dongle whose headset is off is not read: its answer to the level could be a stale one.
-        if (Headsets.ConnectionRequest(kind) is { } ask
-            && Hid.Transact<object>([device], () => device.Write(ask), r => Headsets.Connected(kind, r) is { } connected ? connected : null, 600) is false) return [];
-        var reading = Hid.Transact<object>([device], () => device.Write(Headsets.Request(kind)), r => Headsets.Battery(kind, r) is { } read ? read : null, 600);
-        if (reading is not BatteryRead battery) return [];
-        bool charging = battery.Charging;
-        if (Headsets.ChargingRequest(kind) is { } second)
-            charging |= Hid.Transact<object>([device], () => device.Write(second), r => Headsets.Charging(kind, r) is { } state ? state : null, 600) is true;
-        claimed.Add(info.Path);
-        return [new DeviceBattery(Key("headset", info), NameOf(info, Headsets.Name(kind)), DeviceKind.Headphones, Headsets.Source(kind), battery.Percent)
-            { Charging = charging, Coarse = battery.Coarse, Hardware = Devices.Hardware(info.Vendor, info.Product) }];
+        // Where the reply can come on another collection of the interface, those are read as well (Headsets.ReadsSiblings).
+        var listeners = new List<HidDevice> { device };
+        if (Headsets.ReadsSiblings(kind))
+            foreach (var other in infos.Where(other => other.Path != info.Path && other.Interface == info.Interface && GroupKey(other.Path) == GroupKey(info.Path) && other.InputLength > 0))
+                try { listeners.Add(new HidDevice(other) { StripZero = true }); } catch { }
+        try
+        {
+            void Send(byte[] request)
+            {
+                try { device.Write(request); }
+                catch (System.ComponentModel.Win32Exception error) when (error.NativeErrorCode == 1 && Headsets.FeatureFallback(kind)) { device.SetFeature(request); }
+            }
+            int wait = Headsets.Wait(kind);
+            // A dongle whose headset is off is not read: its answer to the level could be a stale one.
+            if (Headsets.ConnectionRequest(kind) is { } ask
+                && Hid.Transact<object>(listeners, () => Send(ask), r => Headsets.Connected(kind, r) is { } connected ? connected : null, wait) is false) return [];
+            var reading = Hid.Transact<object>(listeners, () => Send(Headsets.Request(kind)), r => Headsets.Battery(kind, r) is { } read ? read : null, wait);
+            if (reading is not BatteryRead battery) return [];
+            bool charging = battery.Charging;
+            if (Headsets.ChargingRequest(kind) is { } second)
+                charging |= Hid.Transact<object>(listeners, () => Send(second), r => Headsets.Charging(kind, r) is { } state ? state : null, wait) is true;
+            claimed.Add(info.Path);
+            return [new DeviceBattery(Key("headset", info), NameOf(info, Headsets.Name(kind)), DeviceKind.Headphones, Headsets.Source(kind), battery.Percent)
+                { Charging = charging, Coarse = battery.Coarse, Hardware = Devices.Hardware(info.Vendor, info.Product) }];
+        }
+        finally { foreach (var other in listeners.Skip(1)) other.Dispose(); }
     }
 
     // ----- PlayStation controllers: a few input reports, read as they come -----
@@ -397,7 +628,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     // collections get which protocol is Dongles.Find's decision (vendor and product pairs that are known, not vendor ids alone).
     private static Func<HidInfo, HashSet<string>, IEnumerable<DeviceBattery>>? Dongle(HidInfo info) => info.Bluetooth ? null
         : Dongles.Find(info.Vendor, info.Product, info.UsagePage, info.ProductName, info.FeatureLength, info.Interface, info.Usage,
-            info.InputLength, info.OutputLength) switch
+            info.InputLength, info.OutputLength, info.Collection) switch
         {
             Dongles.Protocol.BitMouse => BitMouse,
             Dongles.Protocol.Compx => Compx,
@@ -407,6 +638,18 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             Dongles.Protocol.Inphic => Inphic,
             Dongles.Protocol.Mchose => Mchose,
             Dongles.Protocol.Ajazz => Ajazz,
+            Dongles.Protocol.CompxFramed => CompxFramed,
+            Dongles.Protocol.F83 => F83,
+            Dongles.Protocol.Nordic => Nordic,
+            Dongles.Protocol.MchoseRealtek => MchoseRealtek,
+            Dongles.Protocol.Gmouse => Gmouse,
+            Dongles.Protocol.Lingbao => Lingbao,
+            Dongles.Protocol.Nzxt => Nzxt,
+            Dongles.Protocol.Cherry => (info, claimed) => StatusBlock(info, claimed, Dongles.StatusBlock.Cherry),
+            Dongles.Protocol.Hecate => (info, claimed) => StatusBlock(info, claimed, Dongles.StatusBlock.Hecate),
+            Dongles.Protocol.Asus => ReadAsus,
+            Dongles.Protocol.SteelSeries => SteelSeriesMouse,
+            Dongles.Protocol.RapooGen1 => RapooGen1,
             _ => null
         };
 
@@ -520,6 +763,183 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         return [Mouse("ajazz", info, "AJAZZ", battery, preferredName: name)];
     }
 
+    // The Compx frame on its own 17-byte collection (Dongles.CompxFramed): written, and answered on the input report. A mouse
+    // asleep behind its receiver does not answer at all.
+    private static IEnumerable<DeviceBattery> CompxFramed(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info);
+        var read = Hid.Transact<object>([device], () => device.Write(Dongles.CompxRequest(0x04)), r => Dongles.CompxFrame(r) is { } b ? b : null, 600);
+        if (read is not BatteryRead battery) return [];
+        claimed.Add(info.Path);
+        return [Mouse("compx", info, "Compx", battery)];
+    }
+
+    // The 0x83 exchange (Dongles.F83): the request set once, the reply got back until it comes (HaloBattery's 34 ms, then up to
+    // fifteen reads 50 ms apart). A collection that refuses the request is not the one.
+    private static IEnumerable<DeviceBattery> F83(HidInfo info, HashSet<string> claimed)
+    {
+        if (Dongles.F83Find(info.Vendor, info.Product) is not { } model) return [];
+        using var device = new HidDevice(info);
+        if (!device.SetFeature(Dongles.F83Request(model))) return [];
+        Thread.Sleep(34);
+        BatteryRead? read = null;
+        for (int attempt = 0; attempt < 15 && read is null; attempt++)
+        {
+            if (attempt > 0) Thread.Sleep(50);
+            if (device.GetFeature(0, Math.Max(65, device.FeatureLength)) is { } reply) read = Dongles.F83Battery(model, reply);
+        }
+        if (read is not { } battery) return [];
+        claimed.Add(info.Path);
+        return [Mouse("f83", info, model.Name, battery, preferredName: model.Name)];
+    }
+
+    private static IEnumerable<DeviceBattery> Nordic(HidInfo info, HashSet<string> claimed)
+        => Feature(info, claimed, "nordic", "Ninjutso Sora V2", Dongles.NordicRequest(32), 90, Dongles.NordicBattery);
+    private static IEnumerable<DeviceBattery> Lingbao(HidInfo info, HashSet<string> claimed)
+        => Feature(info, claimed, "lingbao", "LINGBAO M5PRO Max", Dongles.LingbaoRequest(), 50, Dongles.LingbaoBattery);
+
+    // MCHOSE on its RealTek receivers: the short report first, then the long one, each asked afresh before every read.
+    private static IEnumerable<DeviceBattery> MchoseRealtek(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info);
+        foreach (bool longReport in new[] { false, true })
+        {
+            var request = Dongles.MchoseRealtekRequest(longReport);
+            for (int attempt = 0; attempt < 4; attempt++)
+            {
+                if (!device.SetFeature(request)) break;
+                Thread.Sleep(120);
+                if (device.GetFeature(request[0], Math.Max(request.Length, device.FeatureLength)) is not { } reply || Dongles.MchoseRealtekBattery(reply) is not { } answer) continue;
+                claimed.Add(info.Path);
+                return [Mouse("mchose", info, "MCHOSE", answer.Read, preferredName: Dongles.MchoseRealtekModel(answer.Model))];
+            }
+        }
+        return [];
+    }
+
+    private static IEnumerable<DeviceBattery> Gmouse(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info) { StripZero = true };
+        var read = Hid.Transact<object>([device], () => device.Write(Dongles.GmouseRequest()), r => Dongles.GmouseBattery(r) is { } b ? b : null, 800);
+        if (read is not BatteryRead battery) return [];
+        claimed.Add(info.Path);
+        return [Mouse("mchose", info, "MCHOSE", battery)];
+    }
+
+    // The NZXT dongle acknowledges first (4E E5), then answers; the acknowledgement is passed over.
+    private static IEnumerable<DeviceBattery> Nzxt(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info);
+        var read = Hid.Transact<object>([device], () => device.Write(Dongles.NzxtRequest()), r => Dongles.NzxtBattery(r) is { } b ? b : null, 1500);
+        if (read is not BatteryRead battery) return [];
+        claimed.Add(info.Path);
+        return [Mouse("nzxt", info, "NZXT Lift Elite", battery, preferredName: "NZXT Lift Elite")];
+    }
+
+    private static IEnumerable<DeviceBattery> StatusBlock(HidInfo info, HashSet<string> claimed, Dongles.StatusBlock kind)
+    {
+        using var device = new HidDevice(info);
+        var read = Hid.Transact<object>([device], () => device.Write(Dongles.StatusBlockRequest(kind)), r => Dongles.StatusBlockBattery(kind, r) is { } b ? b : null, 700);
+        if (read is not BatteryRead battery) return [];
+        claimed.Add(info.Path);
+        return kind == Dongles.StatusBlock.Cherry
+            ? [Mouse("cherry", info, "CHERRY PIXIU75", battery, DeviceKind.Keyboard)]
+            : [Mouse("hecate", info, "HECATE G5M Pro", battery)];
+    }
+
+    // ASUS: up to three asks, 300 ms each (as G-Helper asks), stopping at a command the firmware refuses; a headset is asked
+    // for its charging state second.
+    private static IEnumerable<DeviceBattery> ReadAsus(HidInfo info, HashSet<string> claimed)
+    {
+        if (Asus.Find(info.Vendor, info.Product) is not { } model) return [];
+        using var device = new HidDevice(info);
+        if (AskAsus(device, model) is not { } battery) return [];
+        claimed.Add(info.Path);
+        return [Mouse("asus", info, model.Name, battery, Asus.Kind(model))];
+    }
+    private static BatteryRead? AskAsus(HidDevice device, Asus.Model model)
+    {
+        object? reply = null;
+        for (int attempt = 0; attempt < 3 && reply is null; attempt++)
+            reply = Hid.Transact<object>([device], () => device.Write(Sized(device, Asus.Request(model))), r => Asus.Reply(model, r), 300);
+        if (reply is not BatteryRead battery) return null;
+        if (Asus.ChargingRequest(model) is { } second
+            && Hid.Transact<object>([device], () => device.Write(Sized(device, second)), r => Asus.Charging(model, r) is { } state ? state : null, 300) is true)
+            battery = battery with { Charging = true };
+        return battery;
+    }
+    // A request at the collection's own output length (65 bytes on the ASUS mice, 64 on a headset's or the Omni receiver's).
+    private static byte[] Sized(HidDevice device, byte[] request) { Array.Resize(ref request, device.OutputLength); return request; }
+
+    // The ROG Omni receiver: its pairing table on collection 1, then each paired model on its own channel (Asus.OmniTable).
+    // Every collection of the receiver is claimed, whatever it answers.
+    private static IEnumerable<DeviceBattery> ReadOmni(List<HidInfo> receiver, HashSet<string> claimed)
+    {
+        foreach (var each in receiver) claimed.Add(each.Path);
+        HidInfo? Channel(int collection) => receiver.FirstOrDefault(info => info.Interface == Asus.OmniInterface && info.Collection == collection && info.OutputLength >= 64);
+        if (Channel(Asus.OmniTableCollection) is not { } tableInfo) return [];
+        IReadOnlyList<Asus.Model>? paired;
+        using (var table = new HidDevice(tableInfo))
+            paired = Hid.Transact<IReadOnlyList<Asus.Model>>([table], () => table.Write(Sized(table, Asus.OmniTableRequest())), Asus.OmniTable, 700);
+        var found = new List<DeviceBattery>();
+        foreach (var model in paired ?? [])
+        {
+            if (Channel(model.Collection) is not { } info) continue;
+            try
+            {
+                using var device = new HidDevice(info);
+                if (AskAsus(device, model) is not { } battery) continue;
+                found.Add(new DeviceBattery(Key("asus", info) + $":{model.Product:X4}", model.Name, Asus.Kind(model), DeviceSource.Hid, battery.Percent)
+                    { Charging = battery.Charging, Coarse = battery.Coarse, Hardware = Devices.Hardware(info.Vendor, info.Product) });
+            }
+            catch (Exception error) when (error is System.ComponentModel.Win32Exception or TimeoutException or IOException) { }
+        }
+        return found;
+    }
+
+    // Rapoo's first generation (Dongles.RapooGen1*; untested by us on a mouse): the query written as output report 0xBA, then
+    // the input report got back every few milliseconds until it has gone busy and then answered; a request the receiver lost
+    // (never busy within 100 ms) is sent again, as mousectl does, within 1.5 s in all.
+    private static IEnumerable<DeviceBattery> RapooGen1(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info);
+        var request = Dongles.RapooGen1Request(cable: info.Product == 0x4431);
+        long deadline = Environment.TickCount64 + 1500;
+        for (int sends = 0; sends < 4 && Environment.TickCount64 < deadline; sends++)
+        {
+            device.Write(request);
+            long sent = Environment.TickCount64;
+            bool busy = false;
+            while (Environment.TickCount64 < deadline)
+            {
+                Thread.Sleep(5);
+                byte[]? reply;
+                try { reply = device.GetInput(Dongles.RapooGen1Report, Math.Max(33, device.InputLength), 300); }
+                catch (TimeoutException) { continue; }
+                if (reply is null || Dongles.RapooGen1Status(reply) is not { } ok) continue;
+                if (!ok) { busy = true; continue; }
+                if (busy)
+                {
+                    if (Dongles.RapooGen1Battery(reply) is not { } battery) break;
+                    claimed.Add(info.Path);
+                    return [Mouse("rapoo", info, "Rapoo VT3 PRO", battery)];
+                }
+                if (Environment.TickCount64 - sent >= 100) break;
+            }
+        }
+        return [];
+    }
+
+    private static IEnumerable<DeviceBattery> SteelSeriesMouse(HidInfo info, HashSet<string> claimed)
+    {
+        if (SteelSeriesMice.Find(info.Vendor, info.Product) is not { } model) return [];
+        using var device = new HidDevice(info);
+        var read = Hid.Transact<object>([device], () => device.Write(SteelSeriesMice.Request(model)), r => SteelSeriesMice.Battery(model, r) is { } b ? b : null, 600);
+        if (read is not BatteryRead battery) return [];
+        claimed.Add(info.Path);
+        return [Mouse("steelseries", info, model.Name, battery) with { Source = DeviceSource.SteelSeries }];
+    }
+
     // ----- The standard battery usages -----
 
     private static IEnumerable<DeviceBattery> ReadUsage(HidInfo info)
@@ -548,22 +968,29 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         private const int TimeoutMs = 400, PingTimeoutMs = 1500;
         // Legacy: a HID++ 1.0 device, read through its registers.
         private sealed class Slot { public string Key = "", Name = ""; public bool Legacy; public DeviceKind Kind = DeviceKind.Other; public readonly Dictionary<int, byte> Features = []; public byte[]? Capabilities; public DeviceBattery? Last; public long LastAt; }
-        // A device that sleeps between readings (a mouse left alone) keeps its last reading this long.
+        // A device that sleeps between readings (a mouse left alone) keeps its last level this long, as asleep and not charging: a
+        // device that charges on its cable is powered and answers, so a reading taken while it charged (a mouse just unplugged,
+        // which sleeps at once) does not say it still does.
         private const long Asleep = 10 * 60_000;
-        private static DeviceBattery? Remembered(Slot? slot) => slot?.Last is { } last && Environment.TickCount64 - slot.LastAt < Asleep ? last : null;
+        private static DeviceBattery? Remembered(Slot? slot) => slot?.Last is { } last && Environment.TickCount64 - slot.LastAt < Asleep ? last with { Charging = false, Asleep = true } : null;
         private readonly Dictionary<string, Slot> _known = [];
         public void Clear() => _known.Clear();
         // The receiver (its collections' group) a device was last read through, by the device's key.
         public string? Receiver(string key) => _known.FirstOrDefault(pair => pair.Value.Key == key).Key is { } slot ? slot[..slot.LastIndexOf('|')] : null;
 
+        // The receivers and cabled devices the last Read went through, for the event listener (HidppEvents).
+        public List<HidppEvents.Group> Groups { get; } = [];
+
         public IEnumerable<DeviceBattery> Read(List<HidInfo> collections, HashSet<string> claimed)
         {
             var found = new List<DeviceBattery>();
             var shorts = collections.Where(info => info.Usage == 0x0001).GroupBy(info => GroupKey(info.Path)).ToDictionary(g => g.Key, g => g.First());
+            Groups.Clear();
             foreach (var longInfo in collections.Where(info => info.Usage == 0x0002))
             {
                 string group = GroupKey(longInfo.Path);
                 shorts.TryGetValue(group, out var shortInfo);
+                Groups.Add(new HidppEvents.Group(group, longInfo, shortInfo, Hidpp.IsReceiver(longInfo.Product, longInfo.ProductName)));
                 Channel channel;
                 try { channel = new Channel(longInfo, shortInfo); }
                 catch { continue; }
@@ -576,7 +1003,12 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                         // A failed write or read (the receiver pulled out half way) costs this slot its reading, not the others'.
                         try { device = ReadOne(channel, group, index, longInfo); }
                         catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { device = Remembered(_known.GetValueOrDefault(group + "|" + index)); }
-                        if (device is not null && found.All(known => known.Key != device.Key)) found.Add(device);
+                        // A device read on its cable and through its receiver is one entry: a reading it answered beats one kept
+                        // from before (Remembered), whichever came first.
+                        if (device is null) continue;
+                        int same = found.FindIndex(known => known.Key == device.Key);
+                        if (same < 0) found.Add(device);
+                        else if (found[same].Asleep && !device.Asleep) found[same] = device;
                     }
                 }
             }
@@ -619,10 +1051,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 }
                 // A device without a battery feature (a keyboard on a cable) is not listed.
                 if (device.ReadBattery() is not { } battery) return null;
-                slot.Last = new DeviceBattery(slot.Key, slot.Name, slot.Kind != DeviceKind.Other ? slot.Kind : Devices.Named(slot.Name) ?? DeviceKind.Other, DeviceSource.Logitech, battery.Percent)
-                { Charging = battery.Charging, Coarse = battery.Coarse };
-                slot.LastAt = Environment.TickCount64;
-                return slot.Last;
+                return Take(slot, battery);
             }
             catch (Exception error) when (error is TimeoutException or HidppError)
             {
@@ -631,6 +1060,44 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 return Remembered(slot);
             }
         }
+
+        private static DeviceBattery Take(Slot slot, BatteryRead battery)
+        {
+            slot.Last = new DeviceBattery(slot.Key, slot.Name, slot.Kind != DeviceKind.Other ? slot.Kind : Devices.Named(slot.Name) ?? DeviceKind.Other, DeviceSource.Logitech, battery.Percent)
+            { Charging = battery.Charging, Coarse = battery.Coarse };
+            slot.LastAt = Environment.TickCount64;
+            return slot.Last;
+        }
+
+        // ----- What the devices send unasked (HidppEvents) -----
+
+        // Each device slot's battery feature index and which feature it is (0x1004 or 0x1000; the voltage and headset features
+        // send no event), as found by the reads so far.
+        public Dictionary<(string Group, byte Index), (byte Feature, int Battery)> BatteryIndices()
+        {
+            var indices = new Dictionary<(string, byte), (byte, int)>();
+            foreach (var (slotKey, slot) in _known)
+            {
+                if (slot.Legacy) continue;
+                int bar = slotKey.LastIndexOf('|');
+                if (!byte.TryParse(slotKey[(bar + 1)..], out var index)) continue;
+                if (slot.Features.TryGetValue(Hidpp.UnifiedBattery, out var unified) && unified != 0) indices[(slotKey[..bar], index)] = (unified, Hidpp.UnifiedBattery);
+                else if (slot.Features.TryGetValue(Hidpp.BatteryStatus, out var status) && status != 0) indices[(slotKey[..bar], index)] = (status, Hidpp.BatteryStatus);
+            }
+            return indices;
+        }
+
+        // A battery event's reading for the device in a slot; null for a slot not known.
+        public DeviceBattery? Event(string group, byte index, int battery, byte[] parameters)
+        {
+            if (!_known.TryGetValue(group + "|" + index, out var slot) || slot.Legacy || slot.Key.Length == 0) return null;
+            var read = battery == Hidpp.UnifiedBattery ? Hidpp.Unified(parameters, slot.Capabilities) : Hidpp.Status(parameters);
+            return Take(slot, read);
+        }
+
+        // A device whose link the receiver reports lost: its last reading, asleep and not charging (as Remembered).
+        public DeviceBattery? LinkLost(string group, byte index)
+            => _known.TryGetValue(group + "|" + index, out var slot) && slot.Last is { } last ? last with { Charging = false, Asleep = true } : null;
 
         // HID++ 1.0 devices: register 0x0D (mileage) or 0x07 (a level 1 to 7).
         private static DeviceBattery? Registers(Channel channel, byte index, HidInfo info)

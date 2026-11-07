@@ -14,6 +14,8 @@ using BrimDeck.Native;
 internal static partial class LiquidPages
 {
     private sealed record PowerScene(string Label, double Width, double Height, bool Laptop, MonitorSnapshot Snapshot);
+    // The collapsed row's own device reading is gone (the devices are a part of the row: DeviceStrip); the scenes keep the label.
+    private readonly record struct BatteryReading(int Percent, bool Charging, MemoryLevel Level, string Name, DeviceKind Kind = DeviceKind.Other);
     private sealed record StripScene(string Label, MonitorSnapshot Snapshot, bool Laptop, BatteryReading? Device = null);
 
     private static BatteryCell Cell(double remaining, double rate, bool charging = false, bool discharging = false)
@@ -114,7 +116,6 @@ internal static partial class LiquidPages
                 for (int i = 0; i < strips.Count; i++)
                 {
                     BatteryProvider.ForceBattery = strips[i].Laptop;
-                    deck.OffscreenLowest = strips[i].Device;
                     deck.ApplySettings();
                     Show(deck, root, Page.Capsule, track, cover, strips[i].Snapshot);
                     // The row's readings join with their first figure; the snapshot is handed over again once the row is built with them.

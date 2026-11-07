@@ -400,8 +400,10 @@ public sealed partial class SettingsWindow
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
-        CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), CompactMonitorItems.Battery => Loc.T("设备最低电量（外设）", "Lowest device battery (peripherals)"),
-        CompactMonitorItems.Power => Loc.T("整机功耗", "System power"), CompactMonitorItems.Charge => Loc.T("本机电池", "This PC's battery"), CompactMonitorItems.Frames => Loc.T("帧率", "Frame rate"), _ => "CPU"
+
+        CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), CompactMonitorItems.Power => Loc.T("整机功耗", "System power"),
+        CompactMonitorItems.Charge => Loc.T("本机电池", "This PC's battery"), CompactMonitorItems.Frames => Loc.T("帧率", "Frame rate"),
+        CompactMonitorItems.Battery => Loc.T("设备电量", "Device batteries"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -413,9 +415,7 @@ public sealed partial class SettingsWindow
         var handle = new GripHandle { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
         row.Children.Add(handle);
         var label = TextLine(name, TextSize.Strong, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(Space.Tight, 0, Space.Tight, 0);
-        // The two batteries are told apart where they are chosen: the devices' lowest has the device's icon, this PC's own a battery.
-        if (item == CompactMonitorItems.Battery) { label.ToolTip = Loc.T("外设中电量最低的一个，以设备图标显示。", "Lowest peripheral battery, shown with the device icon."); AutomationProperties.SetHelpText(label, (string)label.ToolTip); }
-        else if (item == CompactMonitorItems.Charge) { label.ToolTip = Loc.T("本机电池，以电池图形显示。", "This PC's battery, shown as a battery icon."); AutomationProperties.SetHelpText(label, (string)label.ToolTip); }
+        if (item == CompactMonitorItems.Charge) { label.ToolTip = Loc.T("本机电池，以电池图形显示。", "This PC's battery, shown as a battery icon."); AutomationProperties.SetHelpText(label, (string)label.ToolTip); }
         Grid.SetColumn(label, 2); row.Children.Add(label);
         // CPU, GPU and the drives choose what they show in a menu at the right of their name.
         if (CompactFigures.Has(item))
@@ -454,9 +454,10 @@ public sealed partial class SettingsWindow
             {
                 CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
                 CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值，在左侧的菜单中选择显示什么。", "The drives always show figures; choose which in the menu at the left."),
-                CompactMonitorItems.Battery => Loc.T("外设中电量最低的一个（鼠标、键盘、耳机等），以设备图标显示；非本机电池。", "Lowest peripheral battery (mouse, keyboard, headphones), shown with the device icon; not this PC's battery."),
                 CompactMonitorItems.Power => Loc.T("整机功耗，单位 W；是否为估算见悬停提示。无读数的电脑不显示。", "System power in W; the tooltip says whether it is an estimate. Hidden on PCs with no reading."),
                 CompactMonitorItems.Charge => Loc.T("本机电池电量，以电池图形显示。无电池的电脑不显示。", "This PC's battery charge, shown as a battery icon. Hidden on PCs without a battery."),
+
+                CompactMonitorItems.Battery => Loc.T("在“设置 › 设备”中选择显示哪些设备、是否显示数字和顺序。", "Choose which devices show, with or without figures, and their order under Settings › Devices."),
                 CompactMonitorItems.Frames => Loc.T("前台程序每秒绘制的帧数；前台程序不在绘制时，显示最近一个在绘制的程序。首次开启时需要授权，未授权时不显示。",
                     "The frames the program in front draws each second; while it draws nothing, the last program that did. Needs permission the first time; hidden until then."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")

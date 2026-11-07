@@ -45,13 +45,25 @@ static class DeviceSafetyTests
     private static void RequestTargets(Action<string, bool> check)
     {
         int[] pages = [0xFF00, 0xFF01, 0xFF02, 0xFF04, 0xFF05, 0xFF0B, 0xFF1C, 0xFFA0, 0x01, 0x0C];
-        // Every vendor and product of the three shared ids, on every page a protocol here uses: none is sent to.
+        // Every vendor and product of the three shared ids, on every page a protocol here uses: none is sent to, but the products
+        // verified for a frame (Dongles.CompxFramed, Dongles.NinjutsoProducts), and those only on their own collection.
+        bool Verified(int vendor, int product) => Dongles.IsCompxFramed(vendor, product) || vendor == Dongles.NordicVendor && Dongles.NinjutsoProducts.Contains(product);
         bool shared = true;
         foreach (int vendor in new[] { 0x3554, 0x1915, 0x0BDA })
             for (int product = 0; product <= 0xFFFF && shared; product++)
                 foreach (int page in pages)
-                    if (Dongles.Find(vendor, product, page, "Wireless Mouse", 64) is not null) { shared = false; break; }
-        check("Requests: Compx's 0x3554, Nordic's 0x1915 and Realtek's 0x0BDA are sent to on no product or page", shared);
+                    if (!Verified(vendor, product) && (Dongles.Find(vendor, product, page, "Wireless Mouse", 64) is not null
+                        || Dongles.Find(vendor, product, page, "Wireless Mouse", 65, 1, 0x0002, 17, 17) is not null)) { shared = false; break; }
+        check("Requests: Compx's 0x3554, Nordic's 0x1915 and Realtek's 0x0BDA are sent to on no product or page but the verified ones", shared);
+        bool own = true;
+        foreach (var (vendor, product) in Dongles.CompxFramed.Where(pair => pair.Vendor == 0x3554).Append((0x1915, 0xAE1C)).Append((0x1915, 0xAE11)))
+            foreach (int page in pages)
+            {
+                var found = Dongles.Find(vendor, product, page, "Wireless Mouse", 64, 1, 0x0002, 64, 64);
+                if (found is not null && !(vendor == 0x1915 && page == 0xFFA0 && found == Dongles.Protocol.Nordic)) own = false;
+            }
+        check("Requests: the verified products of the shared ids only on their own collection (the 17-byte 0xFF02 one, Nordic's 0xFFA0)", own
+            && Dongles.Find(0x3554, 0xF58A, 0xFF02, "", 0, 1, 0x0002, 17, 17) == Dongles.Protocol.CompxFramed);
         check("Requests: Realtek 0BDA:4762 and a Nordic 1915 receiver, the cases the review named, are not sent to",
             Dongles.Find(0x0BDA, 0x4762, 0xFF01, "MCHOSE Mouse", 64) is null && Dongles.Find(0x0BDA, 0x4762, 0xFF0B, "2.4G Mouse", 64) is null
             && Dongles.Find(0x1915, 0x0001, 0xFFA0, "Crazyradio", 64) is null && Dongles.Find(0x1915, 0x520F, 0xFFA0, "HP Prime", 64) is null);

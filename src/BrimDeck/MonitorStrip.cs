@@ -17,7 +17,7 @@ namespace BrimDeck;
 // collapsed row stays still between readings. Given a narrower width directly, it shows what fits, dropping whole readings
 // (CompactMonitor.Fit) so it never cuts through a figure: a reading that no longer fits fades and shrinks out of its place while
 // the others slide together. The panel keeps those transitions (StripPresence) across rebuilds of the row, which happen on every
-// change of its width. The battery reading (the lowest charge among the wireless devices) takes its figure from the panel (SetBattery).
+// change of its width.
 internal sealed class MonitorStrip : FrameworkElement
 {
     // The parts of the drive reading a strip draws: the glyph and the letters as in the row, or the letters alone.
@@ -34,8 +34,6 @@ internal sealed class MonitorStrip : FrameworkElement
     // The look of the power and charge readings on the theme in use, and the threshold under which the charge is low.
     private readonly PowerStyle _powerStyle;
     private readonly int _low;
-    // The lowest battery among the devices shown (MainWindow.LowestBattery), for the battery reading.
-    private BatteryReading? _battery;
     // Made once, as the strip measures and draws on every reading: the readings in order, each once, the delegates it hands to
     // CompactMonitor (a method group or a lambda passed each time would be allocated each time), and the list they are
     // arranged into.
@@ -108,7 +106,7 @@ internal sealed class MonitorStrip : FrameworkElement
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
-            DeviceWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
+
             FramesSlot + Math.Round(3 * _scale) + FigureWidth(WidestFrames) + Math.Round(2 * _scale) + SmallWidth(FramesUnit));
     }
 
@@ -239,9 +237,6 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Gpu when s?.Gpu.OrDefault is { NoReadings: false } gpu: parts.Add("GPU " + MonitorFormat.Percent(gpu.Usage) + "%"); break;
                 case CompactMonitorItems.Download when s?.Network.OrDefault is { } down: parts.Add(Loc.T("下载 ", "Download ") + MonitorFormat.Rate(down.DownBytesPerSecond).Text); break;
                 case CompactMonitorItems.Upload when s?.Network.OrDefault is { } up: parts.Add(Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(up.UpBytesPerSecond).Text); break;
-                case CompactMonitorItems.Battery when _battery is { } device:
-                    parts.Add(Loc.T("设备最低电量（外设）", "Lowest device battery (peripherals)") + " " + device.Name + " " + device.Percent + "%"
-                        + (device.Charging ? Loc.T("，充电", ", charging") : "") + LevelWords(device.Level)); break;
                 case CompactMonitorItems.Power when s?.Power.OrDefault is { } power:
                     parts.Add(Loc.T("整机功耗 ", "System power ") + PowerText.Watts(power.Watts) + Loc.T("，", ", ") + (power.Estimated ? Loc.T("估算", "estimated") : Loc.T("实测", "measured"))); break;
                 case CompactMonitorItems.Frames when FrameOf(s) is { } frames: parts.Add(Loc.T("帧率 ", "Frame rate ") + FramesFigure(frames.PerSecond) + " FPS" + Loc.T("，", ", ") + frames.Program); break;
@@ -253,16 +248,8 @@ internal sealed class MonitorStrip : FrameworkElement
     }
     private static string LevelWords(MemoryLevel level) => level switch
     { MemoryLevel.Critical => Loc.T("，低电量", ", low"), MemoryLevel.Elevated => Loc.T("，电量偏低", ", getting low"), _ => "" };
-    // Whether the settings choose the battery reading, shown yet or not (StripAdmission); and whether any reading other than the
-    // battery is chosen, which the system sampler reads.
-    public bool ChoosesBattery => (_chosen & CompactMonitorItems.Battery) != 0;
-    public bool NeedsSystem => (_chosen & ~CompactMonitorItems.Battery) != 0;
-    // A new lowest battery, for the battery reading's figure.
-    public void SetBattery(BatteryReading? battery)
-    {
-        if (_battery == battery) return;
-        _battery = battery; InvalidateVisual();
-    }
+    // Whether any reading is chosen, which the system sampler reads.
+    public bool NeedsSystem => _chosen != 0;
     private bool ValuesMoving(double now)
     {
         for (int i = 0; i < _cores.Length; i++) if (_cores[i].Moving(now)) return true;
@@ -318,8 +305,8 @@ internal sealed class MonitorStrip : FrameworkElement
             }
             double left = Math.Round(x);
             // Each reading in the color of its level (ReadingLevels); the core columns take theirs core by core.
-            var level = item == CompactMonitorItems.Battery ? _battery?.Level ?? MemoryLevel.Normal
-                : item == CompactMonitorItems.Charge ? BatteryModel.Level(s?.Battery.OrDefault, _low) : ReadingLevels.Of(item, s);
+
+            var level = item == CompactMonitorItems.Charge ? BatteryModel.Level(s?.Battery.OrDefault, _low) : ReadingLevels.Of(item, s);
             string color = _colors.At(item, level);
             switch (item)
             {
@@ -332,7 +319,6 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Storage: Drives(drawing, left, center, s, ppd); break;
-                case CompactMonitorItems.Battery: Battery(drawing, left, center, _battery, color, level, ppd); break;
                 case CompactMonitorItems.Power: Power(drawing, left, center, s?.Power.OrDefault, ppd); break;
                 case CompactMonitorItems.Charge: Charge(drawing, left, center, s?.Battery.OrDefault, _charge.At(now), level, ppd); break;
                 case CompactMonitorItems.Frames: Frames(drawing, left, center, FrameOf(s), color, ppd); break;
@@ -455,21 +441,7 @@ internal sealed class MonitorStrip : FrameworkElement
         }
     }
 
-    // The lowest battery among the wireless devices (not this PC's own, which is the Charge reading and draws a battery): the icon of
-    // that device, a mouse, a keyboard, headphones, in the text color (the warning or critical color only at those levels, as every
-    // reading's level colors), a bolt after it while it charges, then the figure, drawn as the other readings' figures are (Figure):
-    // "83%". The device's name and the kind of reading are in the row's automation name (Spoken).
-    private double DeviceWidth => Math.Round(14 * _scale) + Math.Round(5 * _scale);
-    private void Battery(DrawingContext drawing, double x, double center, BatteryReading? battery, string color, MemoryLevel level, double ppd)
-    {
-        double size = Math.Round(14 * _scale), scale = size / DeviceIcons.Grid;
-        string ink = battery is null ? UI.Tertiary : level == MemoryLevel.Normal ? UI.Secondary : color;
-        drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, x, Math.Round(center - size / 2)));
-        drawing.DrawGeometry(null, DeviceGlyphs.Stroke(ink, 2.1), DeviceGlyphs.Icon(battery?.Kind ?? DeviceKind.Other));
-        drawing.Pop();
-        if (battery is { Charging: true }) DeviceGlyphs.Bolt(drawing, new Rect(x + size + Math.Round(.5 * _scale), Math.Round(center - size * .4), Math.Round(4 * _scale), Math.Round(size * .8)), ink);
-        Figure(drawing, x + DeviceWidth + Math.Round(3 * _scale), center, battery is { } device ? device.Percent / 100.0 : null, "", FigureColor(level, color), ppd);
-    }
+
     // The figure of a reading that is a share: "83%", one size, weight and baseline for every reading that has one (the dials' figures,
     // the drives', the battery's).
     private void Figure(DrawingContext drawing, double x, double center, double? share, string unused, string color, double ppd)

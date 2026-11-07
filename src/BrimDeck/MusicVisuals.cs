@@ -654,9 +654,15 @@ internal sealed class ReadingsCarousel : GlideCarousel
     // cut: while the surface is dragged the window is not whole readings and does not glide (travel 0); the reading it cuts fades
     // over this many DIPs inside it (CompactSpacing.CutFade).
     public ReadingsCarousel(MonitorStrip strip, double window, double travel, double edge, TimeSpan elapsed, bool animate, double cut = 0)
+        : this(strip, strip.PreferredWidth, window, travel, edge, elapsed, animate, cut) { }
+    // The devices' batteries on a column line too wide for it scroll the same way.
+    public ReadingsCarousel(DeviceStrip strip, double window, double travel, double edge, TimeSpan elapsed, bool animate)
+        : this(strip, strip.PreferredWidth, window, travel, edge, elapsed, animate, 0) { }
+    private ReadingsCarousel(FrameworkElement strip, double width, double window, double travel, double edge, TimeSpan elapsed, bool animate, double cut)
     {
+
         Height = strip.Height;
-        strip.Width = strip.PreferredWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        strip.Width = width; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
         Glide(strip, window, travel, edge, elapsed, animate, cut);
     }
 }

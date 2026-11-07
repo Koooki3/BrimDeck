@@ -117,10 +117,10 @@ public static class BatteryModel
         => battery.TryGet(out var sample) && sample.State == BatteryState.Discharging && sample.HasRate && inputs.AcOnline != true ? sample.Watts : Reading<double>.Unavailable(
             Loc.T("未使用电池供电", "not on battery"));
 
-    // Low is at or under the threshold, elevated within ten points above it, as the wireless devices are (Devices.Level); a battery on
+    // Low is at or under the threshold, elevated within ten points above it (Devices.Level, with the warning ten above); a battery on
     // mains is never low. Battery saver is a state of its own (Saver) and does not change the level.
     public static MemoryLevel Level(BatterySample? battery, int low)
-        => battery is null ? MemoryLevel.Normal : Devices.Level((int)Math.Round(battery.Percent), battery.State != BatteryState.Discharging, low);
+        => battery is null ? MemoryLevel.Normal : Devices.Level((int)Math.Round(battery.Percent), battery.State != BatteryState.Discharging, low + 10, low);
 
     public static string ModeName(PowerMode mode) => mode switch
     {

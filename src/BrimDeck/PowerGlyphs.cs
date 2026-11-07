@@ -81,7 +81,7 @@ internal static class PowerGlyphs
     {
         double scale = size / 16;
         drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, at.X, at.Y));
-        drawing.DrawGeometry(null, DeviceGlyphs.Stroke(color, Math.Max(1, 1.4 / Math.Max(scale, .5)) * (scale < .6 ? .8 : 1)), LeafShape);
+        drawing.DrawGeometry(null, PowerMarks.Stroke(color, Math.Max(1, 1.4 / Math.Max(scale, .5)) * (scale < .6 ? .8 : 1)), LeafShape);
         drawing.Pop();
     }
 
@@ -182,14 +182,14 @@ internal static class PowerGlyphs
             if (battery.Level != MemoryLevel.Normal)
             {
                 var empty = new Rect(inner.X + lit, inner.Y, Math.Max(0, inner.Width - lit), inner.Height);
-                DeviceGlyphs.Exclamation(drawing, empty.Width >= markSize * .6 ? empty : inner, empty.Width >= markSize * .6 ? fillColor : onFill, null, ppd);
+                PowerMarks.Exclamation(drawing, empty.Width >= markSize * .6 ? empty : inner, empty.Width >= markSize * .6 ? fillColor : onFill, null, ppd);
             }
             else if (saver) Leaf(drawing, new Point(inner.X + inner.Width / 2 - markSize / 2, inner.Y + (inner.Height - markSize) / 2), markSize, lit > inner.Width * .5 ? onFill : style.Saver);
         }
         else if (compact && battery.Level != MemoryLevel.Normal && !plugged)
         {
             double left = inner.X + lit;
-            DeviceGlyphs.Exclamation(drawing, new Rect(left, body.Y + stroke / 2, Math.Max(0, inner.Width - lit), Math.Max(0, body.Height - stroke)), fillColor, null, ppd);
+            PowerMarks.Exclamation(drawing, new Rect(left, body.Y + stroke / 2, Math.Max(0, inner.Width - lit), Math.Max(0, body.Height - stroke)), fillColor, null, ppd);
         }
     }
 
@@ -270,8 +270,7 @@ internal static class PowerGlyphs
     }
 }
 
-// The mark drawn beside the battery on mains: the plug. The round-capped pens and the exclamation mark are DeviceGlyphs', shared
-// with the devices page.
+// The marks drawn inside and beside the battery: round-capped pens made once, the plug and the exclamation mark.
 internal static class PowerMarks
 {
     // A mains plug, filled and full: two broad rounded prongs, the body rounding down to a thick cable. 9.2 wide and 12 tall, from (0.4, 0).
@@ -279,6 +278,16 @@ internal static class PowerMarks
     private const double PlugWide = 9.2, PlugLeft = .4;
     public const double PlugAspect = PlugWide / 12;
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
+
+    private static readonly Dictionary<(string Color, double Thickness), Pen> Pens = [];
+    public static Pen Stroke(string color, double thickness)
+    {
+        if (Pens.TryGetValue((color, thickness), out var pen)) return pen;
+        pen = new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
+        pen.Freeze();
+        if (Pens.Count > 64) Pens.Clear();
+        return Pens[(color, thickness)] = pen;
+    }
 
     // The plug as tall as the area, centred in it, as a geometry in the area's coordinates (to draw it, or to cut its room out of another).
     public static Geometry PlugIn(Rect area)

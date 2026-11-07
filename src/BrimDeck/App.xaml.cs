@@ -552,7 +552,7 @@ public partial class App : Application
     private void DeviceBatteriesChanged()
     {
         if (Devices is { } devices && Settings.DeviceLowNotice && Settings.NoticesEnabled)
-            foreach (var low in _lowBattery.Update(devices.All.Where(device => !Settings.Hides(device.Key)), Settings.DeviceLowPercent))
+            foreach (var low in _lowBattery.Update(DeviceLists.Noticed(devices.All, Settings.DeviceChoices), Settings.DeviceLowPercent))
                 Notices.SendDeviceLow(low);
         DevicesChanged?.Invoke();
     }

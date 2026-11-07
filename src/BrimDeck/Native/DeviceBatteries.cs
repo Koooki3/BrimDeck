@@ -1,13 +1,16 @@
+using System.Runtime.InteropServices;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using Microsoft.Win32;
 
 namespace BrimDeck.Native;
 
 // How much the devices' batteries are wanted. Watch: a panel shows the devices page or the collapsed battery reading, so every
-// source reads, the ones without events at most once a minute (DevicePolling). Listen: nothing shows them but the low battery
-// notice can show (the dynamic notices are on): Windows' Bluetooth levels stay, which arrive as events, and the HID protocols
-// are read once every fifteen minutes; the game controllers, the GATT reads and the AirPods scan are left out, so those devices
-// notice only while the page shows. None: every source is stopped and lets its devices go.
+// source reads, the ones without events as often as DevicePolling has it. Listen: nothing shows them but the low battery notice
+// can show (the dynamic notices are on): Windows' Bluetooth levels stay, which arrive as events, the devices' own events are
+// heard, and the HID protocols are read once every fifteen minutes; the game controllers, the GATT reads, the AirPods scan and
+// the Corsair receivers are left out, so those devices notice only while the page shows. None: every source is stopped and lets
+// its devices go.
 internal enum DeviceDemand { None, Listen, Watch }
 
 // One way of reading batteries. Started and stopped on the UI thread; it reports its whole current list through the callback
@@ -16,8 +19,10 @@ internal interface IDeviceSource : IDisposable
 {
     void Start(DeviceDemand demand);
     void Stop();
-    // Read again now (the page opened); sources that only listen ignore it.
+    // Read again now (the page opened), as far as the source's own interval allows.
     void Refresh();
+    // Read every device at once, whatever the intervals: the computer woke, or the user came back after a while.
+    void ReadNow();
     // Whether it has listed what is connected since it started (an empty list then means none).
     bool Listed { get; }
 }
@@ -38,6 +43,9 @@ internal sealed class DeviceBatteries : IDisposable
     public DeviceBatteries(Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
+        _idle = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = TimeSpan.FromSeconds(2) };
+        _idle.Tick += (_, _) => Idle();
+        SystemEvents.PowerModeChanged += PowerModeChanged;
         _linger = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = Linger };
         _linger.Tick += (_, _) => { _linger.Stop(); Run(_demand); };
         _apple = new AppleBatteries(dispatcher, Report);
@@ -78,12 +86,54 @@ internal sealed class DeviceBatteries : IDisposable
 
     public void Refresh() { if (_running == DeviceDemand.Watch) foreach (var source in _sources) source.Refresh(); }
 
+    // ----- Reading at once: the computer woke, the user came back -----
+
+    // What the open-source battery tools on Windows do (quiet-battery, HaloBattery, ChargeDock, Solaar on resume): the devices are
+    // read again when the computer wakes, a couple of seconds on (they reconnect first), and when input comes after 20 seconds
+    // without any (a mouse picked up again wakes from its sleep), at most once in five seconds. Only the time of the last input
+    // is looked at (GetLastInputInfo), never what it was.
+    private static readonly TimeSpan Away = TimeSpan.FromSeconds(20), Again = TimeSpan.FromSeconds(5);
+    private readonly DispatcherTimer _idle;
+    private bool _away;
+    private long _readNowAt;
+
+    private void ReadNow()
+    {
+        if (_running != DeviceDemand.Watch || Environment.TickCount64 - _readNowAt < (long)Again.TotalMilliseconds) return;
+        _readNowAt = Environment.TickCount64;
+        foreach (var source in _sources) source.ReadNow();
+    }
+
+    private void Idle()
+    {
+        var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        if (!GetLastInputInfo(ref info)) return;
+        uint idle = unchecked((uint)Environment.TickCount - info.dwTime);
+        if (idle >= Away.TotalMilliseconds) { _away = true; return; }
+        if (_away) { _away = false; ReadNow(); }
+    }
+
+    private void PowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode != PowerModes.Resume) return;
+        _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            var later = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = TimeSpan.FromSeconds(2) };
+            later.Tick += (_, _) => { later.Stop(); _readNowAt = 0; ReadNow(); };
+            later.Start();
+        });
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+    [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+
     private DispatcherTimer? _settle;
     private void Run(DeviceDemand demand)
     {
         if (demand == _running) return;
         var was = _running;
         _running = demand;
+        if (demand == DeviceDemand.Watch) { _away = false; _idle.Start(); } else _idle.Stop();
         if (demand == DeviceDemand.None)
         {
             foreach (var source in _sources) source.Stop();
@@ -113,7 +163,21 @@ internal sealed class DeviceBatteries : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true; _linger.Stop(); _settle?.Stop();
+        _disposed = true; _linger.Stop(); _settle?.Stop(); _idle.Stop();
+        SystemEvents.PowerModeChanged -= PowerModeChanged;
         foreach (var source in _sources) { try { source.Dispose(); } catch { } }
     }
+}
+
+// How often the sources without events of their own are read while the page or the collapsed reading shows, as the open-source
+// battery tools on Windows have it. Ask: the brands that only answer when asked (vigil-watt's quick round, G-Helper's 20 seconds).
+// Logitech: a fallback, its devices sending their own events in between (OpenLogi's 30 seconds). Cached: Windows' own Bluetooth
+// levels, read from its cache without reaching the device (BlueGauge). Listen: the PlayStation controllers, which send their
+// state all the time and are only listened to. Gatt: a Bluetooth LE level whose device sends no notices (the Battery Service
+// specification asks not to poll it often). Slow: the receivers whose answer takes seconds (Corsair's, read on a thread of their
+// own). The receivers that send their battery unasked have no interval: they are listened to all the time (PushEvents).
+internal static class DevicePolling
+{
+    public static readonly TimeSpan Ask = TimeSpan.FromSeconds(15), Logitech = TimeSpan.FromSeconds(30), Cached = TimeSpan.FromSeconds(5),
+        Listen = TimeSpan.FromSeconds(5), Gatt = TimeSpan.FromSeconds(60), Slow = TimeSpan.FromSeconds(60);
 }

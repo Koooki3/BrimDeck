@@ -36,7 +36,6 @@ internal static partial class LiquidPages
         {
             Storage = [new StorageDrive(0, "SSD", [new StorageVolume("C:", "", 100UL << 30, 16UL << 30)])]
         };
-        deck.OffscreenLowest = new BatteryReading(97, false, MemoryLevel.Normal, "MCHOSE A7", DeviceKind.Mouse);
         var palette = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.GlassDark)!);
         PanelTheme.Show(palette);
         Show(deck, root, Page.Capsule, track, cover, snapshot);

@@ -4,7 +4,7 @@ namespace BrimDeck.Core;
 // whatever reports it (DeviceSource). Every source gives readings in this one shape; the roster merges them, one entry per
 // device, in a steady order, so the page never reorders itself as readings come and go.
 
-// What a device is, for its icon and its place in the order. Not saved.
+// What a device is, for its icon and its place in the order. Saved by number with a device's choices (DeviceChoice.Kind).
 public enum DeviceKind { Mouse, Keyboard, Headphones, Earbuds, Controller, Pen, Speaker, Other }
 
 // The devices' icons on a 24 unit grid, line drawings meant to be stroked with round caps and never filled. The devices page
@@ -79,19 +79,86 @@ public sealed record DeviceBattery(string Key, string Name, DeviceKind Kind, Dev
         && Charging == other.Charging && Coarse == other.Coarse && Asleep == other.Asleep && Parts.SequenceEqual(other.Parts);
 }
 
-// A device switched off in the settings (DeckSettings.HiddenDevices).
-public sealed record HiddenDevice(string Key, string Name);
+// A device's own choices (DeckSettings.DeviceChoices): a name of the user's (Label, null for the device's own), and whether it
+// shows in the collapsed row and on the page. Their order is the list's. Remembered once the user changes anything in the list,
+// with the name and kind the device had, so one that is not connected is still listed and keeps them.
+public sealed class DeviceChoice
+{
+    public string Key { get; set; } = "";
+    public string Name { get; set; } = "";
+    public DeviceKind Kind { get; set; } = DeviceKind.Other;
+    public string? Label { get; set; }
+    public bool Collapsed { get; set; } = true;
+    public bool Expanded { get; set; } = true;
+    // The device's own colors, "#RRGGBB" each, or null for the default: its ring while normal (the text color), while charging
+    // (green), when getting low and when low (the collapsed readings' warning and critical colors).
+    public string? Color { get; set; }
+    public string? ChargeColor { get; set; }
+    public string? WarningColor { get; set; }
+    public string? CriticalColor { get; set; }
+    public DeviceChoice Copy() => (DeviceChoice)MemberwiseClone();
+}
+
+
+// The devices as the settings arrange them.
+public static class DeviceLists
+{
+    public const int MaximumLabel = 60;
+
+    public static DeviceChoice? Find(IReadOnlyList<DeviceChoice> choices, string key)
+    {
+        foreach (var choice in choices) if (choice.Key == key) return choice;
+        return null;
+    }
+
+    // The devices read now in the list's order: those the settings remember in theirs, then the others in the roster's own,
+    // each under the name the user gave it.
+    public static List<DeviceBattery> Ordered(IReadOnlyList<DeviceBattery> all, IReadOnlyList<DeviceChoice> choices)
+    {
+        var place = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < choices.Count; i++) place.TryAdd(choices[i].Key, i);
+        return [.. all.Select((device, i) => (device, rank: place.TryGetValue(device.Key, out var at) ? at : choices.Count + i)).OrderBy(entry => entry.rank)
+            .Select(entry => Find(choices, entry.device.Key)?.Label is { Length: > 0 } label ? entry.device with { Name = label } : entry.device)];
+    }
+
+    // The devices the page shows.
+    public static List<DeviceBattery> Expanded(IReadOnlyList<DeviceBattery> all, IReadOnlyList<DeviceChoice> choices)
+        => [.. Ordered(all, choices).Where(device => Find(choices, device.Key)?.Expanded ?? true)];
+
+    // The devices the collapsed row shows, in the list's order.
+    public static List<DeviceBattery> Collapsed(IReadOnlyList<DeviceBattery> all, IReadOnlyList<DeviceChoice> choices)
+        => [.. Ordered(all, choices).Where(device => Find(choices, device.Key)?.Collapsed ?? true)];
+
+    // The devices the low battery notice watches: those not switched off everywhere (shown in the collapsed row or on the page).
+    public static List<DeviceBattery> Noticed(IReadOnlyList<DeviceBattery> all, IReadOnlyList<DeviceChoice> choices)
+        => [.. Ordered(all, choices).Where(device => Find(choices, device.Key) is not { } choice || choice.Collapsed || choice.Expanded)];
+
+    // The list as the user changed it: every device read now and every one remembered, in this order, with the names and kinds
+    // they have now. order: the keys in their new order (those missing keep their place after them).
+    public static List<DeviceChoice> Remember(IReadOnlyList<DeviceBattery> all, IReadOnlyList<DeviceChoice> choices, IEnumerable<string>? order = null)
+    {
+        var listed = Ordered(all, choices).Select(device => device.Key).Concat(choices.Select(choice => choice.Key)).Distinct().ToList();
+        if (order is not null) { var first = order.Where(listed.Contains).ToList(); listed = [.. first, .. listed.Except(first)]; }
+        return [.. listed.Select(key =>
+        {
+            var choice = Find(choices, key)?.Copy() ?? new DeviceChoice { Key = key };
+            if (all.FirstOrDefault(device => device.Key == key) is { } device) { choice.Name = device.Name; choice.Kind = device.Kind; }
+            return choice;
+        })];
+    }
+}
 
 public static class Devices
 {
-    public const int DefaultLowPercent = 15;
+    public const int DefaultLowPercent = 15, DefaultWarningPercent = 25;
     // The low battery threshold the settings offer.
     public static readonly IReadOnlyList<int> LowChoices = [5, 10, 15, 20, 25, 30];
+    // The getting-low threshold the settings offer; it stays above the low one (DeckSettings.Normalize).
+    public static readonly IReadOnlyList<int> WarningChoices = [10, 15, 20, 25, 30, 35, 40, 50];
 
-    // A reading's level: critical at or under the low threshold, elevated within ten points above it, as the collapsed readings'
-    // levels color it. Charging is never low.
-    public static MemoryLevel Level(int? percent, bool charging, int low)
-        => percent is not { } p || charging ? MemoryLevel.Normal : p <= low ? MemoryLevel.Critical : p <= low + 10 ? MemoryLevel.Elevated : MemoryLevel.Normal;
+    // A reading's level: critical at or under the low threshold, elevated at or under the warning one. Charging is never low.
+    public static MemoryLevel Level(int? percent, bool charging, int warning, int low)
+        => percent is not { } p || charging ? MemoryLevel.Normal : p <= low ? MemoryLevel.Critical : p <= warning ? MemoryLevel.Elevated : MemoryLevel.Normal;
 
     public static int Clamp(int percent) => Math.Clamp(percent, 0, 100);
 
@@ -308,65 +375,125 @@ public sealed class LowBatteryWatch
     private long _tick;
 }
 
-// The devices page's layout, after the monitor page's ladder: a grid of cards whose steps come from the page's size, in two
-// tiers. Comfortable: cards tall enough for two lines (at least ComfortableRow), as many columns as keep each card under
-// MaximumCard. Dense: single-line cards (at least DenseRow), as many columns as the width holds cards of MinimumCard. The page
-// takes the comfortable grid while the devices fit in it and the dense one when they do not, going back only once a device fewer
-// than the comfortable grid holds remains, so a device that comes and goes at the edge does not flip it. Within a step devices
-// arrive and leave in place; the page is built again only when the size or the tier changes. Room: the cards the grid holds;
-// with more devices the last card counts the rest.
-public sealed record DevicesLayout(int Columns, int Rows, double Body, double Caption, double Figure, bool Roomy, bool Dense)
+// The devices page's layout, in steps as the monitor page's: the type and the rings change only from one step to the next, never
+// with each pixel of a resize, and the room left over goes between and around the devices. One device is set out wide (Single):
+// its ring, then its figure, name and kind beside it. More take a ring each side by side (Tiles), on one row or, where that does
+// not fit, two, at the largest step that fits; where even the smallest does not, they are listed a line each in columns (List),
+// the list scrolling. A resize within Hysteresis of the step the page has keeps it, so dragging an edge does not flip between two.
+public enum DevicesForm { Tiles, Single, List }
+
+// A step of the tiles: the ring, its stroke and the icon in it, the gap to the figure, the figure, its line and its unit, the name
+// and the line under it (0: none) with their line heights; the tile's width, from MinWidth to MaxWidth; the gap between tiles.
+public sealed record DeviceTileStep(double Ring, double Stroke, double Icon, double Gap, double Figure, double FigureLine, double Unit,
+    double Name, double NameLine, double Detail, double DetailLine, double MinWidth, double MaxWidth, double Spacing)
 {
-    public const double MinimumCard = 180, MaximumCard = 440, Gap = 10, DenseRow = 34, ComfortableRow = 52, MaximumRow = 72, Hysteresis = 12;
-    public int Room => Columns * Rows;
+    public const double NameGap = 2;
+    public double Height => Ring + Gap + FigureLine + NameGap + NameLine + DetailLine;
+}
 
+// A step of the single device: the ring, its stroke and icon, the gap to the text beside it, the figure, the name and the kind.
+public sealed record DeviceSingleStep(double Ring, double Stroke, double Icon, double Gap, double Figure, double FigureLine, double Unit,
+    double Name, double NameLine, double Detail, double DetailLine)
+{
+    public const double TextWidth = 180, MinimumText = 110;
+}
+
+public sealed record DevicesLayout(DevicesForm Form, int Step, int Rows)
+{
+    // Margin: the room kept above and below the tiles; the list's lines, the gap between its columns and their narrowest width.
+    public const double Margin = 12, Hysteresis = 12, ListRow = 38, ListGap = 24, ListColumn = 180;
+    public static readonly DeviceTileStep[] Tiles =
+    [
+        new(88, 6, 36, 12, 26, 30, 13, 13.5, 18, 11.5, 16, 132, 176, 20),
+        new(72, 5, 30, 10, 22, 26, 11.5, 12.5, 17, 11, 15, 112, 150, 16),
+        new(60, 4.5, 26, 9, 20, 24, 11, 12, 16, 10.5, 14, 96, 128, 12),
+        // The smallest has no room for the line under the name; the tooltip carries it.
+        new(40, 3.5, 17, 5, 16, 18, 10, 11.5, 14, 0, 0, 80, 96, 8),
+    ];
+    public static readonly DeviceSingleStep[] Singles =
+    [
+        new(132, 10, 52, 28, 44, 50, 16, 15, 20, 12, 17),
+        new(104, 8, 40, 24, 36, 42, 14, 13.5, 18, 11, 16),
+        new(72, 6, 28, 20, 28, 34, 12, 12.5, 17, 11, 15),
+    ];
+    public DeviceTileStep Tile => Tiles[Math.Clamp(Step, 0, Tiles.Length - 1)];
+    public DeviceSingleStep Single => Singles[Math.Clamp(Step, 0, Singles.Length - 1)];
+
+    // The page's content: width × height, without the header and the margins.
     public static DevicesLayout For(double width, double height, int devices, DevicesLayout? previous)
-    {
-        bool? dense = previous is null ? null : previous.Dense;
-        var next = Tier(width, height, devices, dense);
-        if (previous is null || next == previous) return next;
-        foreach (double dw in new[] { 0, -Hysteresis, Hysteresis })
-            foreach (double dh in new[] { 0, -Hysteresis, Hysteresis })
-                if (Tier(width + dw, height + dh, devices, dense) == previous) return previous;
-        return next;
-    }
-
-    // dense: the tier the page has now (null for none); it stays dense until the devices fit the comfortable grid with one to spare.
-    private static DevicesLayout Tier(double width, double height, int devices, bool? dense)
     {
         width = double.IsFinite(width) ? Math.Max(0, width) : 0;
         height = double.IsFinite(height) ? Math.Max(0, height) : 0;
-        var comfortable = Grid(width, height, dense: false);
-        bool useDense = dense == true ? devices >= comfortable.Room : devices > comfortable.Room;
-        return useDense ? Grid(width, height, dense: true) : comfortable;
+        var next = Fit(width, height, devices);
+        if (previous is null || next == previous) return next;
+        foreach (double dw in new[] { 0, -Hysteresis, Hysteresis })
+            foreach (double dh in new[] { 0, -Hysteresis, Hysteresis })
+                if (Fit(width + dw, height + dh, devices) == previous) return previous;
+        return next;
     }
 
-    private static DevicesLayout Grid(double width, double height, bool dense)
+    private static DevicesLayout Fit(double width, double height, int devices)
     {
-        int fit = Math.Clamp((int)Math.Floor((width + Gap) / (MinimumCard + Gap)), 1, 4);
-        int columns = dense ? fit : Math.Clamp((int)Math.Ceiling((width + Gap) / (MaximumCard + Gap)), 1, fit);
-        int rows = Math.Max(1, (int)Math.Floor((height + Gap) / ((dense ? DenseRow : ComfortableRow) + Gap)));
-        double row = Math.Min(MaximumRow, (height - (rows - 1) * Gap) / rows);
-        bool roomy = !dense && row >= 60 && (width - (columns - 1) * Gap) / columns >= 260;
-        return new(columns, rows, roomy ? 13 : 12, roomy ? 11 : 10.5, roomy ? 20 : dense ? 14 : 17, roomy, dense);
+        // The single device's ring keeps about a sixth of the page's height clear above and below it (the smallest only its margin),
+        // so it never fills the page.
+        if (devices == 1)
+            for (int i = 0; i < Singles.Length; i++)
+                if ((i == Singles.Length - 1 ? Singles[i].Ring + Margin : Singles[i].Ring * 1.36) <= height
+                    && Singles[i].Ring + Singles[i].Gap + DeviceSingleStep.MinimumText <= width) return new(DevicesForm.Single, i, 1);
+        int count = Math.Max(1, devices);
+        for (int i = 0; i < Tiles.Length; i++)
+            for (int rows = 1; rows <= Math.Min(2, count); rows++)
+                if (Fits(Tiles[i], rows, count, width, height)) return new(DevicesForm.Tiles, i, rows);
+        return new(DevicesForm.List, 0, 1);
     }
 
-    // The card size, the same for every card of the page, in whole DIPs that never add up past the page.
-    public (double Width, double Height) CardSize(double width, double height)
-        => (Math.Floor(Math.Min(MaximumCard, Math.Max(0, (width - (Columns - 1) * Gap) / Columns))), Math.Floor(Math.Clamp((height - (Rows - 1) * Gap) / Rows, 0, MaximumRow)));
-
-    // Each card's place, row by row, for shown cards: the rows and columns they take sit in the middle of the page, so one
-    // device sits in the middle rather than in a corner, and a device that arrives moves the others aside.
-    public (double X, double Y, double Width, double Height) Card(int index, double width, double height, int shown = int.MaxValue)
+    private static bool Fits(DeviceTileStep step, int rows, int devices, double width, double height)
     {
-        var (cardWidth, cardHeight) = CardSize(width, height);
-        int count = Math.Clamp(Math.Min(shown, Room), 1, Room);
-        int columns = Math.Min(Columns, count), rows = (int)Math.Ceiling(count / (double)Columns);
-        double left = Math.Max(0, (width - columns * cardWidth - (columns - 1) * Gap) / 2), top = Math.Max(0, (height - rows * cardHeight - (rows - 1) * Gap) / 2);
-        int column = index % Columns, row = index / Columns;
-        // The last row, if not full, is centred on its own.
-        int inRow = row == rows - 1 ? count - row * Columns : columns;
-        double rowLeft = inRow < columns ? left + (columns - inRow) * (cardWidth + Gap) / 2 : left;
-        return (Math.Round(rowLeft + column * (cardWidth + Gap)), Math.Round(top + row * (cardHeight + Gap)), cardWidth, cardHeight);
+        int columns = (devices + rows - 1) / rows;
+        double tile = Math.Min(step.MaxWidth, (width - (columns - 1) * step.Spacing) / columns);
+        return tile >= step.MinWidth && rows * step.Height + (rows - 1) * step.Spacing + Margin <= height;
+    }
+
+    // The columns the devices take: the tiles' on a row, or the list's.
+    public int Columns(int devices, double width) => Form switch
+    {
+        DevicesForm.Tiles => (Math.Max(1, devices) + Rows - 1) / Rows,
+        DevicesForm.List => Math.Clamp((int)Math.Floor((width + ListGap) / (ListColumn + ListGap)), 1, 4),
+        _ => 1
+    };
+
+    // The height of the list's lines all together, for its scrolling.
+    public double ListHeight(int devices, double width) => Math.Ceiling(devices / (double)Columns(devices, width)) * ListRow;
+
+    // Each device's place, in whole DIPs: the tiles in the middle of the page, a last row that is not full centred on its own; the
+    // single device and its text in the middle; the list's lines row by row from the top, before scrolling.
+    public (double X, double Y, double Width, double Height) Place(int index, int devices, double width, double height)
+    {
+        devices = Math.Max(1, devices);
+        switch (Form)
+        {
+            case DevicesForm.Single:
+            {
+                var s = Single;
+                double text = Math.Min(DeviceSingleStep.TextWidth, Math.Max(0, width - s.Ring - s.Gap)), whole = s.Ring + s.Gap + text;
+                return (Math.Round((width - whole) / 2), Math.Round((height - s.Ring) / 2), whole, s.Ring);
+            }
+            case DevicesForm.List:
+            {
+                int columns = Columns(devices, width);
+                double column = Math.Floor((width - (columns - 1) * ListGap) / columns);
+                return (Math.Round(index % columns * (column + ListGap)), index / columns * ListRow, column, ListRow);
+            }
+            default:
+            {
+                var t = Tile;
+                int columns = Columns(devices, width), rows = (devices + columns - 1) / columns, row = index / columns;
+                double tile = Math.Floor(Math.Min(t.MaxWidth, (width - (columns - 1) * t.Spacing) / columns));
+                int inRow = row == rows - 1 ? devices - row * columns : columns;
+                double left = (width - inRow * tile - (inRow - 1) * t.Spacing) / 2, top = (height - rows * t.Height - (rows - 1) * t.Spacing) / 2;
+                return (Math.Round(left + index % columns * (tile + t.Spacing)), Math.Round(top + row * (t.Height + t.Spacing)), tile, t.Height);
+            }
+        }
     }
 }
+
