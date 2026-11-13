@@ -29,12 +29,24 @@ internal sealed class AudioLevelMeter : IDisposable
     private int _analysisMs = 33;
     public int AnalysisMs { get => Volatile.Read(ref _analysisMs); set { Volatile.Write(ref _analysisMs, value); if (_capture is { } capture) capture.AnalysisMs = value; } }
     public static double Now => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
+    // How long a capture keeps running after nothing asks for it (MemoryPlan.MediaLinger): a song paused and played again, or bars
+    // hidden and shown again, within it find the capture running instead of starting it again, which waits up to two seconds for
+    // the system and shows flat bars meanwhile.
+    public TimeSpan Linger { get; set; }
+    private Timer? _release;
     public void SetSource(MediaAppOwner? owner, bool enabled, bool system = false)
     {
         var target = enabled ? owner : system ? Everything : null;
         lock (_gate)
         {
-            if (_disposed || _requested == target) return;
+            if (_disposed) return;
+            if (target is not null || Linger <= TimeSpan.Zero) { _release?.Dispose(); _release = null; }
+            else if (_requested is not null)
+            {
+                _release ??= new Timer(_ => Release(), null, Linger, Timeout.InfiniteTimeSpan);
+                return;
+            }
+            if (_requested == target) return;
             _requested = target; _revision++;
             if (_thread is null)
             {
@@ -42,6 +54,17 @@ internal sealed class AudioLevelMeter : IDisposable
                 _thread.SetApartmentState(ApartmentState.MTA); _thread.Start();
             }
             _wake.Set();
+        }
+    }
+    // The linger ran out with nothing asking again: the capture stops.
+    private void Release()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _release is null) return;
+            _release.Dispose(); _release = null;
+            if (_requested is null) return;
+            _requested = null; _revision++; _wake.Set();
         }
     }
     // Fills the bars' levels from the captured audio, in the given way: flowing along the bars, or one band of pitch for each of
@@ -165,6 +188,6 @@ internal sealed class AudioLevelMeter : IDisposable
     }
     public void Dispose()
     {
-        lock (_gate) { if (_disposed) return; _disposed = true; if (_thread is null) _wake.Dispose(); else _wake.Set(); }
+        lock (_gate) { if (_disposed) return; _disposed = true; _release?.Dispose(); _release = null; if (_thread is null) _wake.Dispose(); else _wake.Set(); }
     }
 }

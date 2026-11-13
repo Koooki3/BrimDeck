@@ -17,6 +17,8 @@ public partial class MainWindow
     private ScrollViewer? _modelScroll;
     private double _modelScrollOffset;
     private Window? _detailPopup;
+    // Set while a pop-up is closed without its fade (ShowModelDetails).
+    private bool _popupAtOnce;
     internal UsageDateRange ModelRange => _customRange ?? UsageDateRange.Recent(_days, DateTime.Today);
 
     private Button DetailLink(UIElement content, string name, Action click)
@@ -235,7 +237,7 @@ public partial class MainWindow
         popup.Closing += (_, e) =>
         {
             closing = true; if (ReferenceEquals(_detailPopup, popup)) _detailPopup = null;
-            if (left || _app.Exiting || popup.Content is not UIElement content || !Soft.Enabled) return;
+            if (left || _popupAtOnce || _app.Exiting || popup.Content is not UIElement content || !Soft.Enabled) return;
             e.Cancel = true; left = true; popup.IsHitTestVisible = false;
             // The theme's answers end with the pop-up rather than play on over buttons that are going.
             InteractionFx.Clear(popup);

@@ -30,7 +30,7 @@ public sealed partial class SettingsWindow
     private void HotkeysSettings()
     {
         SectionTitle(Loc.T("展开与显示", "Expand and show"));
-        Group([.. new[] { HotkeyKind.Hide, HotkeyKind.Expand }.Select(HotkeyRow)]);
+        Group([.. new[] { HotkeyKind.Hide, HotkeyKind.Expand, HotkeyKind.CycleStyle, HotkeyKind.LineStyle }.Select(HotkeyRow)]);
         // Counted in the order of the page switch; a page that is not shown has no place, so its shortcut does nothing.
         SectionTitle(Loc.T("切换页面", "Switch pages"));
         Group([.. Enumerable.Range(0, 10).Select(place => HotkeyRow(HotkeyKind.Page1 + place))]);
@@ -50,6 +50,8 @@ public sealed partial class SettingsWindow
         HotkeyKind.OpenSettings => Loc.T("打开/关闭设置", "Open/close settings"),
         HotkeyKind.Refresh => Loc.T("立即同步用量", "Sync usage now"),
         HotkeyKind.Notices => Loc.T("通知快捷键", "Notices shortcut"),
+        HotkeyKind.CycleStyle => Loc.T("切换刘海、胶囊或指示条", "Switch notch, capsule or bar"),
+        HotkeyKind.LineStyle => Loc.T("切换指示条与刘海或胶囊", "Switch between bar and notch or capsule"),
         _ => Loc.T($"展开/收起第 {PagePlace(kind) + 1} 个页面", $"Expand/collapse page {PagePlace(kind) + 1}")
     };
 
@@ -64,6 +66,8 @@ public sealed partial class SettingsWindow
         HotkeyKind.Refresh => Loc.T("立即读取一次 AI 用量与模型消耗。", "Reads AI usage and model consumption once, now."),
         HotkeyKind.Notices => Loc.T("有提示时打开它的详情并可用键盘操作（Tab 切换、Enter 确认、Esc 关闭）；没有提示时打开通知历史。默认不设置，避免与其他程序冲突。",
             "With a notice on screen, opens its details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise opens the notice history. Unset by default, to avoid clashing with other programs."),
+        HotkeyKind.CycleStyle => Loc.T("按刘海、胶囊、指示条的顺序循环切换收起样式。", "Cycles the collapsed style: notch, capsule, bar."),
+        HotkeyKind.LineStyle => Loc.T("刘海或胶囊切换为指示条，再按一次切换回原来的样式。", "Turns the notch or capsule into the bar; press again to turn it back."),
         _ => null
     };
 

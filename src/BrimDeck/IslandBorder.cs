@@ -16,6 +16,11 @@ public sealed class IslandBorder : Border
     public static readonly DependencyProperty MaterialOpacityProperty = DependencyProperty.Register(
         nameof(MaterialOpacity), typeof(double), typeof(IslandBorder),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender));
+    // The surface's own opacity (DeckSettings.SurfaceTransparency): the base color and the theme's layers are drawn this opaque,
+    // the rim and the content as they are.
+    public static readonly DependencyProperty SurfaceOpacityProperty = DependencyProperty.Register(
+        nameof(SurfaceOpacity), typeof(double), typeof(IslandBorder),
+        new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender));
 
     // The theme's layers over the base color: a gradient and a pattern (scan lines, or a pixel theme's texture). Like the rim
     // they fade with MaterialOpacity, so the indicator, which has neither, keeps its plain color.
@@ -84,6 +89,7 @@ public sealed class IslandBorder : Border
         get => (double)GetValue(MaterialOpacityProperty);
         set => SetValue(MaterialOpacityProperty, value);
     }
+    public double SurfaceOpacity { get => (double)GetValue(SurfaceOpacityProperty); set => SetValue(SurfaceOpacityProperty, value); }
     public Brush? Gradient { get => (Brush?)GetValue(GradientProperty); set => SetValue(GradientProperty, value); }
     public Brush? Pattern { get => (Brush?)GetValue(PatternProperty); set => SetValue(PatternProperty, value); }
     internal IslandDecor? Decor { get => (IslandDecor?)GetValue(DecorProperty); set => SetValue(DecorProperty, value); }
@@ -98,12 +104,40 @@ public sealed class IslandBorder : Border
     protected override void OnRender(DrawingContext drawingContext)
     {
         var outline = Outline();
+        double material = Math.Clamp(MaterialOpacity, 0, 1), surface = Math.Clamp(SurfaceOpacity, 0, 1);
+        // The faintest fill under the surface keeps the whole outline the panel's own for input (see InputCatch), whatever the surface shows.
         drawingContext.DrawGeometry(InputCatch, null, outline);
-        drawingContext.DrawGeometry(Background, null, outline);
-        if (MaterialOpacity <= 0) return;
         // Only a fading material needs the opacity layer; fully shown, the layers draw straight onto the surface.
-        bool fading = MaterialOpacity < 1;
-        if (fading) drawingContext.PushOpacity(Math.Clamp(MaterialOpacity, 0, 1));
+        bool fading = material < 1;
+        if (surface >= 1)
+        {
+            drawingContext.DrawGeometry(Background, null, outline);
+            if (material <= 0) return;
+            if (fading) drawingContext.PushOpacity(material);
+            Layers(drawingContext, outline);
+            Rim(drawingContext, outline);
+            if (fading) drawingContext.Pop();
+            return;
+        }
+        // See-through: the base color and the layers together take the surface's opacity, and the rim keeps its own strength so
+        // the outline stays readable.
+        drawingContext.PushOpacity(surface);
+        drawingContext.DrawGeometry(Background, null, outline);
+        if (material > 0)
+        {
+            if (fading) drawingContext.PushOpacity(material);
+            Layers(drawingContext, outline);
+            if (fading) drawingContext.Pop();
+        }
+        drawingContext.Pop();
+        if (material <= 0) return;
+        if (fading) drawingContext.PushOpacity(material);
+        Rim(drawingContext, outline);
+        if (fading) drawingContext.Pop();
+    }
+
+    private void Layers(DrawingContext drawingContext, Geometry outline)
+    {
         if (Gradient is { } gradient) drawingContext.DrawGeometry(gradient, null, outline);
         Decor?.Draw(drawingContext, RenderSize, CornerRadius, ShoulderRadius, outline);
         if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
@@ -122,27 +156,28 @@ public sealed class IslandBorder : Border
                 DrawEdge(drawingContext, _edge, outline);
             }
         }
-        if (RimWidth > 0)
+    }
+
+    private void Rim(DrawingContext drawingContext, Geometry outline)
+    {
+        if (RimWidth <= 0) return;
+        if (_bevel is { } bevel && BevelBrush is { } shade)
         {
-            if (_bevel is { } bevel && BevelBrush is { } shade)
-            {
-                drawingContext.DrawGeometry(RimBrush, null, bevel.Light);
-                drawingContext.DrawGeometry(shade, null, bevel.Shade);
-            }
+            drawingContext.DrawGeometry(RimBrush, null, bevel.Light);
+            drawingContext.DrawGeometry(shade, null, bevel.Shade);
+        }
+        else
+        {
+            // A rim brush the ambient light animates (AmbientGlow) stays unfrozen, and so does its pen: freezing the pen would
+            // freeze the brush. Its changes then reach the screen without this method running again.
+            // The pen is twice the rim and the layout clip takes its outer half; at rest the rim is that inner half as a ring.
+            if (_settledClip) drawingContext.DrawGeometry(RimBrush, null, Ring(outline, RimWidth));
             else
             {
-                // A rim brush the ambient light animates (AmbientGlow) stays unfrozen, and so does its pen: freezing the pen would
-                // freeze the brush. Its changes then reach the screen without this method running again.
-                // The pen is twice the rim and the layout clip takes its outer half; at rest the rim is that inner half as a ring.
-                if (_settledClip) drawingContext.DrawGeometry(RimBrush, null, Ring(outline, RimWidth));
-                else
-                {
-                    if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); if (RimBrush.IsFrozen) _rim.Freeze(); }
-                    drawingContext.DrawGeometry(null, _rim, outline);
-                }
+                if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); if (RimBrush.IsFrozen) _rim.Freeze(); }
+                drawingContext.DrawGeometry(null, _rim, outline);
             }
         }
-        if (fading) drawingContext.Pop();
     }
 
     // The visible surface owns input; its decorative shadow is a separate, non-interactive sibling.

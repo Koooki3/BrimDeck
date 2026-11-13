@@ -51,7 +51,7 @@ try
     AuditWin2Tests.Run(Check);
     NoticeOpsTests.Run(Check);
     RingLetterTests.Run(root, Check);
-    QuotaRingTests.Run(Check);
+    QuotaRingTests.Run(root, Check);
     PanelThemeTests.Run(root, Check);
     DaylightTests.Run(root, Check);
     NoticeGlyphTests.Run(Check);
@@ -94,6 +94,7 @@ try
     CurvesTests.Run(Check);
     ExpandBounceTests.Run(Check);
     GlassFeedbackTests.Run(Check);
+    SurfaceTransparencyTests.Run(Check);
     ExpandSnapTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);
@@ -112,6 +113,7 @@ try
     await InstallerUpdateTests.Run(root, Check);
     await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
+    MemoryModeTests.Run(Check);
     OffPeakTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);
     LanguageTests.Run(root, Check);

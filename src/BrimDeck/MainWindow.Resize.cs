@@ -323,6 +323,9 @@ public partial class MainWindow
         bool stretched = _resizePage == DeckPage.Notices && NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout();
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
         else if (_resizePage == DeckPage.Devices) RenderDevices();
+        // The clipboard page is built again only where its sizes step; in between its columns stretch (StretchShelf). It is built
+        // once more when the size is saved (FinishResize).
+        else if (_resizePage == DeckPage.Clipboard) StretchShelf();
         else if (!stretched && Environment.TickCount64 - _resizeRendered >= 40)
         {
             _resizeRendered = Environment.TickCount64;

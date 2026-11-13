@@ -64,6 +64,11 @@ internal static class HotkeyTests
             && Normalized(new DeckSettings { MoveHotkey = null! }).MoveHotkey == "");
         // The audit group "win" keeps its tests in their own file; they run from here so that Program.cs stays untouched.
         AuditWinTests.Run(check);
+        check("The line style hotkey returns to the notch or capsule last chosen",
+            Normalized(new DeckSettings { Style = CompactStyle.Capsule }).ShapeStyle == CompactStyle.Capsule
+            && Normalized(new DeckSettings { Style = CompactStyle.Line, ShapeStyle = CompactStyle.Capsule }).ShapeStyle == CompactStyle.Capsule
+            && Normalized(new DeckSettings { Style = CompactStyle.Line, ShapeStyle = CompactStyle.Line }).ShapeStyle == CompactStyle.Notch
+            && Normalized(new DeckSettings { Style = CompactStyle.Line }).ShapeStyle == CompactStyle.Notch);
     }
 
     private static DeckSettings Normalized(DeckSettings settings) { settings.Normalize(); return settings; }

@@ -32,8 +32,8 @@ public partial class MainWindow
         // The material: a copy of the island's own shape, dressed as it is now, without its content.
         var material = new IslandBorder
         {
-            Width = width, Height = height, CornerRadius = Island.CornerRadius, ShoulderRadius = Island.ShoulderRadius, MaterialOpacity = Island.MaterialOpacity,
-            // The brush's opacity too: over a held blur glass is thinner than its color (GlassBackdrop.Held).
+            Width = width, Height = height, CornerRadius = Island.CornerRadius, ShoulderRadius = Island.ShoulderRadius, MaterialOpacity = Island.MaterialOpacity, SurfaceOpacity = Island.SurfaceOpacity,
+            // The brush's opacity too, whatever it is (a held blur glass is thinner than its color, GlassBackdrop.Held), so the copy looks exactly as the surface does.
             Background = new SolidColorBrush(_surface.Color) { Opacity = _surface.Opacity }, Pixel = Island.Pixel, Cut = Island.Cut
         };
         PanelTheme.Dress(material, dpiScale: VisualTreeHelper.GetDpi(Island).DpiScaleX);

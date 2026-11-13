@@ -6,8 +6,11 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
+// A window built with the app's own fonts, which a change of the user's font leaves alone (the settings window).
+internal interface IKeepsAppFonts { }
+
 // The one entry for fonts: every family BrimDeck draws text in comes from here (UI.TextFont, UI.PanelFont and UI.DisplayFont are
-// these, kept for the call sites that already use them), and nothing else names a font (FontSourceTests scans for it).
+// these, kept for the call sites that already use them), and nothing else names a font.
 //
 // Text roles (UiFontRole) take the user's font (DeckSettings.UiFont) in front of their usual chain, and are republished as
 // resources so that XAML follows with DynamicResource. Symbols (Icon, IconMdl2), code (Mono, Code) and the clock styles' own
@@ -75,6 +78,9 @@ internal static class Fonts
         }
     }
 
+    // The panel's text family with the given user font in front: what the settings page's preview line is set in (the page itself is built Plain).
+    public static FontFamily Sample(string? name) => new(UiFonts.Chain(UiFontRole.Panel, name));
+
     // Builds with the app's own fonts whatever the user chose: the settings window does not change with the font it sets (Fonts.Plain).
     public static IDisposable Plain() { var was = _plain; _plain = true; return new PlainScope(was); }
     private sealed class PlainScope(bool was) : IDisposable { public void Dispose() => _plain = was; }
@@ -106,7 +112,7 @@ internal static class Fonts
     {
         var seen = new HashSet<DependencyObject>(ReferenceEqualityComparer.Instance);
         var pending = new Stack<DependencyObject>();
-        foreach (Window window in app.Windows) if (window is not SettingsWindow) pending.Push(window);
+        foreach (Window window in app.Windows) if (window is not IKeepsAppFonts) pending.Push(window);
         while (pending.Count > 0)
         {
             var node = pending.Pop();

@@ -32,7 +32,9 @@ public partial class MainWindow : Window
     private bool _dragHold;
     // Checks run every 40 ms near the surface. Farther away the interval grows with the distance, assuming the cursor
     // approaches at no more than 10 physical pixels per millisecond, so it still arrives within one short interval.
-    private const double TrackNear = 40, TrackFar = 160, ApproachSpeed = 10;
+    // TrackFar: the longest pause while the pointer is far away, which the memory mode sets (MemoryPlan.PointerFarMilliseconds).
+    private const double TrackNear = 40, ApproachSpeed = 10;
+    private double TrackFar => _app.MemoryPlan.PointerFarMilliseconds;
     // How far into the opening the content may start over liquid glass: five frames, the glass's lag and its drawing (live
     // check 10-26: at 50 ms the first frames of a fast opening still showed the content below the glass).
     private const double LiquidLeadMs = 80;
@@ -93,12 +95,15 @@ public partial class MainWindow : Window
     private MainWindow? _takesOver;
     private readonly bool _rebuilt;
     public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Hide || HiddenByUser);
+    // The panel is a topmost overlay: kept above other windows, or an ordinary panel a window rule turns into the indicator,
+    // which shows above the window that fills the screen.
+    private bool KeepsAbove => Settings.AlwaysOnTop
+        || !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line;
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
     // Set when the first read has ended, with data or without (RefreshAsync); until then the usage page shows its skeleton.
     private bool _firstReadEnded;
     // The page built while it waited is not reused (RenderUsage compares its build key, which a failed read does not change).
     internal void FirstReadEnded() { if (_firstReadEnded) return; _firstReadEnded = true; _usageBuilt = null; }
-    public string? LastRefreshError { get; private set; }
 
     private sealed record CompactAlertInfo(AppEntry Entry, string Name, string Label, double Used, DateTimeOffset? ResetAt);
 
@@ -106,7 +111,7 @@ public partial class MainWindow : Window
     {
         _app = app; _lead = lead;
         _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
-            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => Settings.AlwaysOnTop);
+            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove);
         Rect? IslandStrip()
         {
             // The island border is what is drawn, in every style and whether the panel is collapsed or open — its size
@@ -208,6 +213,7 @@ public partial class MainWindow : Window
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing, except leave move mode.
         MouseWheel += PanelWheel;
+        AttachMusicGestures();
         MouseRightButtonUp += (_, e) => { if (_moveArmed) { CancelMove(); e.Handled = true; return; } if (!_expanded || !Settings.RightClickSettings) return; _app.OpenSettings(); e.Handled = true; };
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetExpanded(false, keyboard: true); e.Handled = true; } };
         // A scale change moves the window to a rectangle Windows suggests; the island is centred again.
@@ -225,10 +231,13 @@ public partial class MainWindow : Window
         // WM_DISPLAYCHANGE reaches the window after Windows has moved it into the new layout; SystemEvents reports the change
         // before that, when the window still has its old position. A taskbar change (auto-hide, size) alters the work area
         // without a display change.
-        SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook((IntPtr _, int message, IntPtr wParam, IntPtr _, ref bool _) =>
+        SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook((IntPtr _, int message, IntPtr wParam, IntPtr _, ref bool handled) =>
         {
-            const int DisplayChange = 0x007E, SettingChange = 0x001A, SetWorkArea = 0x002F;
+            const int DisplayChange = 0x007E, SettingChange = 0x001A, SetWorkArea = 0x002F, Wheel = 0x020A, SideWheel = 0x020E;
             if (message == DisplayChange || message == SettingChange && wParam == SetWorkArea) _app.DisplaysChanged();
+            // WPF has no event for the horizontal wheel; the vertical one is only noted, and WPF still handles it.
+            else if (message == Wheel) _swipe.Vertical(DateTimeOffset.UtcNow);
+            else if (message == SideWheel) handled = MusicWheelSwipe(unchecked((short)((long)wParam >> 16)));
             return IntPtr.Zero;
         });
         Closed += (_, _) => DisposeMusic();
@@ -273,8 +282,9 @@ public partial class MainWindow : Window
     private int _fontSeen = -1;
     public void ApplySettings() => ApplySettings(false);
     // animatePage also animates the collapsed shape, which is how a screen-context change (maximized window, full screen)
-    // moves between the notch, the capsule and the indicator.
-    private void ApplySettings(bool animatePage)
+    // moves between the notch, the capsule and the indicator. pageOnly: only the page changed (ShowPage); the collapsed row does not
+    // depend on the page, so it is not built again.
+    private void ApplySettings(bool animatePage, bool pageOnly = false)
     {
         // Powering off (exit) holds the panel as it is.
         if (_poweringOff) return;
@@ -289,9 +299,11 @@ public partial class MainWindow : Window
         // The music page's text was set in the font of its day, and the monitor's column widths were measured in it: both are built again.
         if (_fontSeen != Fonts.Version) { _fontSeen = Fonts.Version; _musicRenderKey = ""; _monitorKey = ""; }
         ApplyTheme();
+        ApplySurface();
         WindowsHost.SetCapturable(this, Settings.WindowCapture);
-        // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one.
-        if (Topmost != Settings.AlwaysOnTop) { Topmost = Settings.AlwaysOnTop; if (!Topmost && !_expanded) _host.Front(false); }
+        // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one; so does an ordinary panel
+        // whose indicator is no longer called for.
+        if (Topmost != KeepsAbove) { Topmost = KeepsAbove; if (!Topmost && !_expanded) _host.Front(false); }
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
@@ -332,7 +344,7 @@ public partial class MainWindow : Window
         FrameHeight = Math.Max(1, Math.Min(MonitorBoundsDip.Height, Math.Max(Math.Max(140, panelSpace), Collapsed.Surface.Bottom + 24)));
         Place(bounds, scale);
         UpdateClock();
-        RenderCompact();
+        if (!pageOnly || newEdge) RenderCompact();
         // Hiding and showing again (the tray, a full-screen rule) are immediate. The boot plays only when the panel first
         // appears (Loaded); the power-off only when BrimDeck exits (App.ExitApplication).
         // The window's own opacity is no longer animated; a build that faded it may have left it lowered.
@@ -606,6 +618,21 @@ public partial class MainWindow : Window
         if (_detailPopup is { } popup) Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_detailPopup, popup)) popup.Close(); });
         if (MediaSourceButton.ContextMenu?.IsOpen == true) Dispatcher.BeginInvoke(CloseSourceMenu);
     }
+    // The surface's transparency (DeckSettings.SurfaceTransparency). ClearType needs an opaque color under the text, so over a
+    // see-through surface the island's text is smoothed in grayscale (a pixel theme's stays unsmoothed, PanelTheme.Text). The
+    // shadow is cast by an opaque copy of the surface that would show through it, so a see-through surface casts none.
+    private void ApplySurface()
+    {
+        double opacity = 1 - Settings.SurfaceTransparency / 100d;
+        bool clear = opacity < 1;
+        Island.SurfaceOpacity = opacity;
+        if (PanelTheme.Current.Effects.Pixel <= 0)
+        {
+            if (clear) TextOptions.SetTextRenderingMode(Island, TextRenderingMode.Grayscale);
+            else Island.ClearValue(TextOptions.TextRenderingModeProperty);
+        }
+        IslandShadow.Visibility = clear ? Visibility.Hidden : Visibility.Visible;
+    }
     // The toolbar's fixed buttons are declared in XAML; their names follow the interface language.
     private void ApplyLanguage()
     {
@@ -758,6 +785,18 @@ public partial class MainWindow : Window
         _clipSettle.Start();
     }
     private static bool ThemeSweeps => PanelTheme.Current.Motion.Ambient is { Sweep: > 0, SweepOpacity: > 0 };
+
+    // The panel has just turned from open to closed (_expanded is already false), by SetExpanded: the collector and the clean-up
+    // take their rules for a closed panel (App.Memory.cs), the clipboard page ends its search and details, a panel the expand
+    // hotkey showed while the panels are hidden hides again, and the collapsed title scrolls its laps anew.
+    private void PanelClosed()
+    {
+        _app.UpdateCollectionLatency();
+        ResetShelf();
+        HotkeyPanelCollapsed();
+        ReplayCompactTitle();
+        _app.RequestTrim();
+    }
     // keyboard: a hotkey or Escape asked for it (motion-review C4), so the move is quicker and has no give.
     public void SetExpanded(bool expanded, bool instant = false, bool keyboard = false)
     {
@@ -785,9 +824,11 @@ public partial class MainWindow : Window
         // that arrives before it does already waits for the closing (DeckLeaving).
         if (wasExpanded && !expanded && !_preview) _app.Notices?.DeckLeaving(this, true);
         if (wasExpanded != expanded && !_preview) Dispatcher.BeginInvoke(() => _app.Notices?.DeckExpanded(this, _expanded));
+        // The smooth memory mode holds off full collections while a panel is open (App.UpdateCollectionLatency).
+        if (expanded && !wasExpanded) _app.UpdateCollectionLatency();
         _escapeDismissal?.SetEnabled(expanded && !_preview || _moveArmed);
-        if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); if (wasExpanded) ResetShelf(); }
-        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); if (!_retiring) Dispatcher.BeginInvoke(DispatcherPriority.Background, () => _app.CheckSurface()); }
+        if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
+        if (wasExpanded && !expanded) { PanelClosed(); if (!_retiring) Dispatcher.BeginInvoke(DispatcherPriority.Background, () => _app.CheckSurface()); }
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
         var style = shape.Style;
@@ -1044,7 +1085,7 @@ public partial class MainWindow : Window
         var grip = TrackGrips(cursor);
         // An ordinary panel under another window is out of the pointer's reach (DeckSettings.AlwaysOnTop); asked only where
         // the pointer would otherwise count as inside.
-        bool Covered() => !Settings.AlwaysOnTop && WindowsHost.CoveredAt(this, cursor);
+        bool Covered() => !KeepsAbove && WindowsHost.CoveredAt(this, cursor);
         bool inCompact = area.Contains(cursor) && grip == ResizeEdges.None && !Covered();
         double dx = Math.Max(0, Math.Max(area.Left - cursor.X, cursor.X - area.Right)), dy = Math.Max(0, Math.Max(area.Top - cursor.Y, cursor.Y - area.Bottom));
         // Whole 20 ms steps, so small movements far away do not reschedule the timer on every check.
@@ -1154,20 +1195,22 @@ public partial class MainWindow : Window
         // Timer requests reuse the current read. Changed settings or a wider
         // date range still require one follow-up, and automatic requests must not clear it.
         if (_refreshing) { if (queueIfBusy) _refreshRequested = true; return; }
-        _refreshing = true; LastRefreshError = null;
+        _refreshing = true;
         var decks = _app.Decks.ToList();
         foreach (var deck in decks) deck.RenderSyncButton();
         try
         {
             var result = await LoadSnapshotsAsync(decks.Min(deck => deck._historyStart));
             foreach (var deck in _app.Decks) deck.SetSnapshots(result);
+            _app.SnapshotsChanged();
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { LastRefreshError = ex.GetType().Name + "\n" + ex.StackTrace; }
+        // A read that failed in a way the sources did not expect leaves the panels with what they showed; the next one tries again.
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
         finally
         {
             _refreshing = false; _syncAsked = false; foreach (var deck in _app.Decks) deck.FirstReadEnded();
-            RestartSyncCycle(); _app.RequestTrim();
+            RestartSyncCycle();
             foreach (var deck in _app.Decks) { deck.RenderUsage(); deck.RenderSyncButton(); }
             if (_refreshRequested)
             {

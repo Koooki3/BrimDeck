@@ -155,8 +155,14 @@ static class KimiUsageTests
         snapshot = new ProviderSnapshot(ProviderId.Kimi); reader.Read(snapshot, home, start, now.AddMinutes(1));
         check("Appended lines are read incrementally and a partial line waits", waited && snapshot.Entries.Count == 5 && snapshot.Entries.Count(e => e.Input == 7) == 1);
         check("Oversized lines are skipped; one holding a usage record counts as unreadable", snapshot.UsageNote.Contains("2 处记录未能读取"));
+        var merged = snapshot.Entries;
         snapshot = new ProviderSnapshot(ProviderId.Kimi); reader.Read(snapshot, home, start, now.AddMinutes(1));
-        check("A second read without changes gives the same result", snapshot.Entries.Count == 5);
+        check("A second read without changes gives the same result, without merging the entries again",
+            snapshot.Entries.Count == 5 && ReferenceEquals(snapshot.Entries, merged) && snapshot.UsageNote.Contains("2 个会话") && snapshot.UsageNote.Contains("2 处记录未能读取"));
+        snapshot = new ProviderSnapshot(ProviderId.Kimi); reader.Read(snapshot, home, DateTimeOffset.FromUnixTimeMilliseconds(t + 1500), now.AddMinutes(1));
+        bool later = snapshot.Entries.Count == 3 && snapshot.Entries.All(e => e.Input != 1658);
+        snapshot = new ProviderSnapshot(ProviderId.Kimi); reader.Read(snapshot, home, start, now.AddMinutes(1));
+        check("Another start date merges the kept entries again", later && snapshot.Entries.Count == 5);
         File.WriteAllText(main, first + "\n");
         snapshot = new ProviderSnapshot(ProviderId.Kimi); reader.Read(snapshot, home, start, now.AddMinutes(1));
         check("A shorter file is read again from the start", snapshot.Entries.Count == 2 && snapshot.UsageComplete);

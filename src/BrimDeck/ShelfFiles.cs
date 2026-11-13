@@ -64,11 +64,18 @@ internal static class ShelfFiles
     public static void Forget(string path) => Folders.TryRemove(path, out _);
     private static void Raise() => Application.Current?.Dispatcher.BeginInvoke(() => Changed?.Invoke());
 
-    // The Explorer's icon for the file: 32 px, drawn at 16 to 48 DIP. Read on the UI thread, which is an STA thread as the shell needs.
-    public static ImageSource? Icon(string path, bool large = false)
+    // Lets go of the icons, type names and folder figures read so far (the page is switched off); false when there were none.
+    public static bool Rest()
     {
-        string key = (large ? "L|" : "S|") + path;
-        if (Icons.TryGetValue(key, out var known)) return known;
+        bool held = !Icons.IsEmpty || !Types.IsEmpty || !Folders.IsEmpty;
+        Icons.Clear(); Types.Clear(); Folders.Clear();
+        return held;
+    }
+
+    // The Explorer's icon for the file: 32 px, drawn at 16 to 48 DIP. Read on the UI thread, which is an STA thread as the shell needs.
+    public static ImageSource? Icon(string path)
+    {
+        if (Icons.TryGetValue(path, out var known)) return known;
         ImageSource? icon = null;
         var info = new ShellFileInfo();
         // SHGFI_ICON (0x100); SHGFI_SYSICONINDEX is not needed. A missing file still gets the icon of its type (SHGFI_USEFILEATTRIBUTES, 0x10).
@@ -84,7 +91,7 @@ internal static class ShelfFiles
             finally { DestroyIcon(info.Icon); }
         }
         if (Icons.Count > 1000) Icons.Clear();
-        Icons[key] = icon;
+        Icons[path] = icon;
         return icon;
     }
     // The Explorer's name for the file's type, such as "PNG 文件" or "文件夹".
