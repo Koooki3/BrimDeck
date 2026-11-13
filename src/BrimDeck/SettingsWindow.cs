@@ -759,7 +759,10 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private void Interaction()
     {
         SectionTitle(Loc.T("悬停与动画", "Hover and animation"));
-        var duration = SliderRow(Loc.T("展开与收起动画时长", "Animation duration"), S.AnimationDuration, AnimationLength.Min, AnimationLength.Max, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value));
+        // motion-review F20: the length covers the panel's expanding and collapsing; hover and press feedback keep their own pace.
+        var duration = SliderRow(Loc.T("展开与收起动画时长", "Expand and collapse duration"), S.AnimationDuration, AnimationLength.Min, AnimationLength.Max, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value),
+            Loc.T("面板展开和收起的动画时长。时间越短，动画越快；收起比展开略快。悬停、按压等反馈有各自固定的节奏，不受此项影响。",
+                "How long the panel takes to expand and collapse. The shorter the time, the faster the animation; collapsing is a little quicker than expanding. Hover and press feedback keep their own pace and are not affected."));
         var openDelay = SliderRow(Loc.T("展开延迟", "Expand delay"), S.OpenDelay, 0, 2000, 50, Loc.T("毫秒", "ms"), value => Change(s => s.OpenDelay = (int)value),
             Loc.T("鼠标悬停在 BrimDeck 的收起面板或指示条上多久后，开始展开。0 毫秒表示立即开始展开。",
                 "How long the pointer rests on BrimDeck's collapsed panel or indicator before it starts to expand. 0 ms expands immediately."));
@@ -775,7 +778,9 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             SliderRow(Loc.T("收起延迟", "Collapse delay"), S.CloseDelay, 0, 2000, 50, Loc.T("毫秒", "ms"), value => Change(s => s.CloseDelay = (int)value),
                 Loc.T("鼠标离开 BrimDeck 的展开面板范围多久后，开始收起。0 毫秒表示立即开始收起。",
                     "How long after the pointer leaves BrimDeck's expanded panel it starts to collapse. 0 ms collapses immediately.")),
-            Toggle(Loc.T("启用展开与收起动画", "Animate expanding and collapsing"), S.Animations, value => { Change(s => s.Animations = value); Enable(duration, value); }), duration);
+            Toggle(Loc.T("启用动画", "Animations"), S.Animations, value => { Change(s => s.Animations = value); Enable(duration, value); }, help:
+                Loc.T("控制面板展开收起、页面切换、悬停与按压反馈等全部动画。关闭，或 Windows 关闭了动画效果、使用高对比度时，界面不再有动画。",
+                    "Switches all animation on or off: the panel expanding and collapsing, page changes, hover and press feedback. With it off, or when Windows has animation effects off or uses high contrast, nothing animates.")), duration);
     }
 
     private void WindowRules()

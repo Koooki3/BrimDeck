@@ -19,6 +19,7 @@ public partial class MainWindow
         void Press(bool down)
         {
             pressed = down;
+            // The cover is pressed as the transport buttons are (motion-review F11).
             Soft.Pressed(press, down, Soft.Enabled);
         }
         art.MouseLeftButtonDown += (_, e) =>

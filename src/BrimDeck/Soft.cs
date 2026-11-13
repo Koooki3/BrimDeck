@@ -33,16 +33,15 @@ internal static class Soft
     public const int Quick = 160, Short = 240, Hover = (int)(Eased.Hover * 1000), HoverOut = (int)(Eased.HoverOut * 1000 + .5), Choose = (int)(Eased.Seconds * 750), Move = (int)(Eased.Seconds * 1000);
     // A press (motion-review F11, F12): what shrinks under the button goes down in Press to PressScale, a pressed fill or glyph
     // in PressFill, so the press is felt at once; both let go in Quick.
-    public const int Press = 100, PressFill = 70;
-    public const double PressScale = .96;
+    public const int Press = PressFeedback.Down, PressFill = PressFeedback.Fill;
+    public const double PressScale = PressFeedback.Scale;
     // How small content is as it steps out of or into its place (the island's compact content, motion-review F15): never so
     // small that it reads as coming from nothing.
     public const double Shrunk = .94;
 
     // Whether anything moves: the setting in BrimDeck and Windows' own "animation effects", and never in high contrast. The one
-    // rule for every animation in the app; MotionGate applies the same (MotionConditions.Allowed).
-    public static bool Enabled => MotionConditions.Allowed((Application.Current as App)?.Settings.Animations != false,
-        SystemParameters.ClientAreaAnimation, SystemParameters.HighContrast);
+    // rule for every animation in the app (motion-review F5, F6): nothing outside it decides for itself.
+    public static bool Enabled => MotionConditions.Allowed((Application.Current as App)?.Settings.Animations != false, SystemParameters.ClientAreaAnimation, SystemParameters.HighContrast);
 
     public static DoubleAnimation Fade(double from, double to, int milliseconds, IEasingFunction? easing = null) =>
         new(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = easing ?? Out };
@@ -75,8 +74,8 @@ internal static class Soft
     // A scale that answers a press: down to PressScale in Press, back in Quick.
     public static void Pressed(ScaleTransform scale, bool down, bool animate)
     {
-        Glide(scale, ScaleTransform.ScaleXProperty, down ? PressScale : 1, animate, down ? Press : Quick);
-        Glide(scale, ScaleTransform.ScaleYProperty, down ? PressScale : 1, animate, down ? Press : Quick);
+        Glide(scale, ScaleTransform.ScaleXProperty, down ? PressScale : 1, animate, PressFeedback.ScaleLength(down));
+        Glide(scale, ScaleTransform.ScaleYProperty, down ? PressScale : 1, animate, PressFeedback.ScaleLength(down));
     }
 
     // Sets a property to its new value and, when animate, glides there from where it was (Soft.Follow, Hover by default): the

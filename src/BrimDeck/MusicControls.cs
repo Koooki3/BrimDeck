@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using BrimDeck.Core;
 
 namespace BrimDeck;
 
@@ -24,20 +25,24 @@ public sealed class MusicControlButton : Button
         if (e.Property == IsMouseOverProperty || e.Property == IsPressedProperty || e.Property == IsEnabledProperty) UpdateState();
     }
     protected override void OnMouseEnter(MouseEventArgs e) { _touched = e.StylusDevice is not null; base.OnMouseEnter(e); UpdateState(); }
-    protected override void OnMouseMove(MouseEventArgs e)
+    protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); Source(e); }
+    // Touch or a pen taking over from a mouse that is already over the button sends no MouseEnter: presses and moves say who it is.
+    protected override void OnPreviewMouseDown(MouseButtonEventArgs e) { Source(e); base.OnPreviewMouseDown(e); }
+    private void Source(MouseEventArgs e)
     {
-        base.OnMouseMove(e);
-        if (_touched && e.StylusDevice is null) { _touched = false; UpdateState(); }
+        bool touch = e.StylusDevice is not null;
+        if (_touched == touch) return;
+        _touched = touch; UpdateState();
     }
     public override void OnApplyTemplate() { base.OnApplyTemplate(); UpdateState(); }
     private void UpdateState()
     {
         if (Template?.FindName("Hover", this) is Ellipse hover)
         {
-            double opacity = !IsEnabled ? 0 : IsPressed ? .16 : (bool)GetValue(IsMouseOverProperty) && !_touched ? .10 : 0;
+            double opacity = !IsEnabled ? 0 : IsPressed ? .16 : PressFeedback.Hovers((bool)GetValue(IsMouseOverProperty), _touched) ? .10 : 0;
             Soft.Glide(hover, OpacityProperty, opacity, AnimationsEnabled, IsPressed ? Soft.PressFill : opacity >= hover.Opacity ? Soft.Hover : Soft.HoverOut);
         }
-        // The press shrinks the button as it does the cover (motion-review F11).
+        // The press shrinks the button as it does the cover (motion-review F11), where it used to jump to its size at once.
         if (Template?.FindName("ControlScale", this) is ScaleTransform scale) Soft.Pressed(scale, IsEnabled && IsPressed, AnimationsEnabled);
     }
 }
@@ -78,12 +83,10 @@ public sealed class MusicSeekSlider : Slider
     // motion-review F8: the bar is laid out once at its hover height and only scaled down to rest, so hovering it changes no
     // layout. The rail and the track (the played part) share the scale.
     private readonly ScaleTransform _barScale = new(1, 1);
-    private bool _touched;
-    protected override void OnMouseEnter(MouseEventArgs e) { _touched = e.StylusDevice is not null; base.OnMouseEnter(e); UpdateState(); }
     private void UpdateState(bool animate = true)
     {
         animate &= AnimationsEnabled && IsLoaded;
-        bool active = IsEnabled && ((bool)GetValue(IsMouseOverProperty) && !_touched || Seeking);
+        bool active = IsEnabled && (PressFeedback.Hovers((bool)GetValue(IsMouseOverProperty), _touched) || Seeking);
         Soft.Glide(_barScale, ScaleTransform.ScaleYProperty, active || HoverHeight <= 0 ? 1 : RestHeight / HoverHeight, animate);
         // On a dark surface the hover color is lighter, on a light one darker, so hovering only ever adds contrast.
         bool dark = PanelTheme.Current.IsDark;
@@ -94,10 +97,19 @@ public sealed class MusicSeekSlider : Slider
         BubbleVisible = active ? Visibility.Visible : Visibility.Collapsed;
         UpdateBubble();
     }
+    private bool _touched;
+    protected override void OnMouseEnter(MouseEventArgs e) { _touched = e.StylusDevice is not null; base.OnMouseEnter(e); UpdateState(); }
+    protected override void OnPreviewMouseDown(MouseButtonEventArgs e) { Source(e); base.OnPreviewMouseDown(e); }
+    private void Source(MouseEventArgs e)
+    {
+        bool touch = e.StylusDevice is not null;
+        if (_touched == touch) return;
+        _touched = touch; UpdateState();
+    }
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (_touched && e.StylusDevice is null) { _touched = false; UpdateState(); }
+        Source(e);
         if (Seeking && IsMouseCaptured && Mouse.LeftButton == MouseButtonState.Pressed)
             Value = Math.Clamp(e.GetPosition(this).X / Math.Max(1, ActualWidth), 0, 1);
         UpdateBubble();

@@ -198,7 +198,7 @@ internal sealed class FigureGauge : FrameworkElement
             + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0);
         double x = _right ? Math.Max(0, w - width) : 0, baseline = Math.Round(h / 2 + number.Baseline - number.Height / 2 + _figure * .05);
         var center = new Point(x + badge / 2, h / 2);
-        double hover = _button ? Math.Clamp(_hover.At(now), 0, 1) : 0;
+        double hover = _button ? PressFeedback.FillShown(Math.Clamp(_hover.At(now), 0, 1), _pressed) : 0;
         if (hover > .01)
         {
             drawing.PushOpacity(hover);
@@ -233,7 +233,7 @@ internal sealed class FigureGauge : FrameworkElement
     }
 
     // Touch and a pen do not hover (motion-review F4).
-    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (_button && e.StylusDevice is null) Hover(true); }
+    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (_button && PressFeedback.Hovers(true, e.StylusDevice is not null)) Hover(true); }
     protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); if (_button) { _pressed = false; Hover(false); } }
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
@@ -438,7 +438,7 @@ internal sealed class BlockGauge : FrameworkElement
         double y = Math.Round((1 - Math.Clamp(_tick.At(now), 0, 1)) * (h - 2)) + 1;
         drawing.DrawLine(pen, new Point(w * .2, y), new Point(w * .8, y));
     }
-    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (e.StylusDevice is null) Hover(true); }
+    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (PressFeedback.Hovers(true, e.StylusDevice is not null)) Hover(true); }
     protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); Hover(false); }
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e) { base.OnMouseLeftButtonUp(e); e.Handled = true; Clicked?.Invoke(); }
     protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); if (KeyboardPress.Pressed(e)) Clicked?.Invoke(); }

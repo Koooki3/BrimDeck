@@ -31,7 +31,7 @@ public partial class MainWindow
     private readonly Grid PageSwitch = new();
     private readonly Border PageCapsule = new() { Width = 60, Height = 24 };
     private readonly TranslateTransform PageCapsuleShift = new();
-    private readonly ScaleTransform PageCapsuleStretch = new(1, 1);
+    private readonly ScaleTransform PageCapsuleStretch = new();
     private bool _expanded = true, _preview = false;
 
     // Links the actual production method, including its retry branch and button reorder, rather than testing the helper alone.
@@ -76,13 +76,40 @@ public partial class MainWindow
         finally { window.Close(); }
     }
 
+    // motion-review F8: moving the capsule to a button of another width sets the width at once and draws the change by stretching
+    // the capsule from its left edge (the real PlacePageCapsule), so the glide lays nothing out again. Skipped where animations are
+    // off (Windows' effects off, high contrast), since nothing glides then.
+    internal static void CheckPageCapsuleStretch(Action<string, bool> check)
+    {
+        var window = new MainWindow { Width = 400, Height = 100, Left = -20000, Top = -20000, ShowActivated = false, WindowStyle = WindowStyle.None };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+        buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton); buttons.Children.Add(window.ShelfPageButton);
+        window.PageCapsule.RenderTransform = new TransformGroup { Children = { window.PageCapsuleStretch, window.PageCapsuleShift } };
+        window.PageSwitch.Children.Add(window.PageCapsule); window.PageSwitch.Children.Add(buttons);
+        window.Content = window.PageSwitch;
+        try
+        {
+            window.Show();
+            window.MonitorPageButton.Width = 90;
+            window.CurrentPage = DeckPage.Usage; window.UpdateLayout(); window.PlacePageCapsule();
+            window.CurrentPage = DeckPage.Monitor; window.PlacePageCapsule();
+            check("the capsule's width is the new button's at once", window.PageCapsule.Width == window.MonitorPageButton.ActualWidth && window.MonitorPageButton.ActualWidth == 90);
+            if (!BrimDeck.Soft.Enabled) { check("animations are off here: the stretch check is skipped", true); return; }
+            check("the capsule's width is not what glides", !window.PageCapsule.HasAnimatedProperties);
+            check("the change of width is drawn by stretching the capsule from the left", window.PageCapsuleStretch.HasAnimatedProperties);
+            window.CurrentPage = DeckPage.Monitor; window.PlacePageCapsule();
+            check("a placement without a change of width starts no stretch", !window.PageCapsuleStretch.HasAnimatedProperties && window.PageCapsuleStretch.ScaleX == 1);
+        }
+        finally { window.Close(); }
+    }
+
     // The header changes size tier: the capsule follows the buttons' new drawn height at once (ApplyHeader), not at the next refresh.
     internal static void CheckPageCapsuleFit(Action<string, bool> check)
     {
         var window = new MainWindow { Width = 260, Height = 100, Left = -20000, Top = -20000, ShowActivated = false, WindowStyle = WindowStyle.None };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton); buttons.Children.Add(window.ShelfPageButton);
-        window.PageCapsule.RenderTransform = window.PageCapsuleShift;
+        window.PageCapsule.RenderTransform = new TransformGroup { Children = { window.PageCapsuleStretch, window.PageCapsuleShift } };
         window.PageSwitch.Children.Add(window.PageCapsule); window.PageSwitch.Children.Add(buttons);
         window.Content = window.PageSwitch;
         try

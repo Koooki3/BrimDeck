@@ -64,10 +64,9 @@ public partial class MainWindow
     private Button? _musicFullControl;
     private TextBlock? _musicSmtcHint;
     private readonly Dictionary<MediaCommand, (MusicControlButton Button, string Icon)> _musicControlButtons = new();
-    // The transport button the pointer last clicked, and when (Environment.TickCount64): only its own new glyph grows into
-    // place; one changed by a media key, the keyboard or the player switches at once (motion-review F10).
+    // The transport button the pointer last clicked, and when (Environment.TickCount64): only its own new glyph grows into place
+    // (motion-review F10, GlyphGrowth).
     private (MediaCommand Id, long At)? _musicPointerClick;
-    private const int MusicClickAnswer = 2000;
     private MusicEqualizer? _musicEqualizer, _compactEqualizer;
     private readonly double[] _flowLevels = new double[CompactMusicLayout.MaximumBars];
     private MusicMarquee? _compactMarquee;
@@ -650,7 +649,7 @@ public partial class MainWindow
                 var created = new MusicControlButton { Style = (Style)FindResource("MusicControl") };
                 created.Click += async (_, _) =>
                 {
-                    if (InputManager.Current.MostRecentInputDevice is MouseDevice or StylusDevice) _musicPointerClick = (id, Environment.TickCount64);
+                    if (InputManager.Current.MostRecentInputDevice is MouseDevice or StylusDevice or TouchDevice) _musicPointerClick = (id, Environment.TickCount64);
                     if (created.Tag is Func<Task> execute) await execute();
                 };
                 slot = (created, ""); controls.Children.Add(created);
@@ -668,15 +667,16 @@ public partial class MainWindow
                     container.Children.Add(singleLabel); icon = container;
                 }
                 // A glyph changed by a click on it (play and pause, the playback mode, the heart) grows into place from nearly its
-                // size instead of switching (motion-review F10).
-                bool clicked = _musicPointerClick is { } click && click.Id == id && Environment.TickCount64 - click.At < MusicClickAnswer;
+                // size instead of switching (motion-review F10); one changed by a media key, the keyboard or the player itself
+                // switches at once.
+                bool clicked = _musicPointerClick is { } click && click.Id == id && GlyphGrowth.Grows(click.At, Environment.TickCount64);
                 if (clicked) _musicPointerClick = null;
                 if (glide && clicked && button.IsVisible && slot.Icon.Length > 0 && icon is FrameworkElement grown)
                 {
-                    var scale = new ScaleTransform(.9, .9);
+                    var scale = new ScaleTransform(GlyphGrowth.From, GlyphGrowth.From);
                     grown.RenderTransformOrigin = new Point(.5, .5); grown.RenderTransform = scale;
-                    var grow = Soft.Fade(.9, 1, 200); grow.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
-                    var fade = Soft.Fade(0, 1, 200); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
+                    var grow = Soft.Fade(GlyphGrowth.From, 1, GlyphGrowth.Milliseconds); grow.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
+                    var fade = Soft.Fade(0, 1, GlyphGrowth.Milliseconds); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
                     scale.ScaleX = scale.ScaleY = 1;
                     scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow); scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
                     grown.BeginAnimation(OpacityProperty, fade);

@@ -270,9 +270,9 @@ public partial class MainWindow
             shift.X = x; fill.Width = width;
             if (!slide) return;
             shift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(was.X, x, Soft.Choose, Soft.Follow));
-            if (was.Width > 0 && width > 0 && Math.Abs(was.Width - width) > .5)
+            if (StretchGlide.From(was.Width, width) is { } stretchFrom)
             {
-                var widen = Soft.Fade(was.Width / width, 1, Soft.Choose, Soft.Follow); widen.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
+                var widen = Soft.Fade(stretchFrom, 1, Soft.Choose, Soft.Follow); widen.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
                 stretch.BeginAnimation(ScaleTransform.ScaleXProperty, widen);
             }
         };

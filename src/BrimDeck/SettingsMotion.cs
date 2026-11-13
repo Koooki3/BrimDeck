@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using BrimDeck.Core;
 
 namespace BrimDeck;
 
@@ -36,7 +37,7 @@ internal static class SettingsMotion
     {
         if (sender is not Thumb { Template: { } template } thumb || template.FindName("KnobScale", thumb) is not ScaleTransform scale) return;
         // Touch and a pen do not hover (motion-review F4).
-        double to = thumb.IsMouseOver && e.StylusDevice is null ? KnobHover : 1;
+        double to = PressFeedback.Hovers(thumb.IsMouseOver, e.StylusDevice is not null) ? KnobHover : 1;
         Soft.Glide(scale, ScaleTransform.ScaleXProperty, to, Soft.Enabled, Soft.Quick);
         Soft.Glide(scale, ScaleTransform.ScaleYProperty, to, Soft.Enabled, Soft.Quick);
     }

@@ -60,6 +60,7 @@ internal static class Program
             NoticePanelTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
+            BrimDeck.MainWindow.CheckPageCapsuleStretch(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
             if (hosted)
             {
