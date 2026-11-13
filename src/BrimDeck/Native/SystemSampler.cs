@@ -164,7 +164,13 @@ internal sealed class SystemSampler : IDisposable
     // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
     // page knows early how many lines it needs for them. frames: a collapsed row or an open page shows the frame rate. gpu: the graphics
     // adapters (the page, the row's GPU reading, the power).
-    public void SetReads(bool cpu, bool memory, bool network) { _readCpu = cpu; _readMemory = memory; _readNetwork = network; }
+    // Turning the network off is noted here, not only seen as the flag: off and on again between two collections still starts over.
+    private volatile bool _networkRestart;
+    public void SetReads(bool cpu, bool memory, bool network)
+    {
+        if (_readNetwork && !network) _networkRestart = true;
+        _readCpu = cpu; _readMemory = memory; _readNetwork = network;
+    }
     public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false, bool frames = false, bool gpu = false)
     {
         if (!_disposed) _frames.Want(frames);
@@ -320,7 +326,7 @@ internal sealed class SystemSampler : IDisposable
         }
         // While network is not read the provider forgets its baseline and the history goes, so the first rate after it turns on is not an
         // average over the time off and old readings do not join new ones.
-        if (!_readNetwork) { _network.Forget(); _history.Clear(); }
+        if (!_readNetwork || _networkRestart) { _networkRestart = false; _network.Forget(); _history.Clear(); }
         var network = _readNetwork ? _network.Sample(now) : Reading<NetworkSample>.Unavailable(Why.Waiting);
         if (network.TryGet(out var rates))
         {
