@@ -21,9 +21,9 @@ public sealed partial class SettingsWindow
     {
         bool syncing = false;
         var refresh = new List<Action>();
-        _refreshReadings = null;
+        _refreshReadings = null; _refreshExpanded = null;
         // Shows what the settings hold in place: the colors, the preset they match, and the readings' colors in the table.
-        void Refresh() { syncing = true; try { foreach (var update in refresh) update(); } finally { syncing = false; } _refreshReadings?.Invoke(); }
+        void Refresh() { syncing = true; try { foreach (var update in refresh) update(); } finally { syncing = false; } _refreshReadings?.Invoke(); _refreshExpanded?.Invoke(); }
         // A color per reading, four to a row.
         var roles = KeepPreview(new UniformGrid { Columns = 4, Width = Loc.IsEnglish ? 600 : 440, Margin = new Thickness(0, Space.Tight, 0, Space.Tight) });
         foreach (var role in Enum.GetValues<MonitorRole>()) roles.Children.Add(SwatchCell(RoleName(role), RoleHelp(role), () => RoleSwatch(role, Refresh), refresh));
@@ -68,29 +68,20 @@ public sealed partial class SettingsWindow
             MusicChoice(Loc.T("进程行", "Process rows"), S.MonitorProcessView,
                 [(MonitorProcessView.Auto, Loc.T("自动", "Auto")), (MonitorProcessView.Compact, Loc.T("简略", "Compact")), (MonitorProcessView.Detailed, Loc.T("详细", "Detailed"))],
                 v => Resize(s => s.MonitorProcessView = v, DeckPage.Monitor), keepPreview: true),
-            Toggle(Loc.T("显示进程列表", "Show the process list"), S.MonitorProcesses, v => Resize(s => s.MonitorProcesses = v, DeckPage.Monitor),
+            Toggle(Loc.T("显示进程列表", "Show the process list"), ExpandedOf(S, ExpandedItem.Processes).Visible,
+                v => EditExpanded(list => list.First(reading => reading.Item == ExpandedItem.Processes).Visible = v),
                 help:
-                Loc.T("按 CPU 或内存列出占用最高的应用。", "Lists the apps using the most CPU or memory."),
+                Loc.T("按 CPU 或内存列出占用最高的应用。位置由页面大小决定；只开这一项时占满整页。", "Lists the apps using the most CPU or memory. Its place follows the page's size; alone it fills the page."),
                 keepPreview: true),
-            Toggle(Loc.T("显示硬盘", "Show drives"), S.MonitorStorage, v => Resize(s => s.MonitorStorage = v, DeckPage.Monitor),
-                help:
-                Loc.T("不含 U 盘、移动硬盘、网络盘和光驱。", "USB, external, network and optical drives are not included."),
-                keepPreview: true),
-            Toggle(Loc.T("显示功耗与电池", "Show power and battery"), S.MonitorPower, v => Resize(s => s.MonitorPower = v, DeckPage.Monitor),
-                help:
-                Loc.T("在硬盘下方显示整机功耗和本机电池。只在面板展开到系统监控页时读取。",
-                    "Shows system power and this PC's battery under the drives. Read only while the panel is open on the system monitor page."),
-                keepPreview: true),
-            WithFrameAccess(Toggle(Loc.T("显示帧率", "Show the frame rate"), S.MonitorFrames, v => { Resize(s => s.MonitorFrames = v, DeckPage.Monitor); if (v) AskFrameAccess(); else FrameAccessChanged?.Invoke(); },
-                help:
-                Loc.T("在网速下方显示前台程序的帧率、程序名称和所在显示器的刷新率；前台程序不在绘制时，显示最近一个在绘制的程序。只在面板展开到系统监控页时读取。首次开启时需要授权。",
-                    "Shows the frame rate of the program in front under the network rates, with its name and its display's refresh rate; while it draws nothing, the last program that did. Read only while the panel is open on the system monitor page. Needs permission the first time."),
-                keepPreview: true), () => S.MonitorFrames && !Reading(S, CompactMonitorItems.Frames).Visible),
             WithSensorStops(Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
                 Loc.T("读不到的温度不显示。CPU 温度由主板固件提供，许多电脑没有这项数据；有的电脑读到的是主板的温度，不是 CPU 本身的温度。",
                     "Temperatures that cannot be read are not shown. The CPU temperature comes from the motherboard firmware. Many PCs do not provide it, and on some it is the motherboard's temperature rather than the CPU's."),
                 keepPreview: true)));
+        // What the page shows, and in which order; the frame rate's permission note stays with its row's table.
+        var (readings, quick) = ExpandedOptions();
+        SectionTitle(Loc.T("展开时显示的监控项", "Readings shown when expanded"));
+        Group(WithFrameAccess(readings, () => ExpandedOf(S, ExpandedItem.Frames).Visible && !Reading(S, CompactMonitorItems.Frames).Visible), quick);
         SectionTitle(Loc.T("来源", "Sources"));
         Group(MusicChoice(Loc.T("显卡占用率", "GPU usage"), S.MonitorGpuUsage,
             [(GpuUsageSource.Driver, Loc.T("显卡驱动", "GPU driver")), (GpuUsageSource.Windows, "Windows")], v => Change(s => s.MonitorGpuUsage = v),

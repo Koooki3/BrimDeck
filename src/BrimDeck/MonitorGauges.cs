@@ -545,13 +545,16 @@ internal sealed class NetworkBlock : FrameworkElement
     private readonly MonitorColors _colors;
     private readonly MetricsMode _mode;
     private readonly double _body, _caption;
+    // Which of the two rates the block shows (the table may choose one): one takes the whole width.
+    private readonly bool _download, _upload;
     private NetworkSample? _rates;
     private IReadOnlyList<double> _down = [], _up = [];
     private string _reason = "";
 
-    public NetworkBlock(MonitorColors colors, MetricsMode mode, double body, double caption)
+    public NetworkBlock(MonitorColors colors, MetricsMode mode, double body, double caption, bool download = true, bool upload = true)
     {
         _colors = colors; _mode = mode == MetricsMode.Blocks ? MetricsMode.Lines : mode; _body = body; _caption = caption;
+        _download = download || !upload; _upload = upload || !download;
         Height = Math.Ceiling(body * 1.7);
     }
 
@@ -561,7 +564,7 @@ internal sealed class NetworkBlock : FrameworkElement
     public void Set(Reading<NetworkSample> reading, IReadOnlyList<double> down, IReadOnlyList<double> up)
     {
         _rates = reading.OrDefault; _reason = reading.HasValue ? "" : reading.Reason; _down = down; _up = up;
-        ToolTip = _rates is { } r ? Loc.T("下载 ", "Download ") + MonitorFormat.Rate(r.DownBytesPerSecond).Text + " · " + Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(r.UpBytesPerSecond).Text
+        ToolTip = _rates is { } r ? string.Join(" · ", new[] { _download ? Loc.T("下载 ", "Download ") + MonitorFormat.Rate(r.DownBytesPerSecond).Text : null, _upload ? Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(r.UpBytesPerSecond).Text : null }.OfType<string>())
             : Loc.T("暂无读数：", "No reading: ") + _reason;
         InvalidateVisual();
     }
@@ -572,8 +575,13 @@ internal sealed class NetworkBlock : FrameworkElement
     {
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), line = Math.Ceiling(_body * 1.7), half = Math.Floor((w - 12) / 2);
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
-        Half(drawing, 0, half, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _down, _colors.Download, ppd);
-        Half(drawing, half + 12, half, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _up, _colors.Upload, ppd);
+        if (_download && _upload)
+        {
+            Half(drawing, 0, half, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _down, _colors.Download, ppd);
+            Half(drawing, half + 12, half, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _up, _colors.Upload, ppd);
+        }
+        else if (_download) Half(drawing, 0, w, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _down, _colors.Download, ppd);
+        else Half(drawing, 0, w, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _up, _colors.Upload, ppd);
     }
 
     private void Half(DrawingContext drawing, double left, double width, double line, MonitorGlyph glyph, double? rate, IReadOnlyList<double> history, string color, double ppd)

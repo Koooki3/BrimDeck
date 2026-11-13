@@ -111,6 +111,7 @@ Works with players that use Windows media controls, with extra support for NetEa
 - Lists the busiest apps by CPU or memory; click an app for its details.
 - Shows the space in use on internal drives, the whole machine's power draw, and the battery of a laptop or tablet.
 - Optionally shows CPU, GPU and solid-state drive temperatures, and the frame rate of the program in front.
+- Choose which readings the expanded page shows, and in what order, under Settings › System monitor; the page lays itself out for any choice, and what is not chosen is not read.
 - Colors follow the panel theme by default; several preset color schemes are offered, and you can make your own.
 
 For where each reading comes from and its limits, see [System monitor readings](docs/en-US/system-monitor.md). PCs whose CPU temperature or power cannot be read can turn on [enhanced sensors](docs/en-US/enhanced-sensors.md).

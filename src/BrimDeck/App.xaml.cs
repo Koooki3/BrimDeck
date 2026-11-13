@@ -156,7 +156,7 @@ public partial class App : Application
         InitializeHotkeys();
         StartBackgroundUpdates();
         // Only for a user who has the monitor page with its power line: the rest never open it.
-        if (Settings.MonitorPage && Settings.MonitorPower) PowerWarm.Start(Dispatcher);
+        if (Settings.MonitorPage && Settings.ShowsExpanded(ExpandedItem.Power)) PowerWarm.Start(Dispatcher);
         WarmSettingsWriter();
         ApplyMemoryMode();
         DisplayPower.Install(Dispatcher);
@@ -539,22 +539,38 @@ public partial class App : Application
     }
     // The system is read while any panel shows the monitor page open (and briefly after; see SystemSampler) or shows readings in
     // its collapsed row. Processes are listed only for an open page.
-    internal void PresentMonitor(MainWindow deck, bool page, bool strip, bool power = false, bool heldStrip = false)
+    internal void PresentMonitor(MainWindow deck, bool page, bool strip, bool power = false, bool heldStrip = false, ExpandedDemand? demand = null)
     {
-        if (page) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
+        if (page) { _presentingMonitor.Add(deck); _pageDemands[deck] = demand ?? EveryDemand; } else { _presentingMonitor.Remove(deck); _pageDemands.Remove(deck); }
         if (power) _presentingPower.Add(deck); else _presentingPower.Remove(deck);
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
         if (strip || heldStrip) _heldStrip.Add(deck); else _heldStrip.Remove(deck);
         LingerPageExtras();
         ApplyMonitorDemand(lingered: false);
     }
+    // What the open pages read (the layout of each keeps only the items the table chooses, ExpandedPlan.Demand); a page just closed keeps
+    // asking for what it did while its extras linger. An empty table reads nothing.
+    private const ExpandedDemand EveryDemand = (ExpandedDemand)511;
+    private readonly Dictionary<MainWindow, ExpandedDemand> _pageDemands = [];
+    private ExpandedDemand _lastPageDemand;
+    private ExpandedDemand PageDemand()
+    {
+        if (_presentingMonitor.Count > 0)
+        {
+            var all = ExpandedDemand.None;
+            foreach (var deck in _presentingMonitor) all |= _pageDemands.GetValueOrDefault(deck, EveryDemand);
+            return all;
+        }
+        return _pageExtras ? _lastPageDemand : ExpandedDemand.None;
+    }
     // lingered: the page's linger just ran out (LingerPageExtras), so a sampler no longer wanted stops at once instead of lingering again.
     private void ApplyMonitorDemand(bool lingered)
     {
         // A page that closed a moment ago is still read for, processes included, while its extras linger: opened again, it shows
         // the current list at once instead of "Reading processes…" until the first list comes.
-        bool listing = _presentingMonitor.Count > 0 || _pageExtras;
-        bool wanted = listing || _stripMonitor.Count > 0;
+        var pageDemand = PageDemand();
+        bool listing = (pageDemand & ExpandedDemand.Processes) != 0;
+        bool wanted = pageDemand != ExpandedDemand.None || _stripMonitor.Count > 0;
         if (Exiting || Monitor is null && !wanted) return;
         // The sampler reads the choice of graphics adapter on its own thread, where each part is read whole.
         Monitor ??= CreateMonitor();
@@ -613,6 +629,7 @@ public partial class App : Application
         if (_presentingMonitor.Count > 0)
         {
             _pageLinger?.Stop();
+            _lastPageDemand = PageDemand();
             _pageExtras = true; _pagePower = _presentingPower.Count > 0; _pageFrames = _presentingMonitor.Any(deck => deck.PageShowsFrames);
             return;
         }
@@ -637,17 +654,22 @@ public partial class App : Application
             && (item == CompactMonitorItems.Storage || reading.ShowValue) && CompactFigures.Shows(reading, CompactFigures.Temperature);
         bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
         if (Monitor is not null) Monitor.GpuUsage = Settings.MonitorGpuUsage;
-        Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu, held) || Heat(CompactMonitorItems.Gpu, held),
-            page && Settings.MonitorStorage || stripDrives,
-            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage, shown),
+        var pageDemand = PageDemand();
+        bool Page(ExpandedDemand what) => page && (pageDemand & what) != 0;
+        // The cpu, memory and network are read for what an open page shows and for a collapsed row; with a row, all as before.
+        bool stripActive = _stripMonitor.Count > 0 || _heldStrip.Count > 0;
+        Monitor?.SetReads(stripActive || Page(ExpandedDemand.Cpu), stripActive || Page(ExpandedDemand.Memory), stripActive || Page(ExpandedDemand.Network));
+        Monitor?.SetExtras(Page(ExpandedDemand.Temperatures) || Heat(CompactMonitorItems.Cpu, held) || Heat(CompactMonitorItems.Gpu, held),
+            Page(ExpandedDemand.Storage) || stripDrives,
+            Page(ExpandedDemand.Storage) && Page(ExpandedDemand.Temperatures) || Heat(CompactMonitorItems.Storage, shown),
             // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
             // alone also for the row's charge reading.
-            (_presentingPower.Count > 0 || _pageExtras && _pagePower) && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
+            (_presentingPower.Count > 0 || _pageExtras && _pagePower) && Page(ExpandedDemand.Power) && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
             (shown & CompactMonitorItems.Charge) != 0,
             // The frame rate for a row that shows it, or an open page with room for its line.
-            (shown & CompactMonitorItems.Frames) != 0 || Settings.MonitorFrames && (_presentingMonitor.Any(deck => deck.PageShowsFrames) || _pageExtras && _pageFrames),
+            (shown & CompactMonitorItems.Frames) != 0 || Page(ExpandedDemand.Frames) && (_presentingMonitor.Any(deck => deck.PageShowsFrames) || _pageExtras && _pageFrames),
             // The graphics adapters for the page and the row's GPU reading (the power asks for them itself).
-            page || (shown & CompactMonitorItems.Gpu) != 0);
+            Page(ExpandedDemand.Gpu) || (shown & CompactMonitorItems.Gpu) != 0);
     }
     // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
     // source nor a battery (a desktop with nothing), so such a page does not keep asking.

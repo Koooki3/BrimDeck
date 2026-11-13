@@ -8,15 +8,25 @@ Every reading is read and shown only on this PC, never saved or sent. Unless sta
 
 | Reading | Default | Where to switch it | Notes |
 | --- | --- | --- | --- |
-| CPU, memory, network speed | Shown | — | The CPU also shows the usage of each core |
-| GPU | Shown | General › GPU | With more than one graphics card, choose which one shows |
+| CPU, memory, download, upload | Shown | Readings shown when expanded | The CPU also shows the usage of each core |
+| GPU | Shown | Readings shown when expanded | With more than one graphics card, choose which one shows |
 | Busiest apps | Shown | When expanded › Show the process list | Sorted by CPU or memory; click an app for its details |
-| Drives | Shown | When expanded › Show drives | Internal drives only |
-| System power and this PC's battery | Shown | When expanded › Show power and battery | PCs without a battery show no battery |
+| Drives | Shown | Readings shown when expanded › Drives | Internal drives only |
+| System power and this PC's battery | Shown | Readings shown when expanded › Power and battery | PCs without a battery show no battery |
 | Temperatures | Hidden | When expanded › Show temperatures | CPU, GPU and solid-state drives |
-| Frame rate | Hidden | When expanded › Show the frame rate | Needs permission the first time |
+| Frame rate | Hidden | Readings shown when expanded › Frame rate | Needs permission the first time |
 
 The readings shown in the notch and capsule are chosen under "When collapsed".
+
+## Choosing what the expanded page shows
+
+"Readings shown when expanded" is a table with a row for each reading: CPU, GPU, memory, download, upload, frame rate, drives, and power and battery. "Show" decides whether the expanded page shows it; drag the handle at the start of a row, or press Alt+Up/Down in the row, to change its place on the page. The process list has its own "Show the process list" switch, and its place follows the page's size.
+
+- The checks here only affect the expanded page, and the checks under "When collapsed" only affect the notch and capsule; neither changes the other.
+- Presets: All (the frame rate stays as it is), Brief (CPU, memory, download, upload), CPU and memory, and None.
+- The page lays itself out for what is chosen: a single reading fills the page; when room runs short, minor lines such as the frame rate and drives go first, then the network and memory are compressed, and nothing overlaps or leaves the page. Download and upload share one line and can be shown one at a time.
+- With nothing chosen, the expanded page shows a note and an "Open settings" button, and asks for no data. A reading that is not chosen is not requested by the expanded page; collapsed rows and the delay-retention window still read what they need.
+- Until you change the table the expanded page is exactly as before the upgrade; the old switches for the process list, drives, power and battery, and frame rate are now part of it.
 
 ## CPU and GPU
 
