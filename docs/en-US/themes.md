@@ -5,7 +5,7 @@ The Notch, Capsule and Indicator, the quota notice, the expanded panel and its p
 | Kind | Themes |
 | --- | --- |
 | Basics | System, Dark (the default: the original pure black look), Light, Liquid Glass (light), Liquid Glass (dark) |
-| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Island Holiday 2, Pixel Blocks, Cyberpunk: Edgerunners (the demo), Arknights: Endfield |
+| More themes | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Island Holiday 2, Pixel Blocks, Cyberpunk: Edgerunners (the demo), Arknights: Endfield |
 | Custom | The theme files in the themes folder, which can be created, edited and deleted in settings |
 
 Each theme remembers the theme, warning and critical colors of the app columns and the clock's style and color you change while using it: they are saved when you switch to another theme and come back when you return. A theme chosen for the first time uses its own colors and suggested clock. Restoring defaults in "Quotas and usage" or "Collapsed view" restores the current theme's defaults.

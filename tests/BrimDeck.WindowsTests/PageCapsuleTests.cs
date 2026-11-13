@@ -7,19 +7,21 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
+// PanelTheme.Find only maps an id through the automatic liquid glass; the theme cards here use fixed built-in themes, so the id stands as it is.
+internal static class LiquidTheme
+{
+    public static string Look(string id) => id;
+}
+
 // Soft reads only this property. No real App startup, accounts or user settings are involved.
-public sealed class App : Application
+public sealed partial class App : Application
 {
     public DeckSettings Settings { get; } = new();
 }
 
-// PageHandover's snapshot path reads the inherited draw scale; capsule tests use only its real Glide path.
-internal static class UI
-{
-    public static double GetScale(DependencyObject owner) => 1;
-}
 public partial class MainWindow
 {
+    internal double Scale => 1;
     private DeckSettings Settings { get; } = new();
     private DeckPage CurrentPage { get; set; }
     private readonly Button AIUsageButton = new() { Content = "Usage", Width = 60, Height = 24 };
