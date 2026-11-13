@@ -69,7 +69,7 @@
   // brand that is orange; the rest are grays. Warning is the notice orange, critical the danger red.
   "apps": {
     "claude": "#A8620A", "codex": "#1F6FA3", "antigravity": "#047A7A", "cursor": "#3C3C3C", "zcode": "#6B35C9",
-    "dsh": "#4D7A1C", "grokBot": "#5C5C5C", "kimi": "#A63FCB", "opencode": "#6B6B6B", "manual": "#3C3C3C", "other": "#5C5C5C", "warning": "#B84A00", "critical": "#C61218"
+    "dsh": "#4D7A1C", "grokBot": "#5C5C5C", "kimi": "#A63FCB", "opencode": "#6B6B6B", "codeagent": "#1AA298", "commandcode": "#3C1FB2", "workbuddy": "#39A460", "mimo": "#F46400", "manual": "#3C3C3C", "other": "#5C5C5C", "warning": "#B84A00", "critical": "#C61218"
   },
   // The clock in the wide face, white-on-charcoal or ink-on-paper; the signal yellow is a preset, not the default.
   "clock": {
@@ -151,7 +151,7 @@
     },
     "apps": {
       "claude": "#FC9C1E", "codex": "#4BB4E6", "antigravity": "#06C2C2", "cursor": "#CCCCCC", "zcode": "#9B6BF7",
-      "dsh": "#8BC34A", "grokBot": "#9A9A9A", "kimi": "#D272FC", "opencode": "#8A8A8A", "manual": "#CCCCCC", "other": "#CCCCCC", "warning": "#FC6C00", "critical": "#FF6F67"
+      "dsh": "#8BC34A", "grokBot": "#9A9A9A", "kimi": "#D272FC", "opencode": "#8A8A8A", "codeagent": "#22D3C5", "commandcode": "#9985EA", "workbuddy": "#98DBB0", "mimo": "#FF6900", "manual": "#CCCCCC", "other": "#CCCCCC", "warning": "#FC6C00", "critical": "#FF6F67"
     },
     "clock": {
       "palette": { "amber": "#C6CA4C", "cyan": "#4BB4E6", "pink": "#9C9C9C", "lime": "#B4D44A" },

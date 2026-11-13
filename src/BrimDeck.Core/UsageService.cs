@@ -14,6 +14,15 @@ public interface IDesktopSources
     Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation);
     // Runs a read-only query against a local SQLite database; null means the database could not be opened or queried.
     IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) => null;
+    // Decrypts the base64 of a Windows DPAPI blob of the current user (CodeAgent's sign-in); null when it cannot.
+    string? UnprotectUserData(string base64) => null;
+    // Runs CodeAgent CLI's `auth status` to renew an expired CodeAgent sign-in kept in home (CodeAgentUsage); true when the file
+    // then holds a later expiry than before.
+    Task<bool> RenewCodeAgentAsync(string home, CancellationToken cancellation) => Task.FromResult(false);
+    // The Xiaomi account signed in to in BrimDeck for Xiaomi MiMo (MiMoUsage.MiMoSession, serialized); null when none is.
+    string? ReadMiMoSession() => null;
+    // Replaces it with a renewed one.
+    void SaveMiMoSession(string session) { }
 }
 
 // quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
@@ -49,6 +58,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly KimiSessions _kimi = new();
     // The Kimi Code membership level, read from /me at most every few hours, for the hash of the token it was read with.
     private (string Account, string Plan, DateTimeOffset Time)? _kimiPlan;
+    // When a CodeAgent renewal last failed; null after one that worked.
+    private DateTimeOffset? _codeAgentRenewed;
+    private (CreditHours Hours, DateTimeOffset Time)? _codeAgentHours;
     // The last Kimi Code quota read online and the hash of its account; kimiQuotaCache keeps it across restarts.
     private KimiQuotaReading? _kimiRetained;
     private string _kimiAccount = "", _kimiSaved = "";
@@ -156,6 +168,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             // Grok Bot has no usage records, so it is read only for its online quota rows.
             var sources = ProviderCatalog.UsageSources.Where(required.Contains);
             if (grokBotOnline) sources = sources.Append(ProviderId.GrokBot);
+            // Xiaomi MiMo's linked keys have no records of their own: their statistics are MiMo's.
+            if (required.Contains(ProviderId.MiMoLinked)) sources = sources.Append(ProviderId.MiMoLinked);
             var tasks = sources.Select(id => FetchAsync(id, usageStart, claudeOnline, deadline.Token, cancellation));
             var configured = _configured.RefreshAsync(settings.EnabledApps, deadline.Token);
             List<ProviderSnapshot> results = [.. await Task.WhenAll(tasks), .. await configured];
@@ -254,8 +268,10 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
         // The reader owns a cache and is accessed serially before the first asynchronous request.
-        var snapshot = id is ProviderId.Claude or ProviderId.Codex or ProviderId.Pi
-            ? _logs.Read(id, id == ProviderId.Pi ? _locations.PiSessions : id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
+        var snapshot = id is ProviderId.Claude or ProviderId.Codex or ProviderId.Pi or ProviderId.CodeAgent or ProviderId.CommandCode or ProviderId.WorkBuddy or ProviderId.WorkBuddyAi
+            ? _logs.Read(id, id switch { ProviderId.Pi => _locations.PiSessions, ProviderId.Codex => _locations.CodexHome, ProviderId.CodeAgent => _locations.CodeAgentHome,
+                ProviderId.CommandCode => _locations.CommandCodeHome, ProviderId.WorkBuddy => _locations.WorkBuddyHome, ProviderId.WorkBuddyAi => _locations.WorkBuddyAiHome, _ => _locations.ClaudeHome },
+                now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         var claudeAccount = id == ProviderId.Claude ? ReadClaudeProfile(snapshot) : ("", "");
         var wslRead = _includeWsl && id is ProviderId.Claude or ProviderId.Codex ? StartWsl(snapshot, now, start.LocalDateTime) : null;
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
@@ -263,10 +279,20 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
         if (id == ProviderId.Kimi) _kimi.Read(snapshot, _locations.KimiHome, start, now);
         if (id == ProviderId.OpenCode) OpenCodeUsage.Read(snapshot, desktop, _locations.OpenCodeDatabase, start, now);
+        if (id == ProviderId.MiMo) MiMoUsage.Read(snapshot, desktop, _locations.MiMoDatabase, start, now);
         try
         {
             switch (id)
             {
+                case ProviderId.CodeAgent:
+                    await ReadCodeAgentAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.CommandCode:
+                    await ReadCommandCodeAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.WorkBuddy or ProviderId.WorkBuddyAi:
+                    await ReadWorkBuddyAsync(snapshot, WorkBuddyUsage.For(id), now, ct);
+                    break;
                 case ProviderId.Pi:
                     snapshot.UsageNote += Loc.T(" · 费用取自 Pi 记录，非订阅账单", " · Costs recorded by Pi, not subscription charges");
                     snapshot.StatusLabel = Loc.T("仅本地统计", "Local usage only");
@@ -316,6 +342,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 case ProviderId.OpenCode:
                     await ReadOpenCodeAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.MiMo:
+                    await ReadMiMoAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.MiMoLinked:
+                    await ReadMiMoLinkedAsync(snapshot, now, ct);
                     break;
             }
         }
@@ -836,10 +868,11 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         await ReadCursorEvents(snapshot, token, unified, spend, now, start, ct);
     }
 
-    // The account's records can run to thousands a day, more than one refresh can read, so they are read a day at a time,
-    // newest first, and every day read in full is kept. The days a refresh did not reach are read by the next ones.
-    // A plan merged with Grok has no records in the usage event list; its records are the account's billing items, priced
-    // from the week's amount (CursorPrices), whose readings may need days before those shown.
+    // The account's records can run to thousands a day, more than one refresh can read, so they are read newest first and
+    // every day read in full is kept. The days a refresh did not reach are read by the next ones. An older plan reads its
+    // usage event list a day at a time. A plan merged with Grok has no records there; its records are the account's billing
+    // items, read a range of days at a time (ReadCursorBillingDays) and priced from the week's amount (CursorPrices), whose
+    // readings may need days before those shown.
     private async Task ReadCursorEvents(ProviderSnapshot snapshot, string token, bool unified, (DateTimeOffset Start, long Cents)? spend, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
         var account = CursorAccount(token);
@@ -857,14 +890,17 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         foreach (var day in _cursorDays.Keys.Where(day => day < first || day > last).ToList()) _cursorDays.Remove(day);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(TimeSpan.FromSeconds(20));
+        bool Settled(DateTime day) => _cursorDays.TryGetValue(day, out var kept) && kept.ReadAt >= new DateTimeOffset(day.AddDays(1)).AddHours(1);
         try
         {
             for (var day = last; day >= first; day = day.AddDays(-1))
             {
-                var end = new DateTimeOffset(day.AddDays(1));
-                if (_cursorDays.TryGetValue(day, out var kept) && kept.ReadAt >= end.AddHours(1)) continue;
-                var read = unified ? ReadCursorBillingDay(token, new DateTimeOffset(day), end, budget.Token) : ReadCursorDay(token, new DateTimeOffset(day), end, budget.Token);
-                _cursorDays[day] = (await read, now);
+                if (Settled(day)) continue;
+                if (!unified) { _cursorDays[day] = (await ReadCursorDay(token, new DateTimeOffset(day), new DateTimeOffset(day.AddDays(1)), budget.Token), now); continue; }
+                // A merged plan reads each run of days still to read with one range of billing items.
+                var newest = day;
+                while (day > first && !Settled(day.AddDays(-1))) day = day.AddDays(-1);
+                await ReadCursorBillingDays(token, day, newest, now, budget.Token);
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException ||
@@ -927,24 +963,58 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         throw new InvalidDataException();
     }
 
+    // The local days oldest to newest of a merged plan, read as one range of billing items. The items come newest first, so
+    // after each page every day after the oldest item so far is complete and is kept at once; a refresh that stops part way
+    // keeps those, and the next reads only the days left. Should a page that has more after it come out of that order, the
+    // days not yet kept are read one at a time instead.
+    private async Task ReadCursorBillingDays(string token, DateTime oldest, DateTime newest, DateTimeOffset now, CancellationToken ct)
+    {
+        DateTimeOffset from = new(oldest), to = new(newest.AddDays(1));
+        var found = new Dictionary<DateTime, Dictionary<string, TokenEntry>>();
+        DateTimeOffset? earliest = null;
+        var pending = newest;
+        var next = "";
+        for (int page = 1; page <= 100; page++)
+        {
+            using var response = await ReadCursorBillingPage(token, from, to, next, ct);
+            bool ordered = true;
+            foreach (var item in response.RootElement.Get("data").EnumerateArray())
+            {
+                if (item.Get("eventTime").Date() is { } time) { if (time > earliest) ordered = false; earliest = time; }
+                if (ParseCursorBillingItem(item) is { } entry && entry.Time >= from && entry.Time < to)
+                {
+                    var day = entry.Time.LocalDateTime.Date;
+                    if (!found.TryGetValue(day, out var entries)) found[day] = entries = [];
+                    entries.TryAdd(entry.Key, entry);
+                }
+            }
+            var pagination = response.RootElement.Get("pagination");
+            bool more = pagination.Get("hasMore").ValueKind == JsonValueKind.True;
+            if (more && !ordered)
+            {
+                for (; pending >= oldest; pending = pending.AddDays(-1))
+                    _cursorDays[pending] = (await ReadCursorBillingDay(token, new DateTimeOffset(pending), new DateTimeOffset(pending.AddDays(1)), ct), now);
+                return;
+            }
+            var complete = !more ? oldest : earliest is { } reached ? reached.LocalDateTime.Date.AddDays(1) : DateTime.MaxValue;
+            for (; pending >= oldest && pending >= complete; pending = pending.AddDays(-1))
+                _cursorDays[pending] = (found.TryGetValue(pending, out var entries) ? [.. entries.Values] : [], now);
+            if (!more) return;
+            next = pagination.Get("nextCursor").Text();
+            if (next.Length == 0) throw new InvalidDataException();
+        }
+        throw new InvalidDataException();
+    }
+
     // One local day's billing items, [from, to), read a page at a time by the cursor each page gives for the next.
     private async Task<List<TokenEntry>> ReadCursorBillingDay(string token, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
     {
-        var subject = CursorAccount(token);
-        if (subject.Length == 0) throw new InvalidDataException();
         var entries = new Dictionary<string, TokenEntry>();
         var next = "";
-        static string Time(DateTimeOffset time) => Uri.EscapeDataString(time.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture));
         for (int page = 1; page <= 100; page++)
         {
-            var uri = $"https://cursor.com/api/dashboard/v2/query-billing-items?scope=user&startTime={Time(from)}&endTime={Time(to)}&pageSize=500";
-            if (next.Length > 0) uri += "&cursor=" + Uri.EscapeDataString(next);
-            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            request.Headers.TryAddWithoutValidation("Cookie", CursorSession(subject, token));
-            using var response = await SendAsync(_http, request, ct);
-            var items = response.RootElement.Get("data");
-            if (items.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
-            foreach (var item in items.EnumerateArray())
+            using var response = await ReadCursorBillingPage(token, from, to, next, ct);
+            foreach (var item in response.RootElement.Get("data").EnumerateArray())
                 if (ParseCursorBillingItem(item) is { } entry && entry.Time >= from && entry.Time < to) entries.TryAdd(entry.Key, entry);
             var pagination = response.RootElement.Get("pagination");
             if (pagination.Get("hasMore").ValueKind != JsonValueKind.True) return entries.Values.ToList();
@@ -952,6 +1022,21 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             if (next.Length == 0) throw new InvalidDataException();
         }
         throw new InvalidDataException();
+    }
+
+    // One page of billing items in [from, to), 500 at most; next is the cursor the page before gave, "" for the first.
+    private async Task<JsonDocument> ReadCursorBillingPage(string token, DateTimeOffset from, DateTimeOffset to, string next, CancellationToken ct)
+    {
+        var subject = CursorAccount(token);
+        if (subject.Length == 0) throw new InvalidDataException();
+        static string Time(DateTimeOffset time) => Uri.EscapeDataString(time.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture));
+        var uri = $"https://cursor.com/api/dashboard/v2/query-billing-items?scope=user&startTime={Time(from)}&endTime={Time(to)}&pageSize=500";
+        if (next.Length > 0) uri += "&cursor=" + Uri.EscapeDataString(next);
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        request.Headers.TryAddWithoutValidation("Cookie", CursorSession(subject, token));
+        var response = await SendAsync(_http, request, ct);
+        if (response.RootElement.Get("data").ValueKind != JsonValueKind.Array) { response.Dispose(); throw new InvalidDataException(); }
+        return response;
     }
 
     private static string CursorSession(string subject, string token) => "WorkosCursorSessionToken=" + Uri.EscapeDataString(subject + "::" + token);
@@ -1175,6 +1260,204 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
 
     // OpenCode's own sign-in to OpenCode Console reads the Go allowance of its workspace (OpenCodeUsage). The token is used as
     // it is and never renewed; an expired one is not sent. A workspace without Go is refused with HTTP 403.
+    // Command Code's plan quota (CommandCodeUsage), read with the key Command Code is signed in with. The key does not expire; a
+    // refused one means Command Code was signed out or the key was deleted, which only signing in again in Command Code fixes.
+    private async Task ReadCommandCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        if (snapshot.UsageAvailable) snapshot.UsageNote += Loc.T(" · 费用取自 Command Code 记录，按其标价计算", " · Costs recorded by Command Code at its list prices");
+        snapshot.ListedPrices = CommandCodeUsage.ReadPrices(_locations.CommandCodeHome) is { Count: > 0 } listed ? listed : null;
+        var key = CommandCodeUsage.ReadKey(_locations.CommandCodeHome);
+        if (key is null) { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请先登录 Command Code", "Sign in to Command Code first"); return; }
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(20));
+        async Task<(int Status, string Body)> Get(string path)
+        {
+            using var request = Bearer(HttpMethod.Get, CommandCodeUsage.Api + path, key);
+            using var response = await _http.SendAsync(request, deadline.Token);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests) throw RateLimitedException.From(response);
+            return ((int)response.StatusCode, await response.Content.ReadAsStringAsync(deadline.Token));
+        }
+        CommandCodeUsage.Reading reading;
+        try { reading = await CommandCodeUsage.ReadAsync(Get); }
+        catch (CommandCodeUsage.RejectedException)
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T("Command Code 拒绝了本机保存的登录，请在 Command Code 中重新登录", "Command Code refused the sign-in saved on this PC. Sign in to Command Code again.");
+            return;
+        }
+        snapshot.Metrics = reading.Metrics;
+        snapshot.Plan = reading.Plan;
+        snapshot.PlanSource = Loc.T("Command Code 账户", "Command Code account");
+        snapshot.Scope = "account";
+        Connected(snapshot, Loc.T("Command Code 账户", "Command Code account"), now);
+        if (reading.Warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
+    }
+
+    // The Xiaomi MiMo Desktop membership (MiMoUsage), read with the MiMo server's cookies for the Xiaomi account signed in to in
+    // BrimDeck. Refused cookies are renewed once with the account's longer sign-in (MiMoUsage.RenewAsync) and the reading tried
+    // again; a renewal that fails is not tried again for ten minutes, as it needs the user to sign in again.
+    private DateTimeOffset? _mimoRenewFailed;
+    private async Task ReadMiMoAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        if (snapshot.UsageAvailable) snapshot.UsageNote += Loc.T(" · 桌面版会员请求按公开单价估算，其余费用取自 MiMo 记录",
+            " · Desktop membership requests are estimated at public prices; other costs are as MiMo recorded them");
+        void SignedOut()
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T("小米账号的登录已失效，请在设置中重新登录", "The Xiaomi account sign-in has expired. Sign in again in Settings.");
+        }
+        var session = MiMoUsage.MiMoSession.Parse(desktop.ReadMiMoSession());
+        if (session is null)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请在设置中登录小米账号", "Sign in to a Xiaomi account in Settings first.");
+            return;
+        }
+        async Task<HttpResponseMessage> Send(string cookie)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, MiMoUsage.SubscriptionAddress);
+            request.Headers.TryAddWithoutValidation("Cookie", cookie);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            return await _http.SendAsync(request, ct);
+        }
+        var response = await Send(session.Cookie);
+        try
+        {
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                response.Dispose();
+                bool waiting = _mimoRenewFailed is { } failed && now >= failed && now - failed < TimeSpan.FromMinutes(10);
+                var renewed = waiting ? null : await MiMoUsage.RenewAsync(session, null, ct);
+                if (renewed is null) { if (!waiting) _mimoRenewFailed = now; SignedOut(); return; }
+                _mimoRenewFailed = null;
+                desktop.SaveMiMoSession(renewed.Serialize());
+                session = renewed;
+                response = await Send(renewed.Cookie);
+                if (response.StatusCode == HttpStatusCode.Unauthorized) { SignedOut(); return; }
+            }
+            if (response.StatusCode == HttpStatusCode.TooManyRequests) throw RateLimitedException.From(response);
+            response.EnsureSuccessStatusCode();
+            // The MiMo server may hand out new cookies with an answer; they replace the kept ones.
+            var cookie = MiMoUsage.Merge(session.Cookie, MiMoUsage.SetCookies(response));
+            if (cookie != session.Cookie && cookie.Length > 0) desktop.SaveMiMoSession((session with { Cookie = cookie }).Serialize());
+            using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            var membership = MiMoUsage.ParseSubscription(doc.RootElement);
+            snapshot.Scope = "account";
+            snapshot.Plan = membership.Plan;
+            snapshot.PlanSource = Loc.T("Xiaomi MiMo 账户", "Xiaomi MiMo account");
+            if (membership.Weekly is not { } weekly)
+            {
+                snapshot.StatusLabel = Loc.T("未订阅会员", "No membership");
+                snapshot.Status = Loc.T("这个小米账号没有生效中的 Xiaomi MiMo 桌面版会员", "This Xiaomi account has no Xiaomi MiMo desktop membership in force.");
+                return;
+            }
+            snapshot.Quotas = [weekly];
+            Connected(snapshot, Loc.T("Xiaomi MiMo 桌面版会员", "Xiaomi MiMo desktop membership"), now);
+            if (weekly.UsedPercent >= 100) snapshot.Status = Loc.T("本周额度已用完", "This week's allowance is used up");
+        }
+        finally { response.Dispose(); }
+    }
+
+    // WorkBuddy's credits (WorkBuddyUsage), read with the sign-in BrimDeck got from the edition's website (ConnectWorkBuddyAsync).
+    // A renewed sign-in is saved at once, as the website may replace the refresh token with it.
+    private async Task ReadWorkBuddyAsync(ProviderSnapshot snapshot, WorkBuddyUsage.Edition edition, DateTimeOffset now, CancellationToken ct)
+    {
+        if (snapshot.UsageAvailable) snapshot.UsageNote += Loc.T(" · 费用按模型公开单价估算，非 WorkBuddy 积分", " · Costs estimated at public model prices, not WorkBuddy credits");
+        if (ReadWorkBuddySession(edition) is not { } session)
+        { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请在设置中登录 WorkBuddy", "Sign in to WorkBuddy in settings"); return; }
+        WorkBuddyUsage.Reading reading;
+        try { reading = await WorkBuddyUsage.ReadAsync(_http, edition, session, renewed => secrets?.Write(edition.SessionKey, renewed.Serialize()), ct); }
+        catch (WorkBuddyUsage.RejectedException)
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T("WorkBuddy 登录已失效，请在设置中重新登录", "The WorkBuddy sign-in has expired. Sign in again in settings.");
+            return;
+        }
+        if (reading.Metrics.Count == 0) throw new InvalidDataException(Loc.T("WorkBuddy 没有返回积分", "WorkBuddy returned no credits"));
+        snapshot.Metrics = reading.Metrics;
+        snapshot.Plan = reading.Plan;
+        snapshot.PlanSource = ProviderCatalog.Name(edition.Id) + Loc.T(" 账户", " account");
+        snapshot.Scope = "account";
+        Connected(snapshot, snapshot.PlanSource, now);
+    }
+
+    private WorkBuddyUsage.Session? ReadWorkBuddySession(WorkBuddyUsage.Edition edition)
+    {
+        try { return WorkBuddyUsage.Session.Parse(secrets?.Read(edition.SessionKey) ?? ""); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException or JsonException or FormatException) { return null; }
+    }
+
+    public bool WorkBuddyConnected(ProviderId id) => ReadWorkBuddySession(WorkBuddyUsage.For(id)) is not null;
+
+    // Signs in to WorkBuddy in the browser (WorkBuddyUsage): open receives the website's sign-in page and returns false when it
+    // could not be opened. True once the sign-in is saved; false when the user did not finish within ten minutes.
+    public async Task<bool> ConnectWorkBuddyAsync(ProviderId id, Func<string, bool> open, CancellationToken ct)
+    {
+        if (secrets is null) throw new InvalidOperationException("No secrets store");
+        var edition = WorkBuddyUsage.For(id);
+        var (state, url) = await WorkBuddyUsage.StartLoginAsync(_http, edition, ct);
+        if (!open(url)) throw new InvalidDataException(Loc.T("无法打开默认浏览器", "The default browser could not be opened"));
+        var session = await WorkBuddyUsage.WaitForLoginAsync(_http, edition, state, ct);
+        if (session is null) return false;
+        secrets.Write(edition.SessionKey, session.Serialize());
+        return true;
+    }
+
+    public void DisconnectWorkBuddy(ProviderId id) => secrets?.Delete(WorkBuddyUsage.For(id).SessionKey);
+
+    // Xiaomi MiMo: the keys Xiaomi MiMo Desktop and MiMo Code linked (MiMoUsage.ReadLinkedKeys), read again on every refresh. A Token
+    // Plan key shows the plan quota, a pay-as-you-go key the balances and this month's charges; with both, one column shows them all,
+    // the plan first. A refused key is named in the status while the other is still shown.
+    private async Task ReadMiMoLinkedAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var keys = MiMoUsage.ReadLinkedKeys(_locations.MiMoDatabase);
+        if (keys.Count == 0)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请先在 Xiaomi MiMo 桌面版或 MiMo Code CLI 中关联开放平台", "Link the Open Platform in the Xiaomi MiMo desktop app or MiMo Code CLI first.");
+            return;
+        }
+        async Task<JsonDocument?> Get(MiMoUsage.LinkedKey key, string path)
+        {
+            using var request = Bearer(HttpMethod.Get, key.Host + path.TrimStart('/'), key.Key);
+            using var response = await _http.SendAsync(request, ct);
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) return null;
+            if (response.StatusCode == HttpStatusCode.TooManyRequests) throw RateLimitedException.From(response);
+            response.EnsureSuccessStatusCode();
+            return await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        }
+        var metrics = new List<UsageMetric>();
+        var warnings = new List<string>();
+        foreach (var key in keys)
+        {
+            if (key.TokenPlan)
+            {
+                using var answer = await Get(key, "/v1/platform/token_plan");
+                if (answer is null) { warnings.Add(Loc.T("Token Plan 密钥已失效", "The Token Plan key is no longer valid")); continue; }
+                if (MiMoUsage.TokenPlan(answer.RootElement) is var (plan, quota)) { snapshot.Plan = plan; metrics.Add(quota); }
+                else warnings.Add(Loc.T("没有生效中的 Token Plan", "No Token Plan in force"));
+                continue;
+            }
+            using var balance = await Get(key, "/v1/platform/balance");
+            if (balance is null) { warnings.Add(Loc.T("API 密钥已失效", "The API key is no longer valid")); continue; }
+            var amounts = MiMoUsage.Balance(balance.RootElement, out bool available);
+            metrics.AddRange(amounts);
+            if (!available) warnings.Add(Loc.T("余额不足", "The balance is insufficient"));
+            using var usage = await Get(key, "/v1/platform/usage/daily?" + MiMoUsage.UsageQuery(now));
+            if (usage is not null) metrics.Add(MiMoUsage.MonthSpend(usage.RootElement, amounts[0].Currency, now));
+        }
+        snapshot.Scope = "account";
+        if (metrics.Count == 0)
+        {
+            snapshot.StatusLabel = Loc.T("读取失败", "Read failed");
+            snapshot.Status = string.Join(Loc.T("；", "; "), warnings);
+            return;
+        }
+        snapshot.Metrics = metrics;
+        snapshot.PlanSource = "Xiaomi MiMo";
+        Connected(snapshot, "Xiaomi MiMo", now);
+        if (warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), warnings);
+    }
+
     private async Task ReadOpenCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {
         var credential = OpenCodeUsage.ReadCredential(desktop, _locations.OpenCodeDatabase, _locations.OpenCodeData);
@@ -1212,10 +1495,74 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (limited) snapshot.Status = Loc.T("已达到 OpenCode Go 的用量上限，重置前请求会被拒绝", "The OpenCode Go limit is reached; requests are refused until it resets.");
     }
 
+    // CodeAgent's credit allowance (CodeAgentUsage), read with the sign-in CodeAgent keeps. An expired or refused sign-in is renewed
+    // the way CodeAgent renews it (IDesktopSources.RenewCodeAgentAsync) and the reading tried once more; a renewal that fails is
+    // not tried again for ten minutes, so a sign-in that needs the user does not start the CLI on every refresh.
+    private async Task ReadCodeAgentAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var home = _locations.CodeAgentHome;
+        var credential = CodeAgentUsage.ReadCredential(home, desktop.UnprotectUserData);
+        if (credential is null) { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请先登录 CodeAgent", "Sign in to CodeAgent first"); return; }
+        void Expired()
+        {
+            snapshot.StatusLabel = Loc.T("登录已过期", "Sign-in expired");
+            snapshot.Status = Loc.T("CodeAgent 登录已过期且未能自动续期，请在 CodeAgent 中重新登录", "The CodeAgent sign-in has expired and could not be renewed. Sign in to CodeAgent again.");
+        }
+        async Task<CodeAgentCredential?> Renew()
+        {
+            if (_codeAgentRenewed is { } last && now - last < TimeSpan.FromMinutes(10)) return null;
+            _codeAgentRenewed = now;
+            if (!await desktop.RenewCodeAgentAsync(home, ct)) return null;
+            _codeAgentRenewed = null;
+            return CodeAgentUsage.ReadCredential(home, desktop.UnprotectUserData) is { } renewed && !renewed.Expired(_clock()) ? renewed : null;
+        }
+        if (credential.Expired(now) && (credential = await Renew()) is null) { Expired(); return; }
+        async Task<JsonDocument?> Read(CodeAgentCredential signIn, string url)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(15));
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.TryAddWithoutValidation("X-Auth-Token", signIn.Token);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.UserAgent.ParseAdd("BrimDeck/0.1");
+            try { return await SendAsync(_http, request, deadline.Token); }
+            catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) { return null; }
+        }
+        var doc = await Read(credential, CodeAgentUsage.QuotaUrl);
+        if (doc is null && await Renew() is { } fresh) doc = await Read(credential = fresh, CodeAgentUsage.QuotaUrl);
+        if (doc is null) { Expired(); return; }
+        using (doc)
+        {
+            var metrics = CodeAgentUsage.Quotas(doc.RootElement, await ReadCodeAgentHours(credential.Token));
+            if (metrics.Count == 0) throw new InvalidDataException(Loc.T("CodeAgent 没有返回额度", "CodeAgent returned no quota"));
+            snapshot.Metrics = metrics;
+            snapshot.Scope = "account";
+            snapshot.PlanSource = Loc.T("CodeAgent 账户", "CodeAgent account");
+            Connected(snapshot, Loc.T("CodeAgent 账户", "CodeAgent account"), now);
+        }
+    }
+
     // Kimi Code's own sign-in reads the plan quota. The token is used as it is: an expired one is not sent and never renewed,
     // since renewing would replace the sign-in Kimi Code holds. Kimi Code renews it only while in use, so most refreshes find
     // it expired; the last reading (KimiQuotaCache) then stands in, marked as old, until Kimi Code is used again. A rejected
     // token is treated the same way, since Kimi Code renews it on its next use.
+    // The busy and idle hours change rarely: they are read again after six hours, and a failed read keeps the last ones.
+    private async Task<CreditHours?> ReadCodeAgentHours(string token)
+    {
+        var now = _clock();
+        if (_codeAgentHours is { } kept && now - kept.Time < TimeSpan.FromHours(6)) return kept.Hours;
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var request = new HttpRequestMessage(HttpMethod.Get, CodeAgentUsage.HoursUrl);
+            request.Headers.TryAddWithoutValidation("X-Auth-Token", token);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var doc = await SendAsync(_http, request, deadline.Token);
+            if (CreditHours.Parse(doc.RootElement) is { } hours) { _codeAgentHours = (hours, now); return hours; }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or IOException or RateLimitedException) { }
+        return _codeAgentHours?.Hours;
+    }
+
     private async Task ReadKimiAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {
         var service = KimiUsage.Service(_locations.KimiHome, _locations.KimiEnvironment);

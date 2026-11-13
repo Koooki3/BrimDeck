@@ -90,10 +90,18 @@ internal static class DashboardUsageTests
 
         var oversized = new DeckSettings { Apps = Enumerable.Range(1, 9).Select(i => new AppEntry
             { QuotaSource = ProviderId.Claude, UsageSource = ProviderId.Claude, DisplayName = "应用 " + i, Enabled = i != 1 }).ToList() };
-        var retained = oversized.Apps.Take(7).Select(a => a.InstanceId).ToArray();
+        var retained = oversized.Apps.Select(a => a.InstanceId).ToArray();
         oversized.Normalize();
-        check("Application configuration is limited to seven rows including hidden rows", oversized.Apps.Count == 7 && oversized.EnabledApps.Count == 6);
-        check("Oversized configurations preserve the first seven identities and their order", oversized.Apps.Select(a => a.InstanceId).SequenceEqual(retained));
+        check("Any number of applications can be configured", oversized.Apps.Count == 9 && oversized.Apps.Select(a => a.InstanceId).SequenceEqual(retained));
+        check("At most seven applications are shown, the first ones switched on",
+            oversized.EnabledApps.Count == 7 && oversized.EnabledApps.Select(a => a.DisplayName).SequenceEqual(Enumerable.Range(2, 7).Select(i => "应用 " + i))
+            && !oversized.Apps[8].Enabled && oversized.ShownAppsFull);
+        oversized.Apps[3].Enabled = false; oversized.Normalize();
+        check("Switching one application off leaves room to show another", !oversized.ShownAppsFull && oversized.EnabledApps.Count == 6);
+        oversized.SetEnabled(ProviderId.Cursor, true); oversized.Normalize();
+        check("An application added with room left is shown", oversized.Apps[^1] is { QuotaSource: ProviderId.Cursor, Enabled: true } && oversized.ShownAppsFull);
+        oversized.SetEnabled(ProviderId.Antigravity, true);
+        check("An application added past the limit is kept switched off", oversized.Apps[^1] is { QuotaSource: ProviderId.Antigravity, Enabled: false } && oversized.EnabledApps.Count == 7);
 
         var directory = Path.Combine(root, "source-requests");
         var locations = DataLocations.Resolve(Path.Combine(directory, "home"), Path.Combine(directory, "roaming"), Path.Combine(directory, "local"), null, null);

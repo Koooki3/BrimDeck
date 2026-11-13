@@ -1013,7 +1013,8 @@ public partial class MainWindow
             _compactLyric = line.Current;
             if (_trackNoticeUntil <= DateTimeOffset.UtcNow)
             {
-                if (_compactMarquee is not null) _compactMarquee.Text = CompactLyricText(track, line.Current);
+                // A lyric that follows its line builds the row again, which asks for the line's width (RenderCompactMusic).
+                if (_compactMarquee is not null && !TextFollowsLength) _compactMarquee.Text = CompactLyricText(track, line.Current);
                 else RenderCompact();
             }
         }
@@ -1031,6 +1032,29 @@ public partial class MainWindow
         if (!NeedsLyrics || track.State == MediaState.Stopped) return ("", "", "");
         if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return ("", track.CurrentLyric ?? "", "");
         return _lyrics.At(track, DateTimeOffset.UtcNow);
+    }
+    // The collapsed middle text's room follows the length of what it shows: the lyric's with MusicLyricAutoWidth, the title's with
+    // MusicTitleAutoWidth, each only while it is the chosen middle text. Only with auto width, and not for a notch on a side edge,
+    // whose text runs across the column.
+    private bool TextFollowsLength => Settings.MusicText switch
+    {
+        CompactMusicText.Lyrics => Settings.MusicLyricAutoWidth,
+        CompactMusicText.Title => Settings.MusicTitleAutoWidth,
+        _ => false
+    } && Settings.CompactAutoWidth(EffectiveStyle) && !CompactColumnMode;
+    // The drawn width of a collapsed line, in the face and size MusicMarquee draws it with.
+    private double CompactTextWidth(string text, double size) => text.Length == 0 ? 0
+        : new FormattedText(text, System.Globalization.CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, Fonts.Face(UiFontRole.Panel, FontWeights.Normal), size,
+            Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip).Width;
+    // The most content the middle text may widen the surface to: FollowScreenShare of the widest the style may be on this monitor (the
+    // screen, or the work area for the capsule), less the surface's insets.
+    private double FollowContentLimit(CollapsedShape shape)
+    {
+        var style = shape.Style;
+        var (monitor, work) = style == CompactStyle.Capsule ? (_screenMonitor, _screenWork) : (MonitorBoundsDip, WorkDip);
+        double span = CollapsedGeometry.WidthRange(style, monitor, work, _scale).Max;
+        double insets = CollapsedGeometry.SurfaceWidth(style, shape.Surface.Height, 1, _scale) - 1;
+        return double.IsFinite(span) && span > 0 ? Math.Max(0, span * CompactMusicLayout.FollowScreenShare - Math.Max(0, insets)) : double.PositiveInfinity;
     }
     // The collapsed lyric: the line, or the title without one, and for an instrumental when chosen (DeckSettings.MusicInstrumentalTitle).
     private string CompactLyricText(MediaTrack track, string line)
@@ -1087,11 +1111,21 @@ public partial class MainWindow
         var layout = CompactMusicLayout.Calculate(rowWidth, scale, media, apps.Count, text.Length > 0, fixedFace,
             strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi), equalizer, Settings.EqualizerBars, showCover, ringDiameter);
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
-        // and the lyric's changing length are left out, so the width changes only when the content itself does.
+        // and the lyric's changing length are left out, so the width changes only when the content itself does, unless the
+        // middle text follows its length (below).
         int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
         bool steadyText = media && !hideText && Settings.MusicText != CompactMusicText.None;
-        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, fixedFace, strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi), dpi,
-            equalizer, Settings.EqualizerBars, showCover, ringDiameter);
+        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, fixedFace, (strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi)), dpi, equalizer, Settings.EqualizerBars, showCover, ringDiameter);
+        // Middle text that follows its length (TextFollowsLength) asks for the room of what it shows instead of the fixed slot:
+        // the lyric line, or the title where the lyric shows it (no line yet, an instrumental with MusicInstrumentalTitle), and the
+        // title during the track notice, which is shown in the same place. Text hidden while paused asks for no room at all.
+        double textSlot = 0;
+        if (steadyText && TextFollowsLength)
+        {
+            textSlot = CompactMusicLayout.FollowSlot(CompactTextWidth(text, layout.TextFont), scale);
+            double natural = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, fixedFace, (strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi)), dpi, equalizer, Settings.EqualizerBars, showCover, ringDiameter, textSlot);
+            wanted = CompactMusicLayout.FollowWidth(natural, wanted, FollowContentLimit(shape));
+        }
         // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
         // for, this leaves out the track notice, so the surface does not move for it.
         var readingWidths = strip?.ItemWidths() ?? [];
@@ -1112,7 +1146,9 @@ public partial class MainWindow
         bool hasClock = clock is not null && hasFixed, hasTransfer = transfer is not null && hasFixed, hasDevices = devices is not null && hasFixed, hasText = layout.TextWidth > 0 && text.Length > 0;
         double titleWanted = hasText ? layout.TextWidth : 0;
         double shortest = CompactMusicLayout.Whole(CompactMusicLayout.MinimumText * scale);
-        double titleShare = hasText ? Math.Min(titleWanted, Math.Max(shortest, CompactMusicLayout.Whole(CompactSpacing.TitleMax * scale))) : 0;
+        // The title's first room: the room its text asked for when it follows its length, else TitleMax.
+        double titleFirst = textSlot > 0 ? textSlot : CompactMusicLayout.Whole(CompactSpacing.TitleMax * scale);
+        double titleShare = hasText ? Math.Min(titleWanted, Math.Max(shortest, titleFirst)) : 0;
         double titleFloor = hasText ? Math.Min(shortest, titleWanted) : 0;
         var ringWidths = apps.Select(_ => layout.RingSize).ToList();
         bool hasRings = ringWidths.Count > 0, hasReadings = readingWidths.Count > 0;
@@ -1156,7 +1192,7 @@ public partial class MainWindow
         }
         int title = shown.FindIndex(entry => entry.Part is CompactPart.Music);
         // One gap between every two parts; what is left widens them evenly and then centres the row.
-        var place = CompactSpacing.Arrange([.. shown.Select(entry => entry.Size)], title, titleWanted, shortest, grid.Width, unit, scale, dpi);
+        var place = CompactSpacing.Arrange([.. shown.Select(entry => entry.Size)], title, titleWanted, shortest, grid.Width, unit, scale, dpi, titleFirst);
         bool animate = Soft.Enabled;
         for (int i = 0; i < shown.Count; i++)
         {

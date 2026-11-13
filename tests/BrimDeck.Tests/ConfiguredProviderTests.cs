@@ -216,8 +216,8 @@ internal static class ConfiguredProviderTests
         check("An answer without windows is reported as unrecognized", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false } empty && empty.Status.Contains("无法识别"));
         // OpenRouter: the account balance from /credits, then the key's cap and its UTC-day and UTC-month spending from /key.
         entry.QuotaSource = ProviderId.OpenRouter;
-        check("OpenRouter is entered by hand after OpenCode Go and before New API, sharing the manual color",
-            manual.IndexOf(ProviderId.OpenRouter) == manual.IndexOf(ProviderId.OpenCodeGo) + 1 && ProviderCatalog.Name(ProviderId.OpenRouter) == "OpenRouter" &&
+        check("OpenRouter is entered by hand after Command Code API and before New API, sharing the manual color",
+            manual.IndexOf(ProviderId.OpenRouter) == manual.IndexOf(ProviderId.CommandCodeApi) + 1 && ProviderCatalog.Name(ProviderId.OpenRouter) == "OpenRouter" &&
             ProviderCatalog.Key(ProviderId.OpenRouter) == "openrouter" && (int)ProviderId.OpenRouter == 19 && !ProviderCatalog.NeedsSite(ProviderId.OpenRouter) &&
             !ProviderCatalog.IsUsageSource(ProviderId.OpenRouter) && AppPresets.ThemeColor(ProviderId.OpenRouter) == AppPresets.ManualColor && PanelThemes.AppKey(ProviderId.OpenRouter) == "manual");
         string routerKey = """{"data":{"limit":null,"limit_reset":null,"limit_remaining":null,"effective_budget":null,"usage":82.47,"usage_daily":1.5,"usage_weekly":3,"usage_monthly":12.25}}""";

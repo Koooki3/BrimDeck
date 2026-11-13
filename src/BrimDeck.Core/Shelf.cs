@@ -16,9 +16,11 @@ public sealed class ClipEntry
     public ClipKind Kind { get; set; }
     // The plain text of a text entry; empty for a picture.
     public string Text { get; set; } = "";
-    // The rich forms the copying application also offered, pasted with the text unless pasting as plain text.
-    public string Html { get; set; } = "";
-    public string Rtf { get; set; } = "";
+    // The rich forms the copying application also offered (HTML, RTF), pasted with the text unless pasting as plain text. They are
+    // kept in files of their own beside the history, read only to paste (ShelfService), as they are often many times the text and
+    // the page never shows them. Histories saved before held them here; read in, they are moved to those files (TakeRich).
+    [JsonPropertyName("Html"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? SavedHtml { get; set; }
+    [JsonPropertyName("Rtf"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? SavedRtf { get; set; }
     // A picture's size in pixels; the picture itself is kept in its own file beside the history (ShelfFiles).
     public int PixelWidth { get; set; }
     public int PixelHeight { get; set; }
@@ -50,9 +52,9 @@ public sealed class ShelfCategory
     public string Name { get; set; } = "";
     // "#RRGGBB", taken from the theme's swatches when the category is made.
     public string Color { get; set; } = "#9CB9FF";
-    // Clipboard only: whether its entries are kept until deleted, or go with the history when BrimDeck exits. "常用" always keeps.
-    // A category made now starts cleared on exit (AddCategory); one saved before the choice existed has none and stays kept, as
-    // every category was then.
+    // Clipboard only: whether its entries are kept until deleted, or go with the history (at exit, or after the time it is kept
+    // for: DeckSettings.ClipboardKeepHistory). "常用" always keeps. A category made now starts going with the history
+    // (AddCategory); one saved before the choice existed has none and stays kept, as every category was then.
     [JsonPropertyName("Keep")] public bool? KeepChosen { get; set; }
     [JsonIgnore] public bool Keep { get => KeepChosen ?? true; set => KeepChosen = value; }
     // What goes in by itself (ShelfRules); null when nothing does.
@@ -76,7 +78,7 @@ public sealed class ShelfData
     public IEnumerable<ShelfCategory> OwnCategories(ShelfSide side) => Categories(side).Where(category => category.Id != Favorites);
 
     // A phrase, and an entry in "常用" or in a category set to keep, stays until the user deletes it; the rest is history, cleared
-    // when BrimDeck exits (and when it starts, after an exit that did not clear it).
+    // when BrimDeck exits (and when it starts, after an exit that did not clear it), or kept for a time (Shelf.Expired).
     public bool Kept(ClipEntry clip) => clip.Manual || clip.Categories.Any(id => id == Favorites || ClipCategories.FirstOrDefault(c => c.Id == id)?.Keep == true);
 
     private static readonly JsonSerializerOptions Options = new() { Converters = { new JsonStringEnumConverter() } };
@@ -106,6 +108,9 @@ public sealed class ShelfData
 // What dragging files out of the file transfer does (DeckSettings.TransferDragOut). Move lets the target move the originals; a
 // target that only takes copies (a chat window, a browser) still copies them. Files moved away leave the list.
 public enum TransferDragOut { Copy, Move }
+
+// How long the history is kept past an exit (DeckSettings.ClipboardKeepFor): 1, 7 or 30 days.
+public enum HistoryLength { Day, Week, Month }
 
 public static class Shelf
 {
@@ -204,7 +209,8 @@ public static class Shelf
 
     public static int LineCount(string text) => text.Length == 0 ? 0 : text.Count(c => c == '\n') + 1;
 
-    // A copy is added at the top. The same text copied again moves its entry up instead of adding a second one, keeping its categories.
+    // A copy is added at the top. The same text copied again moves its entry up instead of adding a second one, keeping its categories
+    // (and its rich forms, unless the new copy brings its own: ShelfService.Copied).
     public static ClipEntry Add(ShelfData data, ClipEntry entry)
     {
         if (entry.Kind != ClipKind.Image)
@@ -215,7 +221,6 @@ public static class Shelf
                 data.Clips.Remove(same);
                 same.Copied = entry.Copied; same.Kind = entry.Kind;
                 if (entry.Source.Length > 0) same.Source = entry.Source;
-                if (entry.Html.Length > 0 || entry.Rtf.Length > 0) { same.Html = entry.Html; same.Rtf = entry.Rtf; }
                 data.Clips.Insert(0, same);
                 return same;
             }
@@ -241,6 +246,28 @@ public static class Shelf
 
     // The history, without what is kept (ShelfData.Kept): cleared when BrimDeck exits.
     public static List<ClipEntry> History(ShelfData data) => data.Clips.Where(clip => !data.Kept(clip)).ToList();
+
+    // The rich forms a history saved before held in its entries, each entry's taken out of it to be kept in its own files.
+    public static List<(ClipEntry Clip, string Html, string Rtf)> TakeRich(ShelfData data)
+    {
+        var taken = new List<(ClipEntry, string, string)>();
+        foreach (var clip in data.Clips)
+        {
+            if (clip.SavedHtml is null && clip.SavedRtf is null) continue;
+            if ((clip.SavedHtml ?? "").Length > 0 || (clip.SavedRtf ?? "").Length > 0) taken.Add((clip, clip.SavedHtml ?? "", clip.SavedRtf ?? ""));
+            clip.SavedHtml = null; clip.SavedRtf = null;
+        }
+        return taken;
+    }
+
+    // The history kept past an exit goes once it is older than the length chosen, counted from its last copy.
+    public static DateTimeOffset KeptSince(HistoryLength length, DateTimeOffset now)
+        => now.AddDays(length switch { HistoryLength.Day => -1, HistoryLength.Week => -7, _ => -30 });
+    public static List<ClipEntry> Expired(ShelfData data, HistoryLength length, DateTimeOffset now)
+    {
+        var since = KeptSince(length, now);
+        return data.Clips.Where(clip => clip.Copied < since && !data.Kept(clip)).ToList();
+    }
 
     // What "清除" reaches where it is pressed: in "全部" everything not kept (ShelfData.Kept: phrases, "常用" and the categories set
     // to keep stay); in one of the user's categories, what is in it. Nothing in "常用".

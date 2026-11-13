@@ -644,13 +644,19 @@ public partial class MainWindow
                 : countText.Length > 0 ? CountTooltip(quota) : MetricPercentTooltip(quota);
             Grid.SetColumn(reset, 1); labelRow.Children.Add(reset);
         }
+        // A quota spent only in busy or idle hours (CodeAgent) shows when its hours next start, or end while they are on, in place of
+        // the daily reset.
+        var hours = quota is { Hours: { } schedule, Period: { } period } ? schedule.Next(period, DateTimeOffset.Now) : default;
+        bool timed = hours.At is not null;
         var rightText = text ? quota.ResetText : offPeak ? (change is { } next ? Loc.T(UI.ShortReset(next) + "切换", "switches " + UI.ShortReset(next)) : "")
+            : timed ? (hours.On ? Loc.T(UI.ShortReset(hours.At) + "结束", "ends " + UI.ShortReset(hours.At)) : Loc.T(UI.ShortReset(hours.At) + "开始", "starts " + UI.ShortReset(hours.At)))
             : resetText.Length > 0 ? resetText : expiryText;
         if (rightText.Length > 0)
         {
             var right = UI.Line(rightText, layout.Reset, UI.Tertiary);
             right.FontFamily = UI.PanelFont;
             right.ToolTip = text ? null : offPeak ? Loc.T($"{change:yyyy-MM-dd HH:mm} 转为" + (offPeakNow ? "高峰时段" : "低峰时段"), (offPeakNow ? "Peak" : "Off-peak") + $" from {change:yyyy-MM-dd HH:mm}")
+                : timed ? CreditHoursTooltip(quota, hours.At!.Value, hours.On)
                 : (quota.ResetAt ?? quota.ExpiresAt)!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
             right.VerticalAlignment = VerticalAlignment.Bottom; right.HorizontalAlignment = HorizontalAlignment.Right;
             right.Margin = new Thickness(Space.Tight, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
@@ -659,6 +665,28 @@ public partial class MainWindow
         var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", (left ? 100 - used : used) / 100, color); Grid.SetRow(track, 4);
         block.Children.Add(track);
         return block;
+    }
+
+    // The busy and idle hours of CodeAgent credits and when this quota's hours next start or end, for example
+    // "忙时（消耗 3 倍）：工作日 10:00–12:00、15:00–18:00" / "闲时（消耗 0.2 倍）：其余时间，包括周末全天" / "闲时进行中，11-13 15:00 结束".
+    // The definition's hours are China Standard Time and are written as they are; local times are given for the next change.
+    private static string CreditHoursTooltip(UsageMetric quota, DateTimeOffset at, bool on)
+    {
+        var hours = quota.Hours!;
+        static string Clock(double hour) => $"{(int)hour:00}:{(int)Math.Round(hour % 1 * 60):00}";
+        string Ranges(bool weekend) => string.Join(Loc.T("、", ", "), hours.Ranges(CreditPeriod.Busy, weekend).Select(range => Clock(range.From) + "–" + Clock(range.To)));
+        string Rate(CreditPeriod period) => hours.Rates.TryGetValue(period, out var rate) ? Loc.T($"（消耗 {rate:0.##} 倍）", $" ({rate:0.##}× credits)") : "";
+        string weekdays = Ranges(false), weekends = Ranges(true);
+        var busy = Loc.T("忙时", "Busy hours") + Rate(CreditPeriod.Busy) + Loc.T("：", ": ") + string.Join(Loc.T("；", "; "), new[]
+        {
+            weekdays.Length > 0 ? Loc.T("工作日 ", "weekdays ") + weekdays : "",
+            weekends.Length > 0 ? Loc.T("周末 ", "weekends ") + weekends : ""
+        }.Where(part => part.Length > 0));
+        var idle = Loc.T("闲时", "Idle hours") + Rate(CreditPeriod.Idle) + Loc.T("：其余时间", ": every other hour") + (weekends.Length == 0 ? Loc.T("，包括周末全天", ", all weekend included") : "");
+        var own = quota.Period == CreditPeriod.Busy ? Loc.T("忙时", "Busy hours") : Loc.T("闲时", "Idle hours");
+        var next = own + (on ? Loc.T($"进行中，{at.LocalDateTime:MM-dd HH:mm} 结束", $" now, until {at.LocalDateTime:MM-dd HH:mm}")
+            : Loc.T($" {at.LocalDateTime:MM-dd HH:mm} 开始", $" from {at.LocalDateTime:MM-dd HH:mm}"));
+        return string.Join("\n", busy, idle, next);
     }
 
     // The row's off-peak periods, written as the settings write them.

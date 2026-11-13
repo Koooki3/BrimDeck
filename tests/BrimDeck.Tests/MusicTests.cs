@@ -241,6 +241,18 @@ internal static class MusicTests
             && CompactMusicLayout.Calculate(200, 1, true, 0, false, 33, 0, false, CompactMusicLayout.DefaultBars, showCover: false) is { CoverWidth: 0, ClockAlone: true }
             && CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, cover: false) == CompactMusicLayout.TextSlot + 18 + 8
             && CompactMusicLayout.RequiredWidth(1, true, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, cover: false) == 18 + 8 + 18);
+        // The middle text that follows its length (DeckSettings.MusicLyricAutoWidth, MusicTitleAutoWidth): its room is the text's width
+        // within its limits, and the text never widens the surface past the screen share unless the fixed slot needs more.
+        check("Middle text that follows its length asks for its room, within the shortest and longest room",
+            CompactMusicLayout.FollowSlot(100.2, 1) == 102 && CompactMusicLayout.FollowSlot(10, 1) == CompactMusicLayout.FollowSlotMin
+            && CompactMusicLayout.FollowSlot(5000, 1) == CompactMusicLayout.FollowSlotMax && CompactMusicLayout.FollowSlot(5000, 2) == 2 * CompactMusicLayout.FollowSlotMax
+            && CompactMusicLayout.FollowSlot(double.NaN, 1) == CompactMusicLayout.FollowSlotMin && CompactMusicLayout.FollowSlot(-3, 1) == CompactMusicLayout.FollowSlotMin
+            && CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, textSlot: 102) == 20 + 8 + 102 + 8 + 18
+            && CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true) == CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true, textSlot: 0));
+        check("Middle text never widens the surface past its limit, and content that needs more keeps its fixed width",
+            CompactMusicLayout.FollowWidth(300, 220, 900) == 300 && CompactMusicLayout.FollowWidth(1200, 220, 900) == 900
+            && CompactMusicLayout.FollowWidth(1200, 1000, 900) == 1000 && CompactMusicLayout.FollowWidth(150, 220, 100) == 150
+            && CompactMusicLayout.FollowWidth(1200, 220, double.PositiveInfinity) == 1200 && CompactMusicLayout.FollowWidth(1200, 220, -5) == 220);
 
         // Any width, scale and clock width gives finite regions that are never negative and never add up to more than the row.
         double[] widths = [0, .4, 1, 7, 17.9, 18, 36, 54, 84, 91.3, 115, 164, 178, 400, 1e6, double.NaN, -5, double.PositiveInfinity];

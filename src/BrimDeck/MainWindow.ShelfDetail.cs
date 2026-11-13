@@ -216,7 +216,7 @@ public partial class MainWindow
         string text = _editBox.Text;
         _editCommitting = true;
         _shelfEdit = null;
-        if (text.Trim().Length > 0 && ShelfData.Clips.FirstOrDefault(c => c.Id == id) is { } clip) { clip.Text = text; clip.Kind = Shelf.Classify(text); clip.Html = ""; clip.Rtf = ""; }
+        if (text.Trim().Length > 0 && ShelfData.Clips.FirstOrDefault(c => c.Id == id) is { } clip) { clip.Text = text; clip.Kind = Shelf.Classify(text); _app.Shelf.DropRich(clip.Id); }
         EndTyping();
         _editCommitting = false;
         _app.Shelf.Edited();

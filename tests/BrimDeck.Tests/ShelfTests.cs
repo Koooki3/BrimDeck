@@ -61,6 +61,37 @@ internal static class ShelfTests
             && reread.ClipCategories.Single(c => c.Id == made.Id).Keep == false && reread.ClipCategories.Single(c => c.Id == kept.Id).Keep
             && reread.ClipCategories.Single(c => c.Id == passing.Id).Keep == false);
 
+        // History kept past an exit: what is older than the length goes, counted from the last copy; what is kept stays however old.
+        var aging = new ShelfData();
+        aging.ClipCategories.AddRange([kept, passing]);
+        var noon = new DateTimeOffset(2026, 11, 13, 12, 0, 0, TimeZoneInfo.Local.GetUtcOffset(new DateTime(2026, 11, 13, 12, 0, 0)));
+        aging.Clips.Add(new ClipEntry { Text = "23 hours", Copied = noon.AddHours(-23) });
+        aging.Clips.Add(new ClipEntry { Text = "25 hours", Copied = noon.AddHours(-25) });
+        aging.Clips.Add(new ClipEntry { Text = "6 days", Copied = noon.AddDays(-6) });
+        aging.Clips.Add(new ClipEntry { Text = "8 days", Copied = noon.AddDays(-8) });
+        aging.Clips.Add(new ClipEntry { Text = "31 days", Copied = noon.AddDays(-31) });
+        aging.Clips.Add(new ClipEntry { Text = "old passing", Copied = noon.AddDays(-40), Categories = [passing.Id] });
+        aging.Clips.Add(new ClipEntry { Text = "old kept", Copied = noon.AddDays(-40), Categories = [kept.Id] });
+        aging.Clips.Add(new ClipEntry { Text = "old favorite", Copied = noon.AddDays(-40), Categories = [ShelfData.Favorites] });
+        aging.Clips.Add(new ClipEntry { Text = "old phrase", Copied = noon.AddDays(-40), Manual = true });
+        string Gone(HistoryLength length) => string.Join(",", Shelf.Expired(aging, length, noon).Select(c => c.Text));
+        check("Shelf history: kept past an exit, 1, 7 and 30 days keep what is newer; kept entries stay",
+            Gone(HistoryLength.Day) == "25 hours,6 days,8 days,31 days,old passing" && Gone(HistoryLength.Week) == "8 days,31 days,old passing"
+            && Gone(HistoryLength.Month) == "31 days,old passing");
+        var unknown = new DeckSettings { ClipboardKeepFor = (HistoryLength)9 };
+        unknown.Normalize();
+        check("Shelf history: kept past an exit is off and 30 days by default, an unknown length read as 30 days",
+            !new DeckSettings().ClipboardKeepHistory && new DeckSettings().ClipboardKeepFor == HistoryLength.Month && unknown.ClipboardKeepFor == HistoryLength.Month);
+
+        // Rich forms live in their own files: a history saved with them in its entries gives them up once, and is saved without them.
+        var withRich = ShelfData.Deserialize(System.Text.Encoding.UTF8.GetBytes(
+            "{\"Clips\":[{\"Text\":\"web\",\"Html\":\"<b>web</b>\",\"Rtf\":\"\"},{\"Text\":\"word\",\"Html\":\"\",\"Rtf\":\"{\\\\rtf1 word}\"},{\"Text\":\"empty\",\"Html\":\"\",\"Rtf\":\"\"},{\"Text\":\"plain\"}]}"));
+        var taken = Shelf.TakeRich(withRich);
+        string resaved = System.Text.Encoding.UTF8.GetString(withRich.Serialize());
+        check("Shelf rich forms: an older history gives up its HTML and RTF, and is saved without them",
+            taken.Select(t => (t.Clip.Text, t.Html, t.Rtf)).SequenceEqual([("web", "<b>web</b>", ""), ("word", "", "{\\rtf1 word}")])
+            && !resaved.Contains("\"Html\"") && !resaved.Contains("\"Rtf\"") && Shelf.TakeRich(withRich).Count == 0 && withRich.Clips.Count == 4);
+
         // Files: newest first, a file dropped again moves up, the category is kept or given.
         var shelf = new ShelfData();
         Shelf.AddFiles(shelf, [@"C:\a.txt", @"C:\b.txt"], null, now);

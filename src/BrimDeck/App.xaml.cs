@@ -22,6 +22,7 @@ public partial class App : Application
     public SettingsStore Store { get; private set; } = null!;
     public UsageService Usage { get; private set; } = null!;
     public ProviderSecrets Secrets { get; private set; } = null!;
+    public MiMoAccount MiMo { get; private set; } = null!;
     public Pricing Prices { get; private set; } = null!;
     public AppUpdates Updates { get; internal set; } = null!;
     // Dynamic notices (NoticeCenter): created before the panels, which take their turns on the island through it.
@@ -128,8 +129,9 @@ public partial class App : Application
         Prices = new Pricing(folder);
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
+        MiMo = new MiMoAccount(folder);
         Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
-        Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
+        Usage = new UsageService(new DesktopSources(MiMo), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         WindowDrags = new WindowDrags();
         InteractionFx.Install(this);
@@ -167,7 +169,7 @@ public partial class App : Application
         _exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, AppInstance.Exit);
         _exitListener = ThreadPool.RegisterWaitForSingleObject(_exitEvent, (_, _) => Dispatcher.BeginInvoke(ExitApplication), null, Timeout.Infinite, true);
         if (e.Args.Contains("--settings")) OpenSettings();
-        // A portable update that kept this version says why on the About page.
+        // An update that kept this version says why on the About page.
         else if (Updates.RestartFailed) OpenUpdateSettings();
         // The start reads and builds a lot; what it leaves behind is returned once the panel has been left alone (App.Memory).
         RequestTrim();

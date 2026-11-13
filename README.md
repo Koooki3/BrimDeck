@@ -134,7 +134,7 @@ For the supported connections, brands and models, see [Supported devices](docs/e
 <img src="docs/en-US/images/clipboard.png" width="100%" alt="Clipboard and file transfer page: copied text, a link, code, a picture and a color on the left; held files with their sizes on the right">
 
 - **Clipboard**: Keeps the text and pictures you copy; click an entry to paste it into the window you are working in. Links, code and color values each show in their own style.
-- The history is stored encrypted on this PC and cleared when BrimDeck exits; what is in Favorites or in a category set to be kept stays. You can choose apps that are not recorded.
+- The history is stored only on this PC and cleared when BrimDeck exits by default, or kept for 1 day, 7 days or 30 days; what is in Favorites or in a category set to be kept stays. You can choose apps that are not recorded.
 - **File transfer**: Drag files onto the notch, the capsule or the panel to hold them, then click to paste them into the current window or drag them to where you need them. Only each file's location is kept, never a copy.
 - Both columns have categories with rules for what goes in by itself, and can be searched together.
 
@@ -188,7 +188,7 @@ To remove settings and data as well, also delete `%LOCALAPPDATA%\BrimDeck`. If y
 
 - Reads only the sign-in state and usage records that apps already keep, and never changes, renews or ends their sign-ins.
 - Sign-in tokens are used only in memory and never written to disk; API keys you enter are stored on this PC, encrypted by Windows.
-- The clipboard history and the file transfer's list are stored only on this PC, encrypted by Windows, and never uploaded.
+- The clipboard history and the file transfer's list are stored only on this PC and never uploaded.
 - Goes online only to read quotas and usage, update model prices, fetch lyrics and covers, and check for updates. Conversations are never uploaded, and no usage data is collected.
 
 For the files BrimDeck reads and the addresses it connects to, see [Data and privacy](docs/en-US/privacy.md).

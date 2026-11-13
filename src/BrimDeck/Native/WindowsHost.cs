@@ -154,15 +154,18 @@ public sealed class WindowsHost : IDisposable
                 }
             }
         }
-        if (cause is null) { _orderCulprit = null; return; }
-        // Log repeated obstruction at most every ten seconds, including whether recovery was requested.
+        if (cause is null) return;
         if (recover) SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
-        if (_orderCulprit != (cause, culprit) || Environment.TickCount64 - _orderLoggedAt > 10000)
-        {
-            _orderCulprit = (cause, culprit); _orderLoggedAt = Environment.TickCount64;
-            var named = culprit == IntPtr.Zero ? cause : cause + " " + ProcessName(culprit);
-            NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} panel {named}" + (recover ? "; topmost restored" : "; left as is"));
-        }
+        // The same note, by cause, process and outcome, is logged at most every ten seconds. An app can cover the panel
+        // with a new window every moment, or uncover it for a moment between two, so neither the window nor a break in
+        // the obstruction makes a note new.
+        if (culprit != _namedWindow) { _namedWindow = culprit; _namedProcess = culprit == IntPtr.Zero ? "" : ProcessName(culprit); }
+        var note = "panel " + (_namedProcess.Length == 0 ? cause : cause + " " + _namedProcess) + (recover ? "; topmost restored" : "; left as is");
+        var now = Environment.TickCount64;
+        if (_orderNotes.TryGetValue(note, out var at) && now - at < 10000) return;
+        if (_orderNotes.Count >= 32) foreach (var old in _orderNotes.Where(n => now - n.Value >= 10000).Select(n => n.Key).ToList()) _orderNotes.Remove(old);
+        _orderNotes[note] = now;
+        NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {note}");
     }
     // An ordinary panel. Show desktop puts the desktop above every ordinary window, the panel among them; a click on the
     // desktop leaves it beneath them. Once the desktop has stayed in front for a moment, the panel is made topmost over
@@ -254,8 +257,11 @@ public sealed class WindowsHost : IDisposable
             return;
         }
     }
-    private (string Cause, IntPtr Window)? _orderCulprit;
-    private long _orderLoggedAt;
+    // When each note of the order watch was last logged; the window last named and its process, which is looked up only
+    // when the window changes.
+    private readonly Dictionary<string, long> _orderNotes = [];
+    private IntPtr _namedWindow;
+    private string _namedProcess = "";
     // An app that raises itself whenever it is covered would trade places with the panel without end, the two flickering
     // in turn. Past ten recoveries from topmost windows within two seconds, the panel leaves them above it for five.
     private long _raisesFrom, _yieldUntil;

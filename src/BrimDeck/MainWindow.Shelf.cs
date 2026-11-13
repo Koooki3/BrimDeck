@@ -52,10 +52,10 @@ public partial class MainWindow
 
     private void InitializeShelf()
     {
-        Action changed = ShelfChanged;
+        Action changed = ShelfChanged, figures = FolderFiguresChanged;
         _app.Shelf.Changed += changed;
-        ShelfFiles.Changed += changed;
-        Closed += (_, _) => { _app.Shelf.Changed -= changed; ShelfFiles.Changed -= changed; _movingTimer?.Stop(); };
+        ShelfFiles.Changed += figures;
+        Closed += (_, _) => { _app.Shelf.Changed -= changed; ShelfFiles.Changed -= figures; _movingTimer?.Stop(); };
         HoverZone.AllowDrop = true;
         HoverZone.PreviewDragEnter += ShelfDragEnter;
         HoverZone.PreviewDragOver += ShelfDragOver;
@@ -85,6 +85,16 @@ public partial class MainWindow
         if (IsShelfPage && _expanded && !_preview) RenderShelf(); else _shelfStale = true;
         int count = Settings.ShowsTransfer(EffectiveStyle) ? ShelfData.Files.Count : 0;
         if (count != _transferShown && !_expanded) RenderCompact();
+    }
+    // A folder's item count or total size has arrived (ShelfFiles). Each folder is counted the first time its row is built, as it
+    // scrolls into view, and the header's total asks for every folder. Building the page again for each figure replaced both lists
+    // while the user scrolled: the new list drew a frame at its top before going back to the scroll position, so the list flashed.
+    // Only the figures are set now: on the folder rows built so far and in the header's total. The details are built again as before.
+    private void FolderFiguresChanged()
+    {
+        if (_shelfDetail is not null || ShelfContent.Children.Count == 0) { ShelfChanged(); return; }
+        foreach (var (_, aux) in _shelfRows.Values) if (aux.Tag is RowEnd { Refresh: { } refresh }) refresh();
+        if (_fileTotal is not null) _fileTotal.Text = Shelf.Size(FilesTotal());
     }
 
     // ---- The collapsed count ----
@@ -173,7 +183,7 @@ public partial class MainWindow
             _shelfStale = false; _shelfBuilt = build;
             // The pointer may have left a row that is about to be replaced; its scroll positions are kept.
             RememberShelfScroll();
-            ShelfContent.Children.Clear(); _shelfRows.Clear(); _shelfTabs.Clear(); _fileFrame = null;
+            ShelfContent.Children.Clear(); _shelfRows.Clear(); _shelfTabs.Clear(); _fileFrame = null; _fileTotal = null;
         }
         // The header's own parts are set again either way: another page shown meanwhile has hidden them.
         RenderShelfToolbar(width);
@@ -340,7 +350,7 @@ public partial class MainWindow
         }
         else if (!Searching && _clipTab is null && !Settings.ClipboardRecord)
         {
-            panel.Children.Add(Label(Loc.T("开启后保存在本机，加密存放", "Kept on this computer, encrypted"), layout.Aux, UI.Tertiary, HorizontalAlignment.Center, top: 4));
+            panel.Children.Add(Label(Loc.T("开启后只保存在本机", "Kept only on this computer"), layout.Aux, UI.Tertiary, HorizontalAlignment.Center, top: 4));
             var on = PillButton(Loc.T("开启记录", "Turn on"), primary: true, () => _app.UpdateSettings(SettingsWith(s => s.ClipboardRecord = true)));
             on.Margin = new Thickness(0, 10, 0, 0); on.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(on);
         }
@@ -450,13 +460,16 @@ public partial class MainWindow
         // The size of everything on the file transfer, where there is room for it beside the filters.
         if (side == ShelfSide.Files && fits && layout.FileColumn >= 260 && ShelfData.Files.Count > 0 && room - titleWidth - fixedWidth - ownWidth > 70)
         {
-            long total = ShelfData.Files.Sum(file => ShelfFiles.FileSize(file.Path) ?? (ShelfFiles.IsFolder(file.Path) ? ShelfFiles.Folder(file.Path).Size ?? 0 : 0));
-            var size = Label(Shelf.Size(total), layout.Aux, UI.Tertiary, HorizontalAlignment.Right);
+            var size = Label(Shelf.Size(FilesTotal()), layout.Aux, UI.Tertiary, HorizontalAlignment.Right);
             size.Margin = new Thickness(0, 0, 4, 0);
             buttons.Children.Insert(0, size);
+            _fileTotal = size;
         }
         return row;
     }
+    // The header's total, set again as folder sizes arrive (FolderFiguresChanged).
+    private TextBlock? _fileTotal;
+    private long FilesTotal() => ShelfData.Files.Sum(file => ShelfFiles.FileSize(file.Path) ?? (ShelfFiles.IsFolder(file.Path) ? ShelfFiles.Folder(file.Path).Size ?? 0 : 0));
     // The divider between the column's name and its filters, with its margins; the buttons' own margin (4 at the left, -4 at the
     // right); and "⌄" with the picker's padding, what is left of "分类 ⌄" when its word has no room.
     private const double BarWidth = 13, ButtonsMargin = 0, PickerChrome = 25;
@@ -754,11 +767,14 @@ public partial class MainWindow
         RenderOptions.SetBitmapScalingMode(icon, BitmapScalingMode.HighQuality);
         grid.Children.Add(icon);
         // The facts at the right: size (or the folder's items, then its size), and the date where there is room.
-        string facts = !exists ? Loc.T("已不存在", "Missing") : folder ? FolderFacts(file.Path) : ShelfFiles.FileSize(file.Path) is { } bytes ? Shelf.Size(bytes) : "";
-        if (layout.FileDate && exists && ShelfFiles.Modified(file.Path) is { } modified) facts += "   " + modified.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        string Facts()
+        {
+            string facts = !exists ? Loc.T("已不存在", "Missing") : folder ? FolderFacts(file.Path) : ShelfFiles.FileSize(file.Path) is { } bytes ? Shelf.Size(bytes) : "";
+            if (layout.FileDate && exists && ShelfFiles.Modified(file.Path) is { } modified) facts += "   " + modified.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            return facts;
+        }
+        string facts = Facts();
         bool showFacts = !exists || layout.FileSize;
-        double factsWidth = showFacts ? TextWidth(facts, layout.Aux, FontWeights.Normal) + 10 : 0;
-        double nameRoom = Math.Max(20, layout.FileColumn - layout.Icon - 8 - 12 - Math.Max(factsWidth, 22));
         // Short of room, the name is cut at the end of its stem; an extension of up to four letters (.docx) always shows after it.
         string extension = System.IO.Path.GetExtension(file.Name);
         if (extension.Length is < 2 or > 5 || extension.Length == file.Name.Length) extension = "";
@@ -773,11 +789,26 @@ public partial class MainWindow
         DockPanel.SetDock(ext, System.Windows.Controls.Dock.Right);
         name.Children.Add(ext); name.Children.Add(stem);
         // The whole name, after a moment, when the row shows only part of it.
-        if (TextWidth(file.Name, layout.Body, FontWeights.Normal) > nameRoom) { name.ToolTip = file.Name; ToolTipService.SetInitialShowDelay(name, 600); }
+        void NameTip(string shown)
+        {
+            double factsWidth = showFacts ? TextWidth(shown, layout.Aux, FontWeights.Normal) + 10 : 0;
+            double nameRoom = Math.Max(20, layout.FileColumn - layout.Icon - 8 - 12 - Math.Max(factsWidth, 22));
+            if (name.ToolTip is null && TextWidth(file.Name, layout.Body, FontWeights.Normal) > nameRoom) { name.ToolTip = file.Name; ToolTipService.SetInitialShowDelay(name, 600); }
+        }
+        NameTip(facts);
         Grid.SetColumn(name, 1); grid.Children.Add(name);
         var aux = AuxSlot(showFacts ? facts : "", layout, () => OpenDetail(ShelfSide.Files, file.Id), warn: !exists,
             extra: (BinIcon, Loc.T("从文件中转中移除", "Remove from the file transfer"), () => RemoveFiles([file])));
         Grid.SetColumn(aux, 2); grid.Children.Add(aux);
+        // A folder's figures arrive after the row is built (FolderFiguresChanged); a flash shows its word meanwhile and keeps the
+        // figures to put back (label.Tag).
+        if (folder && showFacts && aux.Tag is RowEnd end)
+            end.Refresh = () =>
+            {
+                string now = Facts();
+                if (end.Label.Tag is string) end.Label.Tag = now; else end.Label.Text = now;
+                NameTip(now);
+            };
         frame.Child = grid;
         AutomationProperties.SetName(frame, file.Name);
         _shelfRows[file.Id] = (frame, aux);
@@ -846,6 +877,8 @@ public partial class MainWindow
         public TextBlock Label { get; } = label;
         public Border More { get; } = more;
         public FrameworkElement? Mark { get; set; }
+        // Sets the figures again on a folder's row (FolderFiguresChanged).
+        public Action? Refresh { get; set; }
     }
     private static void ShowMore(Grid aux, bool on)
     {

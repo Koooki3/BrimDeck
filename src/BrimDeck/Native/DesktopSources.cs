@@ -7,10 +7,60 @@ using BrimDeck.Core;
 
 namespace BrimDeck.Native;
 
-public sealed class DesktopSources : IDesktopSources
+public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
 {
+    public string? ReadMiMoSession() => mimo?.Read();
+    public void SaveMiMoSession(string session) => mimo?.Save(session);
     public ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => ClaudeDesktopReader.Read(locations);
     public GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => GrokBotDesktopReader.Read(locations);
+
+    // Starts `codeagentcli auth status` without a window, with the environment the codeagent launcher sets (its certificates,
+    // no proxy) and the data folder BrimDeck reads, and waits until the sign-in file holds a later expiry or the CLI ends. The
+    // CLI writes the renewed sign-in within a few seconds; it is ended once that is written, or after 30 seconds.
+    public async Task<bool> RenewCodeAgentAsync(string home, CancellationToken cancellation)
+    {
+        var cli = CodeAgentUsage.FindCli(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetEnvironmentVariable("PATH"));
+        if (cli is null) return false;
+        long before = CodeAgentUsage.StoredExpiry(home);
+        var install = Path.GetDirectoryName(Path.GetDirectoryName(cli))!;
+        var start = new ProcessStartInfo(cli, "auth status --json")
+        {
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetTempPath(),
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        var cert = Path.Combine(install, "custom", "cert.pem");
+        if (File.Exists(cert)) { start.Environment["NODE_EXTRA_CA_CERTS"] = cert; start.Environment["SSL_CERT_FILE"] = cert; }
+        foreach (var name in new[] { "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY" }) start.Environment.Remove(name);
+        start.Environment["CODEAGENT3_CONFIG_DIR"] = home;
+        using var process = Process.Start(start);
+        if (process is null) return false;
+        process.StandardInput.Close();
+        _ = process.StandardOutput.ReadToEndAsync(cancellation); _ = process.StandardError.ReadToEndAsync(cancellation);
+        bool Renewed() { try { return CodeAgentUsage.StoredExpiry(home) > before; } catch (IOException) { return false; } }
+        try
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (!Renewed() && !process.HasExited && DateTime.UtcNow < deadline) await Task.Delay(300, cancellation);
+            // The CLI may still be writing the file when it ends; give it a moment.
+            if (!Renewed() && process.HasExited) await Task.Delay(1000, cancellation);
+            // A renewed CLI may still be writing the rest of the sign-in; it is left a few seconds to end by itself.
+            if (Renewed()) for (int wait = 0; wait < 10 && !process.HasExited; wait++) await Task.Delay(300, cancellation);
+            return Renewed();
+        }
+        finally { try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { } }
+    }
+
+    public string? UnprotectUserData(string base64)
+    {
+        byte[]? plain = null;
+        try
+        {
+            plain = ProtectedData.Unprotect(Convert.FromBase64String(base64), null, DataProtectionScope.CurrentUser);
+            return System.Text.Encoding.UTF8.GetString(plain);
+        }
+        catch (Exception ex) when (ex is FormatException or CryptographicException) { return null; }
+        finally { if (plain is not null) CryptographicOperations.ZeroMemory(plain); }
+    }
 
     // Newer Cursor clients store the access token as "cursor-safe-storage:v1:" and the base64 of a value encrypted with
     // Cursor's own os_crypt key (Local State in %APPDATA%\Cursor); older clients store the token itself.

@@ -286,7 +286,9 @@ internal static class CompactReadingTests
     // The order of the collapsed parts: one per style, each part once, kept by copies and by saving.
     private static void PartOrder(Action<string, bool> check)
     {
-        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices];
+        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Transfer, CompactPart.Devices, CompactPart.Equalizer, CompactPart.Clock];
+        check("Compact order: by default the equalizer and the clock come last", new DeckSettings().NotchOrder.SequenceEqual(standard)
+            && CompactParts.Default.SequenceEqual(standard));
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
         check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Equalizer, CompactPart.Clock, CompactPart.Transfer, CompactPart.Devices])
             && odd.CapsuleOrder.SequenceEqual(standard));

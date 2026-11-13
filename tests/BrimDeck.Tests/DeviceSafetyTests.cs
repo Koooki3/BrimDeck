@@ -20,12 +20,11 @@ static class DeviceSafetyTests
         bool Aside(int vendor, params string[] processes) => VendorSoftware.BrandOf(vendor) is { } brand && VendorSoftware.Running(processes).Contains(brand);
 
         string[] desktop = ["explorer.exe", "chrome.exe", "BrimDeck.exe", "steam.exe", "Discord.exe", "svchost.exe"];
-        check("Vendor software: nothing of the four brands among ordinary processes, so every brand is read",
-            !Aside(Razer.Vendor, desktop) && !Aside(Dongles.EndgameVendor, desktop) && !Aside(Dongles.VaxeeVendor, desktop) && !Aside(Dongles.InphicVendor, desktop) && !Aside(Dongles.InphicWireless, desktop));
-        check("Vendor software: Razer stands aside for Synapse 3 and 4 and their background parts",
-            Aside(Razer.Vendor, [.. desktop, "Razer Synapse.exe"]) && Aside(Razer.Vendor, [.. desktop, "Razer Synapse 4.exe"])
-            && Aside(Razer.Vendor, [.. desktop, "RazerCentralService.exe"]) && Aside(Razer.Vendor, [.. desktop, "Razer Synapse Service.exe"]) && Aside(Razer.Vendor, [.. desktop, "RazerAppEngine.exe"])
-            && Aside(Razer.Vendor, ["RAZERSYNAPSE.EXE"]));
+        check("Vendor software: nothing of the three brands among ordinary processes, so every brand is read",
+            !Aside(Dongles.EndgameVendor, desktop) && !Aside(Dongles.VaxeeVendor, desktop) && !Aside(Dongles.InphicVendor, desktop) && !Aside(Dongles.InphicWireless, desktop));
+        check("Vendor software: Razer is read with Synapse 3 and 4 and their background parts running",
+            !Aside(Razer.Vendor, [.. desktop, "Razer Synapse.exe", "Razer Synapse 4.exe", "RazerCentralService.exe", "Razer Synapse Service.exe", "RazerAppEngine.exe"])
+            && VendorSoftware.BrandOf(Razer.Vendor) is null);
         check("Vendor software: Endgame Gear, VAXEE and Inphic stand aside for their own programs and not for each other's",
             Aside(Dongles.EndgameVendor, "EndgameGearConfigurator.exe") && !Aside(Dongles.EndgameVendor, "Razer Synapse.exe", "VAXEE Tool.exe")
             && Aside(Dongles.VaxeeVendor, "VAXEE Mouse Config.exe") && !Aside(Dongles.VaxeeVendor, "EndgameGear.exe")

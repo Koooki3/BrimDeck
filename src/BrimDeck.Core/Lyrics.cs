@@ -109,9 +109,11 @@ public sealed partial class LyricsService : IDisposable
     public const int MaxResponseBytes = 2 * 1024 * 1024;
     private const int MaxRedirects = 2;
     // appleLyricsFile keeps which Apple Music lyrics each song was matched to; none keeps it only in memory.
-    public LyricsService(HttpClient? http = null, Func<IEnumerable<string>>? appleCacheRoots = null, string? appleLyricsFile = null)
+    public LyricsService(HttpClient? http = null, Func<IEnumerable<string>>? appleCacheRoots = null, string? appleLyricsFile = null,
+        Func<string>? queMusicSettings = null)
     {
         _appleCacheRoots = appleCacheRoots ?? AppleCacheRoots;
+        _queMusicSettings = queMusicSettings ?? QueMusicSettingsFile;
         _appleLyricsFile = appleLyricsFile; _appleLyricsIds = LoadAppleLyricsIds(appleLyricsFile);
         _ownsHttp = http is null;
         // Redirects are followed by Get, only to HTTPS on the same host.
@@ -122,6 +124,12 @@ public sealed partial class LyricsService : IDisposable
         if (!enabled || string.IsNullOrWhiteSpace(track.Title) || string.IsNullOrWhiteSpace(track.Artist)) return Lyrics.Empty;
         if (!track.IsQqMusic && !string.IsNullOrWhiteSpace(track.EmbeddedLyrics))
             return Lyrics.Parse(track.EmbeddedLyrics, null, track.Duration.TotalSeconds, track.Source);
+        if (track.IsQueMusic)
+        {
+            var found = await FindQueMusic(track, token);
+            if (found.Lyrics is { } local) return local;
+            if (found.SongId.Length > 0) track = track with { SongId = found.SongId };
+        }
         await _gate.WaitAsync(token);
         try
         {

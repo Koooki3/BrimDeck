@@ -36,6 +36,9 @@ public static class ProviderNetwork
         ProviderId.OpenRouter => ["openrouter.ai"],
         ProviderId.KimiApi => [HostOf(KimiUsage.DefaultBaseUrl), HostOf(KimiUsage.GlobalBaseUrl)],
         ProviderId.OpenCodeGo => [HostOf(OpenCodeUsage.DefaultServer)],
+        ProviderId.CommandCodeApi => [HostOf(CommandCodeUsage.Api)],
+        ProviderId.MiMoApi => [HostOf(MiMoUsage.PlatformApi)],
+        ProviderId.MiMoTokenPlan => [.. MiMoUsage.TokenPlanHosts.Select(HostOf)],
         _ => []
     };
     private static string HostOf(string url) => new Uri(url).IdnHost;

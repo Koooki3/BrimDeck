@@ -75,7 +75,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 
 ### 应用颜色（apps）
 
-配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`kimi`、`opencode`、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`（这两种同时也是文字，需 4.5:1）。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
+配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`kimi`、`opencode`、`codeagent`、`commandcode`、`workbuddy`、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`（这两种同时也是文字，需 4.5:1）。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
 
 ### 时间（clock）
 
@@ -258,4 +258,4 @@ Windows 支持时，玻璃下面的桌面是模糊的：BrimDeck 在岛的正下
 
 ## 界面字体
 
-界面字体是应用设置，不属于主题：在“设置 › 常规 › 外观与语言 › 界面字体”选择，主题文件不能指定字体。选择的字体放在默认字体前面，中文仍回退到微软雅黑，所以缺字不会出现方框。设置窗口本身始终使用应用自带字体，试字体时不会跟着变得难读。时钟样式中自带字体的样式（如 Orbitron、Tektur、Fredoka）和数码管、点阵、像素样式保留自己的字形，其余时钟样式跟随所选字体。
+界面字体是应用设置，不属于主题：在“设置 › 常规 › 外观与语言 › 界面字体”选择，主题文件不能指定字体。选择的字体放在默认字体前面，中文仍回退到微软雅黑，所以缺字不会出现方框。设置窗口默认使用应用自带字体，试字体时不会跟着变得难读；打开“字体应用到设置窗口”后，设置窗口也使用所选字体，但“界面字体”和这个开关两行仍使用自带字体，字体难以阅读时可以在这里改回。时钟样式中自带字体的样式（如 Orbitron、Tektur、Fredoka）和数码管、点阵、像素样式保留自己的字形，其余时钟样式跟随所选字体。

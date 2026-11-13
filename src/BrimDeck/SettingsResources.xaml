@@ -457,7 +457,8 @@
     <Setter Property="Height" Value="22"/><Setter Property="Padding" Value="9,0"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton">
       <Border x:Name="Chrome" CornerRadius="11" Background="Transparent" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="1" Padding="{TemplateBinding Padding}">
-        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        <!-- The content takes the chip's whole height and centres its words itself, by their letters (InkCentredText). -->
+        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Stretch"/>
       </Border>
       <ControlTemplate.Triggers>
         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SettingsFillHover}"/><Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/></Trigger>

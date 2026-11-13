@@ -78,6 +78,8 @@ internal sealed class SystemSampler : IDisposable
     // machine near idle (300 ms read true). Collections of a query closer together than this are not made (Collect).
     private const double ShortestCounterSeconds = .2;
     private double _cpuAt = double.NegativeInfinity, _gpuAt = double.NegativeInfinity;
+    // When the adapters' counters last joined their query (GpuProvider.Want).
+    private double _gpuJoinedAt = double.NegativeInfinity;
     private Reading<CpuSample> _lastCpu = Reading<CpuSample>.Unavailable(Why.Waiting);
     private Reading<IReadOnlyList<GpuSample>> _lastGpus = Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.Waiting);
     private readonly Queue<(double Down, double Up)> _history = new(HistoryLength);
@@ -205,7 +207,7 @@ internal sealed class SystemSampler : IDisposable
         _power = new PowerProvider(_meterPdh, stuck);
         _gpuTemperatures = new GpuTemperatures(stuck);
         _battery = new BatteryProvider();
-        bool primed = false, first = false;
+        bool primed = false, first = false, holdGpu = false;
         while (!_disposed && Volatile.Read(ref _generation) == generation)
         {
             try
@@ -222,18 +224,21 @@ internal sealed class SystemSampler : IDisposable
                     bool primeProcesses = _primeProcesses;
                     _primeProcesses = false;
                     // Readings starting (the monitor opened or came back): a hardware monitor started meanwhile is looked for again.
-                    if (!primed) { _bridges.Rescan(); Collect(listProcesses: true); }
+                    if (!primed) { _bridges.Rescan(); Collect(listProcesses: true); holdGpu = false; }
                     else
                     {
-                        if (primeCounters) PrimeCounters();
+                        // Adapters already read before this priming keep their last reading in the snapshot after it (Collect): a
+                        // collection there would cover little more than the panel opening, which keeps the busiest engine (the
+                        // desktop composing the animation) at 40 to 60 %, and the GPU figure read high for a second.
+                        holdGpu = !(primeCounters && PrimeCounters());
                         if (_listProcesses && (primeProcesses || !_lastProcesses.HasValue)) _processes.Sample(Now());
                     }
                     primed = true; first = true;
                     Pause(PrimeMilliseconds);
                     continue;
                 }
-                var snapshot = Collect(listProcesses: first);
-                first = false;
+                var snapshot = Collect(listProcesses: first, holdGpu);
+                first = false; holdGpu = false;
                 if (_disposed) break;
                 // A reading taken just as the sampler paused would bring back figures that then grow old. The adapter shown is
                 // resolved again here: a reading taken before the user chose another adapter would otherwise bring the old one back.
@@ -280,20 +285,27 @@ internal sealed class SystemSampler : IDisposable
         _cpu!.Forget();
     }
 
-    // The counters just asked for, read once: the power meter's, and the adapters' when they have just joined their query.
-    private void PrimeCounters()
+    // The counters just asked for, read once: the power meter's, and the adapters' when they have just joined their query. Whether
+    // the adapters' did.
+    private bool PrimeCounters()
     {
         _power!.Prepare(_powerWanted);
-        if (_gpu!.Want(_gpuWanted)) { _gpuPdh?.Collect(); _gpuAt = Now(); }
+        if (!_gpu!.Want(_gpuWanted)) return false;
+        _gpuPdh?.Collect(); _gpuJoinedAt = _gpuAt = Now();
+        return true;
     }
 
-    private MonitorSnapshot Collect(bool listProcesses)
+    // holdGpu: the adapters keep their last reading, as if collected too soon, when it came from a collection after their counters
+    // joined the query (one over a whole interval, not the priming's); their next collection then covers the time since that one.
+    private MonitorSnapshot Collect(bool listProcesses, bool holdGpu = false)
     {
         double now = Now();
         bool meter = _power!.Prepare(_powerWanted);
-        _gpu!.Want(_gpuWanted);
+        bool gpuJoined = _gpu!.Want(_gpuWanted);
+        if (gpuJoined) _gpuJoinedAt = now;
         // A collection this soon after the last is skipped, and the processor and the adapters keep the readings they gave then.
-        bool cpuSoon = now - _cpuAt < ShortestCounterSeconds, gpuSoon = now - _gpuAt < ShortestCounterSeconds;
+        bool cpuSoon = now - _cpuAt < ShortestCounterSeconds;
+        bool gpuSoon = now - _gpuAt < ShortestCounterSeconds || holdGpu && !gpuJoined && _gpuWanted && _gpuAt > _gpuJoinedAt && _lastGpus.HasValue;
         bool cpuCollected = !cpuSoon && _cpuPdh?.Collect() == true;
         bool gpuCollected = !gpuSoon && _gpuWanted && _gpuPdh?.Collect() == true;
         if (!cpuSoon) _cpuAt = now;

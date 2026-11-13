@@ -60,8 +60,8 @@
     "bubbleBorder": "#8000F0FF"
   },
   "apps": {
-    "claude": "#FF9E3D", "codex": "#3DFFB0", "antigravity": "#00E5FF", "cursor": "#C4D2EE", "zcode": "#7B8CFF",
-    "dsh": "#6FA8FF", "grokBot": "#C4D2EE", "kimi": "#1EC8FF", "opencode": "#8A8494", "manual": "#D07DFF", "other": "#C4D2EE", "warning": "#FCEE0A", "critical": "#FF3B5C"
+    "claude": "#FF9E3D", "codex": "#3DFFB0", "antigravity": "#00E5FF", "cursor": "#C9C3F2", "zcode": "#7B8CFF",
+    "dsh": "#6FA8FF", "grokBot": "#C9C3F2", "kimi": "#1EC8FF", "opencode": "#8A8494", "codeagent": "#22D3C5", "commandcode": "#7A60E3", "workbuddy": "#3DFFB0", "mimo": "#FF6900", "manual": "#D07DFF", "other": "#C9C3F2", "warning": "#FCEE0A", "critical": "#FF3B5C"
   },
   "clock": {
     "style": "tektur", "color": "default",

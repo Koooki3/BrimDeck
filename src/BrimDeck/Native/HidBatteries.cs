@@ -377,8 +377,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         else foreach (var info in hidpp) claimed.Add(info.Path);
         if (ask)
             foreach (var group in infos.Where(info => info.Vendor == Razer.Vendor).GroupBy(info => info.Product))
-                // Basilisk Ultimate, cable and receiver, measured answering battery queries with Synapse 4 running.
-                if (Razer.Find(group.Key) is { } model && (model.Product is 0x0086 or 0x0088 || !Aside(Razer.Vendor))) Try(() => ReadRazer(model, [.. group], claimed));
+                // Read with Synapse running as well (VendorSoftware says why).
+                if (Razer.Find(group.Key) is { } model) Try(() => ReadRazer(model, [.. group], claimed));
         // The devices (GroupKey) a dongle protocol has read this pass.
         var answered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // The ROG Omni receivers, each read as a whole (its pairing table, then its paired devices).

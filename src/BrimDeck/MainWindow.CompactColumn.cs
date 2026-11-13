@@ -9,9 +9,9 @@ namespace BrimDeck;
 
 // The collapsed content of a notch on a side edge (MainWindow.Edge.cs): the parts the row shows side by side (RenderCompactMusic)
 // stand one below the other, each on a line of its own across the column, in the same order, with the row's gap between them
-// (CompactColumn). Text stays upright. The quota rings stand side by side as far as the column allows; each system reading has a
-// line, and one wider than the column glides sideways in it, as the title does. A column longer than the notch glides down the
-// edge and back (ColumnCarousel). An auto-width notch takes the column's length; the notch is as deep as the column is wide.
+// (CompactColumn). Text stays upright. The quota rings stand side by side as far as the column allows; each system reading and
+// each device's battery has a line, and a reading wider than the column glides sideways in it, as the title does. A column longer
+// than the notch glides down the edge and back (ColumnCarousel). An auto-width notch takes the column's length; the notch is as deep as the column is wide.
 public partial class MainWindow
 {
     private ColumnCarousel? _columnCarousel;
@@ -61,7 +61,7 @@ public partial class MainWindow
                 var strip = new MonitorStrip([reading], colors, scale, true, _stripPresence, dpi, _stripUnavailable, _stripAdmission, Settings.DeviceLowPercent, drives);
                 if (strip.PreferredWidth > 0) strips.Add(strip);
             }
-            foreach (var reading in Settings.CompactReadings)
+            foreach (var reading in CompactColumn.Readings(Settings.CompactReadings))
             {
                 if (reading.Item != CompactMonitorItems.Storage) { Line(reading); continue; }
                 foreach (var letter in CompactSources.Of(reading))
@@ -74,6 +74,8 @@ public partial class MainWindow
         _stripLayout = _stripAdmission.Layout;
         bool animate = Soft.Enabled;
         double gap = CompactMusicLayout.Gap(scale), ringGap = CompactMusicLayout.Whole(CompactColumn.RingGap * scale);
+        // The devices one below the other, with the gap the readings' lines keep.
+        devices?.Stack(gap);
         double edge = Math.Min(Snap(layout.TextEdge, dpi), CompactMusicLayout.Whole(CollapsedLimits.ColumnPad * scale));
 
         var lines = new List<(FrameworkElement Element, double Height)>();
@@ -118,7 +120,7 @@ public partial class MainWindow
                     clock.Width = clock.ReservedWidth; Add(clock, clock.Height); _compactClock = clock; break;
                 case CompactPart.Transfer when transfer is not null:
                     Add(transfer, transfer.Height); break;
-                // The devices on a line of their own, scrolling as the readings do when wider than the column.
+                // The devices a line each; should a device's line be wider than the column, they scroll as the readings do.
                 case CompactPart.Devices when devices is not null:
                     if (devices.PreferredWidth > column + .5)
                     {
@@ -137,7 +139,7 @@ public partial class MainWindow
         // The column's width and length for the shape (CollapsedGeometry.Resolve): the widest fixed part, the readings up to the cap,
         // and every line with the gaps; the surface never shortens below its tallest line. Like the row, the track notice is left out.
         var stack = CompactColumn.Stack([.. lines.Select(line => line.Height)], gap);
-        double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (cover ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, apps.Count > 0 ? layout.RingSize : 0],
+        double wantedColumn = CompactColumn.Width(scale, [layout.CoverSize * (cover ? 1 : 0), equalizer ? layout.EqualizerSize : 0, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0, apps.Count > 0 ? layout.RingSize : 0],
             strips.Select(strip => strip.PreferredWidth));
         double wanted = notice ? (double.IsNaN(_compactWanted) ? stack.Length : _compactWanted) : DevicePixels.Up(stack.Length, dpi);
         double required = lines.Count == 0 ? 0 : Math.Ceiling(lines.Max(line => line.Height));

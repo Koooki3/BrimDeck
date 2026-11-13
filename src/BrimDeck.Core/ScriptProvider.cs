@@ -43,6 +43,8 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
     {
         if (entry.QuotaSource == ProviderId.KimiApi) return await RunKimiAsync();
         if (entry.QuotaSource == ProviderId.OpenCodeGo) return await RunOpenCodeGoAsync();
+        if (entry.QuotaSource == ProviderId.CommandCodeApi) return await RunCommandCodeAsync();
+        if (entry.QuotaSource is ProviderId.MiMoApi or ProviderId.MiMoTokenPlan) return await RunMiMoAsync();
         using var engine = new Engine(options =>
         {
             options.ExperimentalFeatures = ExperimentalFeature.TaskInterop;
@@ -236,6 +238,70 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
         if (quotas.Count == 0) throw new InvalidDataException(t("OpenCode 返回的 Go 用量无法识别。", "The Go usage OpenCode returned is not recognized."));
         List<string> warnings = limited ? [t("已达到 OpenCode Go 的用量上限，重置前请求会被拒绝", "The OpenCode Go limit is reached; requests are refused until it resets.")] : [];
         return new(quotas.Select(UsageMetric.FromQuota).ToList(), "", "plan", [], warnings) { Source = "OpenCode Go" };
+    }
+    // A Command Code API key (created in Command Code Studio) reads the same plan quota as Command Code's own sign-in, read by
+    // CommandCodeUsage. The key is sent only to api.commandcode.ai.
+    private async Task<ProviderResult> RunCommandCodeAsync()
+    {
+        async Task<(int Status, string Body)> Get(string path)
+        {
+            var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + secret, ["Accept"] = "application/json", ["User-Agent"] = "BrimDeck/0.1" };
+            using var reply = JsonDocument.Parse(await SendAsync("GET", JsonSerializer.Serialize(new { url = CommandCodeUsage.Api + path, options = new { headers } })));
+            if (reply.RootElement.Get("error").Text() is { Length: > 0 } error) throw new InvalidDataException(error);
+            return ((int)(reply.RootElement.Get("status").Number() ?? 0), reply.RootElement.Get("body").Text());
+        }
+        CommandCodeUsage.Reading reading;
+        try { reading = await CommandCodeUsage.ReadAsync(Get); }
+        catch (CommandCodeUsage.RejectedException)
+        {
+            throw new InvalidDataException(Loc.T("Command Code 拒绝了这个 API 密钥，请确认它是在 Command Code Studio 中创建的密钥，且未被删除。",
+                "Command Code rejected this API key. Check that it was created in Command Code Studio and has not been deleted."));
+        }
+        return new(reading.Metrics, reading.Plan, "account", [], reading.Warnings) { Source = ProviderCatalog.Name(ProviderId.CommandCodeApi) };
+    }
+    // A Xiaomi MiMo Open Platform key (MiMoUsage). Xiaomi MiMo API reads the balances and this month's charges of a pay-as-you-go key;
+    // Xiaomi MiMo Token Plan the plan quota of a Token Plan key at the token-plan host of its cluster, asked in turn until one does
+    // not refuse it. A key of the other kind is pointed to its own source. The key is sent only to Xiaomi's own hosts.
+    private async Task<ProviderResult> RunMiMoAsync()
+    {
+        string t(string zh, string en) => Loc.T(zh, en);
+        async Task<(int Status, JsonElement Body)> Get(string url)
+        {
+            var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + secret, ["Accept"] = "application/json" };
+            using var reply = JsonDocument.Parse(await SendAsync("GET", JsonSerializer.Serialize(new { url, options = new { headers } })));
+            if (reply.RootElement.Get("error").Text() is { Length: > 0 } error) throw new InvalidDataException(error);
+            int status = (int)(reply.RootElement.Get("status").Number() ?? 0);
+            JsonElement body;
+            try { using var doc = JsonDocument.Parse(reply.RootElement.Get("body").Text()); body = doc.RootElement.Clone(); }
+            catch (JsonException) { body = default; }
+            return (status, body);
+        }
+        var rejected = t("小米 MiMo 开放平台拒绝了这个 API 密钥，请确认密钥正确，且未被删除。",
+            "The Xiaomi MiMo Open Platform rejected this API key. Check that it is correct and has not been deleted.");
+        bool planKey = MiMoUsage.IsTokenPlanKey(secret);
+        if (entry.QuotaSource == ProviderId.MiMoTokenPlan)
+        {
+            if (!planKey) throw new InvalidDataException(t("这不是 Token Plan 密钥（tp-…），按量计费密钥请选择 Xiaomi MiMo API。", "This is not a Token Plan key (tp-…). Choose Xiaomi MiMo API for a pay-as-you-go key."));
+            foreach (var host in MiMoUsage.TokenPlanHosts)
+            {
+                var (status, body) = await Get(host + "/v1/platform/token_plan");
+                if (status is 401 or 403) continue;
+                if (status != 200) throw new HttpRequestException("HTTP " + status);
+                var (plan, quota) = MiMoUsage.TokenPlan(body) ?? throw new InvalidDataException(t("这个密钥所属的账户没有生效中的 Token Plan。", "The account of this key has no Token Plan in force."));
+                return new([quota], plan, "plan", [], []) { Source = ProviderCatalog.Name(ProviderId.MiMoTokenPlan) };
+            }
+            throw new InvalidDataException(rejected);
+        }
+        if (planKey) throw new InvalidDataException(t("这是 Token Plan 密钥，请选择 Xiaomi MiMo Token Plan。", "This is a Token Plan key. Choose Xiaomi MiMo Token Plan."));
+        var (balanceStatus, balanceBody) = await Get(MiMoUsage.PlatformApi + "/v1/platform/balance");
+        if (balanceStatus is 401 or 403) throw new InvalidDataException(rejected);
+        if (balanceStatus != 200) throw new HttpRequestException("HTTP " + balanceStatus);
+        var metrics = MiMoUsage.Balance(balanceBody, out bool available);
+        List<string> warnings = available ? [] : [t("余额不足，小米 MiMo 开放平台暂时无法调用。", "The balance is insufficient, so the Xiaomi MiMo Open Platform cannot be called for now.")];
+        var (usageStatus, usageBody) = await Get(MiMoUsage.PlatformApi + "/v1/platform/usage/daily?" + MiMoUsage.UsageQuery(now));
+        if (usageStatus == 200) metrics.Add(MiMoUsage.MonthSpend(usageBody, metrics[0].Currency, now));
+        else warnings.Add(t("本月扣费暂时无法读取", "This month's charges cannot be read right now"));
+        return new(metrics, "", "account", [], warnings) { Source = ProviderCatalog.Name(ProviderId.MiMoApi) };
     }
     private static string Error(string error) => JsonSerializer.Serialize(new { error });
     private string Fill(string text) => Injected ? text.Replace(_placeholder, secret, StringComparison.Ordinal) : text;

@@ -296,10 +296,12 @@ public partial class MainWindow
         // When every cost comes from the API, only the prices recovered from those amounts are the ones actually charged;
         // catalog prices would describe a cost that was never calculated.
         // A merged Cursor plan's included records share its weekly amount; their prices are the ones worked out from it.
-        bool shared = source?.WeeklyShares == true && record.Entries.All(t => t.FittedCost || t.ReportedCostUsd is null);
-        var recovery = !shared && record.Entries.All(t => t.ReportedCostUsd is not null) ? Pricing.FromReported(record.Entries) : null;
+        // Prices the application lists for the model itself (Command Code) are the ones its amounts were worked out from.
+        var listed = source?.ListedPrices is { } prices && prices.TryGetValue(record.Entries[0].Model, out var own) ? own : null;
+        bool shared = listed is null && source?.WeeklyShares == true && record.Entries.All(t => t.FittedCost || t.ReportedCostUsd is null);
+        var recovery = listed is null && !shared && record.Entries.All(t => t.ReportedCostUsd is not null) ? Pricing.FromReported(record.Entries) : null;
         var derived = shared ? source!.WeeklyPrices : recovery?.Prices;
-        var model = recovery is null && !shared ? _app.Prices.Match(record.Entries[0]) : null;
+        var model = listed ?? (recovery is null && !shared ? _app.Prices.Match(record.Entries[0]) : null);
         var tiers = model?.Tiers.Where(t => t.MinimumPromptTokens > 0).ToArray() ?? [];
         var columns = derived is not null ? [derived] : model is null ? [] : tiers.Select(t => t.Prices).Prepend(model.Tiers.LastOrDefault(t => t.MinimumPromptTokens <= 0)?.Prices ?? model.Prices)
             .Select(prices => _app.Prices.Effective(model, prices)).ToArray();
@@ -333,7 +335,8 @@ public partial class MainWindow
             { Status: RecoveryStatus.Undetermined } => Loc.T("所选时段的记录不足以确定各项单价", "The records in the selected period cannot determine each price"),
             { Status: RecoveryStatus.Inconsistent } => Loc.T("各条记录的金额不符合固定单价，无法推算单价", "The amounts of the records do not fit fixed prices, so the prices cannot be worked out"),
             _ => model is null ? Loc.T("未找到该模型的单价", "No unit price was found for this model")
-                : tiers.Length > 0 ? Loc.T("USD / 百万 Token · 按单次请求的输入量分档", "USD per million tokens · tiered by the input of each request") : Loc.T("USD / 百万 Token", "USD per million tokens"),
+                : Loc.T("USD / 百万 Token", "USD per million tokens") + (listed is null ? "" : Loc.T($" · {AppPresets.Name(record.Provider)} 标价", $" · {AppPresets.Name(record.Provider)} list prices"))
+                    + (tiers.Length > 0 ? Loc.T(" · 按单次请求的输入量分档", " · tiered by the input of each request") : ""),
         };
         Cell(note, line, 0, UI.Secondary, span: span, margin: new Thickness(0, columns.Length == 0 ? 0 : 3, 0, 0));
         return grid;
@@ -403,7 +406,13 @@ public partial class MainWindow
                     !header && (total && i >= 2 || !total && i == 0 || i == widths.Length - 1) ? FontWeights.SemiBold : FontWeights.Normal);
                 text.TextAlignment = i >= 2 ? TextAlignment.Right : TextAlignment.Left;
                 FrameworkElement cell = text;
-                if (i == 0 && provider is { } id) cell = new CapDot(text, UI.Brush(StatisticsTheme(id)), 7, 13);
+                if (i == 0 && provider is { } id)
+                {
+                    cell = new CapDot(text, UI.Brush(StatisticsTheme(id)), 7, 13);
+                    // A name cut off by its ellipsis shows in full on hover; one that fits shows no tooltip.
+                    text.ToolTip = labels[i];
+                    text.ToolTipOpening += (_, e) => { if (!UI.IsCut(text)) e.Handled = true; };
+                }
                 Grid.SetColumn(cell, i * 2); row.Children.Add(cell);
             }
             return row;
@@ -415,7 +424,7 @@ public partial class MainWindow
             var record = result.Rows[i];
             var row = Row(AppPresets.Name(record.Provider), record.Model, values[i], false, false, record.Provider);
             var tips = Tips(record.Entries, false);
-            // The model name shows the unit prices; the app name shows no tooltip.
+            // The model name shows the unit prices; the app name, inside its dot cell, shows its full name only when cut off (Row).
             foreach (var text in row.Children.OfType<TextBlock>())
             {
                 int column = Grid.GetColumn(text) / 2;

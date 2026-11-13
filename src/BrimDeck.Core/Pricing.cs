@@ -46,6 +46,8 @@ public sealed class Pricing : IDisposable
     private Dictionary<string, HashSet<string>> _tiers = new(StringComparer.Ordinal);
     // Each refresh prices thousands of records that share a few model names; results are kept until the catalog changes.
     private System.Collections.Concurrent.ConcurrentDictionary<string, ModelPrice?> _found = new(StringComparer.Ordinal);
+    // FindMaas answers by name, kept until the table changes as _found is.
+    private System.Collections.Concurrent.ConcurrentDictionary<string, ModelPrice?> _maas = new(StringComparer.Ordinal);
     public int ModelCount { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
     public string? LastError { get; private set; }
@@ -330,7 +332,7 @@ public sealed class Pricing : IDisposable
         foreach (var model in models)
             if (OfficialIds.Contains(Normalize(model.Model)) && _remote.TryGetValue(Normalize(model.Model), out var remote) && ReferenceEquals(remote, model)) unofficial.Add(model);
         _unofficial = unofficial;
-        _lookup = lookup; _tiers = tiers; _found = new(StringComparer.Ordinal); ModelCount = models.Length;
+        _lookup = lookup; _tiers = tiers; _found = new(StringComparer.Ordinal); _maas = new(StringComparer.Ordinal); ModelCount = models.Length;
         Changed?.Invoke();
     }
     private Dictionary<string, ModelPrice> MergedModels()
@@ -398,8 +400,10 @@ public sealed class Pricing : IDisposable
     // The catalog or manual model whose prices apply to a record.
     public ModelPrice? Match(TokenEntry entry)
     {
-        var model = Find(entry.Model);
-        if (model is null && entry.Key.StartsWith("ag:", StringComparison.Ordinal))
+        // A record's own price name (TokenEntry.PriceModel) is tried first, then the name it shows.
+        var model = Find(entry.PriceModel ?? entry.Model) ?? (entry.PriceModel is null ? null : Find(entry.Model));
+        if (model is null && MaasName(Normalize(entry.Model)) is { } maas) model = FindMaas(maas);
+        else if (model is null && entry.Key.StartsWith("ag:", StringComparison.Ordinal))
             model = FindAntigravityBase(entry.Model);
         else if (entry.Key.StartsWith("kimi:", StringComparison.Ordinal))
         {
@@ -520,6 +524,47 @@ public sealed class Pricing : IDisposable
             if (price is null && Regex.IsMatch(candidate, @"^(google/)?gemini-\d[\d.]*-pro$")) price = Find(candidate + "-preview");
             if (price is null) continue;
             return tiers.TryGetValue(shape.Family, out var words) && segments[length..].Any(words.Contains) ? null : price;
+        }
+        return null;
+    }
+    // Model names of MaaS gateways, such as CodeAgent's and those of tools that reach its models through a proxy, take the price of
+    // the catalog model they serve. Only names that start with "maas-", or that name an automatic route ("GLM-5.2-Auto(Volcano-MaaS)"),
+    // are read this way; MaasName returns the name to look for, or null for any other model:
+    //   - the "maas-" prefix goes, and an automatic route is read as the model it is named after ("glm-5.2"): it also sends simple
+    //     requests to smaller models, so its records are priced at the dearest one;
+    //   - a release suffix goes: "-ga-260731", "-260617", "-1017";
+    //   - a version written with dashes takes dots: "glm-5-2" → "glm-5.2", "deepseek-v4-1-flash" → "deepseek-v4.1-flash".
+    // FindMaas then drops words from the end until a catalog model matches, so a provider or channel word, today's or a later one,
+    // does not matter: "glm-5.3-volcengine-codeagent" → "glm-5.3", "qwen3.8-flash-aliyun-codeagent" → "qwen3.8-flash". The word
+    // with the version ("5.3", "v4.1", "qwen3.7", "m3") is never dropped, so "glm-5.4-…" takes the price of "z-ai/glm-5.4" once the
+    // catalog lists it and stays unpriced until then, never the price of another version. A dropped word that names another model of
+    // the same family in the catalog ("flash" when "glm-5.3-flash" is listed) leaves the name unpriced, as FindAntigravityBase does.
+    internal static string? MaasName(string key)
+    {
+        if (Regex.Match(key, @"^(?<base>[a-z0-9.\-]+?)-auto\(.*\)$") is { Success: true } auto) key = auto.Groups["base"].Value;
+        else if (key.StartsWith("maas-", StringComparison.Ordinal)) key = key[5..];
+        else return null;
+        key = Regex.Replace(key, @"(-ga)?-(\d{4}|\d{6}|\d{8})$", "");
+        key = Regex.Replace(key, @"(?<=[a-z]?\d{1,2})-(?=\d{1,2}(-[a-z]|$))", ".");
+        return key.Length > 0 ? key : null;
+    }
+    // Applies to the records of every tool, in Match: Find, which the editor of prices added by hand also uses, stays an exact lookup.
+    private ModelPrice? FindMaas(string name)
+    {
+        var cache = _maas; var lookup = _lookup;
+        if (cache.TryGetValue(name, out var known)) return known;
+        return cache[name] = FindMaas(name, lookup);
+    }
+    private static ModelPrice? FindMaas(string name, Dictionary<string, ModelPrice> lookup)
+    {
+        var segments = name.Split('-');
+        int version = Array.FindIndex(segments, segment => segment.Any(char.IsDigit));
+        if (version < 0) return null;
+        for (int length = segments.Length; length > version; length--)
+        {
+            var candidate = string.Join('-', segments[..length]);
+            if (!lookup.TryGetValue(candidate, out var price)) continue;
+            return segments[length..].Any(word => lookup.ContainsKey(candidate + "-" + word)) ? null : price;
         }
         return null;
     }

@@ -288,7 +288,7 @@ public partial class MainWindow
     private (double Min, double Max) CompactWidthRange(CompactStyle style)
     {
         var (min, max) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip, _scale);
-        return (Math.Min(max, Math.Max(min, CollapsedGeometry.SurfaceWidth(style, Collapsed.Surface.Height, _compactRequired))), max);
+        return (Math.Min(max, Math.Max(min, CollapsedGeometry.SurfaceWidth(style, Collapsed.Surface.Height, _compactRequired, _scale))), max);
     }
 
     private void ApplyResize(double width, double height)

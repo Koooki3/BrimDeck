@@ -69,8 +69,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     {
         _app = app;
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/BrimDeck;component/SettingsResources.xaml", UriKind.Relative) });
-        using (Fonts.Plain()) Fonts.Publish(Resources);
-        Style = (Style)FindResource(typeof(Window));
+        using (OwnFonts()) Fonts.Publish(Resources);
+        Style =(Style)FindResource(typeof(Window));
         // Sizes are DIPs, so the window looks the same at any scale factor. The default fits the page layout (the content
         // column is at most 858 wide); the last closed size replaces it. Either is fitted to the work area of the screen
         // the window opens on, which CenterScreen takes as the one under the mouse pointer.
@@ -143,8 +143,13 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     }
     private void PricesChanged()
     { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(() => { if (IsLoaded) RefreshPriceRows(); }); }
-    // The window keeps the app's own fonts whatever interface font the user chose (Fonts.Plain): it is where the font is chosen, and it stays readable.
-    internal void RebuildTheme() { using (Fonts.Plain()) RebuildThemeCore(); }
+    // The window keeps the app's own fonts whatever interface font the user chose (Fonts.Plain), unless the user asked for it to follow
+    // the chosen one (DeckSettings.SettingsFollowsFont). The font row keeps them either way (AppearanceSection), so a font that is
+    // hard to read can be changed back. Fonts.Use leaves this window alone (IKeepsAppFonts); a change of font or of the switch rebuilds it.
+    private IDisposable? OwnFonts() => S.SettingsFollowsFont ? null : Fonts.Plain();
+    // The family for what this window builds or draws outside a rebuild (a dialog, a popup, a tick label).
+    internal FontFamily SettingsFont(UiFontRole role) => S.SettingsFollowsFont && !Fonts.IsPlain ? Fonts.Of(role) : Fonts.PlainOf(role);
+    internal void RebuildTheme() { using (OwnFonts()) { Fonts.Publish(Resources); RebuildThemeCore(); } }
     private void RebuildThemeCore()
     {
         RememberFocus();
@@ -153,7 +158,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         // A language change rebuilds the window the same way.
         Title = Loc.T("BrimDeck 设置", "BrimDeck Settings");
         _palette = new(SettingsPalette.IsDark(S.Theme)); _palette.Apply(Resources);
-        Background = UI.Brush(Surface); Foreground = UI.Brush(TextPrimary); FontFamily = Fonts.PlainOf(UiFontRole.Panel);
+        Background = UI.Brush(Surface); Foreground = UI.Brush(TextPrimary); FontFamily = SettingsFont(UiFontRole.Panel);
         // Detach reused panels before rebuilding the window's theme-specific surfaces.
         _navigation.Children.Clear(); _content.Children.Clear();
         if (_navigation.Parent is ScrollViewer oldNavigation) oldNavigation.Content = null;
@@ -216,14 +221,14 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     // The product name on one line: a heavier "Brim" followed by a light "Deck".
     private TextBlock Wordmark(double size)
     {
-        var name = new TextBlock { FontFamily = Fonts.PlainOf(UiFontRole.Text), FontSize = size, Foreground = UI.Brush(TextPrimary) };
+        var name = new TextBlock { FontFamily = SettingsFont(UiFontRole.Text), FontSize = size, Foreground = UI.Brush(TextPrimary) };
         name.Inlines.Add(new Run("Brim") { FontWeight = FontWeights.SemiBold });
         name.Inlines.Add(new Run("Deck") { FontWeight = FontWeights.Light, Foreground = UI.Brush(_palette.Dark ? "#C5C5CB" : "#565661") });
         AutomationProperties.SetName(name, "BrimDeck"); return name;
     }
     private TextBlock TextLine(string text, double size = 13, string color = "#F1F1F4", FontWeight? weight = null)
     {
-        var block = UI.Line(text, size, color, weight); block.FontFamily = Fonts.PlainOf(UiFontRole.Panel);
+        var block = UI.Line(text, size, color, weight); block.FontFamily = SettingsFont(UiFontRole.Panel);
         string? resource = color == TextPrimary ? "SettingsTextPrimary" : color == TextSecondary ? "SettingsTextSecondary" :
             color is "#F0A6AA" or "#B12E3A" ? "SettingsError" : null;
         if (resource is not null) block.SetResourceReference(TextBlock.ForegroundProperty, resource);
@@ -305,8 +310,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
-    // The window keeps the app's own fonts whatever interface font the user chose (Fonts.Plain): it is where the font is chosen, and it stays readable.
-    public void ShowPage(int page) { using (Fonts.Plain()) ShowPageCore(page); }
+    public void ShowPage(int page) { using (OwnFonts()) ShowPageCore(page); }
     private void ShowPageCore(int page)
     {
         if (page < 0 || page >= _pages.Length) return;
@@ -425,12 +429,14 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         var transparency = SliderRow(Loc.T("背景透明度", "Background transparency"), S.SurfaceTransparency, 0, DeckSettings.MaxSurfaceTransparency, 5, "%",
             value => Change(s => s.SurfaceTransparency = (int)value));
         // The interface font (UiFonts, Fonts): "Default" keeps the app's own fonts. The installed families are listed when the list is
-        // opened and not before, and the choice reaches every window at once (Fonts.Use) without a restart; this window is built again
-        // with the app's own fonts (Fonts.Plain), and only the preview line below is set in the chosen one.
+        // opened and not before, and the choice reaches every window at once (Fonts.Use) without a restart; this window is built again,
+        // in the chosen font only when the switch below asks for it (DeckSettings.SettingsFollowsFont). The font row and the switch are
+        // always in the app's own fonts (Fonts.Plain), so a font that is hard to read can be changed back from here.
         var fontDefault = Loc.T("默认", "Default");
         List<string> fontNames = S.UiFont.Length > 0 ? [fontDefault, S.UiFont] : [fontDefault];
         bool fontListed = false, fontFilling = false;
-        var font = new ComboBox { Width=150,Style=(Style)FindResource("SettingsCombo"),ItemsSource=fontNames,SelectedIndex=S.UiFont.Length > 0 ? 1 : 0,MaxDropDownHeight=320,IsTextSearchEnabled=true };
+        var font = new ComboBox { Width=150,Style=(Style)FindResource("SettingsCombo"),ItemsSource=fontNames,SelectedIndex=S.UiFont.Length > 0 ? 1 : 0,MaxDropDownHeight=320,IsTextSearchEnabled=true,
+            FontFamily=Fonts.PlainOf(UiFontRole.Panel) };
         AutomationProperties.SetName(font,Loc.T("界面字体", "Interface font")); AutomationProperties.SetAutomationId(font,"interface-font"); PopupMotion.Attach(font);
         font.DropDownOpened+=(_,_)=>
         {
@@ -450,10 +456,16 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         };
         var fontSample = new TextBlock { Text=Loc.T("字体预览 Aa Bb 0123 中英文混排", "Font preview Aa Bb 0123 mixed text"),TextTrimming=TextTrimming.CharacterEllipsis,MaxWidth=260,
             FontFamily=Fonts.Sample(S.UiFont),FontSize=TextSize.Body,Foreground=UI.Brush(TextPrimary),VerticalAlignment=VerticalAlignment.Center };
+        FrameworkElement fontRow, followRow;
+        using (Fonts.Plain())
+        {
+            fontRow = Row(Loc.T("界面字体", "Interface font"),font,help: () => Loc.T("选择界面文字使用的字体，立即生效。图标、等宽的脚本编辑器和时钟的自带字体样式不受影响；字体缺失时会回到默认字体。",
+                "Choose the font the interface text is drawn in; it applies at once. Icons, the monospaced script editor and the clock styles that ship their own fonts are not affected; a missing font falls back to the default one."));
+            followRow = Toggle(Loc.T("字体应用到设置窗口", "Apply font to settings window"), S.SettingsFollowsFont,
+                on => { Change(s => s.SettingsFollowsFont = on); RebuildTheme(); });
+        }
         Group(Row(Loc.T("主题", "Theme"),SegmentBorder(themes)),Row(Loc.T("语言", "Language"),language),Row(Loc.T("缩放", "Scale"),scale),transparency,
-            Row(Loc.T("界面字体", "Interface font"),font,help: () => Loc.T("选择界面文字使用的字体，立即生效。图标、等宽的脚本编辑器和时钟的自带字体样式不受影响；字体缺失时会回到默认字体。",
-                "Choose the font the interface text is drawn in; it applies at once. Icons, the monospaced script editor and the clock styles that ship their own fonts are not affected; a missing font falls back to the default one.")),
-            Row(Loc.T("字体预览", "Font preview"),fontSample));
+            fontRow,followRow,Row(Loc.T("字体预览", "Font preview"),fontSample));
         DisplayChoice(); Interaction(); WindowRules();
     }
     // Either the primary display, or any set of displays, each with its own switch. A chosen display that is not
@@ -698,7 +710,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         {
             switch(_page)
             {
-                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.MemoryMode=defaults.MemoryMode;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;s.SurfaceTransparency=defaults.SurfaceTransparency;s.UiFont=defaults.UiFont;
+                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.MemoryMode=defaults.MemoryMode;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;s.SurfaceTransparency=defaults.SurfaceTransparency;s.UiFont=defaults.UiFont;s.SettingsFollowsFont=defaults.SettingsFollowsFont;
                     s.ClickThrough=defaults.ClickThrough;s.ClickThroughPanel=defaults.ClickThroughPanel;s.WindowCapture=defaults.WindowCapture;break;
                 // The notices shortcut is reset with the notices page.
                 case HotkeysPage:foreach(var kind in Enum.GetValues<HotkeyKind>().Where(kind => kind != HotkeyKind.Notices))s.SetHotkey(kind,defaults.Hotkey(kind));break;
@@ -717,11 +729,11 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                 // The devices' order, names and switches stay; the page and its size are Expanded view's (case 2).
                 case DevicesSettingsPage:s.DeviceLowPercent=defaults.DeviceLowPercent;s.DeviceWarningPercent=defaults.DeviceWarningPercent;s.DeviceFigures=defaults.DeviceFigures;s.DeviceLowNotice=defaults.DeviceLowNotice;break;
                 // The categories and phrases are the user's own data, not settings; the other page has nothing to restore.
-                case ClipboardSettingsPage:s.ClipboardRecord=defaults.ClipboardRecord;s.ClipboardExcluded=[];break;
+                case ClipboardSettingsPage:s.ClipboardRecord=defaults.ClipboardRecord;s.ClipboardExcluded=[];s.ClipboardKeepHistory=defaults.ClipboardKeepHistory;s.ClipboardKeepFor=defaults.ClipboardKeepFor;break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.QuotaRingStyle=defaults.QuotaRingStyle;s.QuotaRingRemaining=defaults.QuotaRingRemaining;s.QuotaRingLetters=defaults.QuotaRingLetters;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
                 case 5:s.EqualizerAlways=defaults.EqualizerAlways;s.EqualizerBars=defaults.EqualizerBars;s.EqualizerMode=defaults.EqualizerMode;s.EqualizerColor=defaults.EqualizerColor;s.EqualizerCustomColor=defaults.EqualizerCustomColor;
-                    s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicPausedHide=defaults.MusicPausedHide;s.MusicInstrumentalTitle=defaults.MusicInstrumentalTitle;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;
+                    s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicPausedHide=defaults.MusicPausedHide;s.MusicInstrumentalTitle=defaults.MusicInstrumentalTitle;s.MusicLyricAutoWidth=defaults.MusicLyricAutoWidth;s.MusicTitleAutoWidth=defaults.MusicTitleAutoWidth;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;
                     s.MusicLyricColor=defaults.MusicLyricColor;s.MusicLyricCustomColor=defaults.MusicLyricCustomColor;break;
                 case MusicGesturesPage:s.MusicDragLeft=defaults.MusicDragLeft;s.MusicDragRight=defaults.MusicDragRight;s.MusicDragUp=defaults.MusicDragUp;s.MusicDragDown=defaults.MusicDragDown;
                     s.MusicSwipeLeft=defaults.MusicSwipeLeft;s.MusicSwipeRight=defaults.MusicSwipeRight;break;
@@ -835,7 +847,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         SectionTitle(Loc.T("应用", "Apps"));
         _appRows = new StackPanel();
         foreach (var entry in S.Apps) _appRows.Children.Add(AppRow(entry));
-        UpdateDividers();
+        UpdateDividers(); UpdateShowLimit();
         var list = new StackPanel();
         var headings = AppColumns(); headings.Height = 34;
         AddHeadings(headings, new[]
@@ -846,25 +858,22 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             (Loc.T("主题", "Theme"), 4, Loc.T("本列进度条和配额环的颜色。配额环始终使用这个颜色。", "The color of this column's progress bars and quota ring. The quota ring always uses this color.")),
             (Loc.T("预警", "Warning"), 5, Loc.T("已用达到 70%（即剩余 30%）时，进度条和数字改用这个颜色。", "At 70% used (30% left), progress bars and numbers change to this color.")),
             (Loc.T("告警", "Critical"), 6, Loc.T("已用达到 90%（即剩余 10%）时，进度条和数字改用这个颜色。", "At 90% used (10% left), progress bars and numbers change to this color.")),
-            (Loc.T("显示", "Show"), 7, "")
+            (Loc.T("显示", "Show"), 7, Loc.T($"最多同时显示 {AppPresets.MaximumShownApps} 个应用。关闭的应用保留其设置。", $"Up to {AppPresets.MaximumShownApps} apps are shown at once. Apps switched off keep their settings."))
         });
         list.Children.Add(headings);
         list.Children.Add(new Border { Child = _appRows, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0, 1, 0, 1) });
-        bool atLimit = S.Apps.Count >= AppPresets.MaximumApps;
         var add = ActionButton("", () =>
         {
-            if (S.Apps.Count >= AppPresets.MaximumApps) return;
-            Change(s => s.Apps.Add(new AppEntry { QuotaSource = ProviderId.Claude, UsageSource = ProviderId.Claude }));
+            // Past the display limit a new app is added switched off.
+            Change(s => s.Apps.Add(new AppEntry { QuotaSource = ProviderId.Codex, UsageSource = ProviderId.Codex, Enabled = !s.ShownAppsFull }));
             ShowPage(3);
         });
-        add.IsEnabled = !atLimit; add.Opacity = atLimit ? .45 : 1;
         var addContent = new StackPanel { Orientation = Orientation.Horizontal };
         addContent.Children.Add(Stroke("M 5,0 L 5,10 M 0,5 L 10,5", 10, 10, TextSecondary));
         var addLabel = TextLine(Loc.T("添加应用", "Add app"), TextSize.Body, TextSecondary); addLabel.Margin = new Thickness(Space.S8, 0, 0, 0); addLabel.VerticalAlignment = VerticalAlignment.Center; addContent.Children.Add(addLabel);
         add.Content = addContent; add.HorizontalAlignment = HorizontalAlignment.Left; add.Margin = new Thickness(10, Space.Tight, 0, Space.Tight); add.Padding = new Thickness(10, Space.Tight, Space.S12, Space.Tight);
-        add.ToolTip = atLimit ? Loc.T($"最多配置 {AppPresets.MaximumApps} 个应用；移除一行后可以继续添加", $"Up to {AppPresets.MaximumApps} apps. Remove a row to add another.")
-            : Loc.T($"最多配置 {AppPresets.MaximumApps} 个应用；同一配额来源或统计应用可以重复选择", $"Up to {AppPresets.MaximumApps} apps. The same quota source or usage app can be chosen more than once.");
-        ToolTipService.SetShowOnDisabled(add, true);
+        add.ToolTip = Loc.T($"同一配额来源或统计应用可以重复选择。已显示 {AppPresets.MaximumShownApps} 个应用时，新添加的应用默认不显示。",
+            $"The same quota source or usage app can be chosen more than once. With {AppPresets.MaximumShownApps} apps shown, a new app is added switched off.");
         AutomationProperties.SetName(add, Loc.T("添加应用", "Add app"));
         list.Children.Add(add);
         _content.Children.Add(list);
@@ -923,7 +932,9 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         Grid.SetColumn(theme, 4); row.Children.Add(theme); Grid.SetColumn(warning, 5); row.Children.Add(warning); Grid.SetColumn(critical, 6); row.Children.Add(critical);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.Enabled, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, Loc.T("显示 ", "Show ") + name); AutomationProperties.SetAutomationId(toggle, "enabled-" + entry.InstanceId.ToString("N"));
-        toggle.Checked += (_, _) => Change(s => s.Entry(entry.InstanceId)!.Enabled = true); toggle.Unchecked += (_, _) => Change(s => s.Entry(entry.InstanceId)!.Enabled = false);
+        toggle.Tag = ShowToggleTag; ToolTipService.SetShowOnDisabled(toggle, true);
+        toggle.Checked += (_, _) => { Change(s => s.Entry(entry.InstanceId)!.Enabled = true); UpdateShowLimit(); };
+        toggle.Unchecked += (_, _) => { Change(s => s.Entry(entry.InstanceId)!.Enabled = false); UpdateShowLimit(); };
         Grid.SetColumn(toggle, 7); row.Children.Add(toggle);
         AttachDrag(handle, name);
         // Removing drops the app's colors and sources with it, so it asks first (SW-09).
@@ -950,7 +961,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     {
         string role = quota ? Loc.T("配额来源", "Quota source") : Loc.T("统计应用", "Usage app");
         ProviderId selected = quota ? entry.QuotaSource : entry.UsageSource;
-        string Label(ProviderId id) => AppPresets.Name(id);
+        string Label(ProviderId id) => quota ? AppPresets.Name(id) : ProviderCatalog.UsageName(id);
         var select = new DropDownButton { Style = (Style)FindResource("SettingsButton"), Value = () => Label(selected) };
         var selectContent = new DockPanel();
         var chevron = Chevron(); chevron.Foreground = UI.Brush(TextSecondary); chevron.Margin = new Thickness(8, ChevronDrop.Top, 0, ChevronDrop.Bottom); DockPanel.SetDock(chevron, Dock.Right); selectContent.Children.Add(chevron);
@@ -1040,7 +1051,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             }
             return double.PositiveInfinity;
         }
-        select.Click += (_, _) => { if (!menu.IsOpen) FitMenuToScreen(select, menu, surface, MenuLimit()); };
+        // The list sits right against its button, as the other drop-downs of the settings do.
+        select.Click += (_, _) => { if (!menu.IsOpen) { FitMenuToScreen(select, menu, surface, MenuLimit()); menu.VerticalOffset = 0; } };
         TogglePopup(select, menu);
         return select;
     }
@@ -1069,13 +1081,21 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
 
     // A popup that closes when the mouse goes down outside it also closes when its own button is pressed.
     // While the popup is open the button ignores the mouse, so that press only closes the popup and does not open it again.
-    private static void TogglePopup(ButtonBase button, Popup popup)
+    // WPF then passes that press on to the window: the popup is already shut (IsOpen is false) but Closed comes only after the
+    // press has been routed, so the popup stays in _shownPopups until then and the app rows let the press only close it.
+    private void TogglePopup(ButtonBase button, Popup popup)
     {
-        popup.Opened += (_, _) => button.IsHitTestVisible = false;
+        popup.Opened += (_, _) => { button.IsHitTestVisible = false; _shownPopups.Add(popup); };
         PopupMotion.Attach(popup);
-        popup.Closed += (_, _) => button.IsHitTestVisible = true;
+        popup.Closed += (_, _) =>
+        {
+            button.IsHitTestVisible = true; _shownPopups.Remove(popup);
+            // A reading that came while the list was open left the rows as they were (QuotasChanged); they are brought up to date now.
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, QuotasChanged);
+        };
         button.Click += (_, _) => popup.IsOpen = !popup.IsOpen;
     }
+    private readonly HashSet<Popup> _shownPopups = [];
 
     // One line of the application menu: the name at the left, an optional note at the right.
     private Button MenuEntry(string name, string note, bool enabled, bool current)
@@ -1183,7 +1203,22 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         int index = _appRows.Children.IndexOf(old);
         _sourceRows.Remove(id);
         _appRows.Children.RemoveAt(index); _appRows.Children.Insert(index, AppRow(entry));
-        UpdateDividers();
+        UpdateDividers(); UpdateShowLimit();
+    }
+
+    private const string ShowToggleTag = "show";
+    // With the most apps shown, the switches of the others are disabled until one is switched off.
+    private void UpdateShowLimit()
+    {
+        if (_appRows is null) return;
+        bool full = S.ShownAppsFull;
+        foreach (var toggle in _appRows.Children.OfType<Border>().Select(border => border.Child).OfType<Grid>()
+            .SelectMany(row => row.Children.OfType<CheckBox>()).Where(box => ShowToggleTag.Equals(box.Tag)))
+        {
+            bool blocked = full && toggle.IsChecked != true;
+            toggle.IsEnabled = !blocked;
+            toggle.ToolTip = blocked ? Loc.T($"最多同时显示 {AppPresets.MaximumShownApps} 个应用，请先关闭一个", $"Up to {AppPresets.MaximumShownApps} apps can be shown. Switch one off first.") : null;
+        }
     }
 
     private void UpdateDividers() { if (_appRows is not null) UpdateDividers(_appRows); }

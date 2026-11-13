@@ -10,8 +10,11 @@ using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// The clipboard history and the file transfer, shared by every panel. Kept in the data folder beside settings.json, encrypted
-// for the current Windows user (DPAPI), as the API keys are: shelf.dat holds the entries, shelf\<id>.dat each picture.
+// The clipboard history and the file transfer, shared by every panel. Kept in the data folder beside settings.json: shelf.dat
+// holds the entries as JSON, shelf\<id>.dat each picture as PNG and shelf\<id>.html and .rtf a text entry's rich forms, which
+// are read only to paste. Only the list is held in memory; pictures are read to be shown. Earlier versions encrypted both for the current Windows user
+// (DPAPI); such files are still read, and the list is written plain at its next save. Encrypting the whole list took from a
+// tenth of a second to seconds once it held thousands of entries, on the panel's thread, at every save.
 internal sealed class ShelfService : IDisposable
 {
     private readonly string _folder, _file, _pictures;
@@ -30,15 +33,25 @@ internal sealed class ShelfService : IDisposable
         _dispatcher = dispatcher;
         _save = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = TimeSpan.FromMilliseconds(600) };
         _save.Tick += (_, _) => { _save.Stop(); Save(); };
+        // The history kept past an exit is looked over every ten minutes for what has grown older than its length.
+        _expire = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = TimeSpan.FromMinutes(10) };
+        _expire.Tick += (_, _) => Expire(raise: true);
         Load();
-        // The history goes when BrimDeck exits; after an exit that did not clear it (a crash, a forced end) it goes now.
-        if (!_unreadable && Shelf.History(Data) is { Count: > 0 } left) Remove(left, raise: false);
     }
+    private readonly DispatcherTimer _expire;
+    private bool _applied;
 
-    // Starts or stops recording as the settings ask.
+    // Starts or stops recording as the settings ask, and keeps the history or lets it go with BrimDeck as they ask.
     public void Apply(DeckSettings settings)
     {
-        _settings = () => settings;
+        bool first = !_applied, kept = !first && _settings().ClipboardKeepHistory;
+        _settings = () => settings; _applied = true;
+        // At the first settings: the history goes when BrimDeck exits, so after an exit that did not clear it (a crash, a forced
+        // end) it goes now, unless it is kept; then only what has grown too old goes.
+        if (first && !settings.ClipboardKeepHistory && !_unreadable && Shelf.History(Data) is { Count: > 0 } left) Remove(left, raise: false);
+        if (settings.ClipboardKeepHistory) { Expire(raise: !first); _expire.Start(); } else _expire.Stop();
+        // Kept from now on: the history copied before, not saved until now (Copied), is saved.
+        if (settings.ClipboardKeepHistory && !kept && !first) QueueSave();
         bool record = settings.ClipboardPage && settings.ClipboardRecord;
         if (record && _watch is null)
         {
@@ -58,14 +71,28 @@ internal sealed class ShelfService : IDisposable
             if (!WritePicture(entry.Id, png)) return;
             Data.Clips.Insert(0, entry);
         }
-        else entry = Shelf.Add(Data, new ClipEntry { Kind = Shelf.Classify(copy.Text), Text = copy.Text, Html = copy.Html, Rtf = copy.Rtf, Copied = now, Source = copy.Source });
+        else
+        {
+            entry = Shelf.Add(Data, new ClipEntry { Kind = Shelf.Classify(copy.Text), Text = copy.Text, Copied = now, Source = copy.Source });
+            // The same text copied again keeps the rich forms it had, unless this copy brings its own.
+            if (copy.Html.Length > 0 || copy.Rtf.Length > 0) WriteRich(entry.Id, copy.Html, copy.Rtf);
+        }
         // The categories whose rules it meets take it, the same text copied again too.
         ShelfRules.Apply(Data, entry);
         Changed?.Invoke();
-        // The history goes when BrimDeck exits and when it next starts, so a copy that is only history has nothing to keep on disk:
-        // saving it serialized and encrypted the whole list, on this thread, after every copy. A picture is saved all the same: its
-        // file is deleted with its entry, and a start after a forced end finds that entry only in the saved list.
-        if (entry.Kind == ClipKind.Image || Data.Kept(entry)) QueueSave();
+        // Unless the history is kept past an exit, it goes when BrimDeck exits and when it next starts, so a copy that is only history
+        // has nothing to keep on disk: saving it turned the whole list into bytes, on this thread, after every copy. A picture
+        // is saved all the same: its file is deleted with its entry, and a start after a forced end finds that entry only in the
+        // saved list.
+        if (_settings().ClipboardKeepHistory || entry.Kind == ClipKind.Image || Data.Kept(entry)) QueueSave();
+    }
+
+    // The history kept past an exit that has grown older than its length goes (Shelf.Expired).
+    private void Expire(bool raise)
+    {
+        var settings = _settings();
+        if (!settings.ClipboardKeepHistory || _unreadable) return;
+        if (Shelf.Expired(Data, settings.ClipboardKeepFor, DateTimeOffset.Now) is { Count: > 0 } gone) Remove(gone, raise);
     }
 
     public void Raise() => Changed?.Invoke();
@@ -77,6 +104,7 @@ internal sealed class ShelfService : IDisposable
         {
             Data.Clips.Remove(entry);
             if (entry.Kind == ClipKind.Image) { DeletePicture(entry.Id); _thumbs.Remove(entry.Id); }
+            else DropRich(entry.Id);
         }
         if (raise) Changed?.Invoke();
         QueueSave();
@@ -103,10 +131,10 @@ internal sealed class ShelfService : IDisposable
         try
         {
             Directory.CreateDirectory(_pictures);
-            File.WriteAllBytes(PicturePath(id), ProtectedData.Protect(png, null, DataProtectionScope.CurrentUser));
+            File.WriteAllBytes(PicturePath(id), png);
             return true;
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException) { return false; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
     }
     private void DeletePicture(Guid id)
     {
@@ -114,9 +142,16 @@ internal sealed class ShelfService : IDisposable
     }
     public byte[]? PictureBytes(Guid id)
     {
-        try { return File.Exists(PicturePath(id)) ? ProtectedData.Unprotect(File.ReadAllBytes(PicturePath(id)), null, DataProtectionScope.CurrentUser) : null; }
+        try
+        {
+            if (!File.Exists(PicturePath(id))) return null;
+            var bytes = File.ReadAllBytes(PicturePath(id));
+            // A PNG starts with its signature; a picture saved encrypted by an earlier version does not.
+            return bytes.AsSpan().StartsWith(PngSignature) ? bytes : ProtectedData.Unprotect(bytes, null, DataProtectionScope.CurrentUser);
+        }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException) { return null; }
     }
+    private static readonly byte[] PngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
     // The picture decoded at most this many pixels wide; the row's thumbnails are kept, the details' full picture is not.
     public BitmapSource? Picture(Guid id, int decodeWidth = 0)
     {
@@ -137,6 +172,33 @@ internal sealed class ShelfService : IDisposable
         return image;
     }
 
+    // ---- Rich forms ----
+    // A text entry's HTML and RTF, beside its pictures' files: shelf\<id>.html and shelf\<id>.rtf, each only when the copy had it.
+    private string RichPath(Guid id, string format) => Path.Combine(_pictures, id.ToString("N") + "." + format);
+    private void WriteRich(Guid id, string html, string rtf)
+    {
+        if (_unreadable) return;
+        try
+        {
+            Directory.CreateDirectory(_pictures);
+            foreach (var (format, text) in new[] { ("html", html), ("rtf", rtf) })
+                if (text.Length > 0) File.WriteAllText(RichPath(id, format), text);
+                else File.Delete(RichPath(id, format));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+    private string ReadRich(Guid id, string format)
+    {
+        try { return File.Exists(RichPath(id, format)) ? File.ReadAllText(RichPath(id, format)) : ""; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return ""; }
+    }
+    // The text was changed by hand: what is pasted is the text alone.
+    public void DropRich(Guid id)
+    {
+        foreach (var format in new[] { "html", "rtf" })
+            try { File.Delete(RichPath(id, format)); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+
     // The page is switched off: the thumbnails and the files' icons it showed are let go (App.ReleaseUnused); the entries stay, as
     // they are what is saved. False when there was nothing to let go.
     public bool Rest()
@@ -152,31 +214,67 @@ internal sealed class ShelfService : IDisposable
         try
         {
             if (!File.Exists(_file)) return;
-            Data = ShelfData.Deserialize(ProtectedData.Unprotect(File.ReadAllBytes(_file), null, DataProtectionScope.CurrentUser));
+            var bytes = File.ReadAllBytes(_file);
+            // The JSON starts with "{"; a list saved encrypted by an earlier version does not.
+            Data = ShelfData.Deserialize(bytes is [(byte)'{', ..] ? bytes : ProtectedData.Unprotect(bytes, null, DataProtectionScope.CurrentUser));
+            // A history saved with the rich forms in it: they move to their own files, and the list is saved without them.
+            if (Shelf.TakeRich(Data) is { Count: > 0 } rich)
+            {
+                foreach (var (clip, html, rtf) in rich) WriteRich(clip.Id, html, rtf);
+                QueueSave();
+            }
+            RemoveStrays();
         }
         // A file that cannot be read (another user's, damaged) is left as it is and nothing is written over it.
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException or System.Text.Json.JsonException)
         { _unreadable = true; Data = new(); }
     }
+    // A picture or rich form is written as it is copied, the list only a moment later; files whose entry is not in the list (BrimDeck
+    // ended in between) are deleted when it starts.
+    private void RemoveStrays()
+    {
+        try
+        {
+            if (!Directory.Exists(_pictures)) return;
+            var ids = Data.Clips.Select(clip => clip.Id).ToHashSet();
+            foreach (var file in Directory.EnumerateFiles(_pictures).ToList())
+                if (Guid.TryParseExact(Path.GetFileNameWithoutExtension(file), "N", out var id) && !ids.Contains(id))
+                    try { File.Delete(file); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
     public void QueueSave() { _save.Stop(); _save.Start(); }
-    public void Save()
+    // The list is turned into bytes here, on the thread that changes it, so what is written is whole; the writing itself is done
+    // on a worker thread, one write after another, so a later save never lands before an earlier one. wait: written before this
+    // returns (leaving BrimDeck).
+    private Task _writing = Task.CompletedTask;
+    public void Save(bool wait = false)
     {
         _save.Stop();
         if (_unreadable) return;
+        var bytes = Data.Serialize();
+        _writing = _writing.ContinueWith(_ => Write(bytes), TaskScheduler.Default);
+        if (wait) _writing.Wait();
+    }
+    private void Write(byte[] bytes)
+    {
         try
         {
             Directory.CreateDirectory(_folder);
             var temp = _file + ".tmp";
-            File.WriteAllBytes(temp, ProtectedData.Protect(Data.Serialize(), null, DataProtectionScope.CurrentUser));
+            File.WriteAllBytes(temp, bytes);
             File.Move(temp, _file, true);
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException) { }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }
-    // Leaving BrimDeck: the history goes; what is kept (ShelfData.Kept) stays. The pictures written for dragging go too.
+    // Leaving BrimDeck: the history goes, unless it is kept past an exit (then only what has grown too old); what is kept
+    // (ShelfData.Kept) stays. The pictures written for dragging go too.
     public void Exit()
     {
-        Remove(Shelf.History(Data), raise: false);
-        Save();
+        _expire.Stop();
+        if (_settings().ClipboardKeepHistory) Expire(raise: false);
+        else Remove(Shelf.History(Data), raise: false);
+        Save(wait: true);
         try { if (Directory.Exists(DragFolder)) Directory.Delete(DragFolder, true); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }
@@ -217,8 +315,8 @@ internal sealed class ShelfService : IDisposable
         else
         {
             data.SetText(entry.Text, TextDataFormat.UnicodeText);
-            if (!plain && entry.Html.Length > 0) data.SetData(DataFormats.Html, entry.Html);
-            if (!plain && entry.Rtf.Length > 0) data.SetData(DataFormats.Rtf, entry.Rtf);
+            if (!plain && ReadRich(entry.Id, "html") is { Length: > 0 } html) data.SetData(DataFormats.Html, html);
+            if (!plain && ReadRich(entry.Id, "rtf") is { Length: > 0 } rtf) data.SetData(DataFormats.Rtf, rtf);
         }
         return data;
     }
@@ -278,5 +376,5 @@ internal sealed class ShelfService : IDisposable
         wait.Start();
     }
 
-    public void Dispose() { _watch?.Dispose(); _watch = null; }
+    public void Dispose() { _expire.Stop(); _watch?.Dispose(); _watch = null; }
 }

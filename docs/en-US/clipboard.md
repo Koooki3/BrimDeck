@@ -14,9 +14,11 @@ BrimDeck keeps the text and pictures you copy, newest first.
 
 ### How long entries are kept
 
-- The history is stored on this PC, encrypted by Windows.
-- Ordinary entries are cleared when BrimDeck exits.
-- What is in Favorites, or in a category set to "Kept", stays until you delete it.
+- The history is stored only on this PC, not encrypted.
+- Ordinary entries are cleared when BrimDeck exits by default.
+- With "Keep history after exit" on in Settings › Clipboard, ordinary entries stay after BrimDeck exits, and entries older than "Keep for" (1 day, 7 days or 30 days; 30 days by default) are deleted. The time counts from the last copy.
+- What is in Favorites, or in a category set to "Kept", stays until you delete it, whatever the two settings above.
+- The entries' text is held in memory, to show and search it; the formatting copied from web pages, Word and other apps, and pictures, are kept on disk and read only to paste or show them. With common content, 9,000 entries use about 30 MB of memory.
 - One entry holds up to 1,000,000 characters; longer copies are not recorded.
 
 ### What is not recorded
@@ -47,9 +49,9 @@ The file transfer holds files you will need shortly. It keeps only where each fi
 
 - The clipboard and the file transfer each have their own categories, made, renamed, reordered and deleted under Settings › Clipboard and Settings › File transfer. An entry or a file can be in several categories.
 - Each category can have a rule for what goes in by itself. The clipboard's conditions cover the kind of content, the text (contains, starts with, ends with, a built-in format or a regular expression), a link's domain and the app it was copied from; the file transfer's cover the file type, extension, file name and folder. Several conditions can require any or all of them.
-- A clipboard category can be set to "Kept" or "Cleared on exit".
+- A clipboard category can be set to "Kept"; otherwise what is in it is cleared with the rest of the history, and its label shows "Cleared on exit" or the length kept.
 - The search button at the top right of the page searches the clipboard and the file transfer together.
 
 ## Where the data is stored
 
-The clipboard history, the file transfer's list and the categories are stored in `%LOCALAPPDATA%\BrimDeck\shelf.dat`, and copied pictures in `%LOCALAPPDATA%\BrimDeck\shelf\`. Both are encrypted for the current Windows user, used only on this PC and never uploaded. See [Data and privacy](privacy.md).
+The clipboard history, the file transfer's list and the categories are stored in `%LOCALAPPDATA%\BrimDeck\shelf.dat`, and copied pictures and formatting in `%LOCALAPPDATA%\BrimDeck\shelf\`. Both are not encrypted, used only on this PC and never uploaded. See [Data and privacy](privacy.md).
