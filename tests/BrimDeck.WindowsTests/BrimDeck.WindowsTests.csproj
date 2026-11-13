@@ -36,6 +36,8 @@
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.band.cso" LogicalName="BrimDeck.LiquidGlass.Frost.band.cso" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.stats.cso" LogicalName="BrimDeck.LiquidGlass.Frost.stats.cso" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl.sha256" />
+    <Compile Include="..\..\src\BrimDeck\Native\PasteInput.cs" Link="PasteInput.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\PanelKeyboard.cs" Link="PanelKeyboard.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\FrameRates.cs" Link="FrameRates.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProcessSnapshot.cs" Link="ProcessSnapshot.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Displays.cs" Link="Displays.cs" />

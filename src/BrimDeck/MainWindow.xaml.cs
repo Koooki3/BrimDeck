@@ -191,6 +191,8 @@ public partial class MainWindow : Window
             _context = context;
             ApplySettings(!_expanded);
         };
+        // The user went to another window while a hotkey had given the panel the keyboard: it keeps the foreground it was given.
+        Deactivated += (_, _) => ReleaseKeyboard(giveBack: false);
         // Esc also leaves move mode (MainWindow.Move.cs).
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this, Settings.WindowCapture); _escapeDismissal = new EscapeDismissal(this, () => { if (_moveArmed) CancelMove(); else if (!ShelfEscape()) SetExpanded(false, keyboard: true); }); };
         // The user went to another window while a hotkey had given the panel the keyboard (MainWindow.Hotkeys.cs).
@@ -300,7 +302,8 @@ public partial class MainWindow : Window
         if (_fontSeen != Fonts.Version) { _fontSeen = Fonts.Version; _musicRenderKey = ""; _monitorKey = ""; }
         ApplyTheme();
         ApplySurface();
-        WindowsHost.SetCapturable(this, Settings.WindowCapture);
+        // A panel holding the keyboard stays one that can be active, whatever the setting (PanelKeyboard).
+        WindowsHost.SetCapturable(this, Settings.WindowCapture || PanelKeys.Holding);
         // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one; so does an ordinary panel
         // whose indicator is no longer called for.
         if (Topmost != KeepsAbove) { Topmost = KeepsAbove; if (!Topmost && !_expanded) _host.Front(false); }

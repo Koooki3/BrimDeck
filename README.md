@@ -150,7 +150,7 @@ For how to use it and its settings, see [Clipboard and file transfer](docs/en-US
 
 ### More settings
 
-- **Shortcuts**: Global shortcuts can expand or hide the panel, open a given page, switch the collapsed style, and move or resize the panel (Settings › Shortcuts).
+- **Shortcuts**: Global shortcuts can expand or hide the panel, open a given page, switch the collapsed style, and move or resize the panel (Settings › Shortcuts). A panel a shortcut opens takes the keyboard: Tab and the arrow keys move between its controls, Enter and Space press them, and Esc or the shortcut again closes it and hands the keyboard back to the window you were in.
 - **Expand on**: Hover or click (Settings › General › Hover and animation).
 - **Mouse pass-through**: Hovering no longer opens the panel and clicks go through it to the window beneath; only shortcuts open it. This suits gaming (Settings › General › Compatibility).
 - **Scale**: The panel can be drawn at 100% or 150% for high-resolution displays.
