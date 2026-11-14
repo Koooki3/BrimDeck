@@ -30,6 +30,8 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
     {
         // When the quotas were read, where that is not when the rest was (a quota that failed this round keeps its earlier reading); null: ReadAt.
         public DateTimeOffset? QuotaAt { get; init; }
+        // The totals of this round were left out for being too many groups; an earlier, smaller reading is not merged back in their place.
+        public bool UsageTooWide { get; init; }
     }
     private sealed record StoredFile(int Version, List<StoredProvider?>? Providers);
     private static readonly JsonSerializerOptions Options = new() { Converters = { new JsonStringEnumConverter() } };
@@ -141,7 +143,7 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
         var quotaAt = old.QuotaAt ?? old.ReadAt;
         if ((fresh.Metrics ?? []).Count == 0 && (old.Metrics ?? []).Count > 0 && quotaAt <= now.AddMinutes(5) && now - quotaAt <= MaxAge)
             merged = merged with { Metrics = old.Metrics, Plan = string.IsNullOrEmpty(fresh.Plan) ? old.Plan : fresh.Plan, QuotaAt = quotaAt };
-        if (!fresh.UsageAvailable && old.UsageAvailable && old.ReadAt <= now.AddMinutes(5) && now - old.ReadAt <= MaxAge)
+        if (!fresh.UsageAvailable && !fresh.UsageTooWide && old.UsageAvailable && old.ReadAt <= now.AddMinutes(5) && now - old.ReadAt <= MaxAge)
             merged = merged with { UsageAvailable = true, UsageComplete = old.UsageComplete, UsageStart = old.UsageStart, Days = old.Days, ReadAt = old.ReadAt };
         return merged;
     }
@@ -205,7 +207,7 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
         // The plan comes with the quotas; the time is when they were read (a quota kept from earlier keeps its own time).
         var quotaAt = snapshot.IsStale && snapshot.QuotaTime is { } quotaTime ? quotaTime : now;
         return new StoredProvider(snapshot.Id, Local(snapshot.Configurations) ? [ProviderCatalog.LocalQuota] : [], keepUsage ? now : quotaAt, Text(snapshot.Plan), metrics,
-            keepUsage, keepUsage && snapshot.UsageComplete, keepUsage ? snapshot.UsageStart : null, days) { QuotaAt = quotaAt };
+            keepUsage, keepUsage && snapshot.UsageComplete, keepUsage ? snapshot.UsageStart : null, days) { QuotaAt = quotaAt, UsageTooWide = snapshot.UsageAvailable && !keepUsage };
     }
 
     private static ProviderSnapshot Restore(StoredProvider stored, DateTimeOffset now)

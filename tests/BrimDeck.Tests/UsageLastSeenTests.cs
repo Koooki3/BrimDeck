@@ -234,6 +234,13 @@ static class UsageLastSeenTests
             wide.Entries = [.. wide.Entries.Take(400)];
             new UsageLastSeen(widePath, () => now).Save([wide], settings);
             var fits = new UsageLastSeen(widePath, () => now).Load(settings).Single();
+            // The same instance: a smaller reading saved before is not merged back in place of the too wide one.
+            var same = new UsageLastSeen(File("wide2.json"), () => now);
+            wide.Entries = [.. Enumerable.Range(0, 400).Select(i => new TokenEntry("k", now, "model-" + i, 10, 0, 0, 0, 1))];
+            same.Save([wide], settings);
+            wide.Entries = [.. Enumerable.Range(0, 401).Select(i => new TokenEntry("k", now, "model-" + i, 10, 0, 0, 0, 1))];
+            same.Save([wide], settings);
+            check("A too wide round does not bring the earlier totals back", !new UsageLastSeen(File("wide2.json"), () => now).Load(settings).Single().UsageAvailable);
             check("Exactly as many groups as it keeps are kept whole", fits.UsageAvailable && fits.Entries.Count == 400);
         }
 

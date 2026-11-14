@@ -84,7 +84,7 @@ public partial class MainWindow
         var button = new Button { Content = content is null ? label : content(label), Height = height, Padding = new Thickness(icon ? 6 : 9, 0, icon ? 6 : 9, 0),
             Style = (Style)FindResource(style), Tag = active ? "Selected" : null, ToolTip = toolTip ? name : null };
         // The toolbar look's 6 DIP corner comes from its style's own resources, which a theme does not replace: square in a pixel theme.
-        if (style == "ToolbarActionButton") button.Resources["SegmentCorner"] = new CornerRadius(PanelTheme.Corner(Radius.Md));
+        if (style == "ToolbarActionButton") button.Resources["SegmentCorner"] = new CornerRadius(PanelTheme.Corner(6));
         AutomationProperties.SetName(button, name); button.Click += (_, _) => click(); return button;
     }
 
@@ -102,10 +102,10 @@ public partial class MainWindow
             UIElement Tab(TextBlock shown)
             {
                 // A hidden SemiBold copy reserves the selected width, so selecting a tab does not resize it.
-                var reserve = UI.Centered(label, TextSize.Body, UI.Secondary, FontWeights.SemiBold); reserve.Visibility = Visibility.Hidden;
+                var reserve = UI.Centered(label, 12, UI.Secondary, FontWeights.SemiBold); reserve.Visibility = Visibility.Hidden;
                 var text = new Grid { Children = { reserve, shown } };
                 if (stage < 2) return text;
-                var dot = new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(StatisticsTheme(app)), Margin = new Thickness(0, 0, Space.S4, 0), VerticalAlignment = VerticalAlignment.Center };
+                var dot = new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(StatisticsTheme(app)), Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center };
                 return new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, text } };
             }
             var button = ModelAction(label, Loc.T("筛选 ", "Filter ") + name, () => ToggleModelApp(app), _modelApps.Contains(app),
@@ -113,7 +113,7 @@ public partial class MainWindow
             button.Padding = new Thickness(stage >= 2 ? 5 : 8, 0, stage >= 2 ? 5 : 8, 0);
             strip.Children.Add(button);
         }
-        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Padding = new Thickness(1) };
+        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
     }
 
     private Button ModelDateButton(bool iconOnly)
@@ -127,8 +127,8 @@ public partial class MainWindow
             // The calendar glyph sits slightly above the label; move the glyph, not the label. The top margin centers it
             // 2/3 DIP lower (one device pixel at 150%), and layout rounding keeps it on whole pixels at every scale.
             icon.Margin = new Thickness(0, 4.0 / 3, 0, 0); content.Children.Add(icon);
-            var label = UI.Centered(_customRange is null ? Loc.T("按时间", "By date") : ModelPeriodLabel, TextSize.Body, _customRange is null ? UI.Secondary : UI.Primary);
-            label.Margin = new Thickness(Space.Tight, 0, 0, 0); content.Children.Add(label); button.Content = content;
+            var label = UI.Centered(_customRange is null ? Loc.T("按时间", "By date") : ModelPeriodLabel, 12, _customRange is null ? UI.Secondary : UI.Primary);
+            label.Margin = new Thickness(6, 0, 0, 0); content.Children.Add(label); button.Content = content;
         }
         return button;
     }
@@ -193,7 +193,7 @@ public partial class MainWindow
             { ToggleModelApp(app); button.Tag = _modelApps.Contains(app) ? "Selected" : null; }, _modelApps.Contains(app), toolTip: false);
             button.Margin = new Thickness(0, 3, 0, 3); stack.Children.Add(button);
         }
-        popup.Content = new Border { Child = stack, Background = UI.Brush(PanelTheme.Hex("popup")), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Lg)), Padding = new Thickness(Space.S8), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1) };
+        popup.Content = new Border { Child = stack, Background = UI.Brush(PanelTheme.Hex("popup")), CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1) };
         ShowModelPopup(popup, ModelToolbar);
     }
 
@@ -201,16 +201,11 @@ public partial class MainWindow
     {
         if (_detailPopup is not null) { _detailPopup.Activate(); return; }
         _leave.Stop(); _popupReturnArea = null; _detailPopup = popup; popup.Owner = this;
+        // Drawn at the panel's scale, as the panel it opens from.
+        if (popup.Content is FrameworkElement scaled) UI.Scale(scaled, _scale);
+        if (double.IsFinite(popup.Width)) popup.Width *= _scale;
         // A layered window renders grayscale text unless told otherwise; its rounded background is opaque, so ClearType is safe.
         RenderOptions.SetClearTypeHint(popup, ClearTypeHint.Enabled);
-        // Drawn at the panel's scale and under a larger Windows text size (Zoom) as the panel it opens from.
-        double drawn = _scale * Zoom;
-        if (drawn != 1 && popup.Content is FrameworkElement content)
-        {
-            UI.Scale(content, drawn);
-            popup.Width *= drawn;
-            if (double.IsFinite(popup.Height)) popup.Height *= drawn;
-        }
         var point = anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight));
         var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
         point = transform.Transform(point);
@@ -219,15 +214,6 @@ public partial class MainWindow
         var (_, panelWork, _) = Native.WindowsHost.MonitorScreen(MonitorHandle) ?? Native.WindowsHost.PrimaryScreen();
         var work = new Rect(transform.Transform(panelWork.TopLeft), transform.Transform(panelWork.BottomRight));
         popup.Left = Math.Clamp(point.X - popup.Width, work.Left, Math.Max(work.Left, work.Right - popup.Width)); popup.Top = point.Y + 3;
-        // A pop-up taller than the room left below its button (the date range's calendar under a short page) hung past the
-        // panel's bottom edge over the window below (live check X-05). The panel grows to hold it, as far as its window allows,
-        // and goes back once the pop-up has closed. The panel hangs from the top, so the button, and the pop-up, stay put.
-        if (double.IsFinite(popup.Height) && PresentationSource.FromVisual(Island) is not null)
-        {
-            double islandTop = transform.Transform(Island.PointToScreen(new Point())).Y;
-            double needed = Math.Ceiling(popup.Top + popup.Height + 8 - islandTop);
-            if (needed > Island.ActualHeight + .5) { _popupFloor = needed; SetExpanded(true); }
-        }
         popup.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { popup.Close(); SetExpanded(false, keyboard: true); e.Handled = true; } };
         // Closing an active owned window also raises Deactivated. Do not close it
         // again from that nested native activation message.
@@ -239,10 +225,8 @@ public partial class MainWindow
             closing = true; if (ReferenceEquals(_detailPopup, popup)) _detailPopup = null;
             if (left || _popupAtOnce || _app.Exiting || popup.Content is not UIElement content || !Soft.Enabled) return;
             e.Cancel = true; left = true; popup.IsHitTestVisible = false;
-            // The theme's answers end with the pop-up rather than play on over buttons that are going.
-            InteractionFx.Clear(popup);
             Soft.Leave(content, () => popup.Close());
-            // ui-1: the leave is the only thing that closes it now, and an animation replaced on the same property never completes,
+            // The leave is the only thing that closes it now, and an animation replaced on the same property never completes,
             // so the pop-up closes on its own a little after the leave should have ended.
             var fallback = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Soft.Quick + 250) };
             fallback.Tick += (_, _) => { fallback.Stop(); if (popup.IsLoaded) popup.Close(); };
@@ -253,7 +237,6 @@ public partial class MainWindow
         popup.Closed += (_, _) =>
         {
             if (ReferenceEquals(_detailPopup, popup)) _detailPopup = null;
-            if (_popupFloor > 0 && _detailPopup is null) { _popupFloor = 0; if (_expanded) SetExpanded(true); }
             // A pop-up that faded out had the page brought up to date when it began to leave.
             if (!left) RenderUsage();
             if (_expanded && !IsMouseOver) PointerChanged(false);
@@ -263,8 +246,8 @@ public partial class MainWindow
         if (Soft.Enabled && popup.Content is UIElement entering)
         {
             entering.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 0, TimeSpan.Zero));
-            // ui-1: once only, and not when it was closed before its first frame: the entrance would replace the leave's fade,
-            // whose end is what closes it.
+            // Once only, and not when it was closed before its first frame: the entrance would replace the leave's fade, whose
+            // end is what closes it.
             EventHandler? enter = null;
             enter = (_, _) => { popup.ContentRendered -= enter; if (!left && popup.IsVisible) Soft.Enter(entering); };
             popup.ContentRendered += enter;
@@ -311,7 +294,7 @@ public partial class MainWindow
         if (tiers.Length > 0)
             for (int i = 0; i < columns.Length; i++)
                 Cell(i == 0 ? $"< {UI.Number(tiers[0].MinimumPromptTokens)}" : i < tiers.Length ? $"{UI.Number(tiers[i - 1].MinimumPromptTokens)}–{UI.Number(tiers[i].MinimumPromptTokens)}"
-                    : $"≥ {UI.Number(tiers[i - 1].MinimumPromptTokens)}", line, i + 1, UI.Secondary, true, margin: new Thickness(Space.S16, 0, 0, 0));
+                    : $"≥ {UI.Number(tiers[i - 1].MinimumPromptTokens)}", line, i + 1, UI.Secondary, true, margin: new Thickness(16, 0, 0, 0));
         if (tiers.Length > 0) line++;
         (string Label, Func<TokenPrices, decimal?> Price)[] kinds =
         [
@@ -323,7 +306,7 @@ public partial class MainWindow
             Cell(label, line, 0, UI.Secondary);
             for (int i = 0; i < columns.Length; i++)
                 Cell(price(columns[i]) is { } value ? "$" + (value * 1_000_000m).ToString("0.00####", System.Globalization.CultureInfo.InvariantCulture) : "—",
-                    line, i + 1, right: true, margin: new Thickness(Space.S16, 0, 0, 0));
+                    line, i + 1, right: true, margin: new Thickness(16, 0, 0, 0));
             line++;
         }
         string note = shared ? derived is null ? Loc.T("单价尚未推算出来", "The prices have not been worked out yet")
@@ -448,7 +431,7 @@ public partial class MainWindow
         if (result.Rows.Count == 0)
         {
             var message = UI.Centered(incomplete ? Refreshing ? Loc.T("正在读取所选时段…", "Reading the selected period…") : Loc.T("所选应用的用量明细暂不可用", "Usage details for the selected apps are not available yet")
-                : Loc.T("所选时段暂无用量记录", "No usage records in the selected period"), TextSize.Body, UI.Tertiary);
+                : Loc.T("所选时段暂无用量记录", "No usage records in the selected period"), 12, UI.Tertiary);
             message.HorizontalAlignment = HorizontalAlignment.Center; message.VerticalAlignment = VerticalAlignment.Center; Grid.SetRow(message, 1); panel.Children.Add(message);
         }
         string selected = _modelApps.SetEquals(Settings.StatisticsProviders) ? Loc.T("全部", "All") : _modelApps.Count == 1 ? AppPresets.Name(_modelApps.Single()) : Loc.T($"{_modelApps.Count} 个应用", Loc.Count(_modelApps.Count, "app", "apps"));
@@ -457,7 +440,8 @@ public partial class MainWindow
         string missing = incomplete ? Loc.T("部分明细尚未读取完整：", "Some details are not fully read yet: ") + string.Join(Loc.T("、", ", "), result.IncompleteProviders.Select(AppPresets.Name)) : "";
         // The label cells explain only an incomplete total; otherwise the visible summary says it all.
         string? totalTip = incomplete ? missing : null;
-        if (restoredApps.Count > 0) totalRow.Opacity = .55;
+        // The total is dimmed only when a row it adds up is the previous run's.
+        if (result.Rows.Any(row => restoredApps.Contains(row.Provider))) totalRow.Opacity = .55;
         // Figures shown as "—" are not known yet, so their tooltips say why instead of giving a count of zero.
         var totalTips = incomplete && result.Entries.Count == 0 ? totals.Select(_ => (string?)missing).ToArray() : Tips(result.Entries, true);
         if (incomplete && result.Entries.Count > 0) totalTips[^1] = totalTips[^1] is { } note ? note + "\n" + missing : missing;
