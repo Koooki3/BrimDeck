@@ -196,7 +196,17 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             // The sign-ins of custom sources are read on the calling thread before their tasks start; none of that holds up the others.
             var configured = Task.Run(async () =>
             {
-                var read = await _configured.RefreshAsync(settings.EnabledApps, deadline.Token);
+                List<ProviderSnapshot> read;
+                try { read = await _configured.RefreshAsync(settings.EnabledApps, deadline.Token); }
+                // The deadline, not the application's end: the sources that were still being read show a timeout, and the others stay.
+                catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+                {
+                    read = [.. settings.EnabledApps.Where(app => !ProviderCatalog.IsBuiltIn(app.QuotaSource)).Select(app => new ProviderSnapshot(app.QuotaSource)
+                    {
+                        Configurations = [app.ConfigurationKey], Source = ProviderCatalog.Name(app.QuotaSource), UsageStart = usageStart?.Date ?? _clock().LocalDateTime.Date.AddDays(-29),
+                        StatusLabel = Loc.T("读取超时", "Timed out"), Status = Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later.")
+                    })];
+                }
                 for (int i = 0; i < read.Count; i++) Finished("configured:" + i, read[i]);
                 return read;
             });

@@ -111,11 +111,13 @@ public sealed class Pricing : IDisposable
             if (File.Exists(saved))
             {
                 using var doc = JsonDocument.Parse(File.ReadAllText(saved));
-                var models = doc.RootElement.Get("models").Deserialize<List<ModelPrice>>() ?? [];
+                // A corrupt entry (null, no model name) is ignored; what is used and what is marked as asked come from the same list.
+                var models = (doc.RootElement.Get("models").Deserialize<List<ModelPrice?>>() ?? [])
+                    .Where(m => m is not null && ValidModel(m) && m.Model.Contains('/')).Select(m => m!).ToList();
                 var savedAt = doc.RootElement.Get("updatedAt").Date();
                 lock (_sync)
                 {
-                    foreach (var model in models.Where(m => ValidModel(m) && m.Model.Contains('/'))) _official[Normalize(model.Model)] = model;
+                    foreach (var model in models) _official[Normalize(model.Model)] = model;
                     // The models whose own prices are in the file, read in the last interval, are not asked for again at launch;
                     // one the file holds no price for (a failed read) is asked for again.
                     if (savedAt is { } asked && asked <= _now())

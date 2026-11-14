@@ -85,6 +85,8 @@ public partial class MainWindow : Window
     // Threshold levels seen per quota; a rise after the first reading briefly widens the compact island.
     private readonly Dictionary<string, int> _levels = new();
     private bool _levelsSeeded;
+    // The number of the latest read; a partial result belongs to the read that sent it and is dropped once another has begun or its own is whole.
+    private int _round;
     private CompactAlertInfo? _alert;
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
@@ -1212,16 +1214,18 @@ public partial class MainWindow : Window
         // date range still require one follow-up, and automatic requests must not clear it.
         if (_refreshing) { if (queueIfBusy) _refreshRequested = true; return; }
         _refreshing = true;
+        int round = ++_round; bool whole = false;
         var decks = _app.Decks.ToList();
         foreach (var deck in decks) deck.RenderSyncButton();
         try
         {
             // The first read hands over what each source has as it ends (UsageService.RefreshAsync throttles this); the whole result follows.
             var result = await LoadSnapshotsAsync(decks.Min(deck => deck._historyStart), partial =>
-                // Background priority keeps input and animation ahead of the partial renders; one that runs after the whole result finds
-                // _refreshing already false (it ends right after the result is set, on this thread) and does nothing.
+                // Background priority keeps input and animation ahead of the partial renders; one that runs after the whole result, or
+                // after the next read began, is of an older round and does nothing.
                 Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
-                    () => { if (_refreshing) foreach (var deck in _app.Decks) deck.SetSnapshots(partial, true); }));
+                    () => { if (_round == round && !whole) foreach (var deck in _app.Decks) deck.SetSnapshots(partial, true); }));
+            whole = true;
             foreach (var deck in _app.Decks) deck.SetSnapshots(result);
             _app.SnapshotsChanged();
         }

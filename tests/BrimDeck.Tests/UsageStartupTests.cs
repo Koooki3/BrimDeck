@@ -106,6 +106,21 @@ static class UsageStartupTests
             check("The source that had finished is unaffected", result.Single(s => s.Id == ProviderId.Pi).UsageAvailable);
         }
 
+        // (b3) A configured source still being read at the deadline shows a timeout; the other sources' results stay.
+        using (var gate = new Gate())
+        {
+            using var http = new HttpClient(gate);
+            using var service = new UsageService(new Desktop(), locations, http, () => now) { Deadline = TimeSpan.FromMilliseconds(400) };
+            var custom = new AppEntry { QuotaSource = ProviderId.Custom, Script = """async function fetchUsage(ctx) { await ctx.http.get("https://example.test/usage"); return [{ title: "x", percent: 1 }]; }""" };
+            custom.Normalize();
+            var mixed = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.CodeAgent, UsageSource = ProviderId.Pi }, custom] };
+            mixed.Normalize();
+            var result = await service.RefreshAsync(mixed);
+            var shown = result.FirstOrDefault(s => s.Id == ProviderId.Custom);
+            check("A configured source cut off by the deadline shows a timeout", shown is not null && shown.StatusLabel == Loc.T("读取超时", "Timed out") && shown.Configurations.Contains(custom.ConfigurationKey));
+            check("The other sources' results are kept when a configured source is cut off", result.Any(s => s.Id == ProviderId.Pi) && result.Single(s => s.Id == ProviderId.CodeAgent).Entries.Count == 1);
+        }
+
         // A cancelled lifetime still cancels the round instead of returning a timeout snapshot.
         using (var gate = new Gate())
         {
@@ -203,6 +218,17 @@ static class UsageStartupTests
             {
                 await pricing.RefreshAsync();
                 check("A cache older than the interval is refreshed at launch, catalog and Kimi prices", server.Calls == 1 + Pricing.OfficialModels.Count);
+            }
+            // An entry that is null in the saved official prices is ignored; the others still seed, and the prices still load.
+            var officialText = File.ReadAllText(Path.Combine(cache, Pricing.OfficialFile));
+            File.WriteAllText(Path.Combine(cache, Pricing.OfficialFile), officialText.Replace("\"models\":[", "\"models\":[null,", StringComparison.Ordinal));
+            check("The test's official prices really hold a null entry", File.ReadAllText(Path.Combine(cache, Pricing.OfficialFile)).Contains("[null,", StringComparison.Ordinal));
+            server.Calls = 0;
+            using (var http = new HttpClient(server))
+            using (var pricing = new Pricing(cache, http, () => at.AddDays(2).AddHours(1)))
+            {
+                await pricing.RefreshAsync();
+                check("A null entry in the saved official prices does not stop the prices loading, and the valid ones seed", pricing.ModelCount > 0 && server.Calls == 0);
             }
             // A catalog written by another version of the program (no stamp) is used, but fetched again at launch.
             var catalogFile = Path.Combine(cache, "model-prices.json");
