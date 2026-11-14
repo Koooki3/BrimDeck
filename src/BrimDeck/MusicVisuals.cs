@@ -607,7 +607,7 @@ internal sealed class QuotaCarousel : GlideCarousel
     // With more shares (QuotaRing.Shares) the rings stand one inside the other about one centre, and the letter goes inside the
     // innermost. Two keep the one ring's stroke, 2 DIP apart, leaving 8 DIP in a 20 DIP ring for the letter; three would leave
     // nothing that way, so three take a 1.5 DIP stroke 1 DIP apart, which leaves 7.
-    internal static Grid Ring((IReadOnlyList<double?> Shares, string Color, string Tip, string Letter) item, double size, double thickness, double scale)
+    internal static Grid Ring((IReadOnlyList<double?> Shares, string Color, string Tip, string Letter, bool Stale) item, double size, double thickness, double scale)
     {
         int count = Math.Max(1, item.Shares.Count);
         double gap = Math.Max(.5, BrimDeck.Core.CompactMusicLayout.Half((count >= 3 ? 1 : 2) * scale));
@@ -619,6 +619,8 @@ internal sealed class QuotaCarousel : GlideCarousel
             && RingLetter.Create(item.Letter, Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * scale)), size, Math.Max(1, hole),
                 Application.Current?.MainWindow is { } window ? VisualTreeHelper.GetDpi(window).PixelsPerDip : 1, UI.PanelFont, UI.Brush(UI.Secondary)) is { } letter)
             ring.Children.Add(letter);
+        // A reading of the previous run (UsageLastSeen) is dimmed until the new one replaces it.
+        if (item.Stale) ring.Opacity = .5;
         return ring;
     }
 
@@ -626,7 +628,7 @@ internal sealed class QuotaCarousel : GlideCarousel
     // count: the whole rings the window holds (CompactSpacing.Window); gap: the row's gap, which the rings keep between them too.
     // flowing: the window as wide as the room gives it, not whole rings (the surface is being dragged; CompactSpacing.ShareFlowing),
     // with the ring it cuts faded over cut DIPs; nothing glides then.
-    public QuotaCarousel(IReadOnlyList<(IReadOnlyList<double?> Shares, string Color, string Tip, string Letter)> items, double size, double thickness, double rowScale, double gap, int count, double edge,
+    public QuotaCarousel(IReadOnlyList<(IReadOnlyList<double?> Shares, string Color, string Tip, string Letter, bool Stale)> items, double size, double thickness, double rowScale, double gap, int count, double edge,
         TimeSpan elapsed = default, bool animate = true, double? flowing = null, double cut = 0)
     {
         // Ring positions, the window and the travel all use whole device pixels. Layout rounding would otherwise widen each gap

@@ -21,6 +21,10 @@ public partial class App : Application
     public DeckSettings Settings { get; private set; } = new();
     public SettingsStore Store { get; private set; } = null!;
     public UsageService Usage { get; private set; } = null!;
+    // The readings of the previous run, shown at the start until each source's own reading of this run arrives (UsageLastSeen). The list
+    // is emptied once the first round has ended.
+    internal UsageLastSeen LastSeen { get; private set; } = null!;
+    internal IReadOnlyList<ProviderSnapshot> RestoredUsage { get; set; } = [];
     public ProviderSecrets Secrets { get; private set; } = null!;
     public MiMoAccount MiMo { get; private set; } = null!;
     public Pricing Prices { get; private set; } = null!;
@@ -133,6 +137,7 @@ public partial class App : Application
         Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
         Usage = new UsageService(new DesktopSources(MiMo), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
+        LastSeen = new UsageLastSeen(Path.Combine(folder, UsageLastSeen.FileName));
         WindowDrags = new WindowDrags();
         InteractionFx.Install(this);
         Notices = new NoticeCenter(this);

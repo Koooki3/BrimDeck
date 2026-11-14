@@ -1241,11 +1241,14 @@ public partial class MainWindow
     }
     // One ring per application (QuotaRing.For), in the chosen style with the application's chosen quotas, every quota in the
     // tooltip, and the application's letter inside when the setting asks for it, so the rings are told apart by more than their color.
-    private (IReadOnlyList<double?> Shares, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
+    private (IReadOnlyList<double?> Shares, string Color, string Tip, string Letter, bool Stale)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
     {
-        var ring = QuotaRing.For(DashboardUsage.Quota(entry, Snapshots), entry, Settings.QuotaRingStyle, Settings.QuotaRingRemaining);
+        var snapshot = DashboardUsage.Quota(entry, Snapshots);
+        var ring = QuotaRing.For(snapshot, entry, Settings.QuotaRingStyle, Settings.QuotaRingRemaining);
         // The display name (AppEntry.Name: the name the user gave the application, else the source's own), so a renamed application's letter follows.
-        return (ring.Shares, PanelTheme.QuotaTheme(entry), entry.Name + " · " + ring.Detail, CompactMusicLayout.RingLetterFor(Settings.QuotaRingLetters, entry.Name));
+        // A reading of the previous run (UsageLastSeen) shows dimmed, and its tip says when it was read.
+        bool stale = snapshot.LastSeenAt is not null;
+        return (ring.Shares, PanelTheme.QuotaTheme(entry), entry.Name + " · " + ring.Detail + (snapshot.LastSeenAt is { } seen ? " · " + UsageLastSeen.Label(seen, DateTimeOffset.Now) : ""), CompactMusicLayout.RingLetterFor(Settings.QuotaRingLetters, entry.Name), stale);
     }).ToArray();
     // The collapsed equalizer and the music page's share one color.
     private Brush EqualizerColor => MusicColor(Settings.EqualizerColor, Settings.EqualizerCustomColor, "equalizer");

@@ -233,8 +233,17 @@ public partial class MainWindow
             empty.Children.Add(open); UsageContent.Children.Add(empty);
             return;
         }
-        if (_details) { _usageForm = "details"; RenderModels(DashboardUsage.Statistics(Settings, Snapshots)); }
-        else RenderColumns(DashboardUsage.Columns(Settings, Snapshots));
+        if (_details)
+        {
+            _usageForm = "details";
+            var shownStatistics = DashboardUsage.Statistics(Settings, Snapshots);
+            RenderModels(shownStatistics);
+            // Totals of the previous run (UsageLastSeen) are dimmed, and the page says so in its tip, until the new ones replace them.
+            var restored = shownStatistics.Where(snapshot => snapshot.LastSeenAt is not null).ToList();
+            UsageContent.Opacity = restored.Count > 0 ? .55 : 1;
+            UsageContent.ToolTip = restored.Count > 0 ? string.Join("\n", restored.Select(snapshot => snapshot.Name + " · " + snapshot.UsageNote)) : null;
+        }
+        else { UsageContent.Opacity = 1; UsageContent.ToolTip = null; RenderColumns(DashboardUsage.Columns(Settings, Snapshots)); }
     }
 
     // A joined switch: one rounded strip, the selected segment filled. Buttons carry accessible names. With a glide key the fill
@@ -392,6 +401,17 @@ public partial class MainWindow
             Grid.SetColumn(chip, 1); head.Children.Add(chip);
             chip.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += chip.DesiredSize.Width;
         }
+        // Readings of the previous run (UsageLastSeen) are marked at the right of the title, and dimmed below, until the new ones replace them.
+        // A column that shows no readings says so in its own label instead.
+        // The title marker belongs to the quotas; restored totals alone are dimmed and say so in their tips.
+        if (snapshot.LastSeenAt is { } seenAt && !off)
+        {
+            var marker = UI.Text(UsageLastSeen.Label(seenAt, DateTimeOffset.Now), Math.Max(10, layout.Reset), UI.Tertiary);
+            marker.FontFamily = UI.PanelFont; marker.HorizontalAlignment = HorizontalAlignment.Right; marker.VerticalAlignment = VerticalAlignment.Top;
+            marker.Margin = new Thickness(8, nameTop, 0, 0); marker.TextTrimming = TextTrimming.CharacterEllipsis; marker.ToolTip = snapshot.Status;
+            Grid.SetColumn(marker, 2); head.Children.Add(marker);
+            marker.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += marker.DesiredSize.Width + 8;
+        }
         name.MaxWidth = Math.Max(20, innerWidth - occupied);
         // The page stretches within its size step instead of being built again (RenderUsage), so the name gives way to the plan
         // as the column's width changes.
@@ -404,7 +424,7 @@ public partial class MainWindow
             // No readings: what the state is, why, and a way to sync now, centered in the column. Left-aligned, the button's text sat
             // inside its outline and padding, so it looked further right than the lines above it.
             var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            var label = UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold);
+            var label = UI.Fixed(snapshot.LastSeenAt is { } seen ? UsageLastSeen.Label(seen, DateTimeOffset.Now) : snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold);
             label.TextAlignment = TextAlignment.Center; label.ToolTip = snapshot.Status;
             status.Children.Add(label);
             // The detail is dropped when it only repeats the label, and when the column is too short for it (the smallest panel):
@@ -478,6 +498,7 @@ public partial class MainWindow
             }
             body = stack;
         }
+        if (snapshot.LastSeenAt is not null) body.Opacity = .55;
         Grid.SetRow(body, 1); column.Children.Add(body);
 
         if (layout.Footer)
@@ -499,6 +520,7 @@ public partial class MainWindow
             {
                 var rows = new StackPanel(); rows.Children.Add(today); rows.Children.Add(week); footer.Children.Add(rows);
             }
+            if (usage.LastSeenAt is not null) footer.Opacity = .55;
             Grid.SetRow(footer, 2); column.Children.Add(footer);
         }
         var surface = new Border
@@ -755,7 +777,8 @@ public partial class MainWindow
         FrameworkElement tokens = snapshot.UsageAvailable ? UI.Centered(UI.Number(total), layout.Foot, UI.Secondary)
             : UI.CenteredSymbol("—", layout.Foot, UI.Secondary);
         tokens.HorizontalAlignment = HorizontalAlignment.Left;
-        tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (snapshot.UsageAvailable ? Loc.T($"{label} Token · {total:N0}", $"{label} tokens · {total:N0}") : snapshot.UsageNote); Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
+        tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (snapshot.UsageAvailable ? Loc.T($"{label} Token · {total:N0}", $"{label} tokens · {total:N0}") : snapshot.UsageNote)
+            + (snapshot.LastSeenAt is not null && snapshot.UsageAvailable ? "\n" + snapshot.UsageNote : ""); Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
         FrameworkElement price = snapshot.UsageAvailable ? UI.Centered(UI.Amount(cost!), layout.Foot, UI.Primary, FontWeights.SemiBold)
             : UI.CenteredSymbol("—", layout.Foot, UI.Tertiary, FontWeights.SemiBold);
         price.Margin = new Thickness(grouped ? 12 : 8, 0, 0, 0); price.ToolTip = snapshot.UsageAvailable ? UI.CostNote(cost!, _app.Prices) : snapshot.UsageNote; Grid.SetColumn(price, 2); row.Children.Add(price);

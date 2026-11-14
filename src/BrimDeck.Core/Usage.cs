@@ -32,6 +32,9 @@ public sealed class ProviderSnapshot(ProviderId id)
     public string Scope { get; set; } = "";
     public Dictionary<string, string> Details { get; set; } = [];
     public bool IsStale { get; set; }
+    // Set on a snapshot restored from the previous run (UsageLastSeen): when its data was read. It is never a fresh reading, so it neither
+    // raises a level notice nor seeds a level (QuotaLevels).
+    public DateTimeOffset? LastSeenAt { get; set; }
     private List<UsageMetric>? _metrics;
     public List<UsageMetric> Metrics { get => _metrics ?? Quotas.Select(UsageMetric.FromQuota).ToList(); set => _metrics = value; }
     public string Plan { get; set; } = "";
