@@ -16,7 +16,7 @@ Windows 原生应用，使用 C# 与 WPF 开发，注重性能与流畅度。
 [![许可证](https://img.shields.io/badge/许可证-Apache%202.0-E5A385?style=flat-square)](LICENSE)
 ![界面语言](https://img.shields.io/badge/界面-简体中文%20%7C%20English-B9A8FF?style=flat-square)
 
-<p><a href="#功能">功能</a> · <a href="#安装">安装</a> · <a href="#快速开始">快速开始</a> · <a href="#隐私">隐私</a> · <a href="#常见问题">常见问题</a> · <a href="#参与开发">参与开发</a> · <a href="README.md">English</a></p>
+<p><a href="#功能">功能</a> · <a href="#安装">安装</a> · <a href="#快速开始">快速开始</a> · <a href="#隐私">隐私</a> · <a href="#常见问题">常见问题</a> · <a href="#交流">交流</a> · <a href="#参与开发">参与开发</a> · <a href="README.md">English</a></p>
 
 <img src="docs/zh-CN/images/hero.png" width="100%" alt="BrimDeck 从屏幕顶部的刘海展开为 AI 用量面板，依次切换到音乐页、系统监控页、剪贴板与文件中转页和设备电量页，最后收起">
 
@@ -207,6 +207,14 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 **我的鼠标、键盘或耳机没有显示电量？**
 设备需要处于连接状态，并且属于[设备电量支持](docs/zh-CN/devices.md)中列出的连接方式或型号。没有列出的设备，欢迎在 [Issues](https://github.com/MoFeng2223/BrimDeck/issues) 中反馈型号。
+
+## 交流
+
+BrimDeck 交流群：1132738200
+
+使用 QQ 扫描下方二维码加入群聊。
+
+<img src="docs/zh-CN/images/qq-group.jpg" width="280" alt="BrimDeck QQ 交流群入群二维码，群号 1132738200">
 
 ## 参与开发
 

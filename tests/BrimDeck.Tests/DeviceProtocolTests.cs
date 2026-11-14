@@ -324,6 +324,17 @@ static class DeviceProtocolTests
             && Dongles.CompxBattery([0x08, 0x04, 0, 0, 0, 1, 63, 2]) == new BatteryRead(63) && Dongles.CompxBattery([0x08, 0x03, 0, 0, 0, 0, 63, 0]) is null);
         var vgn = new byte[64]; vgn[0] = 0x04; vgn[3] = 0x1A; vgn[8] = 41; vgn[9] = 0;
         check("VGN keyboards: the request and a reply", Dongles.VgnRequest().Take(5).SequenceEqual(new byte[] { 0x04, 0, 0, 0x1A, 0x06 }) && Dongles.VgnBattery(vgn) == new BatteryRead(41));
+        var vgn108Reply = Bytes("13 4A 01 00 02 64 01 00 00 00 00 00 00 00 00 00 00 00 00 C5");
+        check("VGN V108: HUB's 0x13/0x4A request, 100 % reply and checksum",
+            Dongles.VgnV108Request().SequenceEqual(Bytes("13 4A 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5E"))
+            && Dongles.VgnV108Battery(vgn108Reply) == new BatteryRead(100)
+            && Dongles.VgnV108Battery(vgn108Reply[..^1].Concat(new byte[] { 0 }).ToArray()) is null
+            && Dongles.VgnV108Battery(Bytes("13 4A 01 00 02 65 01 00 00 00 00 00 00 00 00 00 00 00 00 C6")) is null);
+        check("VGN V108: only its MI_01 HID collection with full reports",
+            Dongles.Find(Dongles.VgnV108Vendor, Dongles.VgnV108Receiver, 0x0001, "VGN V108 2.4G Dongle", 0, 1, 0x0006, 25, 20) == Dongles.Protocol.Vgn
+            && Dongles.Find(Dongles.VgnV108Vendor, Dongles.VgnV108Receiver, 0x0001, "VGN V108 2.4G Dongle", 0, 0, 0x0006, 8, 0) is null
+            && Dongles.Find(Dongles.VgnV108Vendor, Dongles.VgnV108Receiver, 0x0001, "VGN V108 2.4G Dongle", 0, 1, 0x0006, 19, 20) is null
+            && Dongles.Find(Dongles.VgnV108Vendor, Dongles.VgnV108Receiver, 0x0001, "VGN V108 2.4G Dongle", 0, 1, 0x0006, 25, 19) is null);
         // The ATK Z87 Pro's dongle (373B:1012) answers that frame on its 0xFF1C collection; the reply below is the one it gave.
         var atk = (byte[])vgn.Clone(); atk[8] = 92;
         check("ATK keyboards: the Z87 Pro's dongle read with VGN's frame, its model name given over the dongle's",
