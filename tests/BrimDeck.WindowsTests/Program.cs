@@ -12,6 +12,8 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // No check writes to the user's real log: the monitor's failure notes go nowhere here (SensorGuardChecks looks at them by itself).
+        MonitorLog.Sink = _ => { };
         try
         {
             // "--only power": just the power and battery checks, for a quick look at what this machine reports.

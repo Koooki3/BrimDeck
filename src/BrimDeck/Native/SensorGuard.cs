@@ -22,6 +22,8 @@ internal static class SensorGuard
         public Action? OnStuck => stuck;
         public int Ticks;
         public volatile bool Stuck;
+        // Set once the mark is on the disk, just before the driver is asked: the watch counts only the driver's own time, not the disk's.
+        public volatile bool Counting;
     }
     private static readonly object Gate = new();
     private static readonly List<Asking> Askings = [];
@@ -106,6 +108,7 @@ internal static class SensorGuard
         }
         // On the disk before the driver is asked, but not under the lock: the other readings and the settings page do not wait for the flush.
         if (pending.Text is not null) WritePending(pending);
+        asking.Counting = true;
         return asking;
     }
 
@@ -128,7 +131,7 @@ internal static class SensorGuard
         lock (Gate)
         {
             foreach (var asking in Askings)
-                if (!asking.Stuck && ++asking.Ticks * WatchMilliseconds >= SensorStops.StuckSeconds * 1000) { asking.Stuck = true; stuck.Add(asking); }
+                if (!asking.Stuck && asking.Counting && ++asking.Ticks * WatchMilliseconds >= SensorStops.StuckSeconds * 1000) { asking.Stuck = true; stuck.Add(asking); }
             if (stuck.Count == 0) return;
             foreach (var asking in stuck) _stops = SensorStops.With(_stops, asking.Device, SensorStops.Method(asking.Device.Reading), DateTimeOffset.Now);
             // Stopped already: the mark is no longer needed to stop it at the next start.
@@ -152,6 +155,8 @@ internal static class SensorGuard
     private static (int Version, string Text) PendingText()
         => (++_pendingVersion, SensorStops.SerializePending(Askings.Where(asking => asking.Marked).Select(asking => asking.Device)));
 
+    // For the tests: runs before each write of the marks, to make the disk slow.
+    internal static Action? BeforeWrite { get; set; }
     private static readonly object Disk = new();
     private static int _pendingVersion, _written;
     private static void WritePending((int Version, string Text) pending)
@@ -162,6 +167,7 @@ internal static class SensorGuard
         lock (Disk)
         {
             if (pending.Version <= _written) return;
+            BeforeWrite?.Invoke();
             try
             {
                 Directory.CreateDirectory(folder);

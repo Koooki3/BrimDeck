@@ -10,6 +10,7 @@ public static class SnapshotParts
         Cpu = Reading<CpuSample>.Unavailable(waiting), Gpu = Reading<GpuSample>.Unavailable(waiting), Gpus = [],
         Network = Reading<NetworkSample>.Unavailable(waiting), Processes = Reading<ProcessList>.Unavailable(waiting),
         Power = Reading<PowerSample>.Unavailable(waiting),
-        DownHistory = [], UpHistory = [], CpuHistory = [], GpuHistory = [], PowerHistory = []
+        DownHistory = [], UpHistory = [], CpuHistory = [], GpuHistory = [], PowerHistory = [],
+        PowerSummary = null, CpuPower = PowerTrack.None, GpuPower = PowerTrack.None
     };
 }

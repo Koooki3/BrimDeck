@@ -1,31 +1,73 @@
 using BrimDeck.Core;
 using BrimDeck.Native;
 
-// The processor's readings before and after the performance counters join (CpuProvider.Attach): the kernel's times give the first
-// figures alone, and the handover to the counters keeps giving them.
+// The processor's readings before and after the performance counters join (CpuProvider.Attach), with counters and kernel times that are
+// given, so each state is the same on every run: the kernel's times give the first figures alone, the counters take over after Attach, and
+// the times that stand in once the counters stop start a window of their own.
 internal static class CpuProviderChecks
 {
+    private const string BusyPath = @"\Processor Information(*)\% Processor Time";
+
+    private sealed class Counters : ICounterSource
+    {
+        public bool Collects = true;
+        public Dictionary<string, List<(string, double)>> Values = [];
+        public bool Add(string path) => true;
+        public bool Collect() => Collects;
+        public IReadOnlyList<(string Instance, double Value)> Read(string path) => Values.TryGetValue(path, out var list) ? list : [];
+    }
+
     public static void Run(Action<string, bool> check)
     {
-        using var pdh = new PdhQuery();
-        var cpu = new CpuProvider(pdh);
-        check("cpu: nothing is waited for at construction, the counters are not in the query yet", !cpu.Attached);
+        var counters = new Counters();
+        // Four processors; the kernel's times grow by the steps given (idle, kernel, user), as Windows counts them (idle is inside kernel).
+        long idle = 0, kernel = 0, user = 0;
+        int reads = 0;
+        (long, long, long)[]? Times() { reads++; return [(idle, kernel, user), (idle, kernel, user), (idle, kernel, user), (idle, kernel, user)]; }
+        void Advance(long busy, long free) { idle += free; kernel += busy + free; }
+        var cpu = new CpuProvider(counters, Times);
+
+        check("cpu: the counters are not in the query at construction", !cpu.Attached);
+        Advance(50, 50);
         var first = cpu.Sample(false);
-        Thread.Sleep(300);
+        Advance(25, 75);
         var second = cpu.Sample(false);
-        check("cpu: the kernel's times give no figure at first and a figure after a window, without the counters",
-            !first.HasValue && second.TryGet(out var kernel) && kernel.Cores.Count > 0 && kernel.Cores.All(core => core.Usage is >= 0 and <= 1) && !cpu.Attached);
-        check("cpu: before the counters join the frequency is waiting, not missing", second.TryGet(out kernel!) && kernel.Cores.All(core => !core.FrequencyMhz.HasValue)
-            && kernel.Cores.All(core => core.FrequencyMhz.Reason == Why.Waiting));
+        check("cpu: the kernel's times give no figure at first and one after a window, without the counters",
+            !first.HasValue && second.TryGet(out var fallback) && fallback.Cores.Count == 4 && fallback.Cores.All(core => Math.Abs(core.Usage - .25) < 1e-9));
+        check("cpu: before the counters join the frequency is waiting, not missing", second.TryGet(out var waiting) && waiting.Cores.All(core => core.FrequencyMhz.Reason == Why.Waiting));
 
         cpu.Attach();
-        Thread.Sleep(300);
-        bool collected = pdh.Collect();
-        var counters = cpu.Sample(collected);
-        check("cpu: after the counters join the figures go on, from the counters", cpu.Attached && counters.TryGet(out var read) && read.Cores.Count > 0
-            && read.Cores.All(core => core.Usage is >= 0 and <= 1));
-        Thread.Sleep(300);
-        var again = cpu.Sample(pdh.Collect());
-        check("cpu: and stay there on the next reading", again.HasValue && again.TryGet(out read!) && read.Cores.Count == kernel.Cores.Count);
+        counters.Values[BusyPath] = [("0,0", 40), ("0,1", 60)];
+        int before = reads;
+        var read = cpu.Sample(true);
+        check("cpu: after the counters join the readings come from them (two processors), and the kernel's times are not read",
+            cpu.Attached && read.TryGet(out var fromCounters) && fromCounters.Cores.Count == 2 && Math.Abs(fromCounters.Cores[0].Usage - .4) < 1e-9
+            && Math.Abs(fromCounters.Cores[1].Usage - .6) < 1e-9 && reads == before + 1);
+        // The first sample after Attach still read the times (the counters had given nothing before it); from here on they are left alone.
+        before = reads;
+        cpu.Sample(true); cpu.Sample(true);
+        check("cpu: while the counters give readings the kernel's times are not read", reads == before);
+
+        // The counters stop: the last reading is kept while the times take a baseline, and the first figure after covers only the time
+        // since that baseline, not the stretch the counters had.
+        Advance(900, 100);
+        var kept = cpu.Sample(false);
+        var keptAgain = cpu.Sample(false);
+        check("cpu: when the counters stop the last reading is kept until the kernel's times have a baseline of their own",
+            kept.TryGet(out var a) && keptAgain.TryGet(out var b) && ReferenceEquals(a, b) && a.Cores.Count == 2);
+        Advance(20, 80);
+        var resumed = cpu.Sample(false);
+        check("cpu: the first figure from the kernel's times covers a fresh window, not the time the counters were giving the readings",
+            resumed.TryGet(out var c) && c.Cores.Count == 4 && c.Cores.All(core => Math.Abs(core.Usage - .2) < 1e-9));
+
+        // The real counters and times on this machine: only what holds whatever the load (structure, never values).
+        using var pdh = new PdhQuery();
+        var real = new CpuProvider(pdh);
+        real.Sample(false);
+        Thread.Sleep(250);
+        var kernelRead = real.Sample(false);
+        real.Attach();
+        check("cpu: on this machine the kernel's times give one figure per processor with valid shares, and the counters can join",
+            real.Attached && kernelRead.TryGet(out var live) && live.Cores.Count > 0 && live.Cores.All(core => core.Usage is >= 0 and <= 1));
     }
 }

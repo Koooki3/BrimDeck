@@ -241,7 +241,8 @@ internal sealed class SystemSampler : IDisposable
                     // Readings starting (the monitor opened or came back): a hardware monitor started meanwhile is looked for again.
                     // What the first reading already holds (the memory, the drives, the battery) is shown at once; the rest follows. The
                     // readings that are rates since the last collection cover the whole pause here, so they are not shown.
-                    if (!primed) { _bridges.Rescan(); Publish(Collect(listProcesses: true).WithoutWindowed(Why.Waiting)); holdGpu = false; }
+                    // The figures the reading added to the histories and the power statistics cover the pause as well: they are dropped.
+                    if (!primed) { _bridges.Rescan(); var early = Collect(listProcesses: true).WithoutWindowed(Why.Waiting); ForgetWindowed(); Publish(early); holdGpu = false; }
                     else
                     {
                         // Adapters already read before this priming keep their last reading in the snapshot after it (Collect): a
@@ -314,12 +315,18 @@ internal sealed class SystemSampler : IDisposable
     // buffer and the icons (MemoryPlan.KeepCaches).
     private void Rest()
     {
-        _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _powerSource = null; _cpuPower.Clear(); _gpuPower.Clear();
+        ForgetWindowed();
         _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _bridges.Rest();
         _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
         _processes.Forget();
         if (!_keepCaches) { _processes.Dispose(); ProcessIcons.Clear(); }
         _cpu!.Forget();
+    }
+
+    // The histories and the power statistics start over: what they hold came from readings over a window that is no more.
+    private void ForgetWindowed()
+    {
+        _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _powerSource = null; _cpuPower.Clear(); _gpuPower.Clear();
     }
 
     // The counters just asked for, read once: the power meter's, and the adapters' when they have just joined their query. Whether

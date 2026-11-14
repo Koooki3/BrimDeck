@@ -13,7 +13,8 @@ internal sealed class CpuProvider
     private const string BusyPath = @"\Processor Information(*)\% Processor Time";
     private const string PerformancePath = @"\Processor Information(*)\% Processor Performance";
     private const string BasePath = @"\Processor Information(*)\Processor Frequency";
-    private readonly PdhQuery? _pdh;
+    private readonly ICounterSource? _pdh;
+    private readonly Func<(long Idle, long Kernel, long User)[]?> _kernelTimes;
     // The counters join the query in Attach, later than the constructor: the first counter a process adds takes half a second of CPU,
     // which the first readings need not wait for while the kernel's times give the same busy time.
     private bool _busy, _frequency, _attached;
@@ -25,7 +26,12 @@ internal sealed class CpuProvider
     private (long Idle, long Kernel, long User)[] _previousTimes = [];
     private Reading<CpuSample> _last = Reading<CpuSample>.Unavailable(Why.Waiting);
 
-    public CpuProvider(PdhQuery? pdh) => _pdh = pdh;
+    // kernelTimes: where the kernel's times come from (the tests give their own).
+    public CpuProvider(ICounterSource? pdh, Func<(long Idle, long Kernel, long User)[]?>? kernelTimes = null)
+    {
+        _pdh = pdh;
+        _kernelTimes = kernelTimes ?? KernelTimes;
+    }
 
     // Whether the counters have joined the query (Attach); until then the readings come from the kernel's times alone.
     public bool Attached => _attached;
@@ -44,7 +50,7 @@ internal sealed class CpuProvider
     public Reading<CpuSample> Sample(bool pdhCollected)
     {
         // The kernel's times are only the fallback; while the busy-time counter gives readings they are not read at all.
-        var times = _busyReads ? null : KernelTimes();
+        var times = _busyReads ? null : _kernelTimes();
         var timeUsage = new Dictionary<int, double>();
         if (times is not null)
         {
@@ -54,6 +60,9 @@ internal sealed class CpuProvider
         }
         var busy = _shares.Fill(pdhCollected && _busy ? Processors(_pdh!.Read(BusyPath)) : []);
         _busyReads = busy.Count > 0;
+        // While the counters give the readings the kernel's times are not read, so the baseline would grow old: it is dropped, and the
+        // times that stand in once the counters stop start a window of their own (the last reading is kept until it has one).
+        if (_busyReads) _previousTimes = [];
         IReadOnlyList<(string, double)> performanceValues = pdhCollected && _frequency ? _pdh!.Read(PerformancePath) : [];
         IReadOnlyList<(string, double)> nominalValues = pdhCollected && _frequency ? _pdh!.Read(BasePath) : [];
         var (performance, nominal) = (Processors(performanceValues), Processors(nominalValues));
@@ -112,7 +121,7 @@ internal sealed class CpuProvider
         => values.Where(value => value.Instance == "_Total").Select(value => (double?)value.Value).FirstOrDefault();
 
     // Idle, kernel and user time of each processor of the current group.
-    private static (long, long, long)[]? KernelTimes()
+    private static (long Idle, long Kernel, long User)[]? KernelTimes()
     {
         // The first processor group only (at most 64 logical processors); the counters, once they give readings, cover every group.
         int count = Math.Min(Environment.ProcessorCount, 64);
