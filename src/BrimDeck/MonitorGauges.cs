@@ -251,8 +251,9 @@ internal sealed class FigureGauge : FrameworkElement
 }
 
 // One column of a graph: its value (0..1), an optional tick (0..1, the core's frequency), its color and group (a gap separates
-// groups), its tooltip, and under it, where the panel is tall enough, a figure and a smaller line.
-internal sealed record GraphColumn(double Value, double? Tick, string Color, int Group, string Tip, string? Label = null, string? Sub = null);
+// groups), its tooltip, and under it, where the panel is tall enough, a figure and a smaller line. Hot is the color the dot matrix
+// takes at the core's level (the warning or critical color of a busy core); without it the matrix uses Color.
+internal sealed record GraphColumn(double Value, double? Tick, string Color, int Group, string Tip, string? Label = null, string? Sub = null, string? Hot = null);
 
 // Columns side by side, ftop's core columns: the fill is the value, the tick the frequency. Used for the processor's cores, the
 // graphics adapter's engines, and small for the gauge shown beside the main one. As a button the whole graph takes clicks.
@@ -261,6 +262,11 @@ internal sealed class ColumnGraph : FrameworkElement
     private const double Rest = 3;
     private readonly double _maxColumn, _label, _gap;
     private readonly bool _labels, _button;
+    private readonly CoreDisplay _display;
+    // The dot matrix's cells: one frozen brush per color and brightness step, made on first use.
+    private readonly Dictionary<(string Color, int Step), Brush> _cellBrushes = [];
+    private MatrixGrid _grid;
+    private (int, double, double, double) _gridKey;
     private IReadOnlyList<GraphColumn> _columns = [];
     private Eased[] _values = [], _ticks = [];
     private bool[] _hasTick = [];
@@ -273,9 +279,10 @@ internal sealed class ColumnGraph : FrameworkElement
     public event Action? Clicked;
 
     // name: what the graph shows, for screen readers ("CPU 各核心占用").
-    public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null, string name = "")
+    // display: columns, or a dot matrix of the cores as chosen in the settings (CoreDisplay); only the processor's graph takes it.
+    public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null, string name = "", CoreDisplay display = CoreDisplay.Columns)
     {
-        _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null; _name = name; _action = button ?? "";
+        _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null; _name = name; _action = button ?? ""; _display = display;
         ClipToBounds = true; SnapsToDevicePixels = true;
         if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); KeyboardPress.Take(this, true); }
         else ToolTipService.SetPlacement(this, System.Windows.Controls.Primitives.PlacementMode.Mouse);
@@ -311,9 +318,53 @@ internal sealed class ColumnGraph : FrameworkElement
         : new DrawnPeer(this, AutomationControlType.List, () => _name, parts: Parts);
     private IEnumerable<DrawnPart> Parts()
     {
+        double ppd = MonitorDraw.PixelsPerDip(this);
+        if (UseMatrix(ActualWidth, ppd))
+        {
+            var grid = Grid(ActualWidth, ActualHeight, ppd);
+            for (int i = 0; i < grid.Count; i++)
+            {
+                var (x, y) = grid.Origin(i);
+                yield return new DrawnPart(i.ToString(), _columns[i].Tip.Replace("\n", Loc.T("，", ", ")), new Rect(x, y, grid.Cell, grid.Cell));
+            }
+            yield break;
+        }
         var (xs, column) = Geometry(ActualWidth);
         for (int i = 0; i < xs.Length; i++)
             yield return new DrawnPart(i.ToString(), _columns[i].Tip.Replace("\n", Loc.T("，", ", ")), new Rect(xs[i], 0, column, ActualHeight));
+    }
+
+    // Whether the cores are drawn as the dot matrix: as the setting says, and with Auto once the columns would be thinner than
+    // CoreMatrix.ReadableColumn device pixels (they are at least a DIP wide, so a crowd of cores would overflow the graph).
+    private bool UseMatrix(double width, double ppd)
+    {
+        if (_display == CoreDisplay.Columns || _columns.Count == 0) return false;
+        if (_display == CoreDisplay.Matrix) return true;
+        double gaps = 0;
+        for (int i = 1; i < _columns.Count; i++) gaps += Gap(i);
+        return CoreMatrix.Use(_display, Math.Min((width - gaps) / _columns.Count, _maxColumn) * ppd);
+    }
+
+    // The matrix's placement, kept while the count, the size and the scale stay the same.
+    private MatrixGrid Grid(double width, double height, double ppd)
+    {
+        var key = (_columns.Count, width, height, ppd);
+        if (_grid.Count != _columns.Count || key != _gridKey) { _grid = CoreMatrix.Fit(_columns.Count, width, height, ppd, MaxCell); _gridKey = key; }
+        return _grid;
+    }
+    // A few cores in a wide graph stay squares of a sensible size.
+    private const double MaxCell = 14;
+
+    private Brush CellBrush(string color, int step)
+    {
+        if (!_cellBrushes.TryGetValue((color, step), out var brush))
+        {
+            var c = (Color)ColorConverter.ConvertFromString(color);
+            c.A = (byte)Math.Round(c.A * CoreMatrix.Alpha(step) / 255d);
+            var made = new SolidColorBrush(c); made.Freeze();
+            _cellBrushes[(color, step)] = brush = made;
+        }
+        return brush;
     }
 
     // The room under the columns for their figures. With the figure line alone, the line's baseline sits on the graph's bottom
@@ -339,6 +390,7 @@ internal sealed class ColumnGraph : FrameworkElement
     {
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), h = ActualHeight - LabelHeight(ppd), now = Eased.Now;
         if (_button) drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
+        if (_columns.Count > 0 && h > 4 && UseMatrix(w, ppd)) { Matrix(drawing, w, ppd, now); return; }
         var (xs, column) = Geometry(w);
         if (xs.Length == 0 || h <= 4) return;
         double radius = Math.Min(column / 2, 5);
@@ -355,6 +407,29 @@ internal sealed class ColumnGraph : FrameworkElement
                 double y = Math.Round((1 - Math.Clamp(_ticks[i].At(now), 0, 1)) * (h - 2)) + 1, inset = column * .2;
                 drawing.DrawLine(tick, new Point(xs[i] + inset, y), new Point(xs[i] + column - inset, y));
             }
+        }
+    }
+
+    // The dot matrix: the empty cells (kept, drawn again only when the count, the size or the scale change), then each core's cell in
+    // its color at the brightness step of its eased load; a busy core takes its warning or critical color (GraphColumn.Hot).
+    private void Matrix(DrawingContext drawing, double w, double ppd, double now)
+    {
+        var grid = Grid(w, ActualHeight, ppd);
+        double radius = grid.Cell >= 5 ? grid.Cell * .18 : 0;
+        drawing.DrawDrawing(_fixed.Get((_labelsVersion, w, ActualHeight, ppd), context =>
+        {
+            var track = UI.Brush(UI.Fill);
+            for (int i = 0; i < grid.Count; i++)
+            {
+                var (x, y) = grid.Origin(i);
+                context.DrawRoundedRectangle(track, null, new Rect(x, y, grid.Cell, grid.Cell), radius, radius);
+            }
+        }));
+        for (int i = 0; i < grid.Count; i++)
+        {
+            var c = _columns[i];
+            var (x, y) = grid.Origin(i);
+            drawing.DrawRoundedRectangle(CellBrush(c.Hot ?? c.Color, CoreMatrix.Step(_values[i].At(now))), null, new Rect(x, y, grid.Cell, grid.Cell), radius, radius);
         }
     }
 
@@ -378,10 +453,17 @@ internal sealed class ColumnGraph : FrameworkElement
     {
         base.OnMouseMove(e);
         if (_button) return;
-        var (xs, column) = Geometry(ActualWidth);
-        double x = e.GetPosition(this).X;
-        int index = Array.FindLastIndex(xs, start => x >= start - _gap / 2);
-        if (index >= 0 && x > xs[index] + column + _gap) index = -1;
+        var at = e.GetPosition(this);
+        double ppd = MonitorDraw.PixelsPerDip(this);
+        int index;
+        if (UseMatrix(ActualWidth, ppd)) index = Grid(ActualWidth, ActualHeight, ppd).CellAt(at.X, at.Y);
+        else
+        {
+            var (xs, column) = Geometry(ActualWidth);
+            double x = at.X;
+            index = Array.FindLastIndex(xs, start => x >= start - _gap / 2);
+            if (index >= 0 && x > xs[index] + column + _gap) index = -1;
+        }
         if (index == _tipIndex) return;
         _tipIndex = index;
         _tip.Content = index < 0 ? null : _columns[index].Tip;

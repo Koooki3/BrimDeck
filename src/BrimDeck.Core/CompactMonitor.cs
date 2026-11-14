@@ -257,13 +257,26 @@ public static class CompactMonitor
     public static (double Column, double Gap, double Width) CoreColumns(int cores, double scale)
     {
         cores = Math.Max(1, cores);
-        double gap = Math.Max(.5, scale), column = Math.Max(1.5, 2 * scale), room = Math.Round(56 * scale);
+        double gap = Math.Max(.5, scale), column = Math.Max(1.5, 2 * scale), room = Math.Round(ColumnsRoom * scale);
         if (cores * column + (cores - 1) * gap <= room) return (column, gap, cores * column + (cores - 1) * gap);
         if ((room - (cores - 1) * gap) / cores is var shared and >= 1) return (shared, gap, room);
         gap = .5;
         if ((room - (cores - 1) * gap) / cores is var narrow and >= 1) return (narrow, gap, room);
         return (1, gap, cores + (cores - 1) * gap);
     }
+
+    // The room the core columns share at scale 1 (width) and their height.
+    public const double ColumnsRoom = 56, ColumnsHeight = 14;
+
+    // Whether the columns still fit the room at their narrowest (CoreColumns): beyond that they would widen the reading.
+    public static bool CoreColumnsFit(int cores, double scale) => CoreColumns(cores, scale) is var (_, _, width) && width <= Math.Round(ColumnsRoom * scale) + 1e-9;
+
+    // Whether the strip draws the cores as a dot matrix: always or never as chosen; with Auto, once the columns no longer fit.
+    public static bool UsesMatrix(CoreDisplay display, int cores, double scale) => display == CoreDisplay.Matrix || display == CoreDisplay.Auto && !CoreColumnsFit(cores, scale);
+
+    // The width the core readout takes: the columns', or the matrix's.
+    public static double CoreWidth(CoreDisplay display, int cores, double scale, double dpi)
+        => UsesMatrix(display, cores, scale) ? CoreMatrix.Strip(cores, scale, dpi).Width : CoreColumns(cores, scale).Width;
 
     // The width of the items side by side with this gap between them.
     public static double Width(CompactMonitorItems items, Func<CompactMonitorItems, double> width, double gap)

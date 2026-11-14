@@ -56,9 +56,10 @@ internal sealed class MonitorStrip : FrameworkElement
     // parts: what the drive reading draws. The collapsed column (MainWindow.CompactColumn.cs) gives each drive a line without the
     // glyph, its letter shown even when it is the only one.
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi,
-        CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null, int low = Devices.DefaultLowPercent, DriveParts parts = DriveParts.All)
+        CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null, int low = Devices.DefaultLowPercent, DriveParts parts = DriveParts.All,
+        CoreDisplay coreDisplay = CoreDisplay.Auto)
     {
-        _driveParts = parts;
+        _driveParts = parts; _coreDisplay = coreDisplay;
         AddVisualChild(_moving);
         _easing = new PromptTimer(Dispatcher, EaseStep);
         _presence = presence; _dpi = dpi; _colors = colors; _centered = centered; _low = low; _powerStyle = PowerStyle.For(colors.Palette);
@@ -139,7 +140,9 @@ internal sealed class MonitorStrip : FrameworkElement
         return width;
     }
 
-    private double ColumnsWidth(int cores) => CompactMonitor.CoreColumns(cores, _scale).Width;
+    // The cores' room: the columns', or, as chosen or once the columns no longer fit, the dot matrix's.
+    private readonly CoreDisplay _coreDisplay;
+    private double ColumnsWidth(int cores) => CompactMonitor.CoreWidth(_coreDisplay, cores, _scale, _dpi);
 
     private CompactMonitorItems Shown => _shown;
     // Rounded up to whole device pixels: the row rounds the region it gives down to them, which must not drop a reading.
@@ -377,6 +380,7 @@ internal sealed class MonitorStrip : FrameworkElement
         double height = Math.Round(14 * _scale), top = Math.Round(center - height / 2);
         if (cpu is null || cpu.Cores.Count == 0) { drawing.DrawRoundedRectangle(UI.Brush(UI.Fill), null, new Rect(x, top, width, height), 2, 2); return; }
         int count = cpu.Cores.Count, groups = Math.Max(1, cpu.GroupCount);
+        if (CompactMonitor.UsesMatrix(_coreDisplay, count, _scale)) { Matrix(drawing, x, top, height, cpu, groups, now); return; }
         var (column, gap, _) = CompactMonitor.CoreColumns(count, _scale);
         for (int i = 0; i < count; i++)
         {
@@ -389,6 +393,40 @@ internal sealed class MonitorStrip : FrameworkElement
     }
     // The load a core's column shows as it eases; the reading itself while the core has none yet.
     private double EasedUsage(int index, CoreSample core, double now) => index < _cores.Length ? _cores[index].At(now) ?? core.Usage : core.Usage;
+    // The cores as a dot matrix, one square each in the color the column would be (the level of its own load), at the brightness step
+    // of its eased load over an empty cell. The placement and the brushes are kept: a frame allocates nothing.
+    private MatrixGrid _matrix;
+    private readonly Dictionary<(string Color, int Step), Brush> _cellBrushes = [];
+    private void Matrix(DrawingContext drawing, double x, double top, double height, CpuSample cpu, int groups, double now)
+    {
+        int count = cpu.Cores.Count;
+        if (_matrix.Count != count) _matrix = CoreMatrix.Strip(count, _scale, _dpi);
+        var grid = _matrix;
+        double radius = grid.Cell >= 5 ? grid.Cell * .18 : 0;
+        var track = UI.Brush(UI.Fill);
+        // The squares sit on whole device pixels: the row's origin is a whole DIP, which at 150 % is half a device pixel.
+        double dpi = _dpi > 0 ? _dpi : 1, left = Math.Round(x * dpi) / dpi, upper = Math.Round(top * dpi) / dpi;
+        for (int i = 0; i < count; i++)
+        {
+            var core = cpu.Cores[i];
+            double usage = EasedUsage(i, core, now);
+            var (cx, cy) = grid.Origin(i);
+            var cell = new Rect(left + cx, upper + cy, grid.Cell, grid.Cell);
+            drawing.DrawRoundedRectangle(track, null, cell, radius, radius);
+            drawing.DrawRoundedRectangle(CellBrush(CoreColor(core.Group, groups, ReadingLevels.OfShare(core.Usage)), CoreMatrix.Step(usage)), null, cell, radius, radius);
+        }
+    }
+    private Brush CellBrush(string color, int step)
+    {
+        if (!_cellBrushes.TryGetValue((color, step), out var brush))
+        {
+            var c = (Color)ColorConverter.ConvertFromString(color);
+            c.A = (byte)Math.Round(c.A * CoreMatrix.Alpha(step) / 255d);
+            var made = new SolidColorBrush(c); made.Freeze();
+            _cellBrushes[(color, step)] = brush = made;
+        }
+        return brush;
+    }
     // A core's color is mixed from the strip's colors, which it keeps: each is mixed once, not for every core on every reading.
     private readonly Dictionary<(int Group, int Groups, MemoryLevel Level), string> _coreColors = [];
     private string CoreColor(int group, int groups, MemoryLevel level)

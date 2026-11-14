@@ -34,6 +34,18 @@ The readings shown in the notch and capsule are chosen under "When collapsed".
 - With more than one graphics card, the discrete one shows by default. Click the large GPU reading on the page to show the next card, or choose one under General › GPU.
 - GPU usage comes from the graphics driver by default (NVIDIA, AMD, Intel), which matches nvidia-smi and HWiNFO; where the driver gives no reading, it is worked out as Task Manager does. If the driver's reading is wrong, choose Windows under Sources › GPU usage.
 
+## Core display: columns and dot matrix
+
+By default each of the CPU's logical processors is drawn as a thin column. A machine with many threads (192, for example) cannot fit that many columns, so the cores can be drawn as a dot matrix instead: one small square per logical processor, filled from the top down and then to the right with the fastest kind of core first. The brighter the square, the higher the load; a core at the warning or critical level takes that level's color. The matrix works on the expanded page, in the notch, the capsule and the side column, and pointing at a square still shows the core's name, load and frequency.
+
+Choose it under "General > Core display":
+
+- Auto (default): columns while there are few cores, exactly as before. The matrix takes over when the columns would be thinner than 2 device pixels (expanded page), or no longer fit the collapsed reading's room (about 37 cores and more). A usual 8 to 32 core PC is not affected.
+- Columns: always columns.
+- Dot matrix: always the matrix.
+
+The squares are as large as the room allows, on whole device pixels at any display scale, with a one-pixel gap where there is room and touching where there is not. The frequency line of a column has no equivalent in the matrix; point at a square to see it.
+
 ## Drives
 
 - Shows the space in use for each drive letter; when the page has no room for them all, the remaining letters share one line.

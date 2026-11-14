@@ -59,7 +59,12 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("通用", "General"));
         Group(Row(Loc.T("各项颜色", "Reading colors"), roles),
             QuickRow(Loc.T("快捷预设", "Presets"), presets),
-            GpuChoiceRow());
+            GpuChoiceRow(),
+            MusicChoice(Loc.T("核心显示", "Core display"), S.CoreDisplay,
+                [(CoreDisplay.Auto, Loc.T("自动", "Auto")), (CoreDisplay.Columns, Loc.T("柱状", "Columns")), (CoreDisplay.Matrix, Loc.T("点阵", "Dot matrix"))],
+                v => Change(s => s.CoreDisplay = v), keepPreview: true,
+                help: Loc.T("点阵用一个小方块表示一个逻辑处理器，颜色深浅表示占用。自动：核心较少时用柱状，多到柱子太细看不清（例如 192 线程）时改用点阵。",
+                    "The dot matrix shows one small square per logical processor, its brightness the load. Auto uses columns while they stay readable and the matrix when there are too many cores for that (a 192-thread machine, for example).")));
         CompactMonitorOptions();
         SectionTitle(Loc.T("展开时", "When expanded"));
         // The choices that show themselves on the monitor page keep its preview open, so switching between them does not collapse it first.
@@ -356,8 +361,8 @@ public sealed partial class SettingsWindow
         var levels = KeepPreview(new UniformGrid { Columns = 2, Width = Loc.IsEnglish ? 300 : 220, Margin = new Thickness(0, Space.Tight, 0, Space.Tight) });
         foreach (var level in new[] { MemoryLevel.Elevated, MemoryLevel.Critical })
             levels.Children.Add(SwatchCell(LevelName(level), LevelHelp(level), () => LevelSwatch(level, Refresh), refresh, info: true));
-        var status = Row(Loc.T("状态颜色", "Level colors"), levels, help: () => Loc.T("用于收起时的读数；展开时只有温度会变色，占用不变色。",
-            "Used by the collapsed readings; on the expanded page only temperatures change color, usage does not."));
+        var status = Row(Loc.T("状态颜色", "Level colors"), levels, help: () => Loc.T("用于收起时的读数；展开时只有温度和点阵里的核心会变色，其余占用不变色。",
+            "Used by the collapsed readings; on the expanded page only temperatures and the cores of the dot matrix change color, other usage does not."));
         // How the dials and the core columns move to a new reading; the figures always take it at once.
         var smoothing = MusicChoice(Loc.T("平滑过渡", "Smoothing"), S.CompactSmoothing,
             [(CompactSmoothing.Off, Loc.T("不平滑", "Off")), (CompactSmoothing.Ten, Loc.T("10 帧", "10 fps")), (CompactSmoothing.Thirty, Loc.T("30 帧", "30 fps"))],
