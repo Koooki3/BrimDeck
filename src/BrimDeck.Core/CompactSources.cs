@@ -14,24 +14,34 @@ public readonly record struct SensorStates(SensorState Cpu, SensorState Gpu, Sen
 
 // What CPU, GPU and the drives show after their glyph in the collapsed row (CompactReading.Figures): the share in use, the
 // temperature, or both, the share above the temperature in two smaller lines or, when chosen (CompactReading.FiguresInLine),
-// side by side in the row's type. A temperature the machine cannot read is left out,
-// so a reading set to show only that shows its glyph alone.
+// side by side in the row's type. The graphics adapter also offers the share of its dedicated memory in use (Vram), between the
+// two; three figures always sit side by side, as three lines would not fit the row. A temperature or a memory share the machine
+// cannot read is left out, so a reading set to show only that shows its glyph alone.
 public static class CompactFigures
 {
-    public const string Usage = "Usage", Temperature = "Temperature";
+    public const string Usage = "Usage", Temperature = "Temperature", Vram = "VRAM";
     public static bool Has(CompactMonitorItems item) => item is CompactMonitorItems.Cpu or CompactMonitorItems.Gpu or CompactMonitorItems.Storage;
 
     // The share in use without a choice.
     public static IReadOnlyList<string> Of(CompactReading reading) => reading.Figures is { Count: > 0 } figures ? figures : [Usage];
     public static bool Shows(CompactReading reading, string figure) => Of(reading).Contains(figure);
 
-    // A choice in its order (the share, then the temperature), each once; an empty or unknown one is the default (null).
+    // The figures a reading offers, in their order: the graphics adapter's memory sits between the share and the temperature.
+    public static IReadOnlyList<string> Offered(CompactMonitorItems item) => item == CompactMonitorItems.Gpu ? [Usage, Vram, Temperature] : [Usage, Temperature];
+
+    // A choice in its order (the share, the memory, then the temperature), each once; an empty or unknown one, and a figure the reading
+    // does not offer, is dropped, and no choice left is the default (null).
     public static List<string>? Normalize(CompactMonitorItems item, IEnumerable<string?>? figures)
     {
         if (!Has(item) || figures is null) return null;
-        var kept = new[] { Usage, Temperature }.Where(figure => figures.Any(chosen => string.Equals(chosen?.Trim(), figure, StringComparison.OrdinalIgnoreCase))).ToList();
+        var kept = Offered(item).Where(figure => figures.Any(chosen => string.Equals(chosen?.Trim(), figure, StringComparison.OrdinalIgnoreCase))).ToList();
         return kept.Count > 0 ? kept : null;
     }
+
+    // The share of the graphics adapter's dedicated memory in use in this snapshot and its level; null while it has no reading (an
+    // adapter without a memory of its own, a driver that reports none, one asleep).
+    public static (double Share, MemoryLevel Level)? Memory(CompactMonitorItems item, MonitorSnapshot? snapshot) =>
+        item == CompactMonitorItems.Gpu && snapshot?.Gpu.OrDefault is { NoReadings: false } gpu && gpu.DedicatedFraction is { } share ? (share, ReadingLevels.OfShare(share)) : null;
 
     // A ring's temperature in this snapshot and its level; null while it has none.
     public static (double Celsius, MemoryLevel Level)? Heat(CompactMonitorItems item, MonitorSnapshot? snapshot) => item switch

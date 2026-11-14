@@ -505,7 +505,7 @@ public sealed partial class SettingsWindow
         ToolTipService.SetShowOnDisabled(select, true);
         AutomationProperties.SetName(select, role);
 
-        static string FigureName(string figure) => figure == CompactFigures.Usage ? Loc.T("占用", "Usage") : Loc.T("温度", "Temperature");
+        static string FigureName(string figure) => figure == CompactFigures.Usage ? Loc.T("占用", "Usage") : figure == CompactFigures.Vram ? Loc.T("显存", "VRAM") : Loc.T("温度", "Temperature");
         refresh.Add(() =>
         {
             var reading = Reading(S, item);
@@ -572,12 +572,14 @@ public sealed partial class SettingsWindow
             var reading = Reading(S, item);
             var figures = CompactFigures.Of(reading);
             Header(Loc.T("数值", "Figures"));
-            foreach (var figure in new[] { CompactFigures.Usage, CompactFigures.Temperature })
+            foreach (var figure in CompactFigures.Offered(item))
             {
                 bool on = figures.Contains(figure);
                 string? help = figure == CompactFigures.Temperature
                     ? drives ? Loc.T("固态硬盘的温度，显示在已用空间下方；机械硬盘不显示。", "A solid-state drive's temperature, under its space in use; not shown for hard disks.")
                         : Loc.T("显示在占用下方；读不到温度的电脑上不显示。", "Shown under the usage; not shown on a PC whose temperature cannot be read.")
+                    : figure == CompactFigures.Vram
+                        ? Loc.T("专用显存已用的比例，与其他数值排在同一行；读不到显存的显卡上不显示。", "The share of dedicated video memory in use, on the same line as the other figures; not shown for a GPU whose memory cannot be read.")
                     : null;
                 Entry(FigureName(figure), on, on && figures.Count == 1, help, () =>
                 {
@@ -587,10 +589,13 @@ public sealed partial class SettingsWindow
                 });
             }
             Header(Loc.T("排列", "Layout"));
-            string? single = figures.Count < 2 ? Loc.T("同时选择占用和温度时可用。", "Available when both usage and temperature are chosen.") : null;
+            string? single = figures.Contains(CompactFigures.Vram) ? Loc.T("选择显存时，数值始终排在同一行。", "With VRAM chosen, the figures always sit on one line.")
+                : figures.Count < 2 ? Loc.T("同时选择占用和温度时可用。", "Available when both usage and temperature are chosen.") : null;
             foreach (var inLine in new[] { false, true })
             {
-                bool on = reading.FiguresInLine == inLine;
+                // The arrangement that holds is ticked: with VRAM chosen the figures sit on one line whatever was saved (the saved choice
+                // comes back when VRAM is unchosen).
+                bool on = (reading.FiguresInLine || figures.Contains(CompactFigures.Vram)) == inLine;
                 Entry(inLine ? Loc.T("同一行", "One line") : Loc.T("分两行", "Two lines"), on, false, null,
                     () => edit(s => Reading(s, item).FiguresInLine = inLine), single);
             }

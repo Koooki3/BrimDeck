@@ -91,6 +91,7 @@ try
     CompactReadingTests.Run(Check);
     CoreMatrixTests.Run(Check);
     TemperatureTests.Run(Check);
+    VramFigureTests.Run(Check);
     StorageTests.Run(Check);
     SensorStopTests.Run(Check);
     MonitorStartupTests.Run(Check);

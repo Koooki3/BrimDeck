@@ -147,7 +147,7 @@ internal sealed class MonitorView : Grid
                 graphs.Children.Add(_cpuGraph);
                 if (pair)
                 {
-                    _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu);
+                    _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu, layout.Caption);
                     _gpuBlock.Clicked += () => mainChanged(MonitorMain.Gpu);
                     SetColumn(_gpuBlock, 2); graphs.Children.Add(_gpuBlock);
                 }
@@ -365,6 +365,9 @@ internal sealed class MonitorView : Grid
             string kindName = several && !cpuMain ? GpuChoice.KindName(gpu.Kind) : "";
             string heatText = temperature.Length > 0 && gpu.TemperatureKind is { } kind ? kind + " " + temperature : temperature;
             string detail = kindName.Length > 0 && heatText.Length > 0 ? kindName + " · " + heatText : kindName + heatText;
+            // The memory in use, in the large gauge's line (the small one's room is kept for the temperature; its block carries the memory).
+            if (!cpuMain && !idle && gpu.DedicatedFraction is { } memoryShare)
+                detail += (detail.Length > 0 ? " · " : "") + Loc.T("显存 ", "VRAM ") + MonitorFormat.Percent(memoryShare) + "%";
             _gpuGauge.Set(idle ? null : gpu.Usage, idle ? "—" : MonitorFormat.Percent(gpu.Usage), idle ? "" : "%", detail,
                 switchTo.Length > 0 ? tip + "\n" + switchTo : tip, motion, heat is { } c ? Hot(Temperatures.OfGpu(c)) : null);
             _gpuBlock?.Set(idle ? null : gpu.Usage, idle ? null : gpu.DedicatedFraction, tip, motion);

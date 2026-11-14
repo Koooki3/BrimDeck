@@ -44,7 +44,8 @@ public enum CompactMonitorItems
 // scheme's in the normal state, for the further channels in the normal state (the core columns' slowest kind of core), and at
 // the warning and critical levels. They are kept to read older files, which DeckSettings.Normalize moves into the custom
 // scheme and the level colors (CompactMonitor.MoveColors), and are not written.
-// Figures: what CPU, GPU and the drives show after their glyph, the share in use and the temperature (CompactFigures), and what the
+// Figures: what CPU, GPU and the drives show after their glyph, the share in use and the temperature, and for the GPU also its
+// memory's share (CompactFigures), and what the
 // frame rate shows of its program, its icon or not (CompactFrames); Sources:
 // the drive letters the drives show (CompactSources). Both chosen in the table's menus, null for the default. FiguresInLine:
 // both figures side by side in the row's type rather than one above the other in two smaller lines.
@@ -174,13 +175,13 @@ public static class CompactMonitor
     public static CompactMonitorItems Shown(IEnumerable<CompactReading> readings) => Visible(readings) is var shown && shown != CompactMonitorItems.None ? shown : CompactMonitorItems.Cpu;
 
     // The preset the table matches exactly: Full is every reading with every figure (the rings' figures, the share and the
-    // temperature of CPU, GPU and the drives, the frame rate's program icon), Brief the three rings alone; else none, and the
+    // temperature of CPU, GPU and the drives, the frame rate's program icon; not the graphics memory, which is chosen on its own), Brief the three rings alone; else none, and the
     // table itself is the custom choice (saved as Custom in the old key).
     public static CompactMonitorMode? Preset(IEnumerable<CompactReading> readings)
     {
         var all = readings.ToList();
         var (shown, values) = (Visible(all), Values(all));
-        bool figures = all.All(reading => (!CompactFigures.Has(reading.Item) || CompactFigures.Of(reading).Count == FullFigures.Length)
+        bool figures = all.All(reading => (!CompactFigures.Has(reading.Item) || CompactFigures.Of(reading).SequenceEqual(FullFigures))
             && (reading.Item != CompactMonitorItems.Frames || CompactFrames.Shows(reading, CompactFrames.Icon)));
         return shown == Every && values == Rings && figures ? CompactMonitorMode.Full
             : shown == Rings && values == CompactMonitorItems.None ? CompactMonitorMode.Brief : null;
