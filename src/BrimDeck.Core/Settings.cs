@@ -760,6 +760,8 @@ public sealed class DeckSettings
     public int NoticeHighDuration { get; set; } = 8;
     public NoticeScreen NoticeScreen { get; set; }
     public NoticePrivacy NoticePrivacy { get; set; }
+    // What a click on a notice shown on the collapsed island opens; the notices page unless changed.
+    public NoticeClickTarget NoticeClick { get; set; }
     // Holds notices back during a Windows focus session or presentation mode.
     public bool NoticeRespectFocus { get; set; } = true;
     // Notices are held back until this time (BrimDeck's own pause); null when not paused.
@@ -1047,6 +1049,7 @@ public sealed class DeckSettings
         NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
         if (!Enum.IsDefined(NoticePrivacy)) NoticePrivacy = NoticePrivacy.Full;
+        if (!Enum.IsDefined(NoticeClick)) NoticeClick = NoticeClickTarget.Page;
         if (!Enum.IsDefined(NoticeAutoClear)) NoticeAutoClear = NoticeAutoClear.Off;
         NoticeDuration = Math.Clamp(NoticeDuration, 2, 30);
         NoticeHighDuration = Math.Clamp(NoticeHighDuration, 2, 60);
