@@ -111,6 +111,8 @@ internal sealed class CpuProvider
     public void Prime(bool pdhCollected)
     {
         _previousTimes = [];
+        // The kernel's times were not read while the counters gave readings; this one sets their baseline whatever the counters say now.
+        _busyReads = false;
         Forget();
         Sample(pdhCollected);
         _shares = new ProcessorShares();

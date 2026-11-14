@@ -79,6 +79,20 @@ internal static class CpuProviderChecks
         restartCounters.Values.Remove(BusyPath);
         check("cpu: after a restart a counter that gives nothing does not bring back the shares read over the time off", !restart.Sample(true).HasValue);
 
+        // The counters gave readings, stop, and the kernel's times come back: the baseline is set from the times themselves (a stale
+        // "the counters are reading" does not make the next reading wait another interval).
+        var swapCounters = new Counters();
+        var swap = new CpuProvider(swapCounters, Times);
+        swap.Attach();
+        swapCounters.Values[BusyPath] = [("0,0", 40), ("0,1", 60)];
+        swap.Sample(true);
+        swapCounters.Values.Remove(BusyPath);
+        Advance(100, 100);
+        swap.Prime(true);
+        Advance(20, 80);
+        check("cpu: after counters that gave readings, a restart on the kernel's times covers the new window at the next reading",
+            swap.Sample(true).TryGet(out var swapped) && swapped.Cores.All(core => Math.Abs(core.Usage - .2) < 1e-9));
+
         var offTimes = new CpuProvider(new Counters(), Times);
         Advance(50, 50); offTimes.Sample(false);
         Advance(25, 75); offTimes.Sample(false);
