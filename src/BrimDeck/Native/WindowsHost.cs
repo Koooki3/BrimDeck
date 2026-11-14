@@ -51,6 +51,7 @@ public sealed class WindowsHost : IDisposable
         _alwaysOnTop = alwaysOnTop;
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
+        DisplayPower.Changed += DisplayChanged;
         _desktopSettle.Tick += (_, _) => { _desktopSettle.Stop(); RaiseOverDesktop(_window()); };
         _lowerAgain.Tick += (_, _) => { _lowerAgain.Stop(); if (!_overDesktop) Lower(_window()); };
         _orderEvent = OnOrderEvent;
@@ -85,6 +86,14 @@ public sealed class WindowsHost : IDisposable
     private readonly Func<Rect?> _island;
     private string _raisedName = "", _raisedPath = "";
     private ScreenContext _raisedKind = ScreenContext.Desktop;
+    // With the display off nothing can be seen or covered, so the poll rests; when it comes on again one check runs at once.
+    private void DisplayChanged()
+    {
+        if (DisplayPower.Off) { _timer.Stop(); return; }
+        if (_timer.IsEnabled) return;
+        _timer.Start();
+        Poll();
+    }
     private void Poll()
     {
         var context = DetectNow();
@@ -529,6 +538,7 @@ public sealed class WindowsHost : IDisposable
     }
     public void Dispose()
     {
+        DisplayPower.Changed -= DisplayChanged;
         _timer.Stop(); _desktopSettle.Stop(); _lowerAgain.Stop();
         foreach (var hook in _hooks) if (hook != IntPtr.Zero) UnhookWinEvent(hook);
     }

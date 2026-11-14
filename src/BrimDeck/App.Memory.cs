@@ -13,9 +13,8 @@ namespace BrimDeck;
 // shows: a panel that had only started sat at 130 MB, of which it used some 20 MB while collapsed. A clean-up compacts the heap,
 // hands the room it no longer needs back to Windows and takes the process's pages out of the working set; what is still used
 // comes back as it is used. Compacting alone leaves the figure as it was, as little of it is on the heap.
-// What starting leaves behind is given back once in every mode. After that the saver mode cleans up soon after each use and every
-// couple of minutes while nothing is used, the balanced mode after a few minutes without use and seldom, and the smooth mode not
-// at all, so what it has used since the start stays where it is. Never while a panel is open, a surface is being resized or the
+// What starting leaves behind is given back once in every mode. After that the saver mode cleans up soon after each use, the balanced
+// mode after a few minutes without use and no more often than its period, and the smooth mode not at all, so what it has used since the start stays where it is. Never while a panel is open, a surface is being resized or the
 // settings are open. The smooth mode also keeps full collections from running while a panel is open (GCLatencyMode.LowLatency),
 // unless memory runs low.
 // What a page switched off in the settings built and read with is let go a while after the switch (ReleaseUnused), in every mode.
@@ -57,8 +56,7 @@ public partial class App
         // Aggressive also returns the memory the heap no longer uses to the system.
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         SetProcessWorkingSetSize(GetCurrentProcess(), -1, -1);
-        // While nothing is used, again after the mode's period.
-        ScheduleTrim();
+        // Nothing more is scheduled: the next use (RequestTrim) or let-go page (ReleaseUnused) asks again.
     }
 
     // Called whenever a panel opens or closes and when the mode changes.
