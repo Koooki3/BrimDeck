@@ -207,6 +207,36 @@ static class UsageLastSeenTests
             check("A quota read while the totals failed keeps the earlier totals", again.Metrics[0].Percent == 55 && again.UsageAvailable && again.Entries.Any(e => e.Model == "newer-model"));
         }
 
+        // (g2b) The quotas and the totals age apart: old totals do not hold back a quota that was read since, and a source with more groups
+        // than the file keeps is not shown with a cut-short total.
+        {
+            var path = File("ages.json");
+            var clock = now;
+            var store = new UsageLastSeen(path, () => clock);
+            store.Save([Read(ProviderId.Claude, now, 40)], settings);
+            clock = now.AddHours(23);
+            var quotaOnly = Read(ProviderId.Claude, clock, 55); quotaOnly.UsageAvailable = false; quotaOnly.Entries = [];
+            quotaOnly.Metrics = [new UsageMetric(MetricKind.Percent, "5 小时") { Id = "five", Window = 300, Percent = 55, ResetAt = clock.AddDays(3) }];
+            store.Save([quotaOnly], settings);
+            clock = now.AddHours(25);
+            var shown = new UsageLastSeen(path, () => clock).Load(settings);
+            check("Totals older than a day are left out while the quota read two hours ago is shown",
+                shown.Count == 1 && shown[0].Metrics.Count == 1 && shown[0].Metrics[0].Percent == 55 && !shown[0].UsageAvailable && shown[0].Entries.Count == 0);
+            clock = now.AddHours(49);
+            check("When both parts are older than a day nothing is shown", new UsageLastSeen(path, () => clock).Load(settings).Count == 0);
+
+            var wide = Read(ProviderId.Claude, now, 40);
+            wide.Entries = [.. Enumerable.Range(0, 401).Select(i => new TokenEntry("k", now, "model-" + i, 10, 0, 0, 0, 1))];
+            var widePath = File("wide.json");
+            new UsageLastSeen(widePath, () => now).Save([wide], settings);
+            var wideShown = new UsageLastSeen(widePath, () => now).Load(settings).Single();
+            check("More groups than the file keeps leave the totals out rather than cut short", !wideShown.UsageAvailable && wideShown.Entries.Count == 0 && wideShown.Metrics.Count == 1);
+            wide.Entries = [.. wide.Entries.Take(400)];
+            new UsageLastSeen(widePath, () => now).Save([wide], settings);
+            var fits = new UsageLastSeen(widePath, () => now).Load(settings).Single();
+            check("Exactly as many groups as it keeps are kept whole", fits.UsageAvailable && fits.Entries.Count == 400);
+        }
+
         // (g3) The first round after a start always writes, a clock set back does not hold writes off, and an unreadable metric does not stop them.
         {
             var path = File("restart.json");
