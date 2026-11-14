@@ -88,6 +88,13 @@
   // app, warning, critical and clock colors. Remove the "//" to set your own, at most twelve.
   // "swatches": ["#E5A385", "#F0B37E", "#E5C890", "#98DBB0", "#7FD1C4", "#9CB9FF", "#B9A8FF", "#E7A0D0", "#E78284", "#D4D5DF", "#8E8E93", "#F5F5F7"],
 
+  // How the theme answers the pointer: a mark on the control it is over. Remove the "//" to use it; the default dark and light
+  // themes draw nothing over the controls. Each value is inherited on its own and held to a limit.
+  // hover: none, reveal (a faint fill and a lit edge), lift (a soft shadow, for light themes), underline (a fill and a 2 px bar)
+  // hoverStrength: 0 to 0.3; pace: 0.6 to 1.6, scales how long the mark takes; color and secondary: a color key above or "#RRGGBB"
+  // The marks follow the "animation effects" settings of BrimDeck and Windows, and are not drawn in high contrast.
+  // "motion": { "hover": "underline", "hoverStrength": 0.22, "pace": 0.75, "color": "accent", "secondary": "#6E7781" },
+
   "effects": {
     "surfaceGradient": [],          // Two or more colors over the surface, top to bottom, e.g. ["#0A0613", "#1C0B30"]
     "rimGradient": [],              // Two or more colors for the rim, left to right; replaces "rim"

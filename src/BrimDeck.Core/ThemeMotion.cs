@@ -1,0 +1,147 @@
+namespace BrimDeck.Core;
+
+// How a theme answers the pointer on BrimDeck's own panel: a mark on the control the pointer hovers, drawn on the control's
+// own visible shape (InteractionFx in the window project). The file's "motion" section is merged field by field along the
+// base chain, like the effects, and every value is held to MotionSafety's limits. Nothing here runs by itself: BrimDeck only
+// animates while the app-wide rule allows it (Soft.Enabled), and a theme without a motion section (the default dark and light
+// themes) draws nothing over the controls, which keep their own hover looks.
+
+// The mark on a hovered control. reveal: a faint fill and a 1 px edge lit from the top (Fluent); lift: a soft shadow outside
+// the shape and a light top edge (a light theme's raised card); underline: a subtle fill and a 2 px bar along the bottom (Primer).
+public enum HoverFx { None, Reveal, Lift, Underline }
+
+// Style names in theme files.
+public static class MotionStyles
+{
+    public static HoverFx Hover(string? value, HoverFx fallback)
+    {
+        // A name only: numbers ("2") are not styles, whatever the enum would make of them.
+        if (string.IsNullOrWhiteSpace(value)) return fallback;
+        value = value.Trim();
+        if (!char.IsLetter(value[0])) return fallback;
+        return Enum.TryParse<HoverFx>(value, true, out var style) && Enum.IsDefined(style) ? style : fallback;
+    }
+}
+
+// Colors are theme color keys ("accent", "rim", "shadow", ...) or "#RRGGBB" colors. Color is the main mark; Secondary its
+// second tone (an underline's bar, a lift's shadow). Pace scales the hover durations.
+public sealed record ThemeMotion(HoverFx Hover, double HoverStrength, double Pace, string Color, string Secondary)
+{
+    // Without a motion section anywhere in the base chain nothing is drawn over the controls.
+    public static readonly ThemeMotion Default = new(HoverFx.None, .12, 1, "accent", "accent");
+    public bool AnyInteraction => Hover != HoverFx.None && HoverStrength > 0;
+
+    // A motion color as the palette draws it: a key of the palette or a color (the palette's accent when unknown). Kept
+    // readable on the surface like any color chosen outside the theme.
+    public static ThemeColor ResolveColor(PanelPalette palette, string value)
+    {
+        ThemeColor color;
+        if (palette.Colors.Keys.FirstOrDefault(key => string.Equals(key, value, StringComparison.OrdinalIgnoreCase)) is { } key) color = palette[key];
+        else if (!ThemeColor.TryParse(value, out color)) color = palette["accent"];
+        return palette.Readable(color.Over(palette.Surface), PanelThemes.GraphicContrast);
+    }
+}
+
+// The limits every theme is held to.
+public static class MotionSafety
+{
+    public const double HoverMax = .3, PaceMin = .6, PaceMax = 1.6;
+
+    public static double Amount(double? value, double max, double fallback) => value is { } v && double.IsFinite(v) ? Math.Clamp(v, 0, max) : fallback;
+    public static double Pace(double? value, double fallback) => value is { } v && double.IsFinite(v) ? Math.Clamp(v, PaceMin, PaceMax) : fallback;
+}
+
+public static class MotionGate
+{
+    // allowed: the app-wide rule (MotionConditions.Allowed, which Soft.Enabled applies).
+    public static bool Interaction(bool allowed, ThemeMotion motion) => allowed && motion.AnyInteraction;
+}
+
+// The hover durations in milliseconds: a mark arrives in the monitor page's hover time (Eased.Hover) times the theme's pace and
+// leaves in seven tenths of it (Eased.HoverOut). Glide: a mark moving over to a neighboring control.
+public readonly record struct MotionTiming(int HoverIn, int HoverOut, int Glide)
+{
+    public static MotionTiming For(double pace)
+    {
+        double p = Math.Clamp(double.IsFinite(pace) ? pace : 1, MotionSafety.PaceMin, MotionSafety.PaceMax);
+        int hover = Ms(Eased.Hover * 1000 * p, 80, 450);
+        return new(hover, Ms(hover * Eased.HoverOut / Eased.Hover, 56, 315), Ms(GlideBase * p, 90, 600));
+    }
+
+    // The default animation length (360 ms) times six tenths.
+    private const double GlideBase = 360 * .6;
+    private static int Ms(double value, double min, double max) => (int)Math.Round(Math.Clamp(value, min, max));
+}
+
+// Progress along a timeline.
+public static class MotionCurve
+{
+    public static double Linear(double elapsed, double duration) => duration <= 0 ? 1 : Math.Clamp(elapsed / duration, 0, 1);
+    // The soft landing the rest of BrimDeck uses.
+    public static double Ease(double t) => Curves.Bezier(.22, .8, .28, 1, Math.Clamp(t, 0, 1));
+    // A hover mark leaving: the same landing. Its flat end is taken as the end, so the mark is gone exactly when its time is up
+    // rather than a rounding error later.
+    public static double HoverOut(double t) { double e = Ease(t); return e > 1 - 1e-9 ? 1 : e; }
+}
+
+// One control's hover mark over time, on one clock in seconds. It arrives from `from` (0, or where a fading mark of the same
+// control was), holds while hovered, and leaves from where it was. Nothing here reads a clock: the caller passes the time.
+public sealed class HoverTimeline
+{
+    public double ShownAt { get; private set; } = double.NaN;
+    public double ShownFrom { get; private set; }
+    public double LeftAt { get; private set; } = double.NaN;
+    public double LeftFrom { get; private set; }
+    public bool Leaving => !double.IsNaN(LeftAt);
+
+    public void Arrive(double now, double from) { ShownAt = now; ShownFrom = Math.Clamp(from, 0, 1); LeftAt = double.NaN; }
+    public void Leave(double now, double presence) { LeftFrom = Math.Clamp(presence, 0, 1); LeftAt = now; }
+
+    // 0 to 1: how much of the mark shows.
+    public double Presence(double now, MotionTiming timing)
+    {
+        if (Leaving) return LeftFrom * (1 - MotionCurve.HoverOut(MotionCurve.Linear(now - LeftAt, timing.HoverOut / 1000.0)));
+        if (double.IsNaN(ShownAt)) return 0;
+        return ShownFrom + (1 - ShownFrom) * MotionCurve.Ease(MotionCurve.Linear(now - ShownAt, timing.HoverIn / 1000.0));
+    }
+
+    // Whether the mark is still changing: arriving, or leaving and not yet gone.
+    public bool Moving(double now, MotionTiming timing)
+        => Leaving ? Presence(now, timing) > 0 : !double.IsNaN(ShownAt) && now - ShownAt < timing.HoverIn / 1000.0;
+}
+
+// The "motion" section of a theme file. Everything is optional and comes from the base theme when left out.
+public sealed class PanelThemeMotion
+{
+    // none, reveal, lift, underline (HoverFx)
+    public string? Hover { get; set; }
+    // 0 to 0.3
+    public double? HoverStrength { get; set; }
+    // 0.6 to 1.6: scales how long the mark takes
+    public double? Pace { get; set; }
+    // A theme color key or "#RRGGBB"
+    public string? Color { get; set; }
+    public string? Secondary { get; set; }
+}
+
+public static partial class PanelThemes
+{
+    // The base chain's motion sections, merged from the dark theme up and held to MotionSafety.
+    private static ThemeMotion MotionValues(IEnumerable<PanelThemeFile> chain)
+    {
+        var m = ThemeMotion.Default;
+        foreach (var layer in chain)
+        {
+            if (layer.Motion is not { } motion) continue;
+            m = m with
+            {
+                Hover = MotionStyles.Hover(motion.Hover, m.Hover),
+                HoverStrength = MotionSafety.Amount(motion.HoverStrength, MotionSafety.HoverMax, m.HoverStrength),
+                Pace = MotionSafety.Pace(motion.Pace, m.Pace),
+                Color = motion.Color is { Length: > 0 } color && color.Trim() is { Length: > 0 } c ? c : m.Color,
+                Secondary = motion.Secondary is { Length: > 0 } secondary && secondary.Trim() is { Length: > 0 } s ? s : m.Secondary
+            };
+        }
+        return m;
+    }
+}
