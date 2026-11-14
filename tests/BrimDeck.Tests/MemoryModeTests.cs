@@ -43,9 +43,13 @@ internal static class MemoryModeTests
             fluent.TrimDue(used, used) is null && fluent.TrimDue(used.AddHours(1), used) is null);
         check("Memory modes: a clean-up waits its quiet stretch after a use",
             balanced.TrimDue(used, used.AddHours(-1)) == used + balanced.TrimAfter && saver.TrimDue(used, used.AddHours(-1)) == used + saver.TrimAfter);
-        check("Memory modes: with nothing used, the clean-up comes again every period, however often the usage is read meanwhile",
-            balanced.TrimDue(used, used.AddMinutes(4)) == used.AddMinutes(4) + balanced.TrimEvery
-            && saver.TrimDue(used, used.AddMinutes(4)) == used.AddMinutes(4) + saver.TrimEvery);
+        check("Memory modes: with nothing used since the last clean-up there is none to run, however much time passes",
+            balanced.TrimDue(used, used.AddMinutes(4)) is null && saver.TrimDue(used, used.AddMinutes(4)) is null
+            && saver.TrimDue(used, used) is null && balanced.TrimDue(used, used.AddHours(8)) is null);
+        check("Memory modes: a use after the last clean-up brings the next one, no sooner than the period after the last",
+            balanced.TrimDue(used.AddMinutes(5), used.AddMinutes(4)) == used.AddMinutes(4) + balanced.TrimEvery
+            && saver.TrimDue(used.AddMinutes(7), used.AddMinutes(4)) == used.AddMinutes(7) + saver.TrimAfter
+            && saver.TrimDue(used.AddMinutes(4).AddSeconds(1), used.AddMinutes(4)) == used.AddMinutes(4) + saver.TrimEvery);
         check("Memory modes: a use just before the period ends still waits its quiet stretch",
             balanced.TrimDue(used.AddMinutes(13), used.AddMinutes(4)) == used.AddMinutes(13) + balanced.TrimAfter);
         check("Memory modes: the smooth mode still stops the readings after a while",
