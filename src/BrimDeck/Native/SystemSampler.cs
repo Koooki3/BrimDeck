@@ -119,7 +119,7 @@ internal sealed class SystemSampler : IDisposable
     // current. Called on the UI thread.
     public void UsePlan(MemoryPlan plan) { _linger.Interval = plan.ReadingsLinger; _keepCaches = plan.KeepCaches; }
 
-    // Starts the sampling thread without reading, so the counters and the adapters' descriptions are set up before the page first
+    // Starts the sampling thread without reading, so the counters (and the adapters' descriptions, where the adapters are wanted) are set up before the page first
     // opens (the smooth memory mode). Called on the UI thread.
     public void Warm() { if (!_disposed && _thread is null) StartThread(0); }
 
@@ -225,7 +225,7 @@ internal sealed class SystemSampler : IDisposable
                 if (!_wanted)
                 {
                     // Started without a demand (Warm): the counters are set up now, where nothing waits for them.
-                    if (!_cpu!.Attached) AttachCounters();
+                    if (!_cpu!.Attached) { AttachCounters(); if (_gpuWanted) _gpu!.Describe(); }
                     primed = false; Rest(); _wake.WaitOne(); continue;
                 }
                 bool primeCounters = _primeCounters;
@@ -239,8 +239,9 @@ internal sealed class SystemSampler : IDisposable
                     bool primeProcesses = _primeProcesses;
                     _primeProcesses = false;
                     // Readings starting (the monitor opened or came back): a hardware monitor started meanwhile is looked for again.
-                    // What the first reading already holds (the memory, the drives, the battery) is shown at once; the rest follows.
-                    if (!primed) { _bridges.Rescan(); Publish(Collect(listProcesses: true)); holdGpu = false; }
+                    // What the first reading already holds (the memory, the drives, the battery) is shown at once; the rest follows. The
+                    // readings that are rates since the last collection cover the whole pause here, so they are not shown.
+                    if (!primed) { _bridges.Rescan(); Publish(Collect(listProcesses: true).WithoutWindowed(Why.Waiting)); holdGpu = false; }
                     else
                     {
                         // Adapters already read before this priming keep their last reading in the snapshot after it (Collect): a
@@ -316,6 +317,7 @@ internal sealed class SystemSampler : IDisposable
         _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _powerSource = null; _cpuPower.Clear(); _gpuPower.Clear();
         _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _bridges.Rest();
         _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
+        _processes.Forget();
         if (!_keepCaches) { _processes.Dispose(); ProcessIcons.Clear(); }
         _cpu!.Forget();
     }
@@ -326,6 +328,8 @@ internal sealed class SystemSampler : IDisposable
     {
         if (!_cpu!.Attached) return false;
         _power!.Prepare(_powerWanted);
+        // The zones' first collection too, so the next pass holds two and has the temperature.
+        _zones!.Sample(_temperatures && !_processorHeat, Now());
         if (!_gpu!.Want(_gpuWanted)) return false;
         _gpuPdh?.Collect(); _gpuJoinedAt = _gpuAt = Now();
         return true;
@@ -348,7 +352,7 @@ internal sealed class SystemSampler : IDisposable
         bool gpuCollected = !gpuSoon && _gpuWanted && counters && _gpuPdh?.Collect() == true;
         if (!cpuSoon) _cpuAt = now;
         if (!gpuSoon) _gpuAt = now;
-        if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; }
+        if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; _processes.Forget(); }
         else if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
         {
             // Named after the first list is shown (Resolve): the executables' descriptions and icons take 200 to 480 ms on the first list.
@@ -400,7 +404,9 @@ internal sealed class SystemSampler : IDisposable
                 _battery ??= new BatteryProvider();
                 var (batteryInputs, batterySample) = _battery.Sample();
                 battery = batterySample;
-                if (powerWanted)
+                // Not before the counters have joined: without the meter the reading would fall back to the battery's discharge and switch
+                // source (and start its statistics over) a moment later.
+                if (powerWanted && counters)
                 {
                     power = _power!.Sample(meter, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present,
                         report?.PackageWatts, report?.MemoryWatts, bridge.Watts);
@@ -664,12 +670,15 @@ internal sealed class ProcessProvider : IDisposable
     public volatile bool Hold;
 
     // The rows of the last list that were left without their names and icons (Sample with name false), for Resolve.
-    private List<ProcessSample>? _unnamedByCpu, _unnamedByMemory;
+    private List<ProcessSample>? _unnamedByCpu, _unnamedByMemory, _plainByCpu, _plainByMemory;
+
+    // The list left unnamed is let go: it is old once the readings pause or the page no longer lists processes.
+    public void Forget() => _unnamedByCpu = _unnamedByMemory = _plainByCpu = _plainByMemory = null;
 
     // name false: the rows carry the executables' names (or the descriptions already found) and no icons, and Resolve names them later.
     public Reading<ProcessList> Sample(double now, bool name = true)
     {
-        _unnamedByCpu = _unnamedByMemory = null;
+        Forget();
         if (!Read()) return Reading<ProcessList>.Unavailable(Why.NoProcesses);
         var current = new Dictionary<int, (long, long)>();
         var samples = new List<ProcessSample>(512);
@@ -703,16 +712,24 @@ internal sealed class ProcessProvider : IDisposable
         var byMemory = _memoryRanking.Arrange(ProcessSample.Folded(samples, ProcessSort.Memory), sample => sample.MemoryBytes, elapsed, Hold);
         if (name) return new ProcessList(Named(top.Take(Kept)), Named(byMemory.Take(Kept)));
         _unnamedByCpu = top.Take(Kept).ToList(); _unnamedByMemory = byMemory.Take(Kept).ToList();
-        return new ProcessList(Plain(_unnamedByCpu), Plain(_unnamedByMemory));
+        _plainByCpu = Plain(_unnamedByCpu); _plainByMemory = Plain(_unnamedByMemory);
+        return new ProcessList(_plainByCpu, _plainByMemory);
     }
 
-    // The list left unnamed by the last Sample, named now (the descriptions and the icons are looked up here); null when there is none.
+    // The list left unnamed by the last Sample, named now (the descriptions and the icons are looked up here); null when there is none, or
+    // when nothing changed from the list shown (every name known, every icon already read), so no second list is raised for it.
     public Reading<ProcessList>? Resolve()
     {
-        if (_unnamedByCpu is not { } cpu || _unnamedByMemory is not { } memory) return null;
-        _unnamedByCpu = _unnamedByMemory = null;
-        return new ProcessList(Named(cpu), Named(memory));
+        if (_unnamedByCpu is not { } cpu || _unnamedByMemory is not { } memory || _plainByCpu is not { } plainCpu || _plainByMemory is not { } plainMemory) return null;
+        Forget();
+        int icons = ProcessIcons.Prepared;
+        var byCpu = Named(cpu); var byMemory = Named(memory);
+        bool same = ProcessIcons.Prepared == icons && Same(byCpu, plainCpu) && Same(byMemory, plainMemory);
+        if (same) return null;
+        return new ProcessList(byCpu, byMemory);
     }
+    private static bool Same(List<ProcessSample> named, List<ProcessSample> plain)
+        => named.Count == plain.Count && named.Zip(plain).All(pair => pair.First.Name == pair.Second.Name && pair.First.Path == pair.Second.Path);
 
     // Without looking anything up: what an earlier list found, else the executable's file name without ".exe".
     private List<ProcessSample> Plain(List<ProcessSample> entries) => entries.Select(entry =>

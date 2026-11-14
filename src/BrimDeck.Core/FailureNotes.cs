@@ -20,9 +20,9 @@ public sealed class FailureNotes(Func<double> clock, Action<string> write, doubl
         lock (_gate)
         {
             if (_last.TryGetValue((source, kind), out var at) && now - at < quietSeconds) return false;
-            if (_last.Count >= Kept && !_last.ContainsKey((source, kind)))
-                foreach (var old in _last.Where(pair => now - pair.Value >= quietSeconds).Select(pair => pair.Key).ToList()) _last.Remove(old);
-            if (_last.Count >= Kept) return false;
+            if (_last.Count >= Kept)
+                foreach (var old in _last.Where(pair => now - pair.Value >= quietSeconds && pair.Key != (source, kind)).Select(pair => pair.Key).ToList()) _last.Remove(old);
+            if (_last.Count >= Kept && !_last.ContainsKey((source, kind))) return false;
             _last[(source, kind)] = now;
         }
         write($"{source}: {text}");

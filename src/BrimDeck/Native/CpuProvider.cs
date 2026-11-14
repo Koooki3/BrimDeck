@@ -114,6 +114,7 @@ internal sealed class CpuProvider
     // Idle, kernel and user time of each processor of the current group.
     private static (long, long, long)[]? KernelTimes()
     {
+        // The first processor group only (at most 64 logical processors); the counters, once they give readings, cover every group.
         int count = Math.Min(Environment.ProcessorCount, 64);
         const int Entry = 48;
         var buffer = Marshal.AllocHGlobal(count * Entry);

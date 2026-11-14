@@ -475,11 +475,15 @@ internal static class ProcessIcons
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ImageSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
 
     public static void Clear() => Cache.Clear();
+    // How many icons were read (Prepare, past the cache), for telling whether a list gained any.
+    public static int Prepared => Volatile.Read(ref _prepared);
+    private static int _prepared;
     public static ImageSource? For(string? path) => !string.IsNullOrEmpty(path) && Cache.TryGetValue(path, out var icon) ? icon : null;
 
     public static void Prepare(string? path)
     {
         if (string.IsNullOrEmpty(path) || Cache.ContainsKey(path)) return;
+        Interlocked.Increment(ref _prepared);
         ImageSource? icon = null;
         var info = new ShellFileInfo();
         // The 32 px icon is drawn at 16 DIP, so it stays sharp on scaled displays.

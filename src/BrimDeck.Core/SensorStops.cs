@@ -24,9 +24,8 @@ public static class SensorStops
     public const int StuckSeconds = 10;
     // The first readings of a device in a run are marked on disk; the later ones only watched for StuckSeconds. A drive's temperature
     // is asked every 30 seconds and marked every time; the others are asked every second or two, too often to write each time, and
-    // a driver that cannot answer them fails on the first ones. Each mark is two written-through flushes, about 14 ms, on the sampling
-    // thread, so only the first few are made.
-    public const int MarkedReadings = 3;
+    // a driver that cannot answer them fails on the first ones.
+    public const int MarkedReadings = 20;
 
     // Raised by one whenever a reading is asked in a new way, so the stops recorded for the old way no longer hold and it is tried again.
     public static int Method(GuardedReading reading) => reading switch

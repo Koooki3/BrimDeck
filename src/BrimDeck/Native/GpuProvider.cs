@@ -26,6 +26,9 @@ internal sealed class GpuProvider
 
     public GpuProvider(PdhQuery? pdh) => _pdh = pdh;
 
+    // Lists the adapters now rather than with the first reading (the smooth memory mode does it at the start, off the page's way).
+    public void Describe() => _descriptions ??= new GpuDescriptions(GpuAdapters.Read, Now());
+
     // The counters are in the query only while something shows an adapter: the engine counter has an instance per process and engine,
     // often thousands, and is the costliest part of a collection. Called on every tick, before the collection. Whether the counters
     // have just joined the query (they need a first collection).
@@ -48,7 +51,8 @@ internal sealed class GpuProvider
         var engines = _pdh!.Read(EnginePath);
         if (engines.Count == 0) return Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.Waiting);
         var totals = _counters.Sum(engines, _memory ? _pdh.Read(MemoryPath) : [], _shared ? _pdh.Read(SharedPath) : []);
-        var descriptions = _descriptions ??= new GpuDescriptions(GpuAdapters.Read, Now());
+        Describe();
+        var descriptions = _descriptions!;
         var adapters = descriptions.For(totals.Keys, Now());
         var samples = GpuReadings.Samples(totals, adapters, descriptions.Described, Why.NoGpuMemory);
         return samples.Count > 0 ? samples : Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.NoGpu);
