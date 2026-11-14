@@ -60,6 +60,35 @@ internal static class CpuProviderChecks
         check("cpu: the first figure from the kernel's times covers a fresh window, not the time the counters were giving the readings",
             resumed.TryGet(out var c) && c.Cores.Count == 4 && c.Cores.All(core => Math.Abs(core.Usage - .2) < 1e-9));
 
+        // The processor was not read for a while and is read again (CpuProvider.Prime): the counters' and the times' windows from before
+        // cover the whole time off, so the reading that sets the baselines is not given and the next one covers only the time since.
+        var restartCounters = new Counters();
+        var restart = new CpuProvider(restartCounters, Times);
+        restart.Attach();
+        restartCounters.Values[BusyPath] = [("0,0", 40), ("0,1", 60)];
+        restart.Sample(true);
+        // Over the time off the counters read an average of the whole stretch.
+        restartCounters.Values[BusyPath] = [("0,0", 10), ("0,1", 10)];
+        restart.Prime(true);
+        check("cpu: after a restart the last reading is waiting, not the average over the time off", !restart.Sample(false).HasValue);
+        restartCounters.Values[BusyPath] = [("0,0", 80), ("0,1", 90)];
+        check("cpu: the first figure after a restart comes from the new window alone",
+            restart.Sample(true).TryGet(out var fresh) && Math.Abs(fresh.Cores[0].Usage - .8) < 1e-9 && Math.Abs(fresh.Cores[1].Usage - .9) < 1e-9);
+        restartCounters.Values[BusyPath] = [("0,0", 10), ("0,1", 10)];
+        restart.Prime(true);
+        restartCounters.Values.Remove(BusyPath);
+        check("cpu: after a restart a counter that gives nothing does not bring back the shares read over the time off", !restart.Sample(true).HasValue);
+
+        var offTimes = new CpuProvider(new Counters(), Times);
+        Advance(50, 50); offTimes.Sample(false);
+        Advance(25, 75); offTimes.Sample(false);
+        // A long time off: the times moved far since the baseline.
+        Advance(900, 100);
+        offTimes.Prime(false);
+        Advance(20, 80);
+        check("cpu: kernel times: the first figure after a restart covers only the time since it, not the time off",
+            offTimes.Sample(false).TryGet(out var window) && window.Cores.All(core => Math.Abs(core.Usage - .2) < 1e-9));
+
         // The real counters and times on this machine: only what holds whatever the load (structure, never values).
         using var pdh = new PdhQuery();
         var real = new CpuProvider(pdh);

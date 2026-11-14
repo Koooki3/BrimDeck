@@ -167,10 +167,12 @@ internal sealed class SystemSampler : IDisposable
     // page knows early how many lines it needs for them. frames: a collapsed row or an open page shows the frame rate. gpu: the graphics
     // adapters (the page, the row's GPU reading, the power).
     // Turning the network off is noted here, not only seen as the flag: off and on again between two collections still starts over.
-    private volatile bool _networkRestart;
+    // The processor likewise: its counters and times kept their baseline while it was off, so the first reading after would cover the whole time off.
+    private volatile bool _networkRestart, _cpuRestart;
     public void SetReads(bool cpu, bool memory, bool network)
     {
         if (_readNetwork && !network) _networkRestart = true;
+        if (_readCpu && !cpu) _cpuRestart = true;
         _readCpu = cpu; _readMemory = memory; _readNetwork = network;
     }
     public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false, bool frames = false, bool gpu = false)
@@ -375,7 +377,11 @@ internal sealed class SystemSampler : IDisposable
             _history.Enqueue((rates.DownBytesPerSecond, rates.UpBytesPerSecond));
         }
         bool temperatures = _temperatures;
-        var cpu = !_readCpu ? Reading<CpuSample>.Unavailable(Why.Waiting) : cpuSoon ? _lastCpu : _cpu!.Sample(cpuCollected); var gpus = gpuSoon ? _lastGpus : _gpu.Sample(gpuCollected);
+        // The processor was off and is read again: this reading only sets the baselines (CpuProvider.Prime) and is shown as waiting.
+        if (!_readCpu) _cpuRestart = true;
+        bool cpuStart = _readCpu && _cpuRestart && !cpuSoon;
+        if (cpuStart) _cpuRestart = false;
+        var cpu = !_readCpu ? Reading<CpuSample>.Unavailable(Why.Waiting) : cpuStart ? PrimeCpu(cpuCollected) : cpuSoon ? _lastCpu : _cpu!.Sample(cpuCollected); var gpus = gpuSoon ? _lastGpus : _gpu.Sample(gpuCollected);
         _lastCpu = cpu; _lastGpus = gpus;
         // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted or a better source gives them.
         if (_zones!.Sample(temperatures && !_processorHeat && counters, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
@@ -461,6 +467,7 @@ internal sealed class SystemSampler : IDisposable
         if (automatic && shown.Gpu.TryGet(out var gpu)) Volatile.Write(ref _autoGpu, gpu.Luid);
         return temperatures ? WithTemperature(shown, now) : shown;
     }
+    private Reading<CpuSample> PrimeCpu(bool collected) { _cpu!.Prime(collected); return Reading<CpuSample>.Unavailable(Why.Waiting); }
     // The shown adapter's temperature (GpuTemperatures.ReadFor): the chosen adapter's own, or, where it has no sensor, that of an
     // adapter in use that has one, named and marked with its kind. Only adapters in use are asked for another's sake.
     private MonitorSnapshot WithTemperature(MonitorSnapshot snapshot, double now)

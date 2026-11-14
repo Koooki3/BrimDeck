@@ -22,7 +22,7 @@ internal sealed class CpuProvider
     private bool _busyReads;
     private readonly Dictionary<(int Group, int Number), (int Group, CoreTier Tier)> _kinds = CpuTopology.Read();
     private readonly Dictionary<int, double> _highest = [];
-    private readonly ProcessorShares _shares = new();
+    private ProcessorShares _shares = new();
     private (long Idle, long Kernel, long User)[] _previousTimes = [];
     private Reading<CpuSample> _last = Reading<CpuSample>.Unavailable(Why.Waiting);
 
@@ -104,6 +104,18 @@ internal sealed class CpuProvider
 
     // The readings paused: the last reading is old and is not given again.
     public void Forget() => _last = Reading<CpuSample>.Unavailable(Why.Waiting);
+
+    // The readings start again after the processor was not read for a while (the page stopped showing it): what the counters and the
+    // kernel's times hold from before covers the whole time off, so one reading is made to set the baselines and is not given. The
+    // next Sample then covers only the time since this one. pdhCollected: the query was collected for this reading.
+    public void Prime(bool pdhCollected)
+    {
+        _previousTimes = [];
+        Forget();
+        Sample(pdhCollected);
+        _shares = new ProcessorShares();
+        Forget();
+    }
 
     // "0,3" is processor 3 of group 0; "_Total" and "0,_Total" are sums.
     private static Dictionary<(int Group, int Number), double> Processors(IReadOnlyList<(string Instance, double Value)> values)
