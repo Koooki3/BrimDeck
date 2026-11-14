@@ -47,6 +47,8 @@ internal sealed class MonitorStrip : FrameworkElement
     // (empty when one shows), and whether each shows its space and its temperature. _inline: the readings showing both figures
     // side by side rather than one above the other.
     private readonly CompactMonitorItems _usage, _heat, _vram, _inline;
+    // The download and the upload showing the bytes moved since the app began in place of their rate (CompactTraffic).
+    private readonly CompactMonitorItems _total;
     private readonly string[] _letters, _tags;
     private readonly bool[] _letterUsage, _letterHeat;
     // Whether the frame rate shows its program's icon in place of the glyph (CompactFrames).
@@ -80,6 +82,7 @@ internal sealed class MonitorStrip : FrameworkElement
             // settings menu locks the arrangement as soon as it is chosen), so the row does not change its layout when the first figure arrives.
             if (reading.FiguresInLine || reading.Item == CompactMonitorItems.Gpu && CompactFigures.Shows(reading, CompactFigures.Vram)) _inline |= reading.Item;
         }
+        foreach (var reading in readings) if (CompactTraffic.Shows(reading)) _total |= reading.Item;
         var drives = readings.FirstOrDefault(reading => reading.Item == CompactMonitorItems.Storage) ?? new CompactReading { Item = CompactMonitorItems.Storage };
         bool driveUsage = CompactFigures.Shows(drives, CompactFigures.Usage), driveHeat = CompactFigures.Shows(drives, CompactFigures.Temperature);
         if (drives.FiguresInLine) _inline |= CompactMonitorItems.Storage;
@@ -110,11 +113,14 @@ internal sealed class MonitorStrip : FrameworkElement
         // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings. A rate has
         // three digits and a letter, with a point below 100 (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, Look.Primary, 1).WidthIncludingTrailingWhitespace;
-        _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
+        var widths = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
 
             FramesSlot + Math.Round(3 * _scale) + FigureWidth(WidestFrames) + Math.Round(2 * _scale) + SmallWidth(FramesUnit));
+        // A total takes the room of its widest figure ("999M", "99.9M", "99.9G", "999B"), its own rather than the rate's.
+        double totalWidth = Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(Math.Max(text("999M"), text("99.9M")), Math.Max(text("99.9G"), text("999B"))));
+        _width = item => (_total & item) != 0 ? totalWidth : widths(item);
     }
 
     private const string WidestDegrees = "125°", WidestPercent = "100%";
@@ -264,8 +270,12 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Memory when s?.Memory.OrDefault is { } memory: parts.Add(Loc.T("内存 ", "Memory ") + MonitorFormat.Percent(memory.UsedFraction) + "%"); break;
                 case CompactMonitorItems.Gpu when s?.Gpu.OrDefault is { NoReadings: false } gpu: 
                     parts.Add(MonitorSpeech.StripGpu(gpu.Usage, (_values & item) != 0 && (_vram & item) != 0 ? CompactFigures.Memory(item, s)?.Share : null)); break;
-                case CompactMonitorItems.Download when s?.Network.OrDefault is { } down: parts.Add(Loc.T("下载 ", "Download ") + MonitorFormat.Rate(down.DownBytesPerSecond).Text); break;
-                case CompactMonitorItems.Upload when s?.Network.OrDefault is { } up: parts.Add(Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(up.UpBytesPerSecond).Text); break;
+                case CompactMonitorItems.Download when s?.Network.OrDefault is { } down:
+                    if (MonitorSpeech.StripTraffic(true, down.DownBytesPerSecond, down.DownTotalBytes, (_total & item) != 0) is { Length: > 0 } said) parts.Add(said);
+                    break;
+                case CompactMonitorItems.Upload when s?.Network.OrDefault is { } up:
+                    if (MonitorSpeech.StripTraffic(false, up.UpBytesPerSecond, up.UpTotalBytes, (_total & item) != 0) is { Length: > 0 } sent) parts.Add(sent);
+                    break;
                 case CompactMonitorItems.Power when s?.Power.OrDefault is { } power:
                     parts.Add(Loc.T("整机功耗 ", "System power ") + PowerText.Watts(power.Watts) + Loc.T("，", ", ") + (power.Estimated ? Loc.T("估算", "estimated") : Loc.T("实测", "measured"))); break;
                 case CompactMonitorItems.Frames when FrameOf(s) is { } frames: parts.Add(Loc.T("帧率 ", "Frame rate ") + FramesFigure(frames.PerSecond) + " FPS" + Loc.T("，", ", ") + frames.Program); break;
@@ -294,6 +304,13 @@ internal sealed class MonitorStrip : FrameworkElement
     private static string RateFigure(double? rate)
     {
         var q = rate is { } r ? MonitorFormat.CompactRate(r) : new MonitorFormat.Quantity("—", "");
+        return q.Number + q.Unit;
+    }
+    // The bytes moved with a one-letter unit; a dash until the first total is read.
+    private static string TotalFigure(double? bytes)
+    {
+        if (bytes is not { } value) return "\u2014";
+        var q = MonitorFormat.CompactTotal(value);
         return q.Number + q.Unit;
     }
     // Whole degrees with the degree sign, the unit left out for room: "62°". Made once for every degree a reading can have.
@@ -371,8 +388,10 @@ internal sealed class MonitorStrip : FrameworkElement
                     var memory = s?.Memory.OrDefault;
                     Gauge(drawing, dial, left, center, item, _memory.At(now), memory?.UsedFraction, memory is null ? Look.Tertiary : color, level, "M", s, ppd); break;
                 case CompactMonitorItems.Gpu: Gauge(drawing, dial, left, center, item, _gpu.At(now), s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, color, level, "G", s, ppd); break;
-                case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
-                case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
+                case CompactMonitorItems.Download when (_total & item) != 0: Rate(drawing, left, center, MonitorGlyph.Down, TotalFigure(CompactTraffic.Of(item, s)), _colors.At(item, MemoryLevel.Normal), MemoryLevel.Normal, ppd); break;
+                case CompactMonitorItems.Upload when (_total & item) != 0: Rate(drawing, left, center, MonitorGlyph.Up, TotalFigure(CompactTraffic.Of(item, s)), _colors.At(item, MemoryLevel.Normal), MemoryLevel.Normal, ppd); break;
+                case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, RateFigure(s?.Network.OrDefault?.DownBytesPerSecond), color, level, ppd); break;
+                case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, RateFigure(s?.Network.OrDefault?.UpBytesPerSecond), color, level, ppd); break;
                 case CompactMonitorItems.Storage: Drives(drawing, left, center, s, ppd); break;
                 case CompactMonitorItems.Power: Power(drawing, left, center, s?.Power.OrDefault, ppd); break;
                 case CompactMonitorItems.Charge: Charge(drawing, left, center, s?.Battery.OrDefault, _charge.At(now), level, ppd); break;
@@ -506,12 +525,12 @@ internal sealed class MonitorStrip : FrameworkElement
     // levels, as the quota bars' numbers do.
     private string FigureColor(MemoryLevel level, string color) => level == MemoryLevel.Normal ? Look.Primary : color;
 
-    // An arrow and the rate in three significant digits and a letter: "84.2K", "1.24M".
-    private void Rate(DrawingContext drawing, double x, double center, MonitorGlyph glyph, double? rate, string color, MemoryLevel level, double ppd)
+    // An arrow and the rate in three significant digits and a letter ("84.2K", "1.24M"), or the bytes moved ("21.0M", "202M").
+    private void Rate(DrawingContext drawing, double x, double center, MonitorGlyph glyph, string figure, string color, MemoryLevel level, double ppd)
     {
         double size = Math.Round(9 * _scale);
         MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.4 * _scale), glyph, color);
-        var text = MonitorDraw.Text(RateFigure(rate), _font, FigureColor(level, color), ppd);
+        var text = MonitorDraw.Text(figure, _font, FigureColor(level, color), ppd);
         MonitorDraw.BaselineKept(drawing, text, x + size + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 

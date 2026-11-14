@@ -691,8 +691,9 @@ internal sealed class NetworkBlock : FrameworkElement
     public void Set(Reading<NetworkSample> reading, IReadOnlyList<double> down, IReadOnlyList<double> up)
     {
         _rates = reading.OrDefault; _reason = reading.HasValue ? "" : reading.Reason; _down = down; _up = up;
-        string? downText = _rates is { } d && _download ? Loc.T("下载 ", "Download ") + MonitorFormat.Rate(d.DownBytesPerSecond).Text : null;
-        string? upText = _rates is { } u && _upload ? Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(u.UpBytesPerSecond).Text : null;
+        static string Total(double? bytes) => bytes is { } moved ? Loc.T("，累计 ", ", total ") + MonitorFormat.Total(moved).Text : "";
+        string? downText = _rates is { } d && _download ? Loc.T("下载 ", "Download ") + MonitorFormat.Rate(d.DownBytesPerSecond).Text + Total(d.DownTotalBytes) : null;
+        string? upText = _rates is { } u && _upload ? Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(u.UpBytesPerSecond).Text + Total(u.UpTotalBytes) : null;
         ToolTip = _rates is not null ? string.Join(" · ", (_uploadFirst ? new[] { upText, downText } : [downText, upText]).OfType<string>())
             : Loc.T("暂无读数：", "No reading: ") + _reason;
         InvalidateVisual();
@@ -707,14 +708,16 @@ internal sealed class NetworkBlock : FrameworkElement
         if (_download && _upload)
         {
             double downAt = _uploadFirst ? half + 12 : 0, upAt = _uploadFirst ? 0 : half + 12;
-            Half(drawing, downAt, half, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _down, _colors.Download, ppd);
-            Half(drawing, upAt, half, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _up, _colors.Upload, ppd);
+            Half(drawing, downAt, half, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _rates?.DownTotalBytes, _down, _colors.Download, ppd);
+            Half(drawing, upAt, half, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _rates?.UpTotalBytes, _up, _colors.Upload, ppd);
         }
-        else if (_download) Half(drawing, 0, w, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _down, _colors.Download, ppd);
-        else Half(drawing, 0, w, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _up, _colors.Upload, ppd);
+        else if (_download) Half(drawing, 0, w, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _rates?.DownTotalBytes, _down, _colors.Download, ppd);
+        else Half(drawing, 0, w, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _rates?.UpTotalBytes, _up, _colors.Upload, ppd);
     }
 
-    private void Half(DrawingContext drawing, double left, double width, double line, MonitorGlyph glyph, double? rate, IReadOnlyList<double> history, string color, double ppd)
+    // total: the bytes moved since the app began reading, at the end of the half in the caption's type where there is room for it (with
+    // its label if that fits, else the figure alone), and the curve ends before it.
+    private void Half(DrawingContext drawing, double left, double width, double line, MonitorGlyph glyph, double? rate, double? total, IReadOnlyList<double> history, string color, double ppd)
     {
         double badge = Math.Round(_body + 5), baseline = Math.Round(line / 2 + _body * .38);
         // The arrow in the room a dial takes, as large against it as the collapsed strip draws it, so the figures line up with memory's.
@@ -726,12 +729,26 @@ internal sealed class NetworkBlock : FrameworkElement
         MonitorDraw.Baseline(drawing, number, x, baseline);
         x += number.WidthIncludingTrailingWhitespace;
         if (q.Unit.Length > 0) { var unit = MonitorDraw.Text(q.Unit, _caption, Look.Tertiary, ppd); MonitorDraw.Baseline(drawing, unit, x + 3, baseline); x += 3 + unit.WidthIncludingTrailingWhitespace; }
+        double reserved = 0;
+        if (total is { } moved)
+        {
+            var figure = MonitorFormat.Total(moved).Text;
+            foreach (var label in new[] { Loc.T("累计 ", "Total ") + figure, figure })
+            {
+                var drawn = MonitorDraw.Text(label, _caption, Look.Tertiary, ppd);
+                double drawnWidth = Math.Ceiling(drawn.WidthIncludingTrailingWhitespace);
+                if (x + 8 + drawnWidth > left + width) continue;
+                MonitorDraw.Baseline(drawing, drawn, left + width - drawnWidth, baseline);
+                reserved = drawnWidth + 8;
+                break;
+            }
+        }
         if (_mode == MetricsMode.Line || history.Count < 3) return;
         // The sparkline takes the rest of the half after the rate, centred on the line and as tall as the power line's curve (a drive
         // line less 4), so the page's small curves are one size. Measured before a Rect is made: a Rect does not take a negative size,
         // and a narrow half leaves none.
         double start = Math.Max(x + 10, left + width * .45);
-        double areaWidth = left + width - start, areaHeight = Math.Min(line - 4, Math.Ceiling(_body * 1.5) - 4), areaTop = Math.Round((line - areaHeight) / 2);
+        double areaWidth = left + width - reserved - start, areaHeight = Math.Min(line - 4, Math.Ceiling(_body * 1.5) - 4), areaTop = Math.Round((line - areaHeight) / 2);
         if (areaWidth >= 24 && areaHeight >= 6) Sparkline(drawing, new Rect(start, areaTop, areaWidth, areaHeight), history, color);
     }
 

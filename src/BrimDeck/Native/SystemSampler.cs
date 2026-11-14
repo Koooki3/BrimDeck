@@ -333,6 +333,8 @@ internal sealed class SystemSampler : IDisposable
     private void Rest()
     {
         ForgetWindowed();
+        // Sampling paused as a whole: the network's baseline goes (the totals stay), so the time paused is not counted when it resumes.
+        _network.Forget();
         _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _bridges.Rest();
         _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
         _processes.Forget();
@@ -606,19 +608,22 @@ internal sealed class NetworkProvider : IDisposable
     private List<ulong> _adapters = [];
     private int _sinceList = Relist;
     private double? _time;
+    private readonly TrafficTotals _totals = new();
     private readonly IntPtr _row = Marshal.AllocHGlobal(RowSize);
 
     // Starts over: the next sample only sets the baseline, and the adapters are listed again.
-    public void Forget() { _previous = []; _time = null; _sinceList = Relist; }
+    // The sums of the traffic stay (TrafficTotals), but not the time the network was not read.
+    public void Forget() { _previous = []; _time = null; _sinceList = Relist; _totals.Forget(); }
 
     public Reading<NetworkSample> Sample(double now)
     {
         var current = _sinceList++ >= Relist ? List() : Read();
         if (current is null) return Reading<NetworkSample>.Unavailable(Why.NoNetwork);
         // No physical adapter is not the same as no traffic.
-        if (current.Count == 0) { _previous = []; _time = null; return Reading<NetworkSample>.Unavailable(Why.NoAdapter); }
+        if (current.Count == 0) { _previous = []; _time = null; _totals.Forget(); return Reading<NetworkSample>.Unavailable(Why.NoAdapter); }
         var previous = _previous; var then = _time;
         _previous = current; _time = now;
+        var (downTotal, upTotal) = _totals.Add(current, now);
         if (then is not { } start || now - start <= 0) return Reading<NetworkSample>.Unavailable(Why.Waiting);
         double seconds = now - start, down = 0, up = 0;
         foreach (var (luid, (received, sent)) in current)
@@ -627,7 +632,7 @@ internal sealed class NetworkProvider : IDisposable
             down += MonitorMetrics.Rate(before.Received, received, seconds) ?? 0;
             up += MonitorMetrics.Rate(before.Sent, sent, seconds) ?? 0;
         }
-        return new NetworkSample(down, up);
+        return new NetworkSample(down, up) { DownTotalBytes = downTotal, UpTotalBytes = upTotal };
     }
 
     // Every interface, keeping the physical adapters and their counters.

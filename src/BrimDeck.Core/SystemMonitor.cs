@@ -91,7 +91,13 @@ public sealed record MemorySample(ulong Total, ulong Used, ulong CommitUsed, ulo
         : UsedFraction >= ElevatedUsed || CommitFraction >= ElevatedCommit ? MemoryLevel.Elevated : MemoryLevel.Normal;
 }
 
-public sealed record NetworkSample(double DownBytesPerSecond, double UpBytesPerSecond);
+// DownTotalBytes and UpTotalBytes: the bytes moved since the app began reading the network (TrafficTotals); null for a sample that
+// carries none.
+public sealed record NetworkSample(double DownBytesPerSecond, double UpBytesPerSecond)
+{
+    public double? DownTotalBytes { get; init; }
+    public double? UpTotalBytes { get; init; }
+}
 
 // The level of each reading of the collapsed strip, by one rule per kind of reading: a share (CPU, GPU, each core column,
 // memory in use) against ElevatedShare and CriticalShare, memory also by its commit charge (MemorySample.Level), and a rate

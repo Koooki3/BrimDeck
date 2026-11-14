@@ -45,8 +45,8 @@ public enum CompactMonitorItems
 // the warning and critical levels. They are kept to read older files, which DeckSettings.Normalize moves into the custom
 // scheme and the level colors (CompactMonitor.MoveColors), and are not written.
 // Figures: what CPU, GPU and the drives show after their glyph, the share in use and the temperature, and for the GPU also its
-// memory's share (CompactFigures), and what the
-// frame rate shows of its program, its icon or not (CompactFrames); Sources:
+// memory's share (CompactFigures), what the frame rate shows of its program, its icon or not (CompactFrames), and what download and
+// upload show, the rate or the bytes moved since the app began (CompactTraffic); Sources:
 // the drive letters the drives show (CompactSources). Both chosen in the table's menus, null for the default. FiguresInLine:
 // both figures side by side in the row's type rather than one above the other in two smaller lines.
 public sealed class CompactReading
@@ -161,7 +161,7 @@ public static class CompactMonitor
         var list = (readings ?? []).OfType<CompactReading>().Where(reading => Order.Contains(reading.Item)).DistinctBy(reading => reading.Item)
             .Select(reading => new CompactReading { Item = reading.Item, Visible = reading.Visible, ShowValue = reading.ShowValue, Color = Valid(reading.Color),
                 ExtraColors = Extra(reading), WarningColor = Valid(reading.WarningColor), CriticalColor = Valid(reading.CriticalColor),
-                Figures = reading.Item == CompactMonitorItems.Frames ? CompactFrames.Normalize(reading.Figures) : CompactFigures.Normalize(reading.Item, reading.Figures), FiguresInLine = CompactFigures.Has(reading.Item) && reading.FiguresInLine, Sources = CompactSources.Normalize(reading.Item, reading.Sources) }).ToList();
+                Figures = reading.Item == CompactMonitorItems.Frames ? CompactFrames.Normalize(reading.Figures) : CompactTraffic.Has(reading.Item) ? CompactTraffic.Normalize(reading.Item, reading.Figures) : CompactFigures.Normalize(reading.Item, reading.Figures), FiguresInLine = CompactFigures.Has(reading.Item) && reading.FiguresInLine, Sources = CompactSources.Normalize(reading.Item, reading.Sources) }).ToList();
         list.AddRange(Order.Where(item => list.All(reading => reading.Item != item)).Select(item => new CompactReading { Item = item, Visible = false }));
         return list;
     }

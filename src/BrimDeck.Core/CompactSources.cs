@@ -52,6 +52,27 @@ public static class CompactFigures
     };
 }
 
+// What the collapsed row's download and upload show (CompactReading.Figures of those readings): their rate, or without a choice, or the
+// bytes moved since the app began reading the network (Total). One of the two. The page's network block shows both.
+public static class CompactTraffic
+{
+    public const string Total = "Total";
+    public static bool Has(CompactMonitorItems item) => item is CompactMonitorItems.Download or CompactMonitorItems.Upload;
+    public static bool Shows(CompactReading reading) => Has(reading.Item) && reading.Figures?.Contains(Total) == true;
+
+    // The total or the default (null); anything else is dropped, and a reading that has none keeps none.
+    public static List<string>? Normalize(CompactMonitorItems item, IEnumerable<string?>? figures) =>
+        Has(item) && figures?.Any(chosen => string.Equals(chosen?.Trim(), Total, StringComparison.OrdinalIgnoreCase)) == true ? [Total] : null;
+
+    // The bytes moved in this direction in this snapshot; null while the network has no reading, or none yet.
+    public static double? Of(CompactMonitorItems item, MonitorSnapshot? snapshot) => item switch
+    {
+        CompactMonitorItems.Download => snapshot?.Network.OrDefault?.DownTotalBytes,
+        CompactMonitorItems.Upload => snapshot?.Network.OrDefault?.UpTotalBytes,
+        _ => null
+    };
+}
+
 // Whether the collapsed frame rate shows the icon of the program it counts in place of the screen glyph (CompactReading.Figures of
 // the frame rate: the icon, or an empty choice for the glyph). Without a choice, the icon. The desktop and a program without an
 // icon show the glyph. Its name shows on the page only: a name of any length in the row would need a room of fixed width, and leave

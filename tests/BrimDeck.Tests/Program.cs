@@ -88,6 +88,7 @@ try
     SystemMonitorTests.Run(Check);
     ExpandedMonitorTests.Run(Check);
     MonitorSpeechTests.Run(Check);
+    TrafficTotalTests.Run(Check);
     CompactReadingTests.Run(Check);
     CoreMatrixTests.Run(Check);
     TemperatureTests.Run(Check);
