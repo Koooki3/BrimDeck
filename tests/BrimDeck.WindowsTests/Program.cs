@@ -82,6 +82,7 @@ internal static class Program
                 PowerChecks.Run(Check);
                 DeviceChecks.Run(Check);
             }
+            CpuProviderChecks.Run(Check);
             SensorGuardChecks.Run(Check);
             FontFollowTests.Run(Check);
 

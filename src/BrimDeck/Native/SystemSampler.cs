@@ -60,6 +60,8 @@ internal sealed class SystemSampler : IDisposable
     // The whole machine's power and the machine's battery (PowerProvider, BatteryProvider), made on the sampling thread.
     private PowerProvider? _power;
     private BatteryProvider? _battery;
+    // The performance counters join their queries after the first snapshot (CpuProvider.Attach): the first one added takes half a second of
+    // CPU, so the first readings are made without them, the processor's from the kernel's times.
     private readonly Queue<double> _powerHistory = new(HistoryLength);
     private readonly PowerStats _powerStats = new(HistoryLength);
     // Where the last whole-machine figure came from: the peak and mean (of the curve's readings) start over when it changes (plugged in
@@ -204,7 +206,7 @@ internal sealed class SystemSampler : IDisposable
         static PdhQuery? Query()
         {
             try { return new PdhQuery(); }
-            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { Debug.WriteLine(ex); return null; }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { MonitorLog.Note("performance counters", ex); return null; }
         }
         Action stuck = () => Replace(generation);
         _cpuPdh = Query(); _gpuPdh = Query(); _zonesPdh = Query(); _meterPdh = Query();
@@ -215,13 +217,17 @@ internal sealed class SystemSampler : IDisposable
         _zones = new ThermalZones(_zonesPdh, stuck);
         _power = new PowerProvider(_meterPdh, stuck);
         _gpuTemperatures = new GpuTemperatures(stuck);
-        _battery = new BatteryProvider();
         bool primed = false, first = false, holdGpu = false;
         while (!_disposed && Volatile.Read(ref _generation) == generation)
         {
             try
             {
-                if (!_wanted) { primed = false; Rest(); _wake.WaitOne(); continue; }
+                if (!_wanted)
+                {
+                    // Started without a demand (Warm): the counters are set up now, where nothing waits for them.
+                    if (!_cpu!.Attached) AttachCounters();
+                    primed = false; Rest(); _wake.WaitOne(); continue;
+                }
                 bool primeCounters = _primeCounters;
                 _primeCounters = false;
                 if (!primed || _primeProcesses || primeCounters)
@@ -233,7 +239,8 @@ internal sealed class SystemSampler : IDisposable
                     bool primeProcesses = _primeProcesses;
                     _primeProcesses = false;
                     // Readings starting (the monitor opened or came back): a hardware monitor started meanwhile is looked for again.
-                    if (!primed) { _bridges.Rescan(); Collect(listProcesses: true); holdGpu = false; }
+                    // What the first reading already holds (the memory, the drives, the battery) is shown at once; the rest follows.
+                    if (!primed) { _bridges.Rescan(); Publish(Collect(listProcesses: true)); holdGpu = false; }
                     else
                     {
                         // Adapters already read before this priming keep their last reading in the snapshot after it (Collect): a
@@ -249,14 +256,16 @@ internal sealed class SystemSampler : IDisposable
                 var snapshot = Collect(listProcesses: first, holdGpu);
                 first = false; holdGpu = false;
                 if (_disposed) break;
-                // A reading taken just as the sampler paused would bring back figures that then grow old. The adapter shown is
-                // resolved again here: a reading taken before the user chose another adapter would otherwise bring the old one back.
-                _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+                Publish(snapshot);
+                // The programs' names and icons, looked up after the first list was shown with the executables' names.
+                if (_processes.Resolve() is { } named)
                 {
-                    if (_disposed || !_wanted) return;
-                    Latest = WithGpu(snapshot, Volatile.Read(ref _autoGpu), out _);
-                    Updated?.Invoke(Latest);
-                });
+                    _lastProcesses = named;
+                    Publish(snapshot with { Processes = named });
+                }
+                // The counters join now, after the first figures: their first collection starts the processor's and the adapters' windows,
+                // which the next pass primes as for counters just asked for.
+                if (!_cpu!.Attached) { AttachCounters(); _primeCounters = true; continue; }
                 Pause(_intervalMilliseconds);
             }
             // The driver answered after this thread was replaced: the new thread reads now.
@@ -264,13 +273,30 @@ internal sealed class SystemSampler : IDisposable
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 // A reading that fails in an unexpected way is skipped; the page keeps its last figures.
-                Debug.WriteLine(ex);
+                MonitorLog.Note("sampler", ex);
                 _wake.WaitOne(_intervalMilliseconds);
             }
         }
     }
 
     private static double Now() => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
+
+    // A reading taken just as the sampler paused would bring back figures that then grow old. The adapter shown is resolved again here:
+    // a reading taken before the user chose another adapter would otherwise bring the old one back.
+    private void Publish(MonitorSnapshot snapshot) => _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+    {
+        if (_disposed || !_wanted) return;
+        Latest = WithGpu(snapshot, Volatile.Read(ref _autoGpu), out _);
+        Updated?.Invoke(Latest);
+    });
+
+    // Adds the processor's counters, which makes the process load the performance library (the first counter of a process costs
+    // 450 to 880 ms of CPU), and has the query collect once. Called on the sampling thread.
+    private void AttachCounters()
+    {
+        _cpu!.Attach();
+        _cpuAt = Now();
+    }
 
     // Waits the whole time unless there is something new to do: the sampler pausing or stopping, or a new priming. Opening the page
     // wakes the thread twice (SetExtras, then SetDemand); a pass that already took both requests left the second wake behind, which
@@ -298,6 +324,7 @@ internal sealed class SystemSampler : IDisposable
     // the adapters' did.
     private bool PrimeCounters()
     {
+        if (!_cpu!.Attached) return false;
         _power!.Prepare(_powerWanted);
         if (!_gpu!.Want(_gpuWanted)) return false;
         _gpuPdh?.Collect(); _gpuJoinedAt = _gpuAt = Now();
@@ -309,20 +336,23 @@ internal sealed class SystemSampler : IDisposable
     private MonitorSnapshot Collect(bool listProcesses, bool holdGpu = false)
     {
         double now = Now();
-        bool meter = _power!.Prepare(_powerWanted);
-        bool gpuJoined = _gpu!.Want(_gpuWanted);
+        // Before the counters have joined (the first readings) only what needs none is read: the kernel's times stand in for the processor.
+        bool counters = _cpu!.Attached;
+        bool meter = _power!.Prepare(_powerWanted && counters);
+        bool gpuJoined = _gpu!.Want(_gpuWanted && counters);
         if (gpuJoined) _gpuJoinedAt = now;
         // A collection this soon after the last is skipped, and the processor and the adapters keep the readings they gave then.
         bool cpuSoon = now - _cpuAt < ShortestCounterSeconds;
         bool gpuSoon = now - _gpuAt < ShortestCounterSeconds || holdGpu && !gpuJoined && _gpuWanted && _gpuAt > _gpuJoinedAt && _lastGpus.HasValue;
-        bool cpuCollected = _readCpu && !cpuSoon && _cpuPdh?.Collect() == true;
-        bool gpuCollected = !gpuSoon && _gpuWanted && _gpuPdh?.Collect() == true;
+        bool cpuCollected = _readCpu && !cpuSoon && counters && _cpuPdh?.Collect() == true;
+        bool gpuCollected = !gpuSoon && _gpuWanted && counters && _gpuPdh?.Collect() == true;
         if (!cpuSoon) _cpuAt = now;
         if (!gpuSoon) _gpuAt = now;
         if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; }
         else if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
         {
-            _lastProcesses = _processes.Sample(now); _processesAt = now;
+            // Named after the first list is shown (Resolve): the executables' descriptions and icons take 200 to 480 ms on the first list.
+            _lastProcesses = _processes.Sample(now, name: !listProcesses); _processesAt = now;
         }
         // While network is not read the provider forgets its baseline and the history goes, so the first rate after it turns on is not an
         // average over the time off and old readings do not join new ones.
@@ -337,7 +367,7 @@ internal sealed class SystemSampler : IDisposable
         var cpu = !_readCpu ? Reading<CpuSample>.Unavailable(Why.Waiting) : cpuSoon ? _lastCpu : _cpu!.Sample(cpuCollected); var gpus = gpuSoon ? _lastGpus : _gpu.Sample(gpuCollected);
         _lastCpu = cpu; _lastGpus = gpus;
         // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted or a better source gives them.
-        if (_zones!.Sample(temperatures && !_processorHeat, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
+        if (_zones!.Sample(temperatures && !_processorHeat && counters, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
         // The processor's own sensors through the sensor service where enhanced sensors are set up, else a hardware monitor the user
         // runs; either stands in front of the zones. A hardware monitor is asked only for what the service did not give.
         var report = _sensors!.Read(temperatures || _powerWanted, now) is { Status: SensorStatus.Ok } ok ? ok : null;
@@ -366,7 +396,9 @@ internal sealed class SystemSampler : IDisposable
             // Apart from the rest: a battery or a driver that fails in an unexpected way costs these two readings, never the page's.
             try
             {
-                var (batteryInputs, batterySample) = _battery!.Sample();
+                // Made when a reading first asks for it: loading the battery classes costs 17 to 22 ms (more on a first run).
+                _battery ??= new BatteryProvider();
+                var (batteryInputs, batterySample) = _battery.Sample();
                 battery = batterySample;
                 if (powerWanted)
                 {
@@ -385,7 +417,7 @@ internal sealed class SystemSampler : IDisposable
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Debug.WriteLine(ex);
+                MonitorLog.Note("battery and power", ex);
                 power = Reading<PowerSample>.Unavailable(ex.Message); battery = Reading<BatterySample>.Unavailable(ex.Message);
             }
         }
@@ -492,159 +524,6 @@ internal sealed class SystemSampler : IDisposable
         // The thread may be inside a reading; it ends on its own as a background thread if it does not stop in time.
         if (_thread?.Join(1000) != false) { _cpuPdh?.Dispose(); _gpuPdh?.Dispose(); _zonesPdh?.Dispose(); _meterPdh?.Dispose(); _power?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures?.Dispose(); _wake.Dispose(); }
     }
-}
-
-// Per logical processor: usage, and the current frequency against the highest seen so far. Usage is the share of time
-// the processor was busy, which Task Manager shows on Windows 11 since 24H2; the processor utility it showed before
-// scales that by the frequency and reads well above it while the cores boost. Without performance counters the same
-// busy time comes from the kernel.
-internal sealed class CpuProvider
-{
-    private const string BusyPath = @"\Processor Information(*)\% Processor Time";
-    private const string PerformancePath = @"\Processor Information(*)\% Processor Performance";
-    private const string BasePath = @"\Processor Information(*)\Processor Frequency";
-    private readonly PdhQuery? _pdh;
-    private readonly bool _busy, _frequency;
-    // Whether the busy-time counter gave readings last time; until it does, or once it stops, the kernel's times stand in.
-    private bool _busyReads;
-    private readonly Dictionary<(int Group, int Number), (int Group, CoreTier Tier)> _kinds = CpuTopology.Read();
-    private readonly Dictionary<int, double> _highest = [];
-    private readonly ProcessorShares _shares = new();
-    private (long Idle, long Kernel, long User)[] _previousTimes = [];
-    private Reading<CpuSample> _last = Reading<CpuSample>.Unavailable(Why.Waiting);
-
-    public CpuProvider(PdhQuery? pdh)
-    {
-        _pdh = pdh;
-        _busy = pdh?.Add(BusyPath) == true;
-        _frequency = pdh?.Add(PerformancePath) == true & pdh?.Add(BasePath) == true;
-    }
-
-    public Reading<CpuSample> Sample(bool pdhCollected)
-    {
-        // The kernel's times are only the fallback; while the busy-time counter gives readings they are not read at all.
-        var times = _busyReads ? null : KernelTimes();
-        var timeUsage = new Dictionary<int, double>();
-        if (times is not null)
-        {
-            if (_previousTimes.Length == times.Length)
-                for (int i = 0; i < times.Length; i++) if (MonitorMetrics.Usage(_previousTimes[i], times[i]) is { } usage) timeUsage[i] = usage;
-            _previousTimes = times;
-        }
-        var busy = _shares.Fill(pdhCollected && _busy ? Processors(_pdh!.Read(BusyPath)) : []);
-        _busyReads = busy.Count > 0;
-        IReadOnlyList<(string, double)> performanceValues = pdhCollected && _frequency ? _pdh!.Read(PerformancePath) : [];
-        IReadOnlyList<(string, double)> nominalValues = pdhCollected && _frequency ? _pdh!.Read(BasePath) : [];
-        var (performance, nominal) = (Processors(performanceValues), Processors(nominalValues));
-
-        // The processors in their logical order. The kernel's times cover the first processor group only, so the counters
-        // decide the list when they are there.
-        var processors = busy.Count > 0 ? busy.Keys.OrderBy(key => key).ToList()
-            : Enumerable.Range(0, times?.Length ?? 0).Select(index => (Group: 0, Number: index)).ToList();
-        // A counter that gives nothing this once keeps the last reading, so the temperature that rides on it does not drop to a dash.
-        if (processors.Count == 0 || busy.Count == 0 && timeUsage.Count == 0) return _last;
-        var counters = new Dictionary<int, int>();
-        var cores = new List<CoreSample>(processors.Count);
-        for (int logical = 0; logical < processors.Count; logical++)
-        {
-            var key = processors[logical];
-            var (group, tier) = _kinds.TryGetValue(key, out var kind) ? kind : (0, CoreTier.Unknown);
-            double usage = busy.TryGetValue(key, out var percent) ? Math.Clamp(percent / 100, 0, 1)
-                : timeUsage.TryGetValue(key.Number, out var kernelBusy) && key.Group == 0 ? kernelBusy : 0;
-            Reading<double> frequency = Reading<double>.Unavailable(_frequency ? Why.NoFrequency : Why.NoCounters);
-            double? top = null;
-            if (performance.TryGetValue(key, out var share) && nominal.TryGetValue(key, out var baseMhz) && baseMhz > 0)
-            {
-                double mhz = baseMhz * share / 100;
-                frequency = mhz;
-                // Turbo has no reported ceiling; the tick is drawn against the highest frequency this kind of core has reached.
-                _highest[group] = Math.Max(_highest.GetValueOrDefault(group, baseMhz), mhz);
-                top = _highest[group];
-            }
-            int number = counters[group] = counters.GetValueOrDefault(group) + 1;
-            cores.Add(new CoreSample(logical, group, tier, number, usage, frequency, top));
-        }
-        cores.Sort((a, b) => a.Group != b.Group ? a.Group.CompareTo(b.Group) : a.Id.CompareTo(b.Id));
-        var overall = Total(performanceValues) is { } p && Total(nominalValues) is { } n && n > 0 ? Reading<double>.Of(n * p / 100) : Reading<double>.Unavailable(_frequency ? Why.NoFrequency : Why.NoCounters);
-        return _last = new CpuSample(cores, overall);
-    }
-
-    // The readings paused: the last reading is old and is not given again.
-    public void Forget() => _last = Reading<CpuSample>.Unavailable(Why.Waiting);
-
-    // "0,3" is processor 3 of group 0; "_Total" and "0,_Total" are sums.
-    private static Dictionary<(int Group, int Number), double> Processors(IReadOnlyList<(string Instance, double Value)> values)
-    {
-        var result = new Dictionary<(int, int), double>();
-        foreach (var (instance, value) in values)
-        {
-            int comma = instance.IndexOf(',');
-            if (comma > 0 && int.TryParse(instance.AsSpan(0, comma), out int group) && int.TryParse(instance.AsSpan(comma + 1), out int number))
-                result[(group, number)] = value;
-        }
-        return result;
-    }
-    private static double? Total(IReadOnlyList<(string Instance, double Value)> values)
-        => values.Where(value => value.Instance == "_Total").Select(value => (double?)value.Value).FirstOrDefault();
-
-    // Idle, kernel and user time of each processor of the current group.
-    private static (long, long, long)[]? KernelTimes()
-    {
-        int count = Math.Min(Environment.ProcessorCount, 64);
-        const int Entry = 48;
-        var buffer = Marshal.AllocHGlobal(count * Entry);
-        try
-        {
-            if (NtQuerySystemInformation(8, buffer, count * Entry, out int length) != 0) return null;
-            var times = new (long, long, long)[Math.Min(count, length / Entry)];
-            for (int i = 0; i < times.Length; i++)
-                times[i] = (Marshal.ReadInt64(buffer, i * Entry), Marshal.ReadInt64(buffer, i * Entry + 8), Marshal.ReadInt64(buffer, i * Entry + 16));
-            return times;
-        }
-        finally { Marshal.FreeHGlobal(buffer); }
-    }
-    [DllImport("ntdll.dll")] private static extern int NtQuerySystemInformation(int informationClass, IntPtr buffer, int length, out int returnLength);
-}
-
-// The kind of each logical processor from its efficiency class: a higher class is a faster core. Group 0 holds the
-// fastest kind, as on the page; with one class every core is Unknown.
-internal static class CpuTopology
-{
-    public static Dictionary<(int Group, int Number), (int Group, CoreTier Tier)> Read()
-    {
-        var classes = new Dictionary<(int, int), int>();
-        try
-        {
-            GetSystemCpuSetInformation(IntPtr.Zero, 0, out uint length, IntPtr.Zero, 0);
-            if (length == 0) return [];
-            var buffer = Marshal.AllocHGlobal((int)length);
-            try
-            {
-                if (!GetSystemCpuSetInformation(buffer, length, out length, IntPtr.Zero, 0)) return [];
-                for (int offset = 0; offset + 20 <= length;)
-                {
-                    int size = Marshal.ReadInt32(buffer, offset);
-                    if (size <= 0) break;
-                    // SYSTEM_CPU_SET_INFORMATION: Size, Type, then CpuSet { Id, Group (WORD), LogicalProcessorIndex, CoreIndex,
-                    // LastLevelCacheIndex, NumaNodeIndex, EfficiencyClass, ... }.
-                    if (Marshal.ReadInt32(buffer, offset + 4) == 0)
-                        classes[(Marshal.ReadInt16(buffer, offset + 12), Marshal.ReadByte(buffer, offset + 14))] = Marshal.ReadByte(buffer, offset + 18);
-                    offset += size;
-                }
-            }
-            finally { Marshal.FreeHGlobal(buffer); }
-        }
-        // Without the topology every core is drawn as one kind; it is never worth failing the page for.
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Debug.WriteLine(ex); return []; }
-        var ranks = classes.Values.Distinct().OrderByDescending(value => value).ToList();
-        return classes.ToDictionary(pair => pair.Key, pair =>
-        {
-            int group = ranks.IndexOf(pair.Value);
-            var tier = ranks.Count < 2 ? CoreTier.Unknown : group == 0 ? CoreTier.Performance : group == ranks.Count - 1 ? CoreTier.Efficiency : CoreTier.Unknown;
-            return (group, tier);
-        });
-    }
-    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetSystemCpuSetInformation(IntPtr information, uint bufferLength, out uint returnedLength, IntPtr process, uint flags);
 }
 
 internal static class MemoryProvider
@@ -780,11 +659,17 @@ internal sealed class ProcessProvider : IDisposable
     private readonly SteadyRanking _cpuRanking = SteadyRanking.Cpu(), _memoryRanking = SteadyRanking.Memory();
     // By executable name: its path and the name the page shows, once found.
     private readonly Dictionary<string, (string? Path, string Name)> _apps = new(StringComparer.OrdinalIgnoreCase);
+    private const int MaximumApps = 256;
     private readonly HashSet<int> _unreadable = [];
     public volatile bool Hold;
 
-    public Reading<ProcessList> Sample(double now)
+    // The rows of the last list that were left without their names and icons (Sample with name false), for Resolve.
+    private List<ProcessSample>? _unnamedByCpu, _unnamedByMemory;
+
+    // name false: the rows carry the executables' names (or the descriptions already found) and no icons, and Resolve names them later.
+    public Reading<ProcessList> Sample(double now, bool name = true)
     {
+        _unnamedByCpu = _unnamedByMemory = null;
         if (!Read()) return Reading<ProcessList>.Unavailable(Why.NoProcesses);
         var current = new Dictionary<int, (long, long)>();
         var samples = new List<ProcessSample>(512);
@@ -810,12 +695,31 @@ internal sealed class ProcessProvider : IDisposable
         }
         _previous = current; _time = now;
         _unreadable.IntersectWith(current.Keys);
+        // One entry for each executable ever seen would grow for as long as the app runs: past the limit, the ones not running are let go.
+        NameCache.Trim(_apps, samples.Select(sample => sample.AppKey ?? sample.Name), MaximumApps);
         if (then is null) return Reading<ProcessList>.Unavailable(Why.Waiting);
         double elapsed = seconds;
         var top = _cpuRanking.Arrange(ProcessSample.Folded(samples, ProcessSort.Cpu), sample => sample.CpuPercent, elapsed, Hold);
         var byMemory = _memoryRanking.Arrange(ProcessSample.Folded(samples, ProcessSort.Memory), sample => sample.MemoryBytes, elapsed, Hold);
-        return new ProcessList(Named(top.Take(Kept)), Named(byMemory.Take(Kept)));
+        if (name) return new ProcessList(Named(top.Take(Kept)), Named(byMemory.Take(Kept)));
+        _unnamedByCpu = top.Take(Kept).ToList(); _unnamedByMemory = byMemory.Take(Kept).ToList();
+        return new ProcessList(Plain(_unnamedByCpu), Plain(_unnamedByMemory));
     }
+
+    // The list left unnamed by the last Sample, named now (the descriptions and the icons are looked up here); null when there is none.
+    public Reading<ProcessList>? Resolve()
+    {
+        if (_unnamedByCpu is not { } cpu || _unnamedByMemory is not { } memory) return null;
+        _unnamedByCpu = _unnamedByMemory = null;
+        return new ProcessList(Named(cpu), Named(memory));
+    }
+
+    // Without looking anything up: what an earlier list found, else the executable's file name without ".exe".
+    private List<ProcessSample> Plain(List<ProcessSample> entries) => entries.Select(entry =>
+    {
+        if (_apps.TryGetValue(entry.AppKey ?? entry.Name, out var known)) return entry with { Name = known.Name, Path = known.Path };
+        return entry with { Name = entry.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? entry.Name[..^4] : entry.Name };
+    }).ToList();
 
     private List<ProcessSample> Named(IEnumerable<ProcessSample> entries) => entries.Select(entry =>
     {

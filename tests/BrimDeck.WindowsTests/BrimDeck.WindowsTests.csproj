@@ -16,6 +16,8 @@
     <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <Compile Include="..\..\src\BrimDeck\Native\PdhQuery.cs" Link="PdhQuery.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\CpuProvider.cs" Link="CpuProvider.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\MonitorLog.cs" Link="MonitorLog.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\TemperatureSensors.cs" Link="TemperatureSensors.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PowerSensors.cs" Link="PowerSensors.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\StorageReader.cs" Link="StorageReader.cs" />

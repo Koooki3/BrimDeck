@@ -92,6 +92,7 @@ try
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);
     SensorStopTests.Run(Check);
+    MonitorStartupTests.Run(Check);
     StripAdmissionTests.Run(Check);
     DevicesTests.Run(Check);
     DeviceProtocolTests.Run(Check);
