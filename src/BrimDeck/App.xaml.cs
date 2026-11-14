@@ -533,8 +533,25 @@ public partial class App : Application
             Dispatcher.BeginInvoke(() => { if (error is null) _settingsWindow?.SaveStatus(""); else _settingsWindow?.SaveStatus(error, true); });
         }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
-    // Before the process ends, the last write must have reached the disk.
-    private void FinishWriting() { try { _writing.Wait(TimeSpan.FromSeconds(5)); } catch (AggregateException) { } }
+    // The usage's last readings are written the same way, on a chain of their own: saves and clears run in the order they were asked for,
+    // so an older round can neither overwrite a newer one nor bring the file back after a clear.
+    private Task _keeping = Task.CompletedTask;
+    private readonly object _keepingSync = new();
+    internal void QueueLastSeen(Action work)
+    {
+        lock (_keepingSync)
+            _keeping = _keeping.ContinueWith(_ =>
+            {
+                try { work(); } catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine(ex); }
+            }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+    }
+    // Before the process ends, the last writes must have reached the disk (the usage's too, within the same five seconds).
+    private void FinishWriting()
+    {
+        Task keeping;
+        lock (_keepingSync) keeping = _keeping;
+        try { Task.WaitAll([_writing, keeping], TimeSpan.FromSeconds(5)); } catch (AggregateException) { }
+    }
     // The settings window records its size before the final save; closing it during shutdown would be too late.
     // Every panel powers off first (MainWindow.Lifecycle.cs): the islands draw back into dots that sink down through the floor, then the process ends. The
     // settings window goes at once, so the exit answers immediately. A panel that never reports back cannot hold the exit up:

@@ -328,6 +328,8 @@ public partial class MainWindow
     private void RenderModels(IReadOnlyList<ProviderSnapshot> snapshots)
     {
         var result = ModelUsage.Filter(snapshots, _modelApps, ModelRange);
+        // The previous run's totals (UsageLastSeen) of the apps shown here are dimmed row by row; a source that was read again is not.
+        var restoredApps = snapshots.Where(snapshot => snapshot.LastSeenAt is not null && _modelApps.Contains(snapshot.Id)).Select(snapshot => snapshot.Id).ToHashSet();
         bool expanded = ContentCanvas.Width >= 600, compact = ContentCanvas.Width < 640 || ContentCanvas.Height < 170, tiny = ContentCanvas.Height < 170;
         double font = tiny ? 11.5 : 12.5, rowHeight = tiny ? 22 : 27, headerHeight = tiny ? 18 : 22, totalHeight = tiny ? 24 : 29;
         double inset = tiny ? 14 : 20, gap = expanded ? 8 : 12;
@@ -413,6 +415,7 @@ public partial class MainWindow
                 int column = Grid.GetColumn(text) / 2;
                 text.ToolTip = column == 1 ? PriceBreakdown(record, snapshots.FirstOrDefault(s => s.Id == record.Provider)) : column >= 2 ? tips[column - 2] : (object?)null;
             }
+            if (restoredApps.Contains(record.Provider)) row.Opacity = .55;
             var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush(PanelTheme.Hex("rowDivider")), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
             item.MouseEnter += (_, _) => item.Background = UI.Brush(PanelTheme.Hex("rowHover")); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
             list.Children.Add(item);
@@ -437,6 +440,7 @@ public partial class MainWindow
         string missing = incomplete ? Loc.T("部分明细尚未读取完整：", "Some details are not fully read yet: ") + string.Join(Loc.T("、", ", "), result.IncompleteProviders.Select(AppPresets.Name)) : "";
         // The label cells explain only an incomplete total; otherwise the visible summary says it all.
         string? totalTip = incomplete ? missing : null;
+        if (restoredApps.Count > 0) totalRow.Opacity = .55;
         // Figures shown as "—" are not known yet, so their tooltips say why instead of giving a count of zero.
         var totalTips = incomplete && result.Entries.Count == 0 ? totals.Select(_ => (string?)missing).ToArray() : Tips(result.Entries, true);
         if (incomplete && result.Entries.Count > 0) totalTips[^1] = totalTips[^1] is { } note ? note + "\n" + missing : missing;

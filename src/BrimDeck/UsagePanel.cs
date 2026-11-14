@@ -238,8 +238,9 @@ public partial class MainWindow
             var shownStatistics = DashboardUsage.Statistics(Settings, Snapshots);
             RenderModels(shownStatistics);
             // Totals of the previous run (UsageLastSeen) are dimmed, and the page says so in its tip, until the new ones replace them.
-            var restored = shownStatistics.Where(snapshot => snapshot.LastSeenAt is not null).ToList();
-            UsageContent.Opacity = restored.Count > 0 ? .55 : 1;
+            // Only the apps the page shows count, and only their own rows are dimmed (RenderModels).
+            var restored = shownStatistics.Where(snapshot => snapshot.LastSeenAt is not null && _modelApps.Contains(snapshot.Id)).ToList();
+            UsageContent.Opacity = 1;
             UsageContent.ToolTip = restored.Count > 0 ? string.Join("\n", restored.Select(snapshot => snapshot.Name + " · " + snapshot.UsageNote)) : null;
         }
         else { UsageContent.Opacity = 1; UsageContent.ToolTip = null; RenderColumns(DashboardUsage.Columns(Settings, Snapshots)); }

@@ -1061,8 +1061,8 @@ public partial class MainWindow : Window
     {
         var settings = Settings.Copy();
         var store = _app.LastSeen;
-        if (!settings.QuotaWanted) { _ = Task.Run(store.Clear); return; }
-        _ = Task.Run(() => { try { store.Save(round, settings); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); } });
+        if (!settings.QuotaWanted) { _app.QueueLastSeen(store.Clear); return; }
+        _app.QueueLastSeen(() => store.Save(round, settings));
     }
     // Only the main panel reads; every panel shows the result. The history goes back as far as any panel's model details need.
     public async Task RefreshAsync(bool queueIfBusy = true)

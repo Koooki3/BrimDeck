@@ -151,14 +151,19 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
     private static StoredProvider? Live(StoredProvider stored, DateTimeOffset now)
     {
         // Quotas read longer ago than MaxAge are left out too, even when the totals beside them are newer.
-        var at = stored.QuotaAt ?? stored.ReadAt;
-        bool quotaOld = now - at > MaxAge || at > now.AddMinutes(5);
-        var metrics = quotaOld ? [] : (stored.Metrics ?? []).Where(metric => metric is not null && (metric.ResetAt is not { } reset || reset > now)).ToList();
-        return metrics.Count == 0 && !stored.UsageAvailable ? null : stored with { Metrics = metrics };
+        var metrics = QuotaFresh(stored, now) ? (stored.Metrics ?? []).Where(metric => metric is not null && (metric.ResetAt is not { } reset || reset > now)).ToList() : [];
+        // The same the other way round: totals older than MaxAge are left out, and the quotas beside them stay.
+        bool usage = UsageFresh(stored, now);
+        if (metrics.Count == 0 && !usage) return null;
+        return usage ? stored with { Metrics = metrics } : stored with { Metrics = metrics, UsageAvailable = false, UsageComplete = false, UsageStart = null, Days = [] };
     }
 
     private static bool Relevant(DeckSettings settings, StoredProvider stored) => settings.RequiredProviders.Contains(stored.Id);
-    private static bool Fresh(StoredProvider stored, DateTimeOffset now) => stored.ReadAt <= now.AddMinutes(5) && now - stored.ReadAt <= MaxAge;
+    private static bool Recent(DateTimeOffset at, DateTimeOffset now) => at <= now.AddMinutes(5) && now - at <= MaxAge;
+    private static bool QuotaFresh(StoredProvider stored, DateTimeOffset now) => (stored.Metrics?.Count ?? 0) > 0 && Recent(stored.QuotaAt ?? stored.ReadAt, now);
+    private static bool UsageFresh(StoredProvider stored, DateTimeOffset now) => stored.UsageAvailable && Recent(stored.ReadAt, now);
+    // A source is worth keeping while either of its parts is recent: the quotas and the totals are read, and age, apart.
+    private static bool Fresh(StoredProvider stored, DateTimeOffset now) => QuotaFresh(stored, now) || UsageFresh(stored, now);
 
     // The text of a set of readings; sameValues leaves out the time they were read, to tell a changed reading from a later one.
     private static string Serialize(List<StoredProvider> providers, bool sameValues)
@@ -188,15 +193,19 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
             metric.Kind, Text(metric.Label), Text(metric.Id), metric.Window, metric.Percent, metric.Amount, metric.Total, metric.Used, Text(metric.Currency), Text(metric.Unit),
             metric.Unlimited, metric.ResetAt, metric.ExpiresAt, metric.AtLeast, metric.TotalIsTarget, metric.Period)).ToList();
         if (metrics.Count == 0 && !snapshot.UsageAvailable) return null;
-        var days = snapshot.Entries.GroupBy(entry => (Day: entry.Time.LocalDateTime.Date, entry.Model, entry.PriceModel, entry.FittedCost, Reported: entry.ReportedCostUsd is not null))
+        var groups = snapshot.Entries.GroupBy(entry => (Day: entry.Time.LocalDateTime.Date, entry.Model, entry.PriceModel, entry.FittedCost, Reported: entry.ReportedCostUsd is not null))
             .Select(group => new StoredDay(group.Key.Day, Text(group.Key.Model), group.Key.PriceModel is null ? null : Text(group.Key.PriceModel), group.Sum(entry => entry.Input), group.Sum(entry => entry.CacheRead),
                 group.Sum(entry => entry.CacheWrite), group.Sum(entry => entry.CacheWriteHour), group.Sum(entry => entry.Output),
                 group.Key.Reported ? group.Sum(entry => entry.ReportedCostUsd ?? 0) : null, group.Key.FittedCost))
-            .OrderByDescending(day => day.Day).Take(MaxDays).ToList();
+            .OrderByDescending(day => day.Day).ToList();
+        // More groups than MaxDays would be cut short and then shown as the whole: the totals of that source are not kept at all.
+        bool keepUsage = snapshot.UsageAvailable && groups.Count <= MaxDays;
+        var days = keepUsage ? groups : [];
+        if (metrics.Count == 0 && !keepUsage) return null;
         // The plan comes with the quotas; the time is when they were read (a quota kept from earlier keeps its own time).
         var quotaAt = snapshot.IsStale && snapshot.QuotaTime is { } quotaTime ? quotaTime : now;
-        return new StoredProvider(snapshot.Id, Local(snapshot.Configurations) ? [ProviderCatalog.LocalQuota] : [], snapshot.UsageAvailable ? now : quotaAt, Text(snapshot.Plan), metrics,
-            snapshot.UsageAvailable, snapshot.UsageComplete, snapshot.UsageStart, days) { QuotaAt = quotaAt };
+        return new StoredProvider(snapshot.Id, Local(snapshot.Configurations) ? [ProviderCatalog.LocalQuota] : [], keepUsage ? now : quotaAt, Text(snapshot.Plan), metrics,
+            keepUsage, keepUsage && snapshot.UsageComplete, keepUsage ? snapshot.UsageStart : null, days) { QuotaAt = quotaAt };
     }
 
     private static ProviderSnapshot Restore(StoredProvider stored, DateTimeOffset now)
