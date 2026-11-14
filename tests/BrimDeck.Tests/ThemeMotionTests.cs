@@ -55,6 +55,21 @@ internal static class ThemeMotionTests
             PanelThemes.Build("n", PanelThemes.Parse("""{ "base": "github-dark", "night": { "motion": { "hover": "reveal" } } }"""), night: true).Motion.Hover == HoverFx.Reveal
             && PanelThemes.Build("n", PanelThemes.Parse("""{ "base": "github-dark", "night": { "motion": { "hover": "reveal" } } }""")).Motion.Hover == HoverFx.Underline);
 
+        var nightSource = PanelThemes.Parse("""{ "base": "github-dark", "night": { "motion": { "hover": "reveal", "hoverStrength": 0.2 } } }""");
+        var nightCopy = PanelThemes.Parse(PanelThemes.FillTemplate("copy", Palette("github-dark"), "github-dark", nightSource));
+        check("Copying a theme keeps the night look's motion", nightCopy.Night?.Motion is { Hover: "reveal", HoverStrength: .2 }
+            && PanelThemes.Build("c", nightCopy, night: true).Motion.Hover == HoverFx.Reveal);
+        string Problem(string json)
+        {
+            var folder = Directory.CreateTempSubdirectory("brimdeck-motion").FullName;
+            try { File.WriteAllText(Path.Combine(folder, "t.json"), json); return PanelThemes.LoadFolder(folder).Single().Error ?? ""; }
+            finally { Directory.Delete(folder, true); }
+        }
+        check("An unknown motion.hover name makes the file unusable, in the day and the night look",
+            Problem("""{ "id": "t", "motion": { "hover": "confetti" } }""").Contains("confetti")
+            && Problem("""{ "id": "t", "night": { "motion": { "hover": "2" } } }""").Contains("2"));
+        check("Valid or blank motion.hover names are no problem", new[] { "reveal", "LIFT", "none", "", "  " }.All(name => Problem("{ \"id\": \"t\", \"motion\": { \"hover\": \"" + name + "\" } }") == ""));
+
         // ----- Colors -----
         var dark = Palette("dark");
         check("A color key resolves to the palette's color; an unknown name falls back to the accent; a hex color is used",

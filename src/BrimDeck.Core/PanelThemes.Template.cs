@@ -70,7 +70,7 @@ public static partial class PanelThemes
     // The night look as the theme file writes it: only what it sets, as "daylight" and "night" members at the end of the file.
     private static string AppendNight(string text, PanelThemeFile night, PanelThemeDaylight? daylight)
     {
-        var layer = new PanelThemeFile { Colors = night.Colors, Apps = night.Apps, Effects = night.Effects, Clock = night.Clock };
+        var layer = new PanelThemeFile { Colors = night.Colors, Apps = night.Apps, Effects = night.Effects, Clock = night.Clock, Motion = night.Motion };
         if (JsonSerializer.SerializeToNode(layer, Json) is not JsonObject json) return text;
         // Only what the layer sets: no format, empty strings (an id, a name, an unset clock style) or names made for display.
         json.Remove("formatVersion");

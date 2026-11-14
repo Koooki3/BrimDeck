@@ -12,7 +12,7 @@ public partial class MainWindow
 
     private void InitializeMotion()
     {
-        _fx = InteractionFx.Island(this, Island, (Panel)Island.Child, () => _expanded && !_preview);
+        _fx = InteractionFx.Island(this, Island, (Panel)Island.Child, () => _expanded && !_preview, () => Animates, () => Look);
     }
 
     // After anything that opens or closes the panel: closed, whatever the pointer had marked fades with the content; opened under

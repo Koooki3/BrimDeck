@@ -111,6 +111,8 @@ public static partial class PanelThemes
         var decorColors = new[] { decor?.Horizon?.Sea, decor?.Horizon?.Line, decor?.Caustics?.Color, decor?.Palm?.Color }.OfType<string>();
         foreach (var value in (file.Effects?.SurfaceGradient ?? []).Concat(file.Effects?.RimGradient ?? []).Concat(decorColors))
             if (!ThemeColor.TryParse(value, out _)) return Loc.T($"效果中的颜色“{value}”无效", $"The effect color \"{value}\" is invalid");
+        if (file.Motion?.Hover is { } hover && !string.IsNullOrWhiteSpace(hover) && !MotionStyles.TryHover(hover, out _))
+            return Loc.T($"未知的悬停样式“{hover}”（可用：none、reveal、lift、underline）", $"Unknown hover style \"{hover}\" (use none, reveal, lift or underline)");
         return file.Clock is { } clock ? ClockProblem(clock) : null;
     }
 

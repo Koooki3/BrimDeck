@@ -15,9 +15,9 @@ namespace BrimDeck;
 internal static class InteractionFx
 {
     // The panel's layer lies inside the island's content, above it, so the island's outline clips it like the content.
-    public static FxSurface Island(Window window, UIElement input, Panel content, Func<bool> interactive)
+    public static FxSurface Island(Window window, UIElement input, Panel content, Func<bool> interactive, Func<bool> animates, Func<PanelLook> look)
     {
-        var surface = new FxSurface(input, content, interactive);
+        var surface = new FxSurface(input, content, interactive, animates, look);
         content.Children.Add(surface);
         window.Closed += (_, _) => surface.Detach();
         return surface;
@@ -33,6 +33,9 @@ internal sealed partial class FxSurface : FrameworkElement
     private readonly UIElement _input;
     private readonly UIElement _scope;
     private readonly Func<bool> _interactive;
+    // The owning panel's animation rule (Soft.For its profile's settings) and look (its own theme, which another monitor's profile may differ in).
+    private readonly Func<bool> _animates;
+    private readonly Func<PanelLook> _look;
     private readonly DrawingVisual _visual = new();
 
     private ThemeMotion _motion = ThemeMotion.Default;
@@ -49,9 +52,9 @@ internal sealed partial class FxSurface : FrameworkElement
     private DependencyObject? _lastSource;
     private FrameworkElement? _lastTarget;
 
-    public FxSurface(UIElement input, UIElement scope, Func<bool> interactive)
+    public FxSurface(UIElement input, UIElement scope, Func<bool> interactive, Func<bool> animates, Func<PanelLook> look)
     {
-        _input = input; _scope = scope; _interactive = interactive;
+        _input = input; _scope = scope; _interactive = interactive; _animates = animates; _look = look;
         IsHitTestVisible = false; Focusable = false;
         AddVisualChild(_visual);
         input.PreviewMouseMove += Moved;
@@ -71,21 +74,22 @@ internal sealed partial class FxSurface : FrameworkElement
         Reset();
     }
 
-    // Motion allowed at all (BrimDeck's and Windows' animation settings, high contrast; Soft.Enabled) and the theme drawing something.
-    private bool Allowed => !_detached && MotionGate.Interaction(Soft.Enabled, _motion);
+    // Motion allowed at all (the panel's BrimDeck and Windows animation settings, high contrast) and the theme drawing something.
+    private bool Allowed => !_detached && MotionGate.Interaction(_animates(), _motion);
     private bool Active => Allowed && _interactive();
 
     // ----- Theme -----
 
     private void EnsureDressed()
     {
-        int generation = PanelTheme.Generation;
+        var look = _look();
+        int generation = look.Generation;
         if (_generation != generation)
         {
             bool restyled = _generation >= 0;
             _generation = generation;
             if (restyled) Reset();
-            var palette = PanelTheme.Current;
+            var palette = look.Current;
             _motion = palette.Motion;
             _timing = MotionTiming.For(_motion.Pace);
             Dress(palette);

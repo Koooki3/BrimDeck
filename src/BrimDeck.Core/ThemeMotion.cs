@@ -13,13 +13,15 @@ public enum HoverFx { None, Reveal, Lift, Underline }
 // Style names in theme files.
 public static class MotionStyles
 {
-    public static HoverFx Hover(string? value, HoverFx fallback)
+    public static HoverFx Hover(string? value, HoverFx fallback) => TryHover(value, out var style) ? style : fallback;
+
+    // A name only: numbers ("2") are not styles, whatever the enum would make of them.
+    public static bool TryHover(string? value, out HoverFx style)
     {
-        // A name only: numbers ("2") are not styles, whatever the enum would make of them.
-        if (string.IsNullOrWhiteSpace(value)) return fallback;
+        style = HoverFx.None;
+        if (string.IsNullOrWhiteSpace(value)) return false;
         value = value.Trim();
-        if (!char.IsLetter(value[0])) return fallback;
-        return Enum.TryParse<HoverFx>(value, true, out var style) && Enum.IsDefined(style) ? style : fallback;
+        return char.IsLetter(value[0]) && Enum.TryParse(value, true, out style) && Enum.IsDefined(style);
     }
 }
 
