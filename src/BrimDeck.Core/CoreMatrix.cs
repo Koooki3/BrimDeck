@@ -42,6 +42,12 @@ public static class CoreMatrix
     public static int Step(double share) => (int)Math.Round(Math.Clamp(double.IsFinite(share) ? share : 0, 0, 1) * (Steps - 1));
     public static byte Alpha(int step) => (byte)Math.Round(255 * (IdleAlpha + (1 - IdleAlpha) * Math.Clamp(step, 0, Steps - 1) / (Steps - 1)));
 
+    // The columns are drawn at least this many DIPs wide (the graph clamps to it), so narrower than this they would overflow.
+    public const double LeastColumnDip = 1;
+    // The same for a width in DIPs and the device pixels per DIP: Auto also takes the matrix where the clamp would overflow the graph.
+    public static bool Use(CoreDisplay display, double columnDip, double pixelsPerDip) =>
+        Use(display, columnDip * pixelsPerDip) || display == CoreDisplay.Auto && columnDip < LeastColumnDip;
+
     // Whether the matrix draws the cores, for the setting and the width, in device pixels, the columns would have.
     public static bool Use(CoreDisplay display, double columnDevicePixels) => display switch
     {

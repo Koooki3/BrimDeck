@@ -342,7 +342,7 @@ internal sealed class ColumnGraph : FrameworkElement
         if (_display == CoreDisplay.Matrix) return true;
         double gaps = 0;
         for (int i = 1; i < _columns.Count; i++) gaps += Gap(i);
-        return CoreMatrix.Use(_display, Math.Min((width - gaps) / _columns.Count, _maxColumn) * ppd);
+        return CoreMatrix.Use(_display, Math.Min((width - gaps) / _columns.Count, _maxColumn), ppd);
     }
 
     // The matrix's placement, kept while the count, the size and the scale stay the same.

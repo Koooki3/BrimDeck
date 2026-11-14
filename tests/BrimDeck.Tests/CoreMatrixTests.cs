@@ -81,6 +81,7 @@ internal static class CoreMatrixTests
     private static void Rule(Action<string, bool> check)
     {
         check("Core display: Auto takes columns while they are 2 device pixels wide, the matrix below", !CoreMatrix.Use(CoreDisplay.Auto, 2) && CoreMatrix.Use(CoreDisplay.Auto, 1.99));
+        check("Core display: Auto takes the matrix where the columns would be under a DIP wide even when they are 2 device pixels (300 % scale)", CoreMatrix.Use(CoreDisplay.Auto, 0.85, 3) && !CoreMatrix.Use(CoreDisplay.Auto, 1, 3) && !CoreMatrix.Use(CoreDisplay.Columns, 0.5, 3));
         check("Core display: Columns and Matrix ignore the room", !CoreMatrix.Use(CoreDisplay.Columns, 0.1) && CoreMatrix.Use(CoreDisplay.Matrix, 50));
         bool usual = true;
         foreach (var scale in new[] { 1, 1.25, 1.5, 2 })

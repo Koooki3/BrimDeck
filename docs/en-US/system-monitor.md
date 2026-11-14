@@ -36,7 +36,7 @@ The readings shown in the notch and capsule are chosen under "When collapsed".
 
 ## Core display: columns and dot matrix
 
-By default each of the CPU's logical processors is drawn as a thin column. A machine with many threads (192, for example) cannot fit that many columns, so the cores can be drawn as a dot matrix instead: one small square per logical processor, filled from the top down and then to the right with the fastest kind of core first. The brighter the square, the higher the load; a core at the warning or critical level takes that level's color. The matrix works on the expanded page, in the notch, the capsule and the side column, and pointing at a square still shows the core's name, load and frequency.
+By default each of the CPU's logical processors is drawn as a thin column. A machine with many threads (192, for example) cannot fit that many columns, so the cores can be drawn as a dot matrix instead: one small square per logical processor, filled from the top down and then to the right with the fastest kind of core first. The brighter the square, the higher the load; a core at the warning or critical level takes that level's color. The matrix works on the expanded page, in the notch, the capsule and the side column, and on the expanded page pointing at a square shows the core's name, load and frequency (the collapsed readings never took the mouse, so they have no tooltip).
 
 Choose it under "General > Core display":
 
