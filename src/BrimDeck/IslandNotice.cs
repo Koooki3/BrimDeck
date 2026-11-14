@@ -306,7 +306,9 @@ internal sealed class IslandNotice : Window
         if (_item is null || _leaving) return;
         Hold();
         // A notice that arrives under a resting pointer does not open the panel by itself: the pointer leaves and comes back, or clicks.
-        if (_arrivedUnderPointer) return;
+        // With the panel set to open on a click (ClickToExpand), resting on the notice does not open it either; nor when a click on the
+        // notice opens its application (NoticeClick), or the page would open under the pointer before the click could.
+        if (_arrivedUnderPointer || Settings.ClickToExpand || Settings.NoticeClick == NoticeClickTarget.SourceApp) return;
         _hoverOpen.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay));
         _hoverOpen.Start();
     }
