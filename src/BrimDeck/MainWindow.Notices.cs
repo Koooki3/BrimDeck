@@ -293,9 +293,9 @@ public partial class MainWindow
         var center = _app.Notices;
         if (_pageKey != NoticePageKey(center)) return false;
         var listed = Listed(center);
-        if (_pendingNoticeRows is { } pending)
+        if (_noticeBatches is { Pending: true } batches)
         {
-            if (!listed.SequenceEqual(pending, ReferenceEqualityComparer.Instance)) return false;
+            if (!listed.SequenceEqual(batches.Items, ReferenceEqualityComparer.Instance)) return false;
         }
         else if (listed.Count != _pageRows.Count) return false;
         var now = DateTimeOffset.UtcNow;
@@ -378,7 +378,7 @@ public partial class MainWindow
         NoticesContent.Children.Clear(); NoticesContent.ColumnDefinitions.Clear();
         _waitingPlates.Clear();
         _liveRows.Clear();
-        _pageRows.Clear(); _pendingNoticeRows = null; _pageEmpty = null; _pageScroll = null;
+        _pageRows.Clear(); _noticeBatches?.Cancel(); _noticeBatches = null; _pageEmpty = null; _pageScroll = null;
         NoticesContent.Margin = PageMargin;
         var center = _app.Notices;
         var now = DateTimeOffset.UtcNow;
@@ -611,8 +611,10 @@ public partial class MainWindow
 
     // ----- The list column -----
 
+    // Rows built at once when the list is drawn, and rows added per background pass afterwards (a long list built whole took the
+    // page's first frame well past a frame). A page built again, or released, drops what is left.
     private const int InitialNoticeRows = 8, NoticeBatchSize = 3;
-    private List<Notice>? _pendingNoticeRows;
+    private RowBatches<Notice>? _noticeBatches;
 
     private FrameworkElement ListColumn(NoticeCenter center, Notice focus, DateTimeOffset now, string? refocus, bool restoreScroll)
     {
@@ -647,12 +649,10 @@ public partial class MainWindow
         // before requesting focus, even when that row is below the initial batch.
         int keyboardIndex = refocus is null ? -1 : listed.FindIndex(notice => notice.Id == refocus);
         int first = restoreScroll ? listed.Count : Math.Min(listed.Count, Math.Max(InitialNoticeRows, keyboardIndex + 1));
-        for (int i = 0; i < first; i++) AddNoticeRow(list, i, listed[i], focus, now);
-        if (first < listed.Count)
-        {
-            _pendingNoticeRows = listed;
-            QueueNoticeRows(list, listed, first, focus);
-        }
+        // A later batch can bring the page's first live row: WatchPageLive after each, or nothing would follow the tick.
+        _noticeBatches = new RowBatches<Notice>(listed, (i, notice) => AddNoticeRow(list, i, notice, focus, i < first ? now : DateTimeOffset.UtcNow),
+            action => Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, action), NoticeBatchSize, WatchPageLive);
+        _noticeBatches.Start(first);
         if (listed.Count == 0)
         {
             var none = UI.Fixed(_noticeUnread ? Loc.T("没有未读的通知", "No unread notices") : Loc.T("今天还没有通知", "No notices today"), TextSize.Body, 18, UI.Tertiary);
@@ -678,19 +678,6 @@ public partial class MainWindow
         var row = Row(notice, now, ReferenceEquals(notice, focus));
         list.Children.Insert(index, row);
         _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row));
-    }
-
-    private void QueueNoticeRows(StackPanel list, List<Notice> listed, int from, Notice focus)
-    {
-        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
-        {
-            if (!ReferenceEquals(_pendingNoticeRows, listed)) return;
-            var now = DateTimeOffset.UtcNow;
-            int end = Math.Min(listed.Count, from + NoticeBatchSize);
-            for (int i = from; i < end; i++) AddNoticeRow(list, i, listed[i], focus, now);
-            if (end < listed.Count) QueueNoticeRows(list, listed, end, focus);
-            else _pendingNoticeRows = null;
-        });
     }
 
     private Button Segment(string text, bool on, Action click)

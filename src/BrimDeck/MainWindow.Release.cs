@@ -44,6 +44,11 @@ public partial class MainWindow
                     ShelfToolbar.Children.Clear(); _shelfRows.Clear(); _shelfTabs.Clear(); _fileFrame = null; _searchBox = null; _editBox = null;
                     _shelfBuilt = null; _shelfStale = true;
                     break;
+                case DeckPage.Notices:
+                    held |= _pageRows.Count > 0 || _pageEmpty is not null;
+                    _noticeBatches?.Cancel(); _noticeBatches = null;
+                    _waitingPlates.Clear(); _liveRows.Clear(); _pageRows.Clear(); _pageEmpty = null; _pageScroll = null; _pageKey = ""; _noticeLayout = default;
+                    break;
             }
             released |= held;
         }
