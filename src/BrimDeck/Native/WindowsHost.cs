@@ -56,6 +56,7 @@ public sealed class WindowsHost : IDisposable
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
         DisplayPower.Changed += DisplayChanged;
+        if (DisplayPower.Off) _timer.Stop(); // created while the display is already off: it rests until the display comes on
         _desktopSettle.Tick += (_, _) => { _desktopSettle.Stop(); RaiseOverDesktop(_window()); };
         _lowerAgain.Tick += (_, _) => { _lowerAgain.Stop(); if (!_overDesktop) Lower(_window()); };
         _orderEvent = OnOrderEvent;
