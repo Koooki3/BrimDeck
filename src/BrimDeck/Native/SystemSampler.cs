@@ -225,6 +225,8 @@ internal sealed class SystemSampler : IDisposable
         _power = new PowerProvider(_meterPdh, stuck);
         _gpuTemperatures = new GpuTemperatures(stuck);
         bool primed = false, first = false, holdGpu = false;
+        // A thread that took over from one stuck in a driver (Replace) finds the page showing current readings and curves: they stay.
+        bool replacing = generation > 0;
         while (!_disposed && Volatile.Read(ref _generation) == generation)
         {
             try
@@ -233,7 +235,7 @@ internal sealed class SystemSampler : IDisposable
                 {
                     // Started without a demand (Warm): the counters are set up now, where nothing waits for them.
                     if (!_cpu!.Attached) { AttachCounters(); if (_gpuWanted) _gpu!.Describe(); }
-                    primed = false; Rest(); _wake.WaitOne(); continue;
+                    primed = false; replacing = false; Rest(); _wake.WaitOne(); continue;
                 }
                 bool primeCounters = _primeCounters;
                 _primeCounters = false;
@@ -249,7 +251,14 @@ internal sealed class SystemSampler : IDisposable
                     // What the first reading already holds (the memory, the drives, the battery) is shown at once; the rest follows. The
                     // readings that are rates since the last collection cover the whole pause here, so they are not shown.
                     // The figures the reading added to the histories and the power statistics cover the pause as well: they are dropped.
-                    if (!primed) { _bridges.Rescan(); var early = Collect(listProcesses: true).WithoutWindowed(Why.Waiting); ForgetWindowed(); Publish(early); holdGpu = false; }
+                    // A thread taking over (replacing) only starts its windows here: the page keeps the figures it shows until the next snapshot.
+                    if (!primed)
+                    {
+                        _bridges.Rescan();
+                        var early = Collect(listProcesses: true);
+                        if (!replacing) { ForgetWindowed(); Publish(early.WithoutWindowed(Why.Waiting)); }
+                        replacing = false; holdGpu = false;
+                    }
                     else
                     {
                         // Adapters already read before this priming keep their last reading in the snapshot after it (Collect): a
@@ -273,8 +282,9 @@ internal sealed class SystemSampler : IDisposable
                     Publish(snapshot with { Processes = named });
                 }
                 // The counters join now, after the first figures: their first collection starts the processor's and the adapters' windows,
-                // which the next pass primes as for counters just asked for.
-                if (!_cpu!.Attached) { AttachCounters(); _primeCounters = true; continue; }
+                // which the next pass primes as for counters just asked for. Joining takes half a second of this process's CPU, so the
+                // processes are primed again too: the next list would otherwise count that time against BrimDeck.
+                if (!_cpu!.Attached) { AttachCounters(); _primeCounters = true; if (_listProcesses) _primeProcesses = true; continue; }
                 Pause(_intervalMilliseconds);
             }
             // The driver answered after this thread was replaced: the new thread reads now.

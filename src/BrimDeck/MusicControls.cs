@@ -10,6 +10,8 @@ namespace BrimDeck;
 
 public sealed class MusicControlButton : Button
 {
+    // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
+    private PanelLook Look => PanelLook.Of(this);
     private bool _animationsEnabled;
     public bool AnimationsEnabled
     {
@@ -49,6 +51,8 @@ public sealed class MusicControlButton : Button
 
 public sealed class MusicSeekSlider : Slider
 {
+    // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
+    private PanelLook Look => PanelLook.Of(this);
     public static readonly DependencyProperty BarHeightProperty = DependencyProperty.Register(nameof(BarHeight), typeof(double), typeof(MusicSeekSlider), new PropertyMetadata(4d));
     public static readonly DependencyProperty BubbleXProperty = DependencyProperty.Register(nameof(BubbleX), typeof(double), typeof(MusicSeekSlider), new PropertyMetadata(0d));
     public static readonly DependencyProperty BubbleTextProperty = DependencyProperty.Register(nameof(BubbleText), typeof(string), typeof(MusicSeekSlider), new PropertyMetadata(""));
@@ -89,7 +93,7 @@ public sealed class MusicSeekSlider : Slider
         bool active = IsEnabled && (PressFeedback.Hovers((bool)GetValue(IsMouseOverProperty), _touched) || Seeking);
         Soft.Glide(_barScale, ScaleTransform.ScaleYProperty, active || HoverHeight <= 0 ? 1 : RestHeight / HoverHeight, animate);
         // On a dark surface the hover color is lighter, on a light one darker, so hovering only ever adds contrast.
-        bool dark = PanelTheme.Current.IsDark;
+        bool dark = Look.Current.IsDark;
         byte Shift(byte value) => (byte)Math.Round(dark ? value + (255 - value) * .12 : value * .88);
         var color = active ? Color.FromArgb(Accent.A, Shift(Accent.R), Shift(Accent.G), Shift(Accent.B)) : Accent;
         Soft.Glide(_fill, color, animate);

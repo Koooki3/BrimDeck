@@ -13,8 +13,9 @@ namespace BrimDeck;
 
 internal static class MusicVisuals
 {
-    internal static FrameworkElement Icon(string name, double size, Brush? brush = null)
+    internal static FrameworkElement Icon(string name, double size, Brush? brush = null, PanelLook? look = null)
     {
+        var Look = look ?? PanelTheme.Main;
         var data = name switch
         {
             "play" => "M 7,3.5 Q 5,2.5 5,5 V 19 Q 5,21.5 7,20.5 L 20,13 Q 22,12 20,11 Z",
@@ -28,27 +29,29 @@ internal static class MusicVisuals
             _ => "M 9,18 V 5.5 L 20,3.3 V 16 M 9,18 A 3,3 0 1 1 3,18 A 3,3 0 1 1 9,18 M 20,16 A 3,3 0 1 1 14,16 A 3,3 0 1 1 20,16"
         };
         bool filled = name is "play" or "pause" or "previous" or "next" or "sequential" or "liked";
-        var path = new Path { Data = Geometry.Parse(data), Fill = filled ? brush ?? UI.Brush(UI.Primary) : null,
-            Stroke = filled ? null : brush ?? UI.Brush(UI.Secondary), StrokeThickness = 1.8, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round };
+        var path = new Path { Data = Geometry.Parse(data), Fill = filled ? brush ?? UI.Brush(Look.Primary) : null,
+            Stroke = filled ? null : brush ?? UI.Brush(Look.Secondary), StrokeThickness = 1.8, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round };
         var canvas = new Canvas { Width = 24, Height = 24 }; canvas.Children.Add(path);
         return new Viewbox { Width = size, Height = size, Child = canvas };
     }
-    internal static Border Cover(BitmapSource? image, double size, double radius, bool outlined = false)
+    internal static Border Cover(BitmapSource? image, double size, double radius, bool outlined = false, PanelLook? look = null)
     {
-        double corner = PanelTheme.Corner(radius);
-        var content = new Grid { Background = UI.Brush(PanelTheme.Hex("coverPlaceholder")) };
+        var Look = look ?? PanelTheme.Main;
+        double corner = Look.Corner(radius);
+        var content = new Grid { Background = UI.Brush(Look.Hex("coverPlaceholder")) };
         if (image is not null) content.Children.Add(new Image { Source = image, Stretch = Stretch.UniformToFill });
-        else content.Children.Add(Icon("music", size * .34));
-        if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush(PanelTheme.Hex("coverOutline")), StrokeThickness = 1, RadiusX = corner, RadiusY = corner, Margin = new Thickness(.5), IsHitTestVisible = false });
+        else content.Children.Add(Icon("music", size * .34, look: Look));
+        if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush(Look.Hex("coverOutline")), StrokeThickness = 1, RadiusX = corner, RadiusY = corner, Margin = new Thickness(.5), IsHitTestVisible = false });
         content.Clip = new RectangleGeometry(new Rect(0, 0, size, size), corner, corner);
         return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(corner), Child = content };
     }
     // The color taken from the cover, or the theme's equalizer color when there is no cover or it gives none.
-    internal static Brush Accent(BitmapSource? source) => Accent(source, out _);
-    internal static Brush Accent(BitmapSource? source, out Color? cover)
+    internal static Brush Accent(BitmapSource? source, PanelLook? look = null) => Accent(source, out _, look);
+    internal static Brush Accent(BitmapSource? source, out Color? cover, PanelLook? look = null)
     {
+        var Look = look ?? PanelTheme.Main;
         cover = null;
-        if (source is null) return UI.Brush(PanelTheme.Hex("equalizer"));
+        if (source is null) return UI.Brush(Look.Hex("equalizer"));
         try
         {
             var scaled = new TransformedBitmap(source, new ScaleTransform(16d / source.PixelWidth, 16d / source.PixelHeight));
@@ -62,23 +65,23 @@ internal static class MusicVisuals
                 double w = Math.Max(.12, (max - min) / 255d) * pixels[i + 3] / 255d;
                 b += pixels[i] * w; g += pixels[i + 1] * w; r += pixels[i + 2] * w; weight += w;
             }
-            if (weight == 0) return UI.Brush(PanelTheme.Hex("equalizer"));
+            if (weight == 0) return UI.Brush(Look.Hex("equalizer"));
             r /= weight * 255; g /= weight * 255; b /= weight * 255;
             double maxChannel = Math.Max(r, Math.Max(g, b)), minChannel = Math.Min(r, Math.Min(g, b));
             double light = (maxChannel + minChannel) / 2, delta = maxChannel - minChannel;
             double saturation = delta == 0 ? 0 : delta / (1 - Math.Abs(2 * light - 1));
             double hue = delta == 0 ? 0 : maxChannel == r ? ((g - b) / delta + (g < b ? 6 : 0)) / 6
                 : maxChannel == g ? ((b - r) / delta + 2) / 6 : ((r - g) / delta + 4) / 6;
-            bool dark = PanelTheme.Current.IsDark;
+            bool dark = Look.Current.IsDark;
             saturation = Math.Max(.35, saturation); light = dark ? Math.Clamp(light, .62, .78) : Math.Clamp(light, .30, .42);
             double chroma = (1 - Math.Abs(2 * light - 1)) * saturation, x = chroma * (1 - Math.Abs(hue * 6 % 2 - 1)), m = light - chroma / 2;
             (r, g, b) = (hue * 6) switch
             { < 1 => (chroma, x, 0d), < 2 => (x, chroma, 0d), < 3 => (0d, chroma, x), < 4 => (0d, x, chroma), < 5 => (x, 0d, chroma), _ => (chroma, 0d, x) };
             r += m; g += m; b += m;
-            var accent = PanelTheme.Readable(Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255)));
+            var accent = Look.Readable(Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255)));
             var brush = new SolidColorBrush(accent); brush.Freeze(); cover = accent; return brush;
         }
-        catch (Exception) { return UI.Brush(PanelTheme.Hex("equalizer")); }
+        catch (Exception) { return UI.Brush(Look.Hex("equalizer")); }
     }
     // Coordinates from the element's own width. A relative brush spans everything the element draws,
     // including rings scrolled out of view, so its fades would follow the content instead of the edges.
@@ -91,7 +94,11 @@ internal static class MusicVisuals
 // only rendering; InvalidateVisual would also run layout and re-hit-test the whole window.
 internal sealed class MusicEqualizer : FrameworkElement
 {
-    public Brush Color { get; set; } = UI.Brush(UI.Secondary);
+    // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
+    private PanelLook Look => PanelLook.Of(this);
+    // Without a color of its own, the secondary text color of the panel it is drawn in.
+    private Brush? _color;
+    public Brush Color { get => _color ?? UI.Brush(Look.Secondary); set => _color = value; }
     public int Bars { get; init; } = 5;
     // Bar width in DIPs; the collapsed row scales it with its height.
     public double BarWidth { get; init; } = 3;
@@ -139,6 +146,8 @@ internal sealed class MusicEqualizer : FrameworkElement
 
 internal sealed class MusicMarquee : FrameworkElement
 {
+    // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
+    private PanelLook Look => PanelLook.Of(this);
     private FontWeight _weight = FontWeights.Normal;
     // The panel font (it follows the font setting) in the weight the owner asked for.
     private Typeface _typeface => Fonts.Face(UiFontRole.Panel, _weight);
@@ -213,7 +222,9 @@ internal sealed class MusicMarquee : FrameworkElement
     public double EdgeWidth { get; init; } = Edge;
     // False when the region is too narrow for a meaningful stretch of text: the text then rests at its start, cut at the edge.
     public bool ScrollAllowed { get; init; } = true;
-    public Brush Foreground { get; init; } = UI.Brush(UI.Primary);
+    // Without a color of its own, the primary text color of the panel it is drawn in.
+    private readonly Brush? _foreground;
+    public Brush Foreground { get => _foreground ?? UI.Brush(Look.Primary); init => _foreground = value; }
     // With a backdrop, the text is drawn by a child that re-enables ClearType below this element's clip, and the edge fades are
     // drawn over the text in the backdrop color instead of an opacity mask. A clip or a mask on the drawing element forces grayscale.
     public Color? Backdrop
@@ -422,6 +433,8 @@ internal sealed class MusicMarquee : FrameworkElement
 // so nothing at rest is cut or faded. The quota rings and the system readings use it.
 internal abstract class GlideCarousel : Grid
 {
+    // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
+    private PanelLook Look => PanelLook.Of(this);
     internal const double StartHold = QuotaCycle.StartHold, EndHold = QuotaCycle.EndHold, Speed = QuotaCycle.Speed, Fade = QuotaCycle.Fade, FadeEdge = 3;
     private FrameworkElement _strip = null!;
     // The strip's shift is this carousel's own: the readings strip is handed from row to row, and a carousel that let go of it
@@ -601,26 +614,29 @@ internal abstract class GlideCarousel : Grid
 // Rings that do not all fit scroll through a window of whole rings (CompactSpacing.Window), a ring step at a time.
 internal sealed class QuotaCarousel : GlideCarousel
 {
+    // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
+    private PanelLook Look => PanelLook.Of(this);
     // For screen readers: its name, every ring's tooltip line, rotating or not.
     protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
     // One ring with its application's letter inside, at the size the system readings' dials carry theirs for this height, in the secondary text color.
     // With more shares (QuotaRing.Shares) the rings stand one inside the other about one centre, and the letter goes inside the
     // innermost. Two keep the one ring's stroke, 2 DIP apart, leaving 8 DIP in a 20 DIP ring for the letter; three would leave
     // nothing that way, so three take a 1.5 DIP stroke 1 DIP apart, which leaves 7.
-    internal static Grid Ring((IReadOnlyList<double?> Shares, string Color, string Tip, string Letter, bool Stale) item, double size, double thickness, double scale)
+    internal static Grid Ring((IReadOnlyList<double?> Shares, string Color, string Tip, string Letter, bool Stale) item, double size, double thickness, double scale, PanelLook? look = null)
     {
+        var Look = look ?? PanelTheme.Main;
         int count = Math.Max(1, item.Shares.Count);
         double gap = Math.Max(.5, BrimDeck.Core.CompactMusicLayout.Half((count >= 3 ? 1 : 2) * scale));
         if (count >= 3) thickness = Math.Max(.5, BrimDeck.Core.CompactMusicLayout.Half(1.5 * scale));
-        var ring = count == 1 ? UI.Ring(item.Shares.Count == 0 ? 0 : item.Shares[0] ?? 0, item.Color, size, thickness) : UI.NestedRings(item.Shares, item.Color, size, thickness, gap);
+        var ring = count == 1 ? UI.Ring(item.Shares.Count == 0 ? 0 : item.Shares[0] ?? 0, item.Color, size, thickness, look: Look) : UI.NestedRings(item.Shares, item.Color, size, thickness, gap, Look);
         double hole = size - 2 * (count * thickness + (count - 1) * gap);
         // Empty without the setting (DeckSettings.QuotaRingLetters): the ring is then as it was without letters.
         if (item.Letter.Length > 0
             && RingLetter.Create(item.Letter, Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * scale)), size, Math.Max(1, hole),
-                Application.Current?.MainWindow is { } window ? VisualTreeHelper.GetDpi(window).PixelsPerDip : 1, UI.PanelFont, UI.Brush(UI.Secondary)) is { } letter)
+                Application.Current?.MainWindow is { } window ? VisualTreeHelper.GetDpi(window).PixelsPerDip : 1, UI.PanelFont, UI.Brush(Look.Secondary)) is { } letter)
             ring.Children.Add(letter);
         // A reading of the previous run (UsageLastSeen) is dimmed until the new one replaces it.
-        if (item.Stale) ring.Opacity = .5;
+        if (item.Stale) ring.Opacity = BrimDeck.Core.UsageLastSeen.Dimmed;
         return ring;
     }
 
@@ -642,7 +658,7 @@ internal sealed class QuotaCarousel : GlideCarousel
         var strip = new Canvas { Width = items.Count * step, Height = size };
         for (int i = 0; i < items.Count; i++)
         {
-            var ring = Ring(items[i], size, thickness, rowScale);
+            var ring = Ring(items[i], size, thickness, rowScale, Look);
             Canvas.SetLeft(ring, i * step); strip.Children.Add(ring);
         }
         ToolTip = string.Join("\n", items.Select(i => i.Tip));
@@ -657,6 +673,8 @@ internal sealed class QuotaCarousel : GlideCarousel
 // width of their widest figures (MonitorStrip), so the window and the travel do not move with the figures.
 internal sealed class ReadingsCarousel : GlideCarousel
 {
+    // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
+    private PanelLook Look => PanelLook.Of(this);
     // cut: while the surface is dragged the window is not whole readings and does not glide (travel 0); the reading it cuts fades
     // over this many DIPs inside it (CompactSpacing.CutFade).
     public ReadingsCarousel(MonitorStrip strip, double window, double travel, double edge, TimeSpan elapsed, bool animate, double cut = 0)
@@ -678,6 +696,8 @@ internal sealed class ReadingsCarousel : GlideCarousel
 // and bottom edges, outside it (over the notch's ends), so nothing at rest is faded.
 internal sealed class ColumnCarousel : GlideCarousel
 {
+    // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
+    private PanelLook Look => PanelLook.Of(this);
     public ColumnCarousel(FrameworkElement column, double width, double window, double travel, double edge, TimeSpan elapsed, bool animate)
     {
         window = Math.Max(0, window); travel = Math.Max(0, travel);

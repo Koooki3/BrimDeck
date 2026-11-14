@@ -20,7 +20,7 @@ public partial class MainWindow
         {
             pressed = down;
             // The cover is pressed as the transport buttons are (motion-review F11).
-            Soft.Pressed(press, down, Soft.Enabled);
+            Soft.Pressed(press, down, Animates);
         }
         art.MouseLeftButtonDown += (_, e) =>
         {

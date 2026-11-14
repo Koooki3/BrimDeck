@@ -74,7 +74,8 @@ public partial class App
     internal int SurfaceRebuilds { get; private set; }
 
     private void MakeTray()
-        => _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden, ToggleClickThrough, () => Settings.ClickThrough)
+        => _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden, ToggleClickThrough, () => Settings.ClickThrough,
+            () => Settings.Profiles.Count < 2 ? [] : Settings.Profiles.Select(profile => (Profiles.Name(profile), profile.Id == Settings.CurrentProfile, (Action)(() => ChooseProfile(profile.Id)))).ToList())
         {
             NoticeEntry = () => !Settings.NoticesEnabled ? null
                 : Notices.Paused ? (Loc.T("恢复通知提醒", "Resume notices"), () => Notices.Pause(null))

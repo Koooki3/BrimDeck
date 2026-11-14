@@ -30,6 +30,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Xiaomi MiMo Token Plan | ✓ | | Enter a Xiaomi MiMo Token Plan key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
 | Kimi Code API | ✓ | | Enter a Kimi Code API key in settings |
+| Kimi Open Platform | ✓ | | Enter a Kimi Open Platform API key in settings |
 | OpenCode Go | ✓ | | Enter an OpenCode Console API key in settings |
 | Command Code API | ✓ | | Enter a Command Code API key in settings |
 | OpenRouter | ✓ | | Enter an OpenRouter API key in settings |
@@ -145,7 +146,7 @@ Reads the Open Platform API key or Token Plan linked in the Xiaomi MiMo desktop 
 
 ## Sources entered by hand
 
-Choose Zhipu GLM, Z.ai GLM, Xiaomi MiMo API, Xiaomi MiMo Token Plan, DeepSeek, Kimi Code API, OpenCode Go, Command Code API, OpenRouter, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
+Choose Zhipu GLM, Z.ai GLM, Xiaomi MiMo API, Xiaomi MiMo Token Plan, DeepSeek, Kimi Code API, Kimi Open Platform, OpenCode Go, Command Code API, OpenRouter, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
 
 - **Key**: stored on this PC, encrypted by Windows, and never written to the settings file. It is deleted when you remove the column or change its quota source.
 - **Site address**: the home page address is enough. A trailing `/v1`, or the path of a console page you paste, is removed automatically. Requests carry the API key, so the address must use HTTPS; HTTP is only for this PC (`localhost`, `127.0.0.1`, `[::1]`).
@@ -174,7 +175,11 @@ Enter an API key created on the DeepSeek platform. Shows the account balance and
 
 ### Kimi Code API
 
-Enter an API key created in the Kimi Code console (starting with `sk-kimi-`); Kimi Code does not need to be signed in on this PC. Shows the same quota as the automatic Kimi Code source: the 5-hour and monthly limits, the weekly limit on legacy plans, and the extra-usage balance when purchased; the membership level appears beside the name. Keys for both mainland China (kimi.com) and international (kimi.ai) accounts work: api.kimi.com is asked first, and api.kimi.ai when it rejects the key. The source reads "Kimi Code API · kimi.com account" or "Kimi Code API · kimi.ai account", by the account's site. The key does not work on the Moonshot open platform, so no open-platform balance is shown, and no token usage is counted.
+Enter an API key created in the Kimi Code console (starting with `sk-kimi-`); Kimi Code does not need to be signed in on this PC. Shows the same quota as the automatic Kimi Code source: the 5-hour and monthly limits, the weekly limit on legacy plans, and the extra-usage balance when purchased; the membership level appears beside the name. Keys for both mainland China (kimi.com) and international (kimi.ai) accounts work: api.kimi.com is asked first, and api.kimi.ai when it rejects the key. The source reads "Kimi Code API · kimi.com account" or "Kimi Code API · kimi.ai account", by the account's site. The key does not work on the Kimi Open Platform, so no open-platform balance is shown, and no token usage is counted; for the open-platform balance, use "Kimi Open Platform".
+
+### Kimi Open Platform
+
+Enter an API key created on the Kimi Open Platform (platform.kimi.com or platform.kimi.ai). The Open Platform is pay-as-you-go and billed apart from the Kimi membership and Kimi Code plan quotas. Shows the account balance (the cash balance plus the voucher balance), and the cash and voucher balances on their own; the cash balance is negative while the account owes. When the balance is too low to call the API, the status says so. A target balance can be set. Keys for both mainland China and international accounts work: api.moonshot.cn is asked first, and api.moonshot.ai when it rejects the key. Mainland China accounts are shown in CNY and international ones in USD; the source reads "Kimi Open Platform · kimi.com account" or "Kimi Open Platform · kimi.ai account". A Kimi Code console key (starting with `sk-kimi-`) does not work here; choose Kimi Code API for it.
 
 ### OpenCode Go
 

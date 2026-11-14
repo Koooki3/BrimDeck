@@ -17,8 +17,12 @@ public enum WindowBehavior { Normal, Line, Hide }
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen }
 // The monitors that show the panel. Chosen uses DisplayMonitors and falls back to the primary monitor while none of them is connected.
 public enum DisplayPlacement { Primary, Chosen }
-// A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named.
-public sealed record ChosenDisplay(string Id, string Name);
+// A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named. Profile is
+// the profile its panel shows, or null for the current one (DeckSettings.CurrentProfile).
+public sealed record ChosenDisplay(string Id, string Name)
+{
+    public Guid? Profile { get; init; }
+}
 // One app's own answers to the three window rules, as "app rules": for each of the three contexts the app can be in, the
 // panel can follow the global rules (null) or choose one of the behaviors they offer. An app with all three set to Normal
 // is the full-screen exception as it began: its covering windows leave the panel alone. Path is the executable when it is
@@ -36,7 +40,8 @@ public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop app or local web app) signed in with; DeepSeek uses a key entered by hand.
 // GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
 // Kimi reads the plan quota of the account Kimi Code (CLI, desktop app or VS Code extension) signed in with, and its local session records;
-// KimiApi reads the same plan quota with a Kimi Code API key entered by hand.
+// KimiApi reads the same plan quota with a Kimi Code API key entered by hand. KimiPlatform reads the pay-as-you-go balance of a Kimi
+// Open Platform (Moonshot) API key entered by hand, which is billed apart from the membership.
 // OpenCode reads the OpenCode Go allowance of the workspace OpenCode (CLI or desktop app) signed in to OpenCode Console with, and its
 // local records; OpenCodeGo reads the same allowance with an OpenCode Console API key entered by hand.
 // CommandCode reads the plan quota of the account Command Code (CLI or desktop app) signed in with, and its local session records;
@@ -49,7 +54,7 @@ public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string
 // both with the keys Xiaomi MiMo Desktop and MiMo Code linked (MiMoUsage.ReadLinkedKeys); its statistics are MiMo's.
 // Statistics sources are saved as numbers. 8 and 9 were a short-lived split of Claude and are retired:
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
-public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20, CodeAgent = 21, CommandCode = 22, CommandCodeApi = 23, WorkBuddy = 24, WorkBuddyAi = 25, MiMo = 26, MiMoApi = 27, MiMoTokenPlan = 28, MiMoLinked = 29 }
+public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20, CodeAgent = 21, CommandCode = 22, CommandCodeApi = 23, WorkBuddy = 24, WorkBuddyAi = 25, MiMo = 26, MiMoApi = 27, MiMoTokenPlan = 28, MiMoLinked = 29, KimiPlatform = 30 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
 public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices, Notices }
@@ -279,7 +284,7 @@ public static class AppPresets
     // The original preset colors: coral for Claude, mint for Codex, periwinkle for Antigravity, light gray for Cursor.
     public static string ThemeColor(ProviderId id) => id switch
     { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#3A538D", ProviderId.Dsh => "#6081DA", ProviderId.Kimi => "#68CDEB", ProviderId.OpenCode => "#8E8E93", ProviderId.CodeAgent => "#22D3C5", ProviderId.CommandCode => "#7A60E3", ProviderId.WorkBuddy or ProviderId.WorkBuddyAi => "#98DBB0", ProviderId.MiMo or ProviderId.MiMoLinked => "#FF6900",
-      ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.MiMoApi or ProviderId.MiMoTokenPlan or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.OpenCodeGo or ProviderId.CommandCodeApi or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
+      ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.MiMoApi or ProviderId.MiMoTokenPlan or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.KimiPlatform or ProviderId.OpenCodeGo or ProviderId.CommandCodeApi or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
     // Sources entered by hand share one purple by default.
     public const string ManualColor = "#CC9EED";
     public static int Level(double usedPercent) => usedPercent >= CriticalPercent ? 2 : usedPercent >= WarningPercent ? 1 : 0;
@@ -432,6 +437,7 @@ public sealed class DeckSettings
     public string RefreshHotkey { get; set; } = "";
     public string CycleStyleHotkey { get; set; } = "";
     public string LineStyleHotkey { get; set; } = "";
+    public string NextProfileHotkey { get; set; } = "";
     public string Hotkey(HotkeyKind kind) => (kind switch
     {
         HotkeyKind.Hide => HideHotkey, HotkeyKind.Expand => ExpandHotkey, HotkeyKind.Resize => ResizeHotkey, HotkeyKind.Move => MoveHotkey,
@@ -439,7 +445,7 @@ public sealed class DeckSettings
         HotkeyKind.Page2 => Page2Hotkey, HotkeyKind.Page3 => Page3Hotkey, HotkeyKind.Page4 => Page4Hotkey,
         HotkeyKind.Page5 => Page5Hotkey, HotkeyKind.Page6 => Page6Hotkey, HotkeyKind.Page7 => Page7Hotkey, HotkeyKind.Page8 => Page8Hotkey,
         HotkeyKind.Page9 => Page9Hotkey, HotkeyKind.Page10 => Page10Hotkey, HotkeyKind.Refresh => RefreshHotkey,
-        HotkeyKind.CycleStyle => CycleStyleHotkey, HotkeyKind.LineStyle => LineStyleHotkey, HotkeyKind.Notices => NoticeHotkey, _ => ""
+        HotkeyKind.CycleStyle => CycleStyleHotkey, HotkeyKind.LineStyle => LineStyleHotkey, HotkeyKind.NextProfile => NextProfileHotkey, HotkeyKind.Notices => NoticeHotkey, _ => ""
     }) ?? "";
     public void SetHotkey(HotkeyKind kind, string value)
     {
@@ -465,6 +471,7 @@ public sealed class DeckSettings
             case HotkeyKind.CycleStyle: CycleStyleHotkey = value; break;
             case HotkeyKind.LineStyle: LineStyleHotkey = value; break;
             case HotkeyKind.Notices: NoticeHotkey = value; break;
+            case HotkeyKind.NextProfile: NextProfileHotkey = value; break;
         }
     }
     // Mouse pass-through: hovering does not open the panel and every click goes to the window beneath; only the shortcuts open
@@ -591,6 +598,9 @@ public sealed class DeckSettings
     // opens, and over the desktop while the desktop is shown; ForceTopmost then does not apply. The window rules still do:
     // Normal leaves it covered, Line puts the indicator above the window that fills the screen, Hide hides it.
     public bool AlwaysOnTop { get; set; } = true;
+    // The panel stays above other always-on-top windows too: the part one covers is shown above it in a window of a higher band
+    // (TaskbarMirror), so the panel stays on top without raising itself again and again. Where that window cannot be made, the
+    // panel is raised again whenever it is covered.
     public bool ForceTopmost { get; set; }
     // The panel window can be captured on its own by recording apps (OBS window capture). Off, the window keeps the no-activate
     // style that recording apps cannot capture, and that keeps it out of Alt+Tab.
@@ -763,6 +773,12 @@ public sealed class DeckSettings
     public double NoticesWidth { get; set; } = 460;
     public double NoticesHeight { get; set; } = 280;
     public List<NoticeAppRule> NoticeApps { get; set; } = [];
+    // The named profiles (DeckProfile, Profiles). The current one's settings are the ordinary members of this class; ReturnProfile is
+    // the profile a rule replaced while it holds (ProfileRule), to come back to when it stops holding or BrimDeck starts again.
+    public List<DeckProfile> Profiles { get; set; } = [];
+    public Guid CurrentProfile { get; set; }
+    public Guid? ReturnProfile { get; set; }
+    public List<ProfileRule> ProfileRules { get; set; } = [];
     // The ordered application list; the order is the column order of the expanded panel. Claude and Codex are shown
     // at first; the other built-in applications are listed but hidden.
     public List<AppEntry> Apps
@@ -864,6 +880,8 @@ public sealed class DeckSettings
         copy.NoticeApps = (NoticeApps ?? []).Select(rule => rule.Copy()).ToList();
         copy.IgnoredMediaApps = [.. IgnoredMediaApps ?? []];
         copy.DeviceChoices = [.. (DeviceChoices ?? []).Select(device => device.Copy())];
+        copy.Profiles = [.. (Profiles ?? []).Select(profile => profile.Copy())];
+        copy.ProfileRules = [.. (ProfileRules ?? []).Select(rule => rule.Copy())];
         return copy;
     }
     public void Normalize()
@@ -1017,7 +1035,7 @@ public sealed class DeckSettings
             .Select(app => new IgnoredMediaApp(app.AppId.Trim(), (app.Name ?? "").Trim(), (app.Path ?? "").Trim()))
             .DistinctBy(app => app.AppId, StringComparer.OrdinalIgnoreCase).Take(AppPresets.MaximumIgnoredMediaApps).ToList();
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
-            .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
+            .Select(d => d with { Id = d.Id.Trim(), Name = (d.Name ?? "").Trim() }).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
         NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
@@ -1040,6 +1058,7 @@ public sealed class DeckSettings
             if (!Enum.IsDefined(rule.Priority)) rule.Priority = NoticePriority.Normal;
             if (rule.Privacy is { } privacy && !Enum.IsDefined(privacy)) rule.Privacy = null;
         }
+        Core.Profiles.Normalize(this);
     }
     public NoticeAppRule? NoticeRule(string appKey) => NoticeApps.FirstOrDefault(rule => rule.Key == appKey);
 }

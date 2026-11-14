@@ -148,15 +148,16 @@ internal static class UI
     }
     // A progress ring: a faint track with a colored arc that starts at the top and runs clockwise, as the system readings' dials
     // and the device batteries' rings do.
-    public static Grid Ring(double percent, string color, double size, double thickness, string? track = null, string? plate = null)
+    public static Grid Ring(double percent, string color, double size, double thickness, string? track = null, string? plate = null, PanelLook? look = null)
     {
         var ring = new Grid { Width = size, Height = size };
+        look ??= PanelTheme.Main;
         // On a plate (PanelTheme.Plated, or the color given; "" for none): a dark well under the ring and, in the middle, a small square
         // in the ring's color.
-        plate ??= PanelTheme.Plated ? PanelTheme.Hex("input") : "";
+        plate ??= look.Plated ? look.Hex("input") : "";
         if (plate.Length > 0) ring.Children.Add(new Ellipse { Fill = Brush(plate) });
         // On a plate the track is a ring of ticks (dashes), the scale of a gauge.
-        ring.Children.Add(new Ellipse { Stroke = Brush(track ?? PanelTheme.Hex("ringTrack")), StrokeThickness = thickness, StrokeDashArray = plate.Length > 0 ? [.55, 1.1] : null });
+        ring.Children.Add(new Ellipse { Stroke = Brush(track ?? look.Hex("ringTrack")), StrokeThickness = thickness, StrokeDashArray = plate.Length > 0 ? [.55, 1.1] : null });
         if (plate.Length > 0 && size >= 10) ring.Children.Add(new Rectangle { Width = Math.Round(size * .3), Height = Math.Round(size * .3), Fill = Brush(color), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         double fraction = Math.Clamp(percent / 100, 0, 1);
         if (fraction >= .999) ring.Children.Add(new Ellipse { Stroke = Brush(color), StrokeThickness = thickness });
@@ -167,11 +168,11 @@ internal static class UI
     // Progress rings, one inside the other, outside in, gap apart between their strokes, as Ring draws one; a null share draws its
     // track alone, and NaN nothing at all, while the rings inside it keep their places (QuotaRing.Shares). All are geometry about the
     // same centre: a ring nested by margins would have its offset rounded to device pixels apart from its size, and sit off centre.
-    public static Grid NestedRings(IReadOnlyList<double?> shares, string color, double size, double thickness, double gap)
+    public static Grid NestedRings(IReadOnlyList<double?> shares, string color, double size, double thickness, double gap, PanelLook? look = null)
     {
         var ring = new Grid { Width = size, Height = size };
         var center = new Point(size / 2, size / 2);
-        Brush track = Brush(PanelTheme.Hex("ringTrack")), fill = Brush(color);
+        Brush track = Brush((look ?? PanelTheme.Main).Hex("ringTrack")), fill = Brush(color);
         double radius = size / 2 - thickness / 2;
         foreach (var share in shares)
         {

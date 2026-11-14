@@ -56,22 +56,30 @@ internal static class ExpandedMonitorTests
 
     private static void Network(Action<string, bool> check)
     {
-        var preset = ExpandedMonitor.Defaults();
-        check("Expanded presets: the default table is the All preset (the frame rate aside)", ExpandedMonitor.Preset(preset) == ExpandedPreset.All);
-        ExpandedMonitor.Apply(preset, ExpandedPreset.Brief);
-        check("Expanded presets: Brief shows the CPU, memory, download and upload only, and the process list stays",
-            ExpandedMonitor.Shown(preset).SequenceEqual([ExpandedItem.Cpu, ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Processes]) && ExpandedMonitor.Preset(preset) == ExpandedPreset.Brief);
-        ExpandedMonitor.Apply(preset, ExpandedPreset.CpuMemory);
-        check("Expanded presets: CPU and memory", ExpandedMonitor.Shown(preset).SequenceEqual([ExpandedItem.Cpu, ExpandedItem.Memory, ExpandedItem.Processes]) && ExpandedMonitor.Preset(preset) == ExpandedPreset.CpuMemory);
-        ExpandedMonitor.Apply(preset, ExpandedPreset.None);
-        check("Expanded presets: None chooses no reading but leaves the process list", ExpandedMonitor.Shown(preset).SequenceEqual([ExpandedItem.Processes]) && ExpandedMonitor.Preset(preset) == ExpandedPreset.None);
-        ExpandedMonitor.Apply(preset, ExpandedPreset.All);
-        preset.First(r => r.Item == ExpandedItem.Frames).Visible = true;
-        check("Expanded presets: All leaves the frame rate as it is, and a table that is none of them matches none",
-            ExpandedMonitor.Preset(preset) == ExpandedPreset.All && (preset.First(r => r.Item == ExpandedItem.Gpu).Visible = false) == false && ExpandedMonitor.Preset(preset) is null);
         var moved = ExpandedMonitor.Normalize(ExpandedMonitor.Order.Reverse().Select(i => new ExpandedReading { Item = i }));
-        ExpandedMonitor.Apply(moved, ExpandedPreset.Brief);
-        check("Expanded presets: a preset keeps the order", moved.Select(r => r.Item).SequenceEqual(ExpandedMonitor.Normalize(moved).Select(r => r.Item)) && moved[0].Item == ExpandedItem.Processes && moved[^1].Item == ExpandedItem.Cpu);
+        check("Expanded table: a block's items stay together in the block's own order, where its first item was",
+            moved.Select(r => r.Item).SequenceEqual([ExpandedItem.Processes, ExpandedItem.Power, ExpandedItem.Storage, ExpandedItem.Frames,
+                ExpandedItem.Upload, ExpandedItem.Download, ExpandedItem.Memory, ExpandedItem.Cpu, ExpandedItem.Gpu]));
+        var swapped = ExpandedMonitor.Swap(ExpandedMonitor.Defaults(), ExpandedItem.Memory);
+        var rates = ExpandedMonitor.Swap(swapped, ExpandedItem.Download);
+        check("Expanded table: memory and the network change places, and so do the two rates, inside their block",
+            swapped.Select(r => r.Item).Skip(2).Take(3).SequenceEqual([ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Memory])
+            && rates.Select(r => r.Item).Skip(2).Take(3).SequenceEqual([ExpandedItem.Upload, ExpandedItem.Download, ExpandedItem.Memory])
+            && ExpandedMonitor.Normalize(rates).Select(r => r.Item).SequenceEqual(rates.Select(r => r.Item)));
+        var hidden = ExpandedMonitor.Arrange(rates, [ExpandedItem.Power, ExpandedItem.Storage, ExpandedItem.Cpu]);
+        hidden.First(r => r.Item == ExpandedItem.Storage).Visible = false; hidden.First(r => r.Item == ExpandedItem.Upload).Visible = false;
+        var restored = ExpandedMonitor.InDefaultOrder(hidden);
+        check("Expanded table: the default order comes back for hidden items too, and what is shown or hidden stays",
+            !ExpandedMonitor.IsDefaultOrder(hidden) && restored.Select(r => r.Item).SequenceEqual(ExpandedMonitor.Order) && ExpandedMonitor.IsDefaultOrder(restored)
+            && restored.All(r => r.Visible == hidden.First(h => h.Item == r.Item).Visible));
+        check("Expanded table: the default table is in the default order, and the process list's place does not count",
+            ExpandedMonitor.IsDefaultOrder(ExpandedMonitor.Defaults()) && ExpandedMonitor.IsDefaultOrder(null)
+            && ExpandedMonitor.IsDefaultOrder([new() { Item = ExpandedItem.Processes }]) && ExpandedMonitor.Normalize([new() { Item = ExpandedItem.Processes }])[0].Item == ExpandedItem.Processes);
+        var arranged = ExpandedMonitor.Arrange(ExpandedMonitor.Defaults(), [ExpandedItem.Storage, ExpandedItem.Cpu, ExpandedItem.Power, ExpandedItem.Memory]);
+        check("Expanded table: moving blocks puts them in the places those blocks held, the others stay",
+            arranged.Select(r => r.Item).SequenceEqual([ExpandedItem.Storage, ExpandedItem.Cpu, ExpandedItem.Gpu, ExpandedItem.Frames, ExpandedItem.Power,
+                ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Processes])
+            && arranged.Select(r => r.Visible).SequenceEqual(ExpandedMonitor.Normalize(arranged).Select(r => r.Visible)));
         var content = new ExpandedContent(1, 1);
         var split = ExpandedMonitor.Normalize([new() { Item = ExpandedItem.Memory }, new() { Item = ExpandedItem.Download, Visible = false }, new() { Item = ExpandedItem.Cpu }]);
         check("Expanded table: a table from before the network was split gets the upload after the download, shown as the download is",
@@ -81,13 +89,16 @@ internal static class ExpandedMonitorTests
         check("Expanded table: the download keeps the number the network had", (int)ExpandedItem.Download == 3 && (int)ExpandedItem.Upload > (int)ExpandedItem.Processes);
         var old = SettingsMigrations.Read("{\"AppVersion\":\"9.0.0\",\"ExpandedReadings\":[{\"Item\":3,\"Visible\":true},{\"Item\":0,\"Visible\":true}]}");
         check("Expanded settings: a saved network (number 3) reads as the download and the upload follows it",
-            old.ExpandedReadings.Take(3).Select(r => r.Item).SequenceEqual([ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Cpu]) && old.ExpandedReadings[1].Visible);
+            old.ExpandedReadings.Take(5).Select(r => r.Item).SequenceEqual([ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Memory, ExpandedItem.Cpu, ExpandedItem.Gpu]) && old.ExpandedReadings[1].Visible);
         var both = ExpandedLayout.For([ExpandedItem.Download, ExpandedItem.Upload], 620, 200, content);
         var down = ExpandedLayout.For([ExpandedItem.Download], 620, 200, content);
         var up = ExpandedLayout.For([ExpandedItem.Upload], 620, 200, content);
         check("Expanded layout: download and upload are one block of one line, which shows the one or both",
             both.Parts.Count == 1 && both.Downloads && both.Uploads && both.Dropped.Count == 0 && both.Shown.Contains(ExpandedItem.Upload)
             && down.Downloads && !down.Uploads && down.Dropped.Count == 0 && up.Uploads && !up.Downloads && up.Part(ExpandedItem.Upload) is not null && up.Dropped.Count == 0);
+        var upFirst = ExpandedLayout.For([ExpandedItem.Upload, ExpandedItem.Download], 620, 200, content);
+        check("Expanded layout: the upload goes first where the table puts it first, and that is another page",
+            upFirst.UploadFirst && !both.UploadFirst && !up.UploadFirst && upFirst.Signature != both.Signature);
         check("Expanded layout: the same box whichever rates the block shows", both.Parts[0].Box == down.Parts[0].Box && down.Parts[0].Box == up.Parts[0].Box);
     }
 

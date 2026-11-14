@@ -20,13 +20,24 @@ public partial class MainWindow
     private const int DaylightFadeMs = 1600, ThemeFadeMs = 320, LeaveMs = 120;
     private Image? _themeFade, _materialFade;
 
-    // PanelTheme.Changing: the old look is still on screen, and PanelTheme.Current is still the old palette. The new one is
+    private void InitializeThemeFade()
+    {
+        // The main look's change fades the panel while it draws with the main look; its own look's change while it has one (UseLook).
+        void MainChanging(bool daylight) { if (_ownLook is null) BeginThemeFade(daylight); }
+        PanelTheme.Main.Changing += MainChanging;
+        Closed += (_, _) => { PanelTheme.Main.Changing -= MainChanging; if (_ownLook is not null) _ownLook.Changing -= BeginThemeFade; };
+        // The pictures lie on the island's present shape only.
+        IsVisibleChanged += (_, _) => { if (!IsVisible) EndThemeFade(); };
+        Island.SizeChanged += (_, _) => EndThemeFade(quickly: true);
+    }
+
+    // Look.Changing: the old look is still on screen, and Look.Current is still the old palette. The new one is
     // drawn on the frames that follow.
     private void BeginThemeFade(bool daylight)
     {
         // Pictures still fading are left to finish on their own, under the new ones.
         _themeFade = null; _materialFade = null;
-        if (!IsVisible || !Soft.Enabled || LiquidTheme.SkipsFade || _preview || Island.ActualWidth < 1 || Island.ActualHeight < 1 || PresentationSource.FromVisual(Island) is null) return;
+        if (!IsVisible || !Animates || LiquidTheme.SkipsFade || _preview || Island.ActualWidth < 1 || Island.ActualHeight < 1 || PresentationSource.FromVisual(Island) is null) return;
         if (Island.Child is not Panel content) return;
         double width = Island.ActualWidth, height = Island.ActualHeight;
         // The material: a copy of the island's own shape, dressed as it is now, without its content.
@@ -36,7 +47,7 @@ public partial class MainWindow
             // The brush's opacity too, whatever it is (a held blur glass is thinner than its color, GlassBackdrop.Held), so the copy looks exactly as the surface does.
             Background = new SolidColorBrush(_surface.Color) { Opacity = _surface.Opacity }, Pixel = Island.Pixel, Cut = Island.Cut
         };
-        PanelTheme.Dress(material, dpiScale: VisualTreeHelper.GetDpi(Island).DpiScaleX);
+        Look.Dress(material, dpiScale: VisualTreeHelper.GetDpi(Island).DpiScaleX);
         _materialFade = Fade(Picture(material, width, height), daylight ? DaylightFadeMs : ThemeFadeMs);
         // Under the content and the ambient light's scan line, above the island's own drawing.
         content.Children.Insert(0, _materialFade);
@@ -81,7 +92,7 @@ public partial class MainWindow
     {
         foreach (var image in Fading())
         {
-            if (!quickly || !Soft.Enabled) { Remove(image); continue; }
+            if (!quickly || !Animates) { Remove(image); continue; }
             if (image.Tag is "leaving") continue;
             image.Tag = "leaving";
             var leave = Soft.Fade(image.Opacity, 0, LeaveMs, Soft.Out);

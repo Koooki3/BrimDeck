@@ -9,7 +9,7 @@ static class MonitorStartupTests
         var lines = new List<string>();
         var notes = new FailureNotes(() => clock, lines.Add, 600);
         var error = new InvalidOperationException("boom");
-        check("Failure notes: the first failure of a kind is written", notes.Note("battery", error) && lines.Count == 1 && lines[0].StartsWith("battery: InvalidOperationException: boom"));
+        check("Failure notes: the first failure of a kind is written", notes.Note("battery", error) && lines.Count == 1 && lines[0].StartsWith("battery: System.InvalidOperationException: boom"));
         clock = 5;
         check("Failure notes: the same kind from the same source is not written again within the quiet time", !notes.Note("battery", new InvalidOperationException("again")) && lines.Count == 1);
         check("Failure notes: another kind, or another source, is written", notes.Note("battery", new System.IO.IOException("io")) && notes.Note("storage", error) && lines.Count == 3);

@@ -20,7 +20,12 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
     public static readonly TimeSpan MaxAge = TimeSpan.FromHours(24);
     // The file is written again for the same values (apart from the time) only when the last write is this old.
     public static readonly TimeSpan RewriteAfter = TimeSpan.FromMinutes(10);
-    private const int MaxTextLength = 200, MaxMetrics = 100, MaxDays = 400;
+    // MaxGroups bounds the token totals of one source (a group is one model on one day), so that several sources fit in MaxFileBytes.
+    // Whole days are kept, newest first; the start of the totals then moves to the first day kept, so a range reaching further back
+    // shows them as incomplete (ModelUsage) instead of counting less.
+    private const int MaxTextLength = 200, MaxMetrics = 100, MaxGroups = 400;
+    // A restored reading, and its totals, are drawn at this opacity until the new one replaces it.
+    public const double Dimmed = .55;
 
     private sealed record StoredMetric(MetricKind Kind, string Label, string? Id, int? Window, double? Percent, decimal? Amount, decimal? Total, decimal? Used,
         string? Currency, string? Unit, bool Unlimited, DateTimeOffset? ResetAt, DateTimeOffset? ExpiresAt, bool AtLeast, bool TotalIsTarget, CreditPeriod? Period);
@@ -30,8 +35,6 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
     {
         // When the quotas were read, where that is not when the rest was (a quota that failed this round keeps its earlier reading); null: ReadAt.
         public DateTimeOffset? QuotaAt { get; init; }
-        // The totals of this round were left out for being too many groups; an earlier, smaller reading is not merged back in their place.
-        public bool UsageTooWide { get; init; }
     }
     private sealed record StoredFile(int Version, List<StoredProvider?>? Providers);
     private static readonly JsonSerializerOptions Options = new() { Converters = { new JsonStringEnumConverter() } };
@@ -108,7 +111,7 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
                 fresh = [.. fresh.Select(stored => _current.FirstOrDefault(old => KeyOf(old) == KeyOf(stored)) is { } old ? Merge(stored, old, now) : stored)];
                 var have = fresh.Select(KeyOf).ToHashSet();
                 all = new List<StoredProvider>(fresh);
-                all.AddRange(_current.Where(old => !have.Contains(KeyOf(old)) && Relevant(settings, old) && Fresh(old, now)));
+                all.AddRange(_current.Where(old => !have.Contains(KeyOf(old)) && Relevant(settings, old)).Select(old => Live(old, now)).OfType<StoredProvider>());
                 same = Serialize(all, true);
                 text = Serialize(all, false);
                 // Over the size limit the token totals go first, and the sources then show no totals rather than zero ones.
@@ -141,9 +144,9 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
     {
         var merged = fresh;
         var quotaAt = old.QuotaAt ?? old.ReadAt;
-        if ((fresh.Metrics ?? []).Count == 0 && (old.Metrics ?? []).Count > 0 && quotaAt <= now.AddMinutes(5) && now - quotaAt <= MaxAge)
+        if ((fresh.Metrics ?? []).Count == 0 && (old.Metrics ?? []).Count > 0 && InRange(quotaAt, now))
             merged = merged with { Metrics = old.Metrics, Plan = string.IsNullOrEmpty(fresh.Plan) ? old.Plan : fresh.Plan, QuotaAt = quotaAt };
-        if (!fresh.UsageAvailable && !fresh.UsageTooWide && old.UsageAvailable && old.ReadAt <= now.AddMinutes(5) && now - old.ReadAt <= MaxAge)
+        if (!fresh.UsageAvailable && old.UsageAvailable && InRange(old.ReadAt, now))
             merged = merged with { UsageAvailable = true, UsageComplete = old.UsageComplete, UsageStart = old.UsageStart, Days = old.Days, ReadAt = old.ReadAt };
         return merged;
     }
@@ -152,20 +155,19 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
     // a source left with neither quotas nor token totals is not shown.
     private static StoredProvider? Live(StoredProvider stored, DateTimeOffset now)
     {
-        // Quotas read longer ago than MaxAge are left out too, even when the totals beside them are newer.
-        var metrics = QuotaFresh(stored, now) ? (stored.Metrics ?? []).Where(metric => metric is not null && (metric.ResetAt is not { } reset || reset > now)).ToList() : [];
-        // The same the other way round: totals older than MaxAge are left out, and the quotas beside them stay.
-        bool usage = UsageFresh(stored, now);
+        // Each part is judged by its own time: quotas (QuotaAt) or totals (ReadAt) read longer ago than MaxAge are left out, and the
+        // other part stays when it is newer.
+        var metrics = !InRange(stored.QuotaAt ?? stored.ReadAt, now) ? []
+            : (stored.Metrics ?? []).Where(metric => metric is not null && (metric.ResetAt is not { } reset || reset > now)).ToList();
+        bool usage = stored.UsageAvailable && InRange(stored.ReadAt, now);
         if (metrics.Count == 0 && !usage) return null;
-        return usage ? stored with { Metrics = metrics } : stored with { Metrics = metrics, UsageAvailable = false, UsageComplete = false, UsageStart = null, Days = [] };
+        return usage ? stored with { Metrics = metrics } : stored with { Metrics = metrics, UsageAvailable = false, UsageStart = null, Days = [] };
     }
 
     private static bool Relevant(DeckSettings settings, StoredProvider stored) => settings.RequiredProviders.Contains(stored.Id);
-    private static bool Recent(DateTimeOffset at, DateTimeOffset now) => at <= now.AddMinutes(5) && now - at <= MaxAge;
-    private static bool QuotaFresh(StoredProvider stored, DateTimeOffset now) => (stored.Metrics?.Count ?? 0) > 0 && Recent(stored.QuotaAt ?? stored.ReadAt, now);
-    private static bool UsageFresh(StoredProvider stored, DateTimeOffset now) => stored.UsageAvailable && Recent(stored.ReadAt, now);
-    // A source is worth keeping while either of its parts is recent: the quotas and the totals are read, and age, apart.
-    private static bool Fresh(StoredProvider stored, DateTimeOffset now) => QuotaFresh(stored, now) || UsageFresh(stored, now);
+    private static bool InRange(DateTimeOffset at, DateTimeOffset now) => at <= now.AddMinutes(5) && now - at <= MaxAge;
+    // A source is worth reading while either part is recent enough; Live then leaves out the part that is not.
+    private static bool Fresh(StoredProvider stored, DateTimeOffset now) => InRange(stored.ReadAt, now) || InRange(stored.QuotaAt ?? stored.ReadAt, now);
 
     // The text of a set of readings; sameValues leaves out the time they were read, to tell a changed reading from a later one.
     private static string Serialize(List<StoredProvider> providers, bool sameValues)
@@ -199,15 +201,27 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
             .Select(group => new StoredDay(group.Key.Day, Text(group.Key.Model), group.Key.PriceModel is null ? null : Text(group.Key.PriceModel), group.Sum(entry => entry.Input), group.Sum(entry => entry.CacheRead),
                 group.Sum(entry => entry.CacheWrite), group.Sum(entry => entry.CacheWriteHour), group.Sum(entry => entry.Output),
                 group.Key.Reported ? group.Sum(entry => entry.ReportedCostUsd ?? 0) : null, group.Key.FittedCost))
-            .OrderByDescending(day => day.Day).ToList();
-        // More groups than MaxDays would be cut short and then shown as the whole: the totals of that source are not kept at all.
-        bool keepUsage = snapshot.UsageAvailable && groups.Count <= MaxDays;
-        var days = keepUsage ? groups : [];
-        if (metrics.Count == 0 && !keepUsage) return null;
+            .GroupBy(day => day.Day).OrderByDescending(day => day.Key);
+        // Whole days, newest first, up to MaxGroups; a day that does not fit and every earlier one are left out, and the totals then
+        // start the day after it. A single day over the limit leaves the source with no totals rather than a part of that day's.
+        var days = new List<StoredDay>();
+        bool usage = snapshot.UsageAvailable;
+        var usageStart = snapshot.UsageStart;
+        foreach (var day in groups)
+        {
+            if (days.Count + day.Count() > MaxGroups)
+            {
+                if (days.Count == 0) usage = false;
+                else usageStart = day.Key.AddDays(1);
+                break;
+            }
+            days.AddRange(day);
+        }
+        if (!usage) { days = []; usageStart = null; if (metrics.Count == 0) return null; }
         // The plan comes with the quotas; the time is when they were read (a quota kept from earlier keeps its own time).
         var quotaAt = snapshot.IsStale && snapshot.QuotaTime is { } quotaTime ? quotaTime : now;
-        return new StoredProvider(snapshot.Id, Local(snapshot.Configurations) ? [ProviderCatalog.LocalQuota] : [], keepUsage ? now : quotaAt, Text(snapshot.Plan), metrics,
-            keepUsage, keepUsage && snapshot.UsageComplete, keepUsage ? snapshot.UsageStart : null, days) { QuotaAt = quotaAt, UsageTooWide = snapshot.UsageAvailable && !keepUsage };
+        return new StoredProvider(snapshot.Id, Local(snapshot.Configurations) ? [ProviderCatalog.LocalQuota] : [], usage ? now : quotaAt, Text(snapshot.Plan), metrics,
+            usage, snapshot.UsageComplete, usageStart, days) { QuotaAt = quotaAt };
     }
 
     private static ProviderSnapshot Restore(StoredProvider stored, DateTimeOffset now)
@@ -233,7 +247,7 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
             UsageAvailable = stored.UsageAvailable, UsageComplete = stored.UsageComplete, UsageStart = stored.UsageStart,
             LastSeenAt = shown, IsStale = true, LiveQuota = false, QuotaTime = stored.QuotaAt ?? read,
             StatusLabel = label, Status = Loc.T($"显示 {Clock(shown, now)} 读取的数据，新数据到达后会替换。", $"Showing the data read at {Clock(shown, now)}. New data replaces it when it arrives."),
-            UsageNote = Loc.T($"显示 {Clock(read, now)} 读取的数据。", $"Showing the data read at {Clock(read, now)}.")
+            UsageNote = stored.UsageAvailable ? Loc.T($"显示 {Clock(read, now)} 读取的数据。", $"Showing the data read at {Clock(read, now)}.") : ""
         };
     }
 

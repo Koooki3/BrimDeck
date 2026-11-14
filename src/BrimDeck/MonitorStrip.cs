@@ -20,6 +20,8 @@ namespace BrimDeck;
 // change of its width.
 internal sealed class MonitorStrip : FrameworkElement
 {
+    // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
+    private PanelLook Look => PanelLook.Of(this);
     // The parts of the drive reading a strip draws: the glyph and the letters as in the row, or the letters alone.
     internal enum DriveParts { All, Letters }
     private readonly DriveParts _driveParts;
@@ -104,7 +106,7 @@ internal sealed class MonitorStrip : FrameworkElement
         ClipToBounds = true;
         // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings. A rate has
         // three digits and a letter, with a point below 100 (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
-        double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
+        double text(string sample) => MonitorDraw.Text(sample, _font, Look.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
@@ -276,8 +278,8 @@ internal sealed class MonitorStrip : FrameworkElement
         return _cpu.Moving(now) || _memory.Moving(now) || _gpu.Moving(now) || _charge.Moving(now);
     }
 
-    private double FigureWidth(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace);
-    private double SmallWidth(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _small, UI.Primary, 1).WidthIncludingTrailingWhitespace);
+    private double FigureWidth(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _font, Look.Primary, 1).WidthIncludingTrailingWhitespace);
+    private double SmallWidth(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _small, Look.Primary, 1).WidthIncludingTrailingWhitespace);
 
     // Every whole percent's figure, made once: the gauges show one on every reading.
     private static readonly string[] Percents = [.. Enumerable.Range(0, 101).Select(percent => MonitorFormat.Percent(percent / 100d) + "%")];
@@ -360,7 +362,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Cpu: Gauge(drawing, dial, left, center, item, _cpu.At(now), s?.Cpu.OrDefault?.Usage, color, level, "C", s, ppd); break;
                 case CompactMonitorItems.Memory:
                     var memory = s?.Memory.OrDefault;
-                    Gauge(drawing, dial, left, center, item, _memory.At(now), memory?.UsedFraction, memory is null ? UI.Tertiary : color, level, "M", s, ppd); break;
+                    Gauge(drawing, dial, left, center, item, _memory.At(now), memory?.UsedFraction, memory is null ? Look.Tertiary : color, level, "M", s, ppd); break;
                 case CompactMonitorItems.Gpu: Gauge(drawing, dial, left, center, item, _gpu.At(now), s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, color, level, "G", s, ppd); break;
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
@@ -378,7 +380,7 @@ internal sealed class MonitorStrip : FrameworkElement
     private void Columns(DrawingContext drawing, double x, double width, double center, CpuSample? cpu, double now)
     {
         double height = Math.Round(14 * _scale), top = Math.Round(center - height / 2);
-        if (cpu is null || cpu.Cores.Count == 0) { drawing.DrawRoundedRectangle(UI.Brush(UI.Fill), null, new Rect(x, top, width, height), 2, 2); return; }
+        if (cpu is null || cpu.Cores.Count == 0) { drawing.DrawRoundedRectangle(UI.Brush(Look.Fill), null, new Rect(x, top, width, height), 2, 2); return; }
         int count = cpu.Cores.Count, groups = Math.Max(1, cpu.GroupCount);
         if (CompactMonitor.UsesMatrix(_coreDisplay, count, _scale)) { Matrix(drawing, x, top, height, cpu, groups, now); return; }
         var (column, gap, _) = CompactMonitor.CoreColumns(count, _scale);
@@ -387,7 +389,7 @@ internal sealed class MonitorStrip : FrameworkElement
             var core = cpu.Cores[i];
             double usage = EasedUsage(i, core, now);
             double cx = x + i * (column + gap), fill = Math.Max(1.5, usage * height);
-            drawing.DrawRectangle(UI.Brush(UI.Fill), null, new Rect(cx, top, column, height));
+            drawing.DrawRectangle(UI.Brush(Look.Fill), null, new Rect(cx, top, column, height));
             drawing.DrawRectangle(UI.Brush(CoreColor(core.Group, groups, ReadingLevels.OfShare(core.Usage))), null, new Rect(cx, top + height - fill, column, fill));
         }
     }
@@ -403,7 +405,7 @@ internal sealed class MonitorStrip : FrameworkElement
         if (_matrix.Count != count) _matrix = CoreMatrix.Strip(count, _scale, _dpi);
         var grid = _matrix;
         double radius = grid.Cell >= 5 ? grid.Cell * .18 : 0;
-        var track = UI.Brush(UI.Fill);
+        var track = UI.Brush(Look.Fill);
         // The squares sit on whole device pixels: the row's origin is a whole DIP, which at 150 % is half a device pixel.
         double dpi = _dpi > 0 ? _dpi : 1, left = Math.Round(x * dpi) / dpi, upper = Math.Round(top * dpi) / dpi;
         for (int i = 0; i < count; i++)
@@ -442,7 +444,7 @@ internal sealed class MonitorStrip : FrameworkElement
     private void Gauge(DrawingContext drawing, DialParts parts, double x, double center, CompactMonitorItems item, double? dial, double? share, string color, MemoryLevel level, string letter, MonitorSnapshot? s, double ppd)
     {
         // As thick as a quota ring and on the same track, so its whole outline shows even at a low share.
-        MonitorDraw.Dial(drawing, new Point(x + _dial / 2, center), _dial, Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), Math.Max(1, 7 * _scale), dial, color, letter, ppd, parts);
+        MonitorDraw.Dial(drawing, new Point(x + _dial / 2, center), _dial, Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), Math.Max(1, 7 * _scale), dial, color, letter, ppd, parts, look: Look);
         if ((_values & item) == 0 || (parts & DialParts.Face) == 0) return;
         var heat = (_heat & item) != 0 ? CompactFigures.Heat(item, s) : null;
         Figures(drawing, x + _dial + Math.Round(4 * _scale), center, item, (_usage & item) != 0 ? (share, level) : null, (_heat & item) != 0, heat, ppd);
@@ -479,7 +481,7 @@ internal sealed class MonitorStrip : FrameworkElement
 
     // A figure keeps the text color while its reading is normal and takes the level's color at the warning and critical
     // levels, as the quota bars' numbers do.
-    private static string FigureColor(MemoryLevel level, string color) => level == MemoryLevel.Normal ? UI.Primary : color;
+    private string FigureColor(MemoryLevel level, string color) => level == MemoryLevel.Normal ? Look.Primary : color;
 
     // An arrow and the rate in three significant digits and a letter: "84.2K", "1.24M".
     private void Rate(DrawingContext drawing, double x, double center, MonitorGlyph glyph, double? rate, string color, MemoryLevel level, double ppd)
@@ -505,14 +507,14 @@ internal sealed class MonitorStrip : FrameworkElement
         }
         double size = Glyph, baseline = Math.Round(center + _font * .36);
         if (_driveParts != DriveParts.Letters)
-            MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Drive, any ? _colors.At(item, level) : UI.Tertiary);
+            MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Drive, any ? _colors.At(item, level) : Look.Tertiary);
         double at = _driveParts == DriveParts.Letters ? x : x + size + Math.Round(3 * _scale);
         for (int i = 0; i < _letters.Length; i++)
         {
             if (i > 0) at += EntryGap;
             if (_tags[i].Length > 0)
             {
-                MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(_tags[i], _font, UI.Tertiary, ppd), at, baseline);
+                MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(_tags[i], _font, Look.Tertiary, ppd), at, baseline);
                 at += FigureWidth(_tags[i]) + TagGap;
             }
             var share = _letterUsage[i] ? CompactSources.Share(_letters[i], s) : null;
@@ -535,9 +537,9 @@ internal sealed class MonitorStrip : FrameworkElement
     {
         // The bolt is drawn in a square (PowerIcons draws in the shorter side) over the room kept for it; it is narrower than tall.
         double size = Math.Round(14 * _scale), slot = Math.Round(9 * _scale);
-        PowerIcons.Draw(drawing, PowerIcon.Bolt, new Rect(x + Math.Round((slot - size) / 2), Math.Round(center - size / 2), size, size), power is null ? UI.Tertiary : _powerStyle.Draw, _powerStyle, ppd);
+        PowerIcons.Draw(drawing, PowerIcon.Bolt, new Rect(x + Math.Round((slot - size) / 2), Math.Round(center - size / 2), size, size), power is null ? Look.Tertiary : _powerStyle.Draw, _powerStyle, ppd);
         string figure = power is { } p ? PowerFormat.Compact(p.Watts) + "W" : "—";
-        MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(figure, _font, UI.Primary, ppd), x + slot + Math.Round(3 * _scale), Math.Round(center + _font * .36));
+        MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(figure, _font, Look.Primary, ppd), x + slot + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 
     // The frame rate: the program's icon (when chosen and it has one) or a screen glyph in the reading's color, then the whole frames
@@ -550,12 +552,12 @@ internal sealed class MonitorStrip : FrameworkElement
         else
         {
             double size = Glyph;
-            MonitorDraw.Arrow(drawing, new Point(x + (slot - size) / 2, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Screen, frames is null ? UI.Tertiary : color);
+            MonitorDraw.Arrow(drawing, new Point(x + (slot - size) / 2, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Screen, frames is null ? Look.Tertiary : color);
         }
         double at = x + slot + Math.Round(3 * _scale);
-        var figure = MonitorDraw.Text(FramesFigure(frames?.PerSecond), _font, UI.Primary, ppd);
+        var figure = MonitorDraw.Text(FramesFigure(frames?.PerSecond), _font, Look.Primary, ppd);
         MonitorDraw.BaselineKept(drawing, figure, at, baseline);
-        MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(FramesUnit, _small, UI.Tertiary, ppd), at + Math.Ceiling(figure.WidthIncludingTrailingWhitespace) + Math.Round(2 * _scale), baseline);
+        MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(FramesUnit, _small, Look.Tertiary, ppd), at + Math.Ceiling(figure.WidthIncludingTrailingWhitespace) + Math.Round(2 * _scale), baseline);
     }
     private static FrameSample? FrameOf(MonitorSnapshot? s) => s?.Frames.OrDefault;
     private static readonly string[] FrameFigures = [.. Enumerable.Range(0, 1000).Select(count => count.ToString(System.Globalization.CultureInfo.InvariantCulture))];
@@ -570,7 +572,7 @@ internal sealed class MonitorStrip : FrameworkElement
         var visual = battery is null ? new BatteryVisual(0, BatteryState.Discharging, false, MemoryLevel.Normal) : BatteryVisual.Of(battery, _low);
         PowerGlyphs.Battery(drawing, new Rect(x, Math.Round((center - height / 2) * ppd) / ppd, BatteryWidth, height), visual, _powerStyle, ppd,
             battery is null ? 0 : fill ?? battery.Percent / 100, compact: true, unknown: battery is null);
-        string color = battery is null ? UI.Tertiary : _powerStyle.Fill(level, battery.State);
+        string color = battery is null ? Look.Tertiary : _powerStyle.Fill(level, battery.State);
         Figure(drawing, x + BatteryWidth + Math.Round(3 * _scale), center, battery is null ? null : battery.Percent / 100, FigureColor(level, color), ppd);
     }
 }

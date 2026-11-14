@@ -119,15 +119,16 @@ internal static partial class MonitorDraw
     // only the arc moves while a reading eases (MonitorStrip).
     private const double DialStart = Math.PI * 1.25, DialSweep = Math.PI * 1.5;
     public static void Dial(DrawingContext drawing, Point center, double size, double ring, double letterSize, double? share, string color, string letter, double ppd,
-        DialParts parts = DialParts.All)
+        DialParts parts = DialParts.All, PanelLook? look = null)
     {
+        var Look = look ?? PanelTheme.Main;
         double radius = size / 2 - ring / 2;
         var c = new Point(center.X, center.Y + size / 32);
-        if ((parts & DialParts.Face) != 0 && PanelTheme.Plated) drawing.DrawEllipse(UI.Brush(PanelTheme.Hex("input")), null, c, size / 2, size / 2);
-        if ((parts & DialParts.Face) != 0) DialArc(drawing, c, radius, ring, 1, PanelTheme.Hex("ringTrack"));
+        if ((parts & DialParts.Face) != 0 && Look.Plated) drawing.DrawEllipse(UI.Brush(Look.Hex("input")), null, c, size / 2, size / 2);
+        if ((parts & DialParts.Face) != 0) DialArc(drawing, c, radius, ring, 1, Look.Hex("ringTrack"));
         if ((parts & DialParts.Share) != 0 && share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);
         if ((parts & DialParts.Face) == 0) return;
-        var text = Text(letter, letterSize, UI.Primary, ppd, strong: true);
+        var text = Text(letter, letterSize, Look.Primary, ppd, strong: true);
         // Filled as its outline rather than drawn as text: WPF puts a glyph run's baseline on whole device pixels and hints the
         // glyph to them, which at a fractional scale left the letter up to a pixel above the ring's centre (0.7 px at 150 %). The
         // outline is rasterised exactly where it lies, as the ring is, so the two share their centre at any scale. Unhinted, it
@@ -138,12 +139,12 @@ internal static partial class MonitorDraw
         // counters of a 100 % letter open.
         // The outline, its bounds and its stroke are made once per letter, size, scale and text color (the page and the collapsed
         // row redraw their dials on every reading and every frame of a move).
-        var key = (letter, letterSize, ppd, UI.Primary);
+        var key = (letter, letterSize, ppd, Look.Primary);
         if (!Letters.TryGetValue(key, out var made))
         {
             var outline = text.BuildGeometry(new Point()); outline.Freeze();
             double pixels = letterSize * ppd;
-            var stroke = new Pen(UI.Brush(UI.Primary), Math.Min(.06 * pixels, .17 * Math.Sqrt(pixels)) / ppd) { LineJoin = PenLineJoin.Round };
+            var stroke = new Pen(UI.Brush(Look.Primary), Math.Min(.06 * pixels, .17 * Math.Sqrt(pixels)) / ppd) { LineJoin = PenLineJoin.Round };
             stroke.Freeze();
             if (Letters.Count > 64) Letters.Clear();
             Letters[key] = made = (outline, outline.Bounds, stroke);
@@ -151,7 +152,7 @@ internal static partial class MonitorDraw
         var (glyph, bounds, weight) = made;
         if (bounds.IsEmpty) return;
         drawing.PushTransform(Placed(new Matrix(1, 0, 0, 1, c.X - bounds.X - bounds.Width / 2, c.Y - bounds.Y - bounds.Height / 2)));
-        drawing.DrawGeometry(UI.Brush(UI.Primary), weight, glyph);
+        drawing.DrawGeometry(UI.Brush(Look.Primary), weight, glyph);
         drawing.Pop();
     }
 

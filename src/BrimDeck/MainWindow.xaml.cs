@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -45,6 +47,7 @@ public partial class MainWindow : Window
     private int _iconStyleGeneration = -1;
     // The monitor this panel sits on; App assigns it. Without one, or while it is not connected, the primary monitor.
     internal DisplayInfo? Display { get; set; }
+    internal string DisplayLabel(IReadOnlyList<DisplayInfo> all) => Display is { } display && all.FirstOrDefault(d => d.Id == display.Id) is { } shown ? Native.Displays.Label(shown, all) : "";
     private IntPtr MonitorHandle => Display is { } display && WindowsHost.MonitorScreen(display.Handle) is not null ? display.Handle : WindowsHost.PrimaryMonitor();
     // Animated in place so the indicator style can fade its surface in and out instead of switching brushes.
     private readonly SolidColorBrush _surface = new(Colors.Black);
@@ -87,7 +90,34 @@ public partial class MainWindow : Window
     // The number of the latest read; a partial result belongs to the read that sent it and is dropped once another has begun or its own is whole.
     private int _round;
     private CompactAlertInfo? _alert;
-    private DeckSettings Settings => _app.Settings;
+    // The profile this panel shows (App.AssignDisplays): null for the current one, whose settings are App.Settings.
+    internal Guid? Profile { get; set; }
+    private DeckSettings Settings => _app.SettingsFor(Profile);
+    // The look the panel draws with: the main look (PanelTheme.Main), or its own while it shows another profile than the current one,
+    // whose theme, night hours and transparency may differ. Its own look's brushes are the window's resources; its elements find the
+    // look through the inherited PanelLook.LookProperty.
+    private PanelLook? _ownLook;
+    internal PanelLook Look => _ownLook ?? PanelTheme.Main;
+    // Called by App, before the panel takes its settings, whenever the profile or the theme may have changed. Returns whether the
+    // look changed.
+    internal bool UseLook(bool reload = false, bool systemChanged = false)
+    {
+        if (Profile is null)
+        {
+            if (_ownLook is null) return false;
+            _ownLook.Changing -= BeginThemeFade; _ownLook = null;
+            PanelLook.Unpublish(Resources); ClearValue(PanelLook.LookProperty);
+            return true;
+        }
+        bool created = _ownLook is null;
+        if (_ownLook is null) { _ownLook = new PanelLook(Resources); _ownLook.Changing += BeginThemeFade; PanelLook.Set(this, _ownLook); }
+        return _ownLook.Use(Settings, reload, systemChanged) || created;
+    }
+    internal DeckSettings PanelSettings => Settings;
+    // Whether this panel animates: its own profile's "enable animations" (Soft.For), not the profile in use. Text too long for its
+    // place scrolls by TextScrolls, which high contrast does not stop.
+    private bool Animates => Soft.For(Settings);
+    private bool TextScrolls => Soft.Scrolls(Settings);
     public bool IsExpanded => _expanded;
     internal bool Previewing => _preview;
     // The panel this one is made in place of (App.RebuildPanels): it takes its data, and shows at once, without a boot or a
@@ -113,15 +143,6 @@ public partial class MainWindow : Window
         _app = app; _lead = lead;
         _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
             () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove);
-        Rect? IslandStrip()
-        {
-            // The island border is what is drawn, in every style and whether the panel is collapsed or open — its size
-            // and place are the layout's, so PointToScreen carries the window offset, the shape's own offset, the DPI,
-            // the edge's frame and the open panel's own extent all at once. Opposite corners, as the frame may turn the island.
-            if (!IsVisible || PresentationSource.FromVisual(this) is null || PresentationSource.FromVisual(Island) is null) return null;
-            if (!(Island.ActualWidth > 0) || !(Island.ActualHeight > 0)) return null;
-            return new Rect(Island.PointToScreen(new Point(0, 0)), Island.PointToScreen(new Point(Island.ActualWidth, Island.ActualHeight)));
-        }
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () =>
         {
@@ -142,6 +163,15 @@ public partial class MainWindow : Window
         InitializeComposition();
         // Out of sight until the boot (or, without animations, until it has its place): the window shows before it is placed.
         HoverZone.Opacity = 0;
+        // The island stays in sight over a taskbar that Start or search has lifted above every application window, and above
+        // other apps' topmost windows when the panel is to stay above them (DeckSettings.ForceTopmost).
+        _taskbarMirror = new TaskbarMirror(IslandStrip, IslandReach,
+            () => IsVisible && KeepsAbove && !IsSuppressed && !_hiding && _moveOverlay is null && HoverZone.Opacity > 0,
+            _host.CheckOrder, () => new WindowInteropHelper(this).Handle, _host.TopmostCover, MirrorHit, MirrorPointer);
+        _host.CanMirror = () => _taskbarMirror.Available;
+        _host.OrderChecked += _taskbarMirror.Check;
+        _host.ForegroundSwitched += _taskbarMirror.Follow;
+        LayoutUpdated += (_, _) => _taskbarMirror.Track();
         _handover = new PageHandover(LeavingContent);
         InitializeMusic();
         // The toolbar's icons take the industrial drawing of a plated theme (IconStyle); done on the layout after a theme change, when
@@ -161,11 +191,7 @@ public partial class MainWindow : Window
         Island.Background = _surface;
         InitializeShadow();
         InitializeMotion();
-        PanelTheme.Changing += BeginThemeFade;
-        Closed += (_, _) => PanelTheme.Changing -= BeginThemeFade;
-        // The picture of a theme being left lies on the island's present shape only.
-        IsVisibleChanged += (_, _) => { if (!IsVisible) EndThemeFade(); };
-        Island.SizeChanged += (_, _) => EndThemeFade(quickly: true);
+        InitializeThemeFade();
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _seconds.Tick += (_, _) => { if (_compactClock is not null) _compactClock.Time = DateTime.Now; _seconds.Interval = SecondDelay(DateTime.Now); };
@@ -212,7 +238,7 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); if (!_rebuilt) { RestoreLastSeen(); await RefreshAutomaticallyAsync(); } }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { CancelMove(); _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _clipSettle?.Stop(); };
+        Closed += (_, _) => { CancelMove(); _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _taskbarMirror.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _clipSettle?.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing, except leave move mode.
         MouseWheel += PanelWheel;
@@ -245,6 +271,79 @@ public partial class MainWindow : Window
         });
         Closed += (_, _) => DisposeMusic();
         Closed += (_, _) => CloseNotices();
+    }
+
+    private readonly TaskbarMirror _taskbarMirror;
+    // The island border is what is drawn, in every style and whether the panel is collapsed or open — its size and place are
+    // the layout's, so PointToScreen carries the window offset, the shape's own offset, the DPI, the edge's frame and the open
+    // panel's own extent all at once. Opposite corners, as the frame may turn the island. In screen physical pixels.
+    private Rect? IslandStrip()
+    {
+        if (!IsVisible || PresentationSource.FromVisual(this) is null || PresentationSource.FromVisual(Island) is null) return null;
+        if (!(Island.ActualWidth > 0) || !(Island.ActualHeight > 0)) return null;
+        return new Rect(Island.PointToScreen(new Point(0, 0)), Island.PointToScreen(new Point(Island.ActualWidth, Island.ActualHeight)));
+    }
+    // The island with room for its resize grips beside it (they reach up to about 22 DIP past its ends) while the pointer is near
+    // it or a resize runs, in screen physical pixels: what the taskbar mirror shows. Away from the pointer the island alone, so
+    // the mirror leaves the taskbar around it to the taskbar.
+    private Rect? IslandReach()
+    {
+        if (IslandStrip() is not { } strip) return null;
+        double room = 24 * (_pixelsPerDip > 0 ? _pixelsPerDip : 1);
+        return Resizing || Rect.Inflate(strip, 2 * room, 2 * room).Contains(WindowsHost.Cursor()) ? Rect.Inflate(strip, room, room) : strip;
+    }
+
+    // What the taskbar mirror (TaskbarMirror) asks of a window of the panel it shows: the panel itself (its stage, as the window
+    // is clear around it) or one of its pop-ups.
+    private UIElement? MirrorRoot(IntPtr window)
+    {
+        if (window == new WindowInteropHelper(this).Handle) return PresentationSource.FromVisual(Stage) is null ? null : Stage;
+        return HwndSource.FromHwnd(window)?.RootVisual as UIElement;
+    }
+    // Whether that window draws at a place on screen, in physical pixels; where it does not, the mouse passes the mirror.
+    private bool MirrorHit(IntPtr window, Point screen) => MirrorRoot(window) is { } root && root.InputHitTest(root.PointFromScreen(screen)) is not null;
+
+    // A press, a release or a wheel turn over the taskbar mirror, at a place on screen in physical pixels. It is raised as WPF's
+    // own mouse events on the element at that place (or on the element that holds the mouse, as during a drag), so the island
+    // opens on a click as it does itself and the open panel's part over the taskbar takes clicks and the wheel. A raised press
+    // does not give a button the capture it takes on a real one (the mirror keeps it, so that the release comes back), so a
+    // button the press did not leave pressed is clicked through its automation peer on the release.
+    private ButtonBase? _mirrorPressed;
+    private bool MirrorPointer(IntPtr window, uint message, Point screen, int delta)
+    {
+        if (MirrorRoot(window) is not { } root) return false;
+        var target = Mouse.Captured as UIElement is { } held && PresentationSource.FromVisual(held) == PresentationSource.FromVisual(root) ? held
+            : root.InputHitTest(root.PointFromScreen(screen)) as UIElement;
+        if (target is null) return false;
+        int time = Environment.TickCount;
+        if (message is 0x020A) // WM_MOUSEWHEEL
+        {
+            var preview = new MouseWheelEventArgs(Mouse.PrimaryDevice, time, delta) { RoutedEvent = Mouse.PreviewMouseWheelEvent };
+            target.RaiseEvent(preview);
+            target.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, time, delta) { RoutedEvent = Mouse.MouseWheelEvent, Handled = preview.Handled });
+            return true;
+        }
+        bool press = message is 0x0201 or 0x0204 or 0x0207;
+        if (!press && message is not (0x0202 or 0x0205 or 0x0208)) return false;
+        var button = message is 0x0201 or 0x0202 ? MouseButton.Left : message is 0x0204 or 0x0205 ? MouseButton.Right : MouseButton.Middle;
+        ButtonBase? owner = null;
+        for (DependencyObject? at = target; at is not null && !ReferenceEquals(at, root); at = VisualTreeHelper.GetParent(at))
+            if (at is ButtonBase found) { owner = found; break; }
+        if (press && button == MouseButton.Left) _mirrorPressed = owner;
+        bool pressed = owner?.IsPressed == true;
+        var first = new MouseButtonEventArgs(Mouse.PrimaryDevice, time, button) { RoutedEvent = press ? Mouse.PreviewMouseDownEvent : Mouse.PreviewMouseUpEvent };
+        target.RaiseEvent(first);
+        target.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, time, button) { RoutedEvent = press ? Mouse.MouseDownEvent : Mouse.MouseUpEvent, Handled = first.Handled });
+        if (!press && button == MouseButton.Left)
+        {
+            if (owner is not null && ReferenceEquals(owner, _mirrorPressed) && !pressed && owner.IsEnabled && UIElementAutomationPeer.CreatePeerForElement(owner) is { } peer)
+            {
+                if (peer.GetPattern(PatternInterface.Invoke) is IInvokeProvider invoke) invoke.Invoke();
+                else if (peer.GetPattern(PatternInterface.Toggle) is IToggleProvider toggle) toggle.Toggle();
+            }
+            _mirrorPressed = null;
+        }
+        return true;
     }
 
     // Closes a panel whose monitor no longer shows one.
@@ -597,27 +696,27 @@ public partial class MainWindow : Window
     {
         // The stage's scale is the window's; drawn offscreen, the stage lies in a source of its own (MainWindow.Offscreen.cs).
         double dpi = PresentationSource.FromVisual(Stage) is null ? 1 : VisualTreeHelper.GetDpi(Stage).DpiScaleX;
-        if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi && _glassShown == PanelTheme.GlassShown) return;
+        if (_themeGeneration == Look.Generation && _themeDpi == dpi && _glassShown == Look.GlassShown) return;
         // A new scale alone only redraws the scan lines or texture, which are laid out in device pixels.
-        bool sameTheme = _themeGeneration == PanelTheme.Generation && _glassShown == PanelTheme.GlassShown;
-        _themeGeneration = PanelTheme.Generation; _themeDpi = dpi; _glassShown = PanelTheme.GlassShown;
+        bool sameTheme = _themeGeneration == Look.Generation && _glassShown == Look.GlassShown;
+        _themeGeneration = Look.Generation; _themeDpi = dpi; _glassShown = Look.GlassShown;
         // The resize hints take the theme's colors when they are drawn.
         _grips?.InvalidateVisual();
-        if (sameTheme) { Island.Pattern = PanelTheme.Texture(dpiScale: dpi) ?? PanelTheme.Scanlines(dpiScale: dpi); FitShadowCache(dpi); return; }
-        Foreground = UI.Brush(UI.Primary);
-        PanelTheme.Dress(Island, dpiScale: dpi);
-        if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
+        if (sameTheme) { Island.Pattern = Look.Texture(dpiScale: dpi) ?? Look.Scanlines(dpiScale: dpi); FitShadowCache(dpi); return; }
+        Foreground = UI.Brush(Look.Primary);
+        Look.Dress(Island, dpiScale: dpi);
+        if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) Look.Dress(shadow);
         // Pixel art draws the island's text unsmoothed, as on a pixel screen, and casts a stepped shadow.
-        PanelTheme.Text(Island);
-        if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster) { caster.Pixel = PanelTheme.Current.Effects.Pixel; caster.Cut = PanelTheme.Current.Effects.Cut; }
+        Look.Text(Island);
+        if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster) { caster.Pixel = Look.Current.Effects.Pixel; caster.Cut = Look.Current.Effects.Cut; }
         FitShadowCache(dpi);
         ApplyThemeMotion();
         // A theme whose scan line crosses the whole surface keeps the rounded clip (SettleClip).
         if (ThemeSweeps) Island.SettledClip = false;
-        MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
-        SetImmediate(_surface, SolidColorBrush.ColorProperty, !_expanded && Collapsed.Style == CompactStyle.Line ? PanelTheme.ColorOf("indicator") : _expanded ? PanelTheme.PanelSurfaceColor : PanelTheme.SurfaceColor);
+        MusicIndicator.Background = UI.Brush(Look.Hex("indicatorProgress"));
+        SetImmediate(_surface, SolidColorBrush.ColorProperty, !_expanded && Collapsed.Style == CompactStyle.Line ? Look.ColorOf("indicator") : _expanded ? Look.PanelSurfaceColor : Look.SurfaceColor);
         ApplyMaterial();
-        _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent);
+        _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent, Look);
         _musicRenderKey = ""; _compactRendered = null; _alertRendered = null;
         if (_detailPopup is { } popup) Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_detailPopup, popup)) popup.Close(); });
         if (MediaSourceButton.ContextMenu?.IsOpen == true) Dispatcher.BeginInvoke(CloseSourceMenu);
@@ -630,7 +729,7 @@ public partial class MainWindow : Window
         double opacity = 1 - Settings.SurfaceTransparency / 100d;
         bool clear = opacity < 1;
         Island.SurfaceOpacity = opacity;
-        if (PanelTheme.Current.Effects.Pixel <= 0)
+        if (Look.Current.Effects.Pixel <= 0)
         {
             if (clear) TextOptions.SetTextRenderingMode(Island, TextRenderingMode.Grayscale);
             else Island.ClearValue(TextOptions.TextRenderingModeProperty);
@@ -909,7 +1008,7 @@ public partial class MainWindow : Window
         // motion-review C1, C4: closing takes three quarters of the set time; a move the keyboard asked for takes 0.6 of it. The
         // open panel changing size in place (a page switch) keeps its own length whatever the setting (PanelMotion.Reshape).
         bool turning = wasExpanded != expanded;
-        int duration = !instant && Soft.Enabled
+        int duration = !instant && Animates
             ? expanded && !turning ? PanelMotion.Reshape : PanelMotion.Length(Settings.AnimationDuration, closing: turning && !expanded, keyboard: keyboard && turning) : 0;
         // motion-review F1, F2: turned back while the last opening or closing is still under way (the pointer left an opening
         // panel, or came back to a closing one), the surface starts back from where it is at once, in the share of the move it
@@ -1045,7 +1144,7 @@ public partial class MainWindow : Window
         else Animate(ShadowHost, OpacityProperty, shadowShown ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
-        var tone = indicator ? PanelTheme.ColorOf("indicator") : expanded ? PanelTheme.PanelSurfaceColor : PanelTheme.SurfaceColor;
+        var tone = indicator ? Look.ColorOf("indicator") : expanded ? Look.PanelSurfaceColor : Look.SurfaceColor;
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
         // indicator's color.
@@ -1080,7 +1179,11 @@ public partial class MainWindow : Window
     }
     // While compact, TrackPointer alone decides; an extra enter or leave message would restart the open delay.
     private void Island_MouseEnter(object sender, MouseEventArgs e)
-    { if (_expanded) PointerChanged(true); }
+    { if (_expanded && !PressedByKeyboard) PointerChanged(true); }
+    // A button pressed with Space takes the mouse capture until the key is released, and WPF then counts the pointer as over
+    // the button and the panel around it wherever it is; that is no entry of the pointer.
+    private static bool PressedByKeyboard => Mouse.Captured is ButtonBase && Mouse.LeftButton == MouseButtonState.Released
+        && Mouse.RightButton == MouseButtonState.Released && Mouse.MiddleButton == MouseButtonState.Released;
     private void Island_MouseLeave(object sender, MouseEventArgs e)
     { if (_expanded) PointerChanged(false); }
     internal void TrackPointer()
@@ -1119,7 +1222,7 @@ public partial class MainWindow : Window
             // A jump straight out of the panel can leave without any mouse message reaching the window.
             // Inside means over the panel itself or the collapsed hover area (InsideOpenPanel); HoverZone's bounds would also
             // count its top margin above a lowered panel.
-            bool inside = (Island.IsMouseOver || InsideOpenPanel(cursor)) && !Covered();
+            bool inside = (Island.IsMouseOver && !PressedByKeyboard || InsideOpenPanel(cursor)) && !Covered();
             // The expand hotkey's pin holds the panel open until the pointer is inside once. If that first entry is seen here
             // rather than by Island_MouseEnter (for example in the hover area beside the panel), record it, so leaving later closes
             // the panel as usual. An entry by MouseEnter already went through PointerChanged, which released the pin.
@@ -1208,7 +1311,7 @@ public partial class MainWindow : Window
     }
     private Task<List<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart, Action<IReadOnlyList<ProviderSnapshot>> progress)
     {
-        var settings = Settings.Copy();
+        var settings = _app.DataSettings();
         RefreshPrices();
         return Task.Run(() => _app.Usage.RefreshAsync(settings, _app.Lifetime.Token, historyStart, progress));
     }
@@ -1217,8 +1320,8 @@ public partial class MainWindow : Window
     {
         var settings = Settings.Copy();
         var store = _app.LastSeen;
-        if (!settings.QuotaWanted) { _app.QueueLastSeen(store.Clear); return; }
-        _app.QueueLastSeen(() => store.Save(round, settings));
+        if (!settings.QuotaWanted) { _app.KeepUsage(store.Clear); return; }
+        _app.KeepUsage(() => store.Save(round, settings));
     }
     // Only the main panel reads; every panel shows the result. The history goes back as far as any panel's model details need.
     public async Task RefreshAsync(bool queueIfBusy = true)

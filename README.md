@@ -208,6 +208,9 @@ On many PCs Windows does not provide either. Turn on enhanced sensors under Sett
 **My mouse, keyboard or headset shows no battery. Why?**
 The device has to be connected and be one of the connections or models listed in [Supported devices](docs/en-US/devices.md). For a device that is not listed, you are welcome to report its model in [Issues](https://github.com/MoFeng2223/BrimDeck/issues).
 
+**Animations or the equalizer bars never move. Why?**
+BrimDeck's animations and equalizer bars need two settings turned on: BrimDeck's Settings › General › Hover and animation › Animate expanding and collapsing, and Windows Settings › Accessibility › Visual effects › Animation effects. If either is off, the expand animation, the equalizer bars and scrolling text all stop.
+
 ## Community
 
 QQ group: 1132738200

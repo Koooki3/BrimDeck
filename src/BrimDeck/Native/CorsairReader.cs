@@ -62,7 +62,7 @@ internal sealed class CorsairReader(Action<string, DeviceBattery> received) : ID
             {
                 at = Environment.TickCount64;
                 var round = new HashSet<string>();
-                foreach (var group in wanted.GroupBy(info => HidBatteries.GroupKey(info.Path)))
+                foreach (var group in wanted.GroupBy(info => info.Group))
                 {
                     if (Corsair.Find(group.First().Vendor, group.First().Product) is not { } model) continue;
                     var first = group.First();
@@ -118,7 +118,7 @@ internal sealed class CorsairReader(Action<string, DeviceBattery> received) : ID
             }
             if (first is null) continue;
             if (Send(device, Corsair.Request(model, Corsair.Level, route)) && Ask(device, Left(Corsair.ConfirmMs), Corsair.Percent) is int second && second != first) return null;
-            bool charging = model.Bare && Send(device, Corsair.Request(model, Corsair.ChargeState, route))
+            bool charging = Corsair.AsksCharging(model) && Send(device, Corsair.Request(model, Corsair.ChargeState, route))
                 && Ask(device, Left(Corsair.ConfirmMs), reply => Corsair.Charging(reply) is { } state ? state ? 1 : 0 : null) == 1;
             return new(first, charging);
         }

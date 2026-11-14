@@ -384,7 +384,7 @@ public partial class MainWindow
         // moved nothing only fits the window again. The notices page is not built anew for what is only a copy of the
         // settings it was fitted to (FitNoticeLayout).
         _noticeResizeSaved = !compact && _resizePage == DeckPage.Notices;
-        try { if (_resizeChanged) _app.UpdateSettings(Settings.Copy()); else ApplySettings(); }
+        try { if (_resizeChanged) _app.UpdateSettingsFor(Profile, Settings.Copy()); else ApplySettings(); }
         finally { _noticeResizeSaved = false; }
         // The collapsed row's windows ease from the room they followed to whole items (MainWindow.CompactFlow.cs).
         if (compact) SettleCompactFlow();

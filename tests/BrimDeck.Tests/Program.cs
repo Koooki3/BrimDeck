@@ -76,6 +76,7 @@ try
     NoticeThemeFitTests.Run(Check);
     DisplayLayoutTests.Run(Check);
     WindowCompositionTests.Run(Check);
+    ProfileTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
     EdgeFrameTests.Run(Check);
@@ -97,6 +98,14 @@ try
     DevicesTests.Run(Check);
     DeviceProtocolTests.Run(Check);
     DeviceSafetyTests.Run(Check);
+    DeviceReadTests.Run(Check);
+    BrandFamilyTests.Run(Check);
+    BrandsControllerTests.Run(Check);
+    BrandsKeyboardTests.Run(Check);
+    BrandsHeadsetTests.Run(Check);
+    BrandsMouseTests.Run(Check);
+    BrandsGapTests.Run(Check);
+    BrandsMoreTests.Run(Check);
     PowerTests.Run(Check);
     DevicesPageTests.Run(Check);
     FrameRateTests.Run(Check);
@@ -316,13 +325,13 @@ try
         Task<List<ProviderSnapshot>> Refresh(DeckSettings settings, CancellationToken ct = default) { usageClock = usageClock.AddSeconds(60); return service.RefreshAsync(settings, ct); }
         var onlyClaude = Only(ProviderId.Claude);
         var result = (await Refresh(onlyClaude)).Single();
-        Check("Desktop-only login connects without Claude Code credentials", result.LiveQuota && result.Quotas.Count == 2 && result.Plan == "Max 20x");
+        Check("Desktop-only login connects without Claude Code credentials", result.LiveQuota && result.Quotas.Count == 2 && result.Plan == "Ultra");
         Check("Desktop quota resets come from server", result.Quotas.All(quota => quota.ResetAt is not null) && result.Quotas.Single(quota => quota.Minutes == 300).UsedPercent == 9);
         Directory.CreateDirectory(locations.ClaudeHome);
         var credentialPath = Path.Combine(locations.ClaudeHome, ".credentials.json");
         File.WriteAllText(credentialPath, """{"claudeAiOauth":{"accessToken":"test-rejected","subscriptionType":"pro"}}""");
         result = (await Refresh(onlyClaude)).Single();
-        Check("Rejected Code login falls back to Desktop and replaces its plan", quotaHandler.Rejected == 1 && result.LiveQuota && result.Plan == "Max 20x");
+        Check("Rejected Code login falls back to Desktop and replaces its plan", quotaHandler.Rejected == 1 && result.LiveQuota && result.Plan == "Ultra");
         File.WriteAllText(credentialPath, "broken");
         result = (await Refresh(onlyClaude)).Single();
         Check("Damaged Code login does not prevent Desktop connection", result.LiveQuota);
@@ -337,12 +346,22 @@ try
         var profilePath = Path.Combine(locations.ClaudeHome, ".claude.json");
         File.WriteAllText(profilePath, """{"oauthAccount":{"organizationRateLimitTier":"default_claude_max_20x"}}""");
         result = (await Refresh(onlyClaude)).Single();
-        Check("Local account record outranks a stale sign-in plan", result.LiveQuota && result.Plan == "Max 20x");
+        Check("Local account record outranks a stale sign-in plan", result.LiveQuota && result.Plan == "Ultra");
         quotaHandler.Profile = """{"organization":{"organization_type":"claude_max","rate_limit_tier":"default_claude_max_5x"}}""";
         result = (await Refresh(onlyClaude)).Single();
-        Check("Account endpoint decides the Claude plan", result.Plan == "Max 5x");
+        Check("Account endpoint decides the Claude plan", result.Plan == "Max");
         quotaHandler.Profile = null; File.Delete(profilePath);
         Check("Claude organization type names the plan without a tier", PlanParser.ClaudeOrganization(Json("""{"organization":{"organization_type":"claude_pro"}}""")) == "Pro");
+        Check("The account endpoint's display name outranks the tier, and a blank one falls back to it",
+            PlanParser.ClaudeOrganization(Json("""{"organization":{"organization_type":"claude_max","rate_limit_tier":"default_claude_max_20x","plan_display_name":" Ultra "}}""")) == "Ultra" &&
+            PlanParser.ClaudeOrganization(Json("""{"organization":{"organization_type":"claude_max","rate_limit_tier":"default_claude_max_5x","plan_display_name":"Max"}}""")) == "Max" &&
+            PlanParser.ClaudeOrganization(Json("""{"organization":{"organization_type":"claude_max","rate_limit_tier":"default_claude_max_20x","plan_display_name":" "}}""")) == "Ultra");
+        Check("A Team seat keeps its seat name over the display name",
+            PlanParser.ClaudeOrganization(Json("""{"organization":{"organization_type":"claude_team","rate_limit_tier":"default_claude_max_5x","seat_tier":"team_tier_1","plan_display_name":"Team"}}""")) == "Team Premium");
+        Check("Claude tiers read with the names from the October 2026 rename",
+            PlanParser.ClaudeTier("default_claude_max_20x", "max") == "Ultra" && PlanParser.ClaudeTier("default_claude_ultra", "max") == "Ultra" &&
+            PlanParser.ClaudeTier("default_claude_max_5x", "max") == "Max" && PlanParser.ClaudeTier("default_claude_max_10x", "max") == "Max 10x" &&
+            PlanParser.ClaudeTier("", "max") == "max");
         var readCalls = desktopFixture.ReadCalls;
         desktopFixture.ReadFailure = new IOException("Test desktop cache unavailable");
         result = (await Refresh(onlyClaude)).Single();
@@ -361,7 +380,7 @@ try
             };
             result = (await Refresh(onlyClaude)).Single();
             Check($"CLI {fault} failure falls back to one successful Desktop result", result.LiveQuota && result.Quotas.Count == 2 &&
-                result.Plan == "Max 20x" && quotaHandler.Requests.SequenceEqual(["test-code", "test-profile"]));
+                result.Plan == "Ultra" && quotaHandler.Requests.SequenceEqual(["test-code", "test-profile"]));
         }
 
         quotaHandler.Override = null; quotaHandler.Requests.Clear();
@@ -378,7 +397,7 @@ try
         Check("Transient failure keeps the last account quotas with their time", result.LiveQuota && result.Quotas.Count == 2 && result.QuotaTime == previousTime && quotaHandler.Requests.Count == 2);
         quotaHandler.Profile = """{"organization":{"organization_type":"claude_max","rate_limit_tier":"default_claude_max_20x"}}""";
         result = (await Refresh(onlyClaude)).Single();
-        Check("Plan follows the account endpoint while the quota request fails", result.Quotas.Count == 2 && result.Plan == "Max 20x");
+        Check("Plan follows the account endpoint while the quota request fails", result.Quotas.Count == 2 && result.Plan == "Ultra");
         quotaHandler.Profile = null; quotaHandler.Requests.Clear();
         var polled = true;
         for (int cycle = 1; cycle <= 4; cycle++)
@@ -440,7 +459,7 @@ try
         File.WriteAllText(historyPath, History(usageClock.AddMinutes(2), 37, 7));
         result = (await Refresh(onlyClaude)).Single();
         Check("Rate limiting without any earlier reading falls back to the desktop application's local history", result.LiveQuota &&
-            result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 37 && result.Quotas.Single(q => q.Minutes == 10080).UsedPercent == 7 && result.Plan == "Max 20x");
+            result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 37 && result.Quotas.Single(q => q.Minutes == 10080).UsedPercent == 7 && result.Plan == "Ultra");
         quotaHandler.Override = null;
         usageClock = usageClock.AddHours(2);
         result = (await Refresh(onlyClaude)).Single();
@@ -566,7 +585,7 @@ try
             PlanParser.ClaudeTier("default_raven", "team") == "Team");
         Check("The local record names Pro and Max by the organization's type and tier",
             PlanParser.ClaudeProfile(Json("""{"oauthAccount":{"organizationType":"claude_pro","organizationRateLimitTier":"default_claude_ai"}}""")) == "Pro" &&
-            PlanParser.ClaudeProfile(Json("""{"oauthAccount":{"organizationType":"claude_max","organizationRateLimitTier":"default_claude_max_20x"}}""")) == "Max 20x" &&
+            PlanParser.ClaudeProfile(Json("""{"oauthAccount":{"organizationType":"claude_max","organizationRateLimitTier":"default_claude_max_20x"}}""")) == "Ultra" &&
             PlanParser.ClaudeProfile(Json("""{"oauthAccount":{"organizationType":"claude_max"}}""")) == "Max");
         string Usage(int fiveHour, int weekly, int? fable = null) => JsonSerializer.Serialize(new
         {
@@ -655,6 +674,9 @@ try
         failingDesktop.Fail = false;
         var recovered = (await service.RefreshAsync(onlyAntigravity)).Single();
         Check("Discovery errors do not prevent subsequent refresh", recovered.StatusLabel != failed.StatusLabel);
+        failingDesktop.Unreadable = true;
+        var elevated = (await service.RefreshAsync(onlyAntigravity)).Single();
+        Check("An Antigravity language server that cannot be read says it runs as administrator", elevated.StatusLabel == "无法读取" && elevated.Status.Contains("管理员", StringComparison.Ordinal));
     }
     var quotas = QuotaParser.Codex(Json("""
         {"rate_limit":{"primary_window":{"used_percent":16,"limit_window_seconds":604800,"reset_after_seconds":3600}}}
@@ -916,6 +938,8 @@ sealed class CatalogHandler(string json) : HttpMessageHandler
 sealed class FailingDesktopSources : IDesktopSources
 {
     public bool Fail { get; set; } = true;
+    public bool Unreadable { get; set; }
+    public bool AntigravityUnreadable => Unreadable;
     public string? ReadCursorToken(string database) => null;
     public Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation)
         => Fail ? Task.FromException<IReadOnlyList<LocalEndpoint>>(new System.Runtime.InteropServices.COMException()) : Task.FromResult<IReadOnlyList<LocalEndpoint>>([]);

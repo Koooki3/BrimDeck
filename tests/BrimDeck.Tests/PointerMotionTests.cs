@@ -28,6 +28,9 @@ internal static class PointerMotionTests
         check("Animations off in the app stop them", !MotionConditions.Allowed(false, true, false));
         check("Windows' animation effects off stop them", !MotionConditions.Allowed(true, false, false));
         check("High contrast stops them", !MotionConditions.Allowed(true, true, true));
+        // Text too long for its place still scrolls in high contrast; the app's setting and Windows' animation effects stop it.
+        check("Long text scrolls when the app and Windows allow animations", MotionConditions.Scrolls(true, true));
+        check("Long text does not scroll with animations off in the app or in Windows", !MotionConditions.Scrolls(false, true) && !MotionConditions.Scrolls(true, false));
 
         // F10: a glyph grows into place only for a click on its own button, not long after.
         long now = 1_000_000;

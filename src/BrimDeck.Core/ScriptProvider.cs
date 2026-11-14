@@ -42,6 +42,7 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
     public async Task<ProviderResult> RunAsync()
     {
         if (entry.QuotaSource == ProviderId.KimiApi) return await RunKimiAsync();
+        if (entry.QuotaSource == ProviderId.KimiPlatform) return await RunKimiPlatformAsync();
         if (entry.QuotaSource == ProviderId.OpenCodeGo) return await RunOpenCodeGoAsync();
         if (entry.QuotaSource == ProviderId.CommandCodeApi) return await RunCommandCodeAsync();
         if (entry.QuotaSource is ProviderId.MiMoApi or ProviderId.MiMoTokenPlan) return await RunMiMoAsync();
@@ -213,6 +214,37 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
         var metrics = KimiUsage.Usages(root, global ? "USD" : "CNY");
         if (metrics.Count == 0) throw new InvalidDataException(t("这个密钥所属的账户没有 Kimi Code 会员套餐额度。", "The account of this key has no Kimi Code plan quota."));
         return new(metrics, KimiUsage.Plan(me), "plan", [], []) { Source = KimiUsage.Source(ProviderCatalog.Name(ProviderId.KimiApi), global) };
+    }
+    // A Kimi Open Platform key reads the account balance (KimiUsage.PlatformBalance). api.moonshot.cn is asked first; a key it
+    // rejects is tried on api.moonshot.ai. The currency follows the host that answered. The key is sent only to these two hosts.
+    private async Task<ProviderResult> RunKimiPlatformAsync()
+    {
+        string t(string zh, string en) => Loc.T(zh, en);
+        async Task<(int Status, string Body)> Get(string host)
+        {
+            var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + secret, ["Accept"] = "application/json" };
+            using var reply = JsonDocument.Parse(await SendAsync("GET", JsonSerializer.Serialize(new { url = host + "/v1/users/me/balance", options = new { headers } })));
+            if (reply.RootElement.Get("error").Text() is { Length: > 0 } error) throw new InvalidDataException(error);
+            return ((int)(reply.RootElement.Get("status").Number() ?? 0), reply.RootElement.Get("body").Text());
+        }
+        bool global = false;
+        var balance = await Get(KimiUsage.PlatformChina);
+        if (balance.Status == 401)
+        {
+            global = true;
+            balance = await Get(KimiUsage.PlatformGlobal);
+            // Only the second answer describes the key; the first is just the other region's.
+            if (balance.Status != 401) _statuses.Clear();
+        }
+        if (balance.Status == 401) throw new InvalidDataException(t("Kimi 开放平台拒绝了这个 API 密钥，请确认它是在 Kimi 开放平台（platform.kimi.com 或 platform.kimi.ai）创建的密钥，且未被删除。Kimi Code 控制台的密钥（sk-kimi-…）请选择 Kimi Code API。",
+            "The Kimi Open Platform rejected this API key. Check that it was created on the Kimi Open Platform (platform.kimi.com or platform.kimi.ai) and has not been deleted. For a Kimi Code console key (sk-kimi-…), choose Kimi Code API."));
+        if (balance.Status != 200) throw new HttpRequestException("HTTP " + balance.Status);
+        List<UsageMetric> metrics; bool available;
+        try { using var doc = JsonDocument.Parse(balance.Body); metrics = KimiUsage.PlatformBalance(doc.RootElement, global ? "USD" : "CNY", out available); }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException)
+        { throw new InvalidDataException(t("Kimi 开放平台返回的余额无法识别。", "The balance the Kimi Open Platform returned is not recognized.")); }
+        List<string> warnings = available ? [] : [t("余额不足，Kimi 开放平台暂时无法调用。", "The balance is insufficient, so the Kimi Open Platform cannot be called for now.")];
+        return new(metrics, "", "account", [], warnings) { Source = KimiUsage.Source(ProviderCatalog.Name(ProviderId.KimiPlatform), global) };
     }
     // An OpenCode Console API key (oc_sk_…) reads the same Go allowance as OpenCode's own sign-in, read by OpenCodeUsage. A key
     // belongs to one workspace, so none is named. opencode.ai sits behind Cloudflare, which refuses requests without a user agent

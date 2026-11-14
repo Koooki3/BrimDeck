@@ -8,25 +8,27 @@ Every reading is read and shown only on this PC, never saved or sent. Unless sta
 
 | Reading | Default | Where to switch it | Notes |
 | --- | --- | --- | --- |
-| CPU, memory, download, upload | Shown | Readings shown when expanded | The CPU also shows the usage of each core |
-| GPU | Shown | Readings shown when expanded | With more than one graphics card, choose which one shows |
-| Busiest apps | Shown | When expanded › Show the process list | Sorted by CPU or memory; click an app for its details |
-| Drives | Shown | Readings shown when expanded › Drives | Internal drives only |
-| System power and this PC's battery | Shown | Readings shown when expanded › Power and battery | PCs without a battery show no battery |
-| Temperatures | Hidden | When expanded › Show temperatures | CPU, GPU and solid-state drives |
-| Frame rate | Hidden | Readings shown when expanded › Frame rate | Needs permission the first time |
+| CPU, memory, download, upload | Shown | When expanded › What the page shows | The CPU also shows the usage of each core |
+| GPU | Shown | When expanded › What the page shows | With more than one graphics card, choose which one shows |
+| Busiest apps | Shown | When expanded › What the page shows › Process list | Sorted by CPU or memory; click an app for its details |
+| Drives | Shown | When expanded › What the page shows › Drives | Internal drives only |
+| System power and this PC's battery | Shown | When expanded › What the page shows › Power and battery | PCs without a battery show no battery |
+| Temperatures | Hidden | When expanded › What the page shows › Temperatures | CPU, GPU and solid-state drives |
+| Frame rate | Hidden | When expanded › What the page shows › Frame rate | Needs permission the first time |
 
 The readings shown in the notch and capsule are chosen under "When collapsed".
 
 ## Choosing what the expanded page shows
 
-"Readings shown when expanded" is a table with a row for each reading: CPU, GPU, memory, download, upload, frame rate, drives, and power and battery. "Show" decides whether the expanded page shows it; drag the handle at the start of a row, or press Alt+Up/Down in the row, to change its place on the page. The process list has its own "Show the process list" switch, and its place follows the page's size.
+Under "When expanded", "What the page shows" has a chip for each reading, clicked to show or hide it: CPU, GPU, memory, download, upload, frame rate, drives, power and battery, the process list, and temperatures. The temperatures are shown beside the CPU, the GPU and the drives.
+
+"Order on the page" under it is a sketch of the expanded page, with a block for each part of the page: the CPU and GPU are one block, memory, download and upload another, and the frame rate, drives, and power and battery one each. Drag a block, or select it and press Alt+Up/Down, to move it up or down the page. Memory and the network share a block, memory on one line and the network on the next; on a very short panel they share one line, in the same order. The download and the upload sit side by side on the network's line: drag either across the other to change sides, or up or down to move memory, download and upload as one block. Drag memory up or down within the block to change it round with the network; dragged out of the block, it takes the whole block. The process list is drawn with a dashed outline: the panel's size places it, at the side or below, and it cannot be dragged. "Restore the default order" puts the order back without changing what is shown; it is grey while the order is the default.
 
 - The checks here only affect the expanded page, and the checks under "When collapsed" only affect the notch and capsule; neither changes the other.
-- Presets: All (the frame rate stays as it is), Brief (CPU, memory, download, upload), CPU and memory, and None.
 - The page lays itself out for what is chosen: a single reading fills the page; when room runs short, minor lines such as the frame rate and drives go first, then the network and memory are compressed, and nothing overlaps or leaves the page. Download and upload share one line and can be shown one at a time.
 - With nothing chosen, the expanded page shows a note and an "Open settings" button, and asks for no data. A reading that is not chosen is not requested by the expanded page; collapsed rows and the delay-retention window still read what they need.
-- Until you change the table the expanded page is exactly as before the upgrade; the old switches for the process list, drives, power and battery, and frame rate are now part of it.
+- Until you change these switches or the order, the expanded page is exactly as before the upgrade; the old switches for the process list, drives, power and battery, and frame rate are now part of "What the page shows".
+- With both the CPU and the GPU shown, click the smaller one on the expanded page to choose which one is shown large.
 
 ## CPU and GPU
 

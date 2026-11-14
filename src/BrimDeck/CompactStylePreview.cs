@@ -5,8 +5,8 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// A miniature of the collapsed surface on a desktop, for the collapsed view's style cards, and the collapsed capsule alone for
-// the panel theme cards (Theme). The content is fixed (four quota rings, and the clock when asked), so it reads as a style or a
+// A miniature of the collapsed surface on a desktop, for the collapsed view's style cards, and the collapsed capsule with a corner
+// of the open panel behind it for the panel theme cards (Theme). The content is fixed (four quota rings, and the clock when asked), so it reads as a style or a
 // theme rather than as live data. The style cards always take the built-in dark theme's colors: they show the shapes and must
 // not change when another panel theme is chosen.
 internal static class CompactStylePreview
@@ -78,10 +78,11 @@ internal static class CompactStylePreview
         return new Viewbox { Child = screen, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Stretch };
     }
 
-    // A theme card: the collapsed capsule alone at the real island's default size (32 high, rings 12 across, the clock at 12.5),
-    // so the rim, the shadow or glow and the text keep the widths they have on screen; enlarging the capsule would widen the rim
-    // and the glow with it. It sits on the settings window's own inset color, the same for every theme, and shrinks only when the
-    // card is narrower than it.
+    // A theme card: the collapsed capsule at the real island's default size (32 high, rings 12 across, the clock at 12.5), so the
+    // rim, the shadow or glow and the text keep the widths they have on screen; enlarging the capsule would widen the rim and the
+    // glow with it. Behind it, at the lower right, a corner of the open panel shows the theme's surface, text and accent colors.
+    // The scene sits on the settings window's own inset color, the same for every theme, and shrinks only when the card is
+    // narrower than it.
     public static FrameworkElement Theme(PanelPalette palette)
     {
         const double width = 180, height = 32, ring = 12, gap = 8, inset = 16;

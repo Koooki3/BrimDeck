@@ -22,7 +22,7 @@ public partial class MainWindow
         }
         // The button's set height, not ActualHeight: a height ApplyHeader just set shows in ActualHeight only after the next layout pass.
         double x = button.TranslatePoint(new Point(), (UIElement)PageCapsule.Parent).X, width = button.ActualWidth, height = button.Height;
-        bool glide = _expanded && !_preview && PageSwitch.IsVisible && Soft.Enabled && PageCapsule.Width > 0 && Math.Abs(PageCapsuleShift.X - x) > .5;
+        bool glide = _expanded && !_preview && PageSwitch.IsVisible && Animates && PageCapsule.Width > 0 && Math.Abs(PageCapsuleShift.X - x) > .5;
         PageCapsule.Height = height;
         // motion-review F8: the width is set at once and the change is drawn by stretching the capsule from its left edge, so the
         // glide lays nothing out again. A stretch still under way goes on from the width it draws now, not from its laid-out width.

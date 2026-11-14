@@ -30,6 +30,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | Xiaomi MiMo Token Plan | ✓ | | 在设置中填写小米 MiMo Token Plan 密钥 |
 | DeepSeek | ✓ | | 在设置中填写 API 密钥 |
 | Kimi Code API | ✓ | | 在设置中填写 Kimi Code API 密钥 |
+| Kimi 开放平台 | ✓ | | 在设置中填写 Kimi 开放平台 API 密钥 |
 | OpenCode Go | ✓ | | 在设置中填写 OpenCode Console API 密钥 |
 | Command Code API | ✓ | | 在设置中填写 Command Code API 密钥 |
 | OpenRouter | ✓ | | 在设置中填写 OpenRouter API 密钥 |
@@ -145,7 +146,7 @@ MiMo Code CLI 与 Xiaomi MiMo 桌面版共用同一个数据库（`%USERPROFILE%
 
 ## 手动填写的来源
 
-在"配额来源"中选择智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
+在"配额来源"中选择智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、Kimi 开放平台、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
 
 - **密钥**：使用 Windows 的加密功能保存在本机，不写入设置文件。删除该列或更换配额来源时，密钥一并删除。
 - **站点地址**：填写站点首页地址即可。末尾的 `/v1`，以及直接粘贴的控制台页面路径，会自动去掉。请求会带上 API 密钥，所以站点地址须使用 HTTPS；HTTP 仅限本机地址（`localhost`、`127.0.0.1`、`[::1]`）。
@@ -174,7 +175,11 @@ Xiaomi MiMo 桌面版会员不提供 API 密钥，它的额度请使用"Xiaomi M
 
 ### Kimi Code API
 
-填写在 Kimi Code 控制台创建的 API 密钥（`sk-kimi-` 开头），无需在本机登录 Kimi Code。显示的额度与自动读取的 Kimi Code 相同：5 小时与每月额度，旧版套餐另有每周额度，购买了加油包时显示加油包余额；名称旁显示会员等级。国内版（kimi.com）与海外版（kimi.ai）的密钥都可以使用：先向 api.kimi.com 查询，密钥被拒绝时改向 api.kimi.ai 查询，来源按账户所属站点显示为“Kimi Code API · kimi.com 账户”或“Kimi Code API · kimi.ai 账户”。此密钥不能用于 Moonshot 开放平台，因此不显示开放平台余额，也不统计 Token 用量。
+填写在 Kimi Code 控制台创建的 API 密钥（`sk-kimi-` 开头），无需在本机登录 Kimi Code。显示的额度与自动读取的 Kimi Code 相同：5 小时与每月额度，旧版套餐另有每周额度，购买了加油包时显示加油包余额；名称旁显示会员等级。国内版（kimi.com）与海外版（kimi.ai）的密钥都可以使用：先向 api.kimi.com 查询，密钥被拒绝时改向 api.kimi.ai 查询，来源按账户所属站点显示为“Kimi Code API · kimi.com 账户”或“Kimi Code API · kimi.ai 账户”。此密钥不能用于 Kimi 开放平台，因此不显示开放平台余额，也不统计 Token 用量；开放平台余额请使用“Kimi 开放平台”。
+
+### Kimi 开放平台
+
+填写在 Kimi 开放平台（platform.kimi.com 或 platform.kimi.ai）创建的 API 密钥。开放平台按量计费，与 Kimi 会员和 Kimi Code 的套餐额度分开计算。显示账户余额（现金余额与代金券余额之和），以及现金余额与代金券余额；欠费时现金余额为负数。账户余额不足、无法调用时，状态中会注明。可以设置目标余额。国内版与海外版的密钥都可以使用：先向 api.moonshot.cn 查询，密钥被拒绝时改向 api.moonshot.ai 查询；国内版以人民币显示，海外版以美元显示，来源显示为“Kimi 开放平台 · kimi.com 账户”或“Kimi 开放平台 · kimi.ai 账户”。Kimi Code 控制台的密钥（`sk-kimi-` 开头）不能在这里使用，请选择 Kimi Code API。
 
 ### OpenCode Go
 

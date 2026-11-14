@@ -238,6 +238,10 @@ public readonly record struct MotionConditions(bool Animations, bool SystemAnima
     public bool MotionAllowed => Allowed(Animations, SystemAnimations, HighContrast);
     // The rule itself, for Soft.Enabled and these conditions alike.
     public static bool Allowed(bool animations, bool systemAnimations, bool highContrast) => animations && systemAnimations && !highContrast;
+    // Whether text too long for its place (a song's title, the current lyric) scrolls to show the rest. Scrolling is how that text
+    // is read, not a flourish, so high contrast, which is about colors, does not stop it; the app's setting and Windows' "animation
+    // effects" still do.
+    public static bool Scrolls(bool appSetting, bool systemAnimations) => appSetting && systemAnimations;
 }
 
 public static class MotionGate
