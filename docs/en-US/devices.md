@@ -27,6 +27,7 @@ HID devices that carry the standard battery report are shown too.
 | Controllers | Xbox, PlayStation, Steam Controller |
 
 - Only known models of each brand are supported; other models of the same brand may not report a battery.
+- SteelSeries Arctis Nova 7P batteries are read through the 2.4 GHz receiver: the older firmware model (USB product ID `220A`) reports 25% steps; percentage models (`22A7`, `2298`) report the battery percentage directly.
 - Some models are implemented from public protocol documentation and have not been checked on real hardware. If a battery does not show or reads wrong, please report the model in [Issues](https://github.com/MoFeng2223/BrimDeck/issues).
 - While a device sleeps or is out of range, the last charge its receiver recorded is shown.
 

@@ -27,6 +27,7 @@ BrimDeck 只读取电量：不会配对、断开或改动任何设备与 Windows
 | 手柄 | Xbox、PlayStation、Steam Controller |
 
 - 每个品牌只支持已知的型号，同一品牌的其他型号不一定能读到电量。
+- SteelSeries Arctis Nova 7P 支持通过 2.4 GHz 接收器读取电量：旧固件型号（USB 产品 ID `220A`）按 25% 档位显示，百分比型号（`22A7`、`2298`）按设备报告的百分比显示。
 - 部分型号按公开的协议资料实现，尚未在实物上验证。读不到电量或读数不正确时，欢迎在 [Issues](https://github.com/MoFeng2223/BrimDeck/issues) 中反馈设备型号。
 - 设备休眠或超出接收范围时，显示接收器记录的上一次电量。
 

@@ -392,6 +392,32 @@ static class DeviceProtocolTests
 
     private static void HeadsetReplies(Action<string, bool> check)
     {
+        foreach (int product in new[] { 0x220A, 0x22A7, 0x2298 })
+        {
+            bool steps = product == 0x220A;
+            var kind = Headsets.Find(0x1038, product);
+            check($"Nova 7P {product:X4}: recognized with the firmware's battery scale",
+                kind == (steps ? Headsets.Kind.Nova7Steps : Headsets.Kind.Nova7Percent));
+            if (kind is not { } model) continue;
+            check($"Nova 7P {product:X4}: vendor collection, status request and headset source",
+                Headsets.Channel(model) == (-1, 0xFFC0)
+                && Headsets.Request(model).SequenceEqual(new byte[] { 0x00, 0xB0 })
+                && Headsets.Source(model) == DeviceSource.SteelSeries);
+            byte level = steps ? (byte)3 : (byte)64;
+            check($"Nova 7P {product:X4}: battery and both charging states",
+                Headsets.Battery(model, [0xB0, 0, level, 3]) == new BatteryRead(steps ? 75 : 64, Coarse: steps)
+                && Headsets.Battery(model, [0xB0, 0, level, 1]) == new BatteryRead(steps ? 75 : 64, true, steps)
+                && Headsets.Battery(model, [0xB0, 0, level, 2]) == new BatteryRead(steps ? 75 : 64, true, steps));
+            check($"Nova 7P {product:X4}: empty and full batteries are valid",
+                Headsets.Battery(model, [0xB0, 0, 0, 3]) == new BatteryRead(0, Coarse: steps)
+                && Headsets.Battery(model, [0xB0, 0, steps ? (byte)4 : (byte)100, 3]) == new BatteryRead(100, Coarse: steps));
+            check($"Nova 7P {product:X4}: offline, short and invalid reports have no reading",
+                Headsets.Battery(model, [0xB0, 0, level, 0]) is null
+                && Headsets.Battery(model, [0xB0, 0, level]) is null
+                && Headsets.Battery(model, [0xB0, 0, steps ? (byte)5 : (byte)101, 3]) is null);
+            check($"Nova 7P {product:X4}: the product ID alone does not match another vendor",
+                Headsets.Find(0xFFFF, product) is null);
+        }
         check("Headsets: the HyperX requests go to the vendor collections only", Headsets.Channel(Headsets.Kind.CloudAlpha).UsagePage == Headsets.VendorPages);
         check("Headsets: models found by vendor and product", Headsets.Find(0x1038, 0x12AD) == Headsets.Kind.Arctis7 && Headsets.Find(0x1038, 0x2202) == Headsets.Kind.Nova7Steps
             && Headsets.Find(0x03F0, 0x098D) == Headsets.Kind.CloudAlpha && Headsets.Find(0x3837, 0x6045) == Headsets.Kind.MchoseX9 && Headsets.Find(0x3837, 0x1012) is null);

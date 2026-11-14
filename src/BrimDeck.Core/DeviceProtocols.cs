@@ -1108,8 +1108,10 @@ public static class Headsets
     {
         (SteelSeries, 0x1260 or 0x12AD or 0x1252 or 0x1280) => Kind.Arctis7,
         (SteelSeries, 0x12C2 or 0x12C4) => Kind.Arctis9,
-        (SteelSeries, 0x22A1 or 0x227E or 0x2258 or 0x229E or 0x22AD or 0x22A9 or 0x22A5) => Kind.Nova7Percent,
-        (SteelSeries, 0x2202 or 0x2206 or 0x223A or 0x227A or 0x22A4) => Kind.Nova7Steps,
+        // Nova 7P uses the same status request as the 7/7X: 220A reports steps; 22A7 and 2298 report percent.
+        // Product IDs and scales: HeadsetControl lib/devices/steelseries_arctis_nova_7p.hpp (protocol facts only).
+        (SteelSeries, 0x22A1 or 0x227E or 0x2258 or 0x229E or 0x22AD or 0x22A9 or 0x22A5 or 0x22A7 or 0x2298) => Kind.Nova7Percent,
+        (SteelSeries, 0x2202 or 0x2206 or 0x223A or 0x227A or 0x22A4 or 0x220A) => Kind.Nova7Steps,
         (SteelSeries, 0x12E0 or 0x12E5) => Kind.NovaPro,
         (HyperXHp, 0x098D) => Kind.CloudAlpha,
         (HyperXHp, 0x0696 or 0x018B) => Kind.CloudII,
