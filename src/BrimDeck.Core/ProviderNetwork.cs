@@ -35,6 +35,7 @@ public static class ProviderNetwork
         ProviderId.DeepSeek => ["api.deepseek.com"],
         ProviderId.OpenRouter => ["openrouter.ai"],
         ProviderId.KimiApi => [HostOf(KimiUsage.DefaultBaseUrl), HostOf(KimiUsage.GlobalBaseUrl)],
+        ProviderId.KimiPlatform => [HostOf(KimiUsage.PlatformChina), HostOf(KimiUsage.PlatformGlobal)],
         ProviderId.OpenCodeGo => [HostOf(OpenCodeUsage.DefaultServer)],
         ProviderId.CommandCodeApi => [HostOf(CommandCodeUsage.Api)],
         ProviderId.MiMoApi => [HostOf(MiMoUsage.PlatformApi)],
