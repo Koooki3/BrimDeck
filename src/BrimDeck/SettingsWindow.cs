@@ -30,11 +30,11 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private ScrollViewer _scroll = null!;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
         Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("增强传感器", "Enhanced sensors"), Loc.T("快捷键", "Shortcuts"), Loc.T("显示与设备", "Display and devices"),
-        Loc.T("剪贴板", "Clipboard"), Loc.T("文件中转", "File transfer"), Loc.T("快捷操作", "Quick actions")];
+        Loc.T("剪贴板", "Clipboard"), Loc.T("文件中转", "File transfer"), Loc.T("快捷操作", "Quick actions"), Loc.T("显示器与配置", "Displays and profiles")];
     // The order of the pages in the navigation; the theme page (ThemePage) and the shortcuts (HotkeysPage) are listed with the
     // basic pages, and the system monitor's page (MonitorSettingsPage) has its own group after music, then the clipboard's two
-    // pages, before About.
-    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, HotkeysPage, 3, 4, 5, 6, MusicGesturesPage, MonitorSettingsPage, SensorsPage, ClipboardSettingsPage, TransferSettingsPage, DevicesSettingsPage, 7];
+    // pages, before About. The profiles page (ProfilesPage) closes the basic pages.
+    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, HotkeysPage, ProfilesPage, 3, 4, 5, 6, MusicGesturesPage, MonitorSettingsPage, SensorsPage, ClipboardSettingsPage, TransferSettingsPage, DevicesSettingsPage, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
@@ -118,11 +118,11 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         _app.Updates.Changed += UpdatesChanged;
         Native.SensorGuard.Changed += SensorStopsChanged;
         SizeChanged += (_, _) => { if (_priceTable is not null) _priceTable.Height = Math.Max(220, ActualHeight - PriceTableReserve); };
-        Closed += (_, _) => { WatchThemeFolder(false); EndAppDrag(false, false); _updateOpenGeneration++; _app.Updates.Changed -= UpdatesChanged; Native.SensorGuard.Changed -= SensorStopsChanged; SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _app.Prices.Changed -= PricesChanged; _exceptionsReservedHeight = 0; _exceptionsOpen = false; _exceptionsHost = null; _scroll.ScrollChanged -= ExceptionsScrollChanged; if (!_app.Exiting) { _app.Deck.Preview(false); _app.FlushSettings(); } };
+        Closed += (_, _) => { WatchThemeFolder(false); EndAppDrag(false, false); _updateOpenGeneration++; _app.Updates.Changed -= UpdatesChanged; Native.SensorGuard.Changed -= SensorStopsChanged; SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _app.Prices.Changed -= PricesChanged; _exceptionsReservedHeight = 0; _exceptionsOpen = false; _exceptionsHost = null; _scroll.ScrollChanged -= ExceptionsScrollChanged; if (!_app.Exiting) { _app.PreviewDeck.Preview(false); _app.FlushSettings(); } };
         StateChanged += (_, _) =>
         {
             UpdateCaption();
-            if (WindowState == WindowState.Minimized) { _preview = false; _app.Deck.Preview(false); }
+            if (WindowState == WindowState.Minimized) { _preview = false; _app.PreviewDeck.Preview(false); }
         };
         RebuildTheme();
     }
@@ -321,7 +321,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         _appRowMotionVersions.Clear();
         _sourceRows.Clear();
         _appRows = null;
-        if (page != _page && _preview) { _preview = false; _app.Deck.Preview(false); }
+        if (page != _page && _preview) { _preview = false; _app.PreviewDeck.Preview(false); }
         // Rebuilding the same page after a change keeps the reader where they were; only switching pages starts at the top.
         double keep = page == _page ? Math.Max(_scroll.VerticalOffset, _keptOffset) : 0; _keptOffset = 0;
         // The exception list's reserved height only lasts for this visit of the page.
@@ -355,7 +355,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),()=>{ if(Confirm(Loc.T("恢复默认", "Restore defaults"),ResetConfirmText(page),Loc.T("恢复默认", "Restore defaults")))ResetPage(); }); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
-        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case SensorsPage: SensorsSettings(); break; case HotkeysPage: HotkeysSettings(); break; case DevicesSettingsPage: DevicesSettings(); break; case ClipboardSettingsPage: ClipboardSettings(); break; case TransferSettingsPage: TransferSettings(); break; case MusicGesturesPage: MusicGesturesSettings(); break; }
+        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case SensorsPage: SensorsSettings(); break; case HotkeysPage: HotkeysSettings(); break; case DevicesSettingsPage: DevicesSettings(); break; case ClipboardSettingsPage: ClipboardSettings(); break; case TransferSettingsPage: TransferSettings(); break; case MusicGesturesPage: MusicGesturesSettings(); break; case ProfilesPage: ProfilesSettings(); break; }
         if (_content.Children[^1] is Border lastGroup) lastGroup.Margin = new Thickness(lastGroup.Margin.Left, lastGroup.Margin.Top, lastGroup.Margin.Right, 0);
         // Apply the offset before the frame is drawn, so the rebuilt page never shows its top for a frame.
         if (keep > 0) { _scroll.UpdateLayout(); _scroll.ScrollToVerticalOffset(keep); _scroll.UpdateLayout(); }
@@ -376,6 +376,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         SensorsPage => "M 4,4 H 12 V 12 H 4 Z M 6,1 V 4 M 10,1 V 4 M 6,12 V 15 M 10,12 V 15 M 1,6 H 4 M 1,10 H 4 M 12,6 H 15 M 12,10 H 15",
         MusicGesturesPage => "M 1,8 H 15 M 4,5 L 1,8 L 4,11 M 12,5 L 15,8 L 12,11",
         HotkeysPage => "M 1,3 H 15 V 13 H 1 Z M 4,6 V 6.1 M 7,6 V 6.1 M 10,6 V 6.1 M 13,6 V 6.1 M 4,10 H 12",
+        // Three stacked layers.
+        ProfilesPage => "M 8,1.5 L 15,5 L 8,8.5 L 1,5 Z M 1,8 L 8,11.5 L 15,8 M 1,11 L 8,14.5 L 15,11",
         ClipboardSettingsPage => "M 3,2.5 H 13 V 15 H 3 Z M 6,1 H 10 V 4 H 6 Z M 5.5,8 H 10.5 M 5.5,11 H 10.5",
         TransferSettingsPage => "M 1.5,9 L 3.5,3 H 12.5 L 14.5,9 V 13 A 1,1 0 0 1 13.5,14 H 2.5 A 1,1 0 0 1 1.5,13 Z M 1.5,9 H 5.5 L 6.5,10.5 H 9.5 L 10.5,9 H 14.5",
         ThemePage => "M 8,1 C 4,1 1,4 1,8 C 1,12 4,15 8,15 C 9.4,15 9.6,13.6 8.8,12.8 C 8,12 8.6,10.5 10,10.5 H 12 C 13.7,10.5 15,9.2 15,7.5 C 15,4 12,1 8,1 Z M 4.6,8 V 8.1 M 6,4.8 V 4.9 M 9.6,4.4 V 4.5 M 12,6.8 V 6.9",
@@ -462,63 +464,11 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         }
         Group(Row(Loc.T("主题", "Theme"),SegmentBorder(themes)),Row(Loc.T("语言", "Language"),language),Row(Loc.T("缩放", "Scale"),scale),transparency,
             fontRow,followRow,Row(Loc.T("字体预览", "Font preview"),fontSample));
-        DisplayChoice(); Interaction(); WindowRules();
-    }
-    // Either the primary display, or any set of displays, each with its own switch. A chosen display that is not
-    // connected keeps its switch, marked, so that it can be removed. The last switch that is on cannot be turned off.
-    private void DisplayChoice()
-    {
-        SectionTitle(Loc.T("显示位置", "Display"));
-        var displays = Native.Displays.Current();
-        var modes = new UniformGrid { Columns = 2, Width = 240 };
-        foreach (var (placement, name) in new[] { (DisplayPlacement.Primary, Loc.T("跟随主显示器", "Primary display")), (DisplayPlacement.Chosen, Loc.T("自选显示器", "Choose displays")) })
-        {
-            var option = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = name, IsChecked = S.Display == placement, GroupName = "Display" };
-            AutomationProperties.SetName(option, Loc.T("显示在 · ", "Show on · ") + name);
-            option.Checked += (_, _) =>
-            {
-                if (S.Display == placement) return;
-                // Choosing displays for the first time starts from the one BrimDeck is on now.
-                var start = displays.FirstOrDefault(d => d.Primary) ?? displays.FirstOrDefault();
-                Change(s =>
-                {
-                    s.Display = placement;
-                    if (placement == DisplayPlacement.Chosen && s.DisplayMonitors.Count == 0 && start is not null) s.DisplayMonitors.Add(new ChosenDisplay(start.Id, start.Name));
-                });
-                ShowPage(0);
-            };
-            modes.Children.Add(option);
-        }
-        var rows = new List<FrameworkElement> { Row(Loc.T("显示在", "Show on"), SegmentBorder(modes)) };
-        if (S.Display == DisplayPlacement.Chosen)
-        {
-            var entries = displays.Select(d => (d.Id, d.Name, Label: Native.Displays.Label(d, displays) + (d.Primary ? Loc.T(" · 主显示器", " · primary") : ""))).ToList();
-            entries.AddRange(S.DisplayMonitors.Where(c => displays.All(d => d.Id != c.Id))
-                .Select(c => (c.Id, c.Name, Label: (c.Name.Length > 0 ? c.Name : Loc.T("显示器", "Display")) + Loc.T("（未连接）", " (not connected)"))));
-            var switches = new List<(CheckBox Box, string Id)>();
-            void UpdateSwitches() { foreach (var (box, id) in switches) box.IsEnabled = !(box.IsChecked == true && S.DisplayMonitors.Count == 1); }
-            foreach (var (id, name, label) in entries)
-            {
-                var row = Toggle(label, S.DisplayMonitors.Any(c => c.Id == id), on =>
-                {
-                    Change(s =>
-                    {
-                        s.DisplayMonitors.RemoveAll(c => c.Id == id);
-                        if (on) s.DisplayMonitors.Add(new ChosenDisplay(id, name));
-                    });
-                    UpdateSwitches();
-                });
-                // The displays are items under "Show on", so their names are not set as headings.
-                if (row is Border { Child: CheckBox { Content: TextBlock text } box }) { text.FontWeight = FontWeights.Normal; switches.Add((box, id)); }
-                rows.Add(row);
-            }
-            UpdateSwitches();
-        }
-        Group([.. rows]);
+        Interaction(); WindowRules();
     }
     // Monitors were connected, removed or rearranged; the list of displays is built again.
     // A taskbar that appeared, moved or went away also shows or hides the collapsed group's anchor row.
-    internal void DisplaysChanged() { if (!IsLoaded) return; if (_page is 0 or 1) ShowPage(_page); }
+    internal void DisplaysChanged() { if (!IsLoaded) return; if (_page is 0 or 1 or ProfilesPage) ShowPage(_page); }
     // The style hotkey changed the collapsed style; the page's cards and options follow it.
     internal void CompactStyleChanged()
     {
@@ -696,7 +646,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         {
             switch(_page)
             {
-                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.MemoryMode=defaults.MemoryMode;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.Display=defaults.Display;s.DisplayMonitors=[];s.PanelScale=defaults.PanelScale;s.SurfaceTransparency=defaults.SurfaceTransparency;s.UiFont=defaults.UiFont;s.SettingsFollowsFont=defaults.SettingsFollowsFont;
+                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.MemoryMode=defaults.MemoryMode;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.PanelScale=defaults.PanelScale;s.SurfaceTransparency=defaults.SurfaceTransparency;s.UiFont=defaults.UiFont;s.SettingsFollowsFont=defaults.SettingsFollowsFont;
                     s.ClickThrough=defaults.ClickThrough;s.ClickThroughPanel=defaults.ClickThroughPanel;s.WindowCapture=defaults.WindowCapture;break;
                 case HotkeysPage:foreach(var kind in Enum.GetValues<HotkeyKind>())s.SetHotkey(kind,defaults.Hotkey(kind));break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
@@ -734,7 +684,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
 
     // A page that is not shown cannot be previewed, so its sizes are only saved.
     private void Resize(Action<DeckSettings> edit, DeckPage page = DeckPage.Usage)
-    { bool shown = DeckPages.Shown(S, page); Change(edit); if (!shown) return; _preview = true; _app.Deck.Preview(true); _app.Deck.SelectPage(page, remember: false); }
+    { bool shown = DeckPages.Shown(S, page); Change(edit); if (!shown) return; _preview = true; _app.PreviewDeck.Preview(true); _app.PreviewDeck.SelectPage(page, remember: false); }
 
     private void Interaction()
     {
@@ -800,10 +750,9 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         });
         raise.BorderBrush = UI.Brush(_palette.Border);
         raise.Background = UI.Brush(_palette.Input);
-        keep.Children.Add(Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost,
-            value => Change(s => s.ForceTopmost = value), help:
-            Loc.T("开启后，面板被其他置顶窗口遮挡时会立即恢复到上方，其他应用打开的菜单除外。仍遵循上面的显示与隐藏规则。若其他应用反复置顶自己，面板会暂停恢复几秒。",
-                "Restores the panel above other always-on-top windows as soon as it is covered, except for menus other apps open. Display and hide rules above still apply. If an app keeps raising itself, the panel pauses for a few seconds.")));
+        keep.Children.Add(Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost, value => Change(s => s.ForceTopmost = value), help:
+            Loc.T("开启后，面板被其他置顶窗口遮住时仍显示在最上方，可以正常操作。其他应用的菜单除外。",
+                "When on, the panel stays above other always-on-top windows and works as usual. Menus from other apps are excepted.")));
         keep.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
         var topRows = new StackPanel();
         topRows.Children.Add(keep);
@@ -1224,13 +1173,17 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         Group(Row(Loc.T("当前版本", "Current version"),version),
             Row(Loc.T("开源许可证", "License"),TextLine("Apache License 2.0",12,TextSecondary)),
             Row(Loc.T("项目主页", "Homepage"),Link("GitHub ↗","https://github.com/MoFeng2223/BrimDeck")),
-            Row(Loc.T("问题与建议", "Issues and suggestions"),Link(Loc.T("提交反馈 ↗", "Send feedback ↗"),"https://github.com/MoFeng2223/BrimDeck/issues")));
+            Row(Loc.T("问题与建议", "Issues and suggestions"),Link(Loc.T("提交反馈 ↗", "Send feedback ↗"),"https://github.com/MoFeng2223/BrimDeck/issues")),
+            // The README's community section in the interface language, so the ways to reach us can change without a new version.
+            Row(Loc.T("交流", "Community"),Link(Loc.T("查看交流方式 ↗", "Join the community ↗"),Loc.T(
+                "https://github.com/MoFeng2223/BrimDeck/blob/main/README.zh-CN.md#%E4%BA%A4%E6%B5%81",
+                "https://github.com/MoFeng2223/BrimDeck/blob/main/README.md#community"))));
     }
 
     // External links are plain text, so their right edge lines up with the values in the rows above.
     private Button Link(string text, string url)
     {
-        var link = ActionButton(text, () => UI.OpenUrl(url)); link.Style = (Style)FindResource("SettingsLink"); link.ToolTip = url; return link;
+        var link = ActionButton(text, () => UI.OpenUrl(url)); link.Style = (Style)FindResource("SettingsLink"); link.ToolTip = Uri.UnescapeDataString(url); return link;
     }
 
     // Sections and groups are added to the page, or to the panel being collected while one is.

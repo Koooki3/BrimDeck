@@ -120,6 +120,21 @@
       </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <!-- One of two or more buttons joined in one outline (the frame is the group's): the input fill, brighter under the pointer.
+       Tag holds the corners, rounded only at the group's ends. -->
+  <Style x:Key="SettingsJoinedButton" TargetType="Button" BasedOn="{StaticResource SettingsButton}">
+    <Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/><Setter Property="Padding" Value="14,6"/><Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Chrome" CornerRadius="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Background="Transparent" Padding="{TemplateBinding Padding}">
+        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SettingsFillHover}"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SettingsFillPressed}"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.4"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <!-- A custom theme's name under its card: plain text that renames the theme when clicked. -->
   <Style x:Key="SettingsCardName" TargetType="Button">
     <Setter Property="Cursor" Value="IBeam"/><Setter Property="FocusVisualStyle" Value="{DynamicResource SettingsGlyphFocus}"/>
@@ -458,6 +473,21 @@
       <ControlTemplate.Triggers>
         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SettingsFillHover}"/><Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/></Trigger>
         <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SettingsAccentTint}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource SettingsAccentTint}"/><Setter Property="Foreground" Value="{DynamicResource SettingsAccentText}"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <!-- A choice among several that may all be on: framed when off, filled with the accent's tint and outlined in the accent when on. -->
+  <Style x:Key="SettingsPickChip" TargetType="ToggleButton">
+    <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocus}"/>
+    <Setter Property="Foreground" Value="{DynamicResource SettingsTextSecondary}"/><Setter Property="FontSize" Value="12.5"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Height" Value="32"/><Setter Property="Padding" Value="10,0"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton">
+      <Border x:Name="Chrome" CornerRadius="7" Background="Transparent" BorderBrush="{DynamicResource SettingsInputBorder}" BorderThickness="1" Padding="{TemplateBinding Padding}">
+        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SettingsFillHover}"/><Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/></Trigger>
+        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SettingsAccentTint}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource SettingsAccentText}"/><Setter Property="Foreground" Value="{DynamicResource SettingsAccentText}"/></Trigger>
       </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>

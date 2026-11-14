@@ -29,6 +29,19 @@ internal static class AntigravityUsageTests
         new AntigravityUsage().Read(missing, fake, [Path.Combine(root, "none")], now.AddDays(-29), now);
         check("Missing Antigravity conversation folders are unavailable, not zero", !missing.UsageAvailable);
 
+        var daemon = Path.Combine(root, "antigravity", "daemon");
+        Directory.CreateDirectory(daemon);
+        File.WriteAllText(Path.Combine(daemon, "hub_64335.json"), """{"pid":29156,"httpsPort":64334,"httpPort":64335,"lsVersion":"2.32.1","csrfToken":"token-a"}""");
+        File.WriteAllText(Path.Combine(daemon, "hub_1.json"), """{"pid":1,"httpsPort":0,"httpPort":0,"csrfToken":"no-port"}""");
+        File.WriteAllText(Path.Combine(daemon, "hub_2.json"), """{"pid":2,"httpsPort":10,"httpPort":11}""");
+        File.WriteAllText(Path.Combine(daemon, "hub_3.json"), "{not json");
+        File.WriteAllText(Path.Combine(daemon, "other.json"), """{"pid":4,"httpsPort":10,"httpPort":11,"csrfToken":"other"}""");
+        var servers = AntigravityUsage.ReadLanguageServers(daemon);
+        check("Antigravity service files give each language server's ports and token, skipping incomplete and malformed files",
+            servers.SequenceEqual([new AntigravityUsage.LanguageServer(29156, 64334, 64335, "token-a")]));
+        check("A missing Antigravity service folder gives no language servers", AntigravityUsage.ReadLanguageServers(Path.Combine(root, "none")).Count == 0);
+        check("The Antigravity service folder is under .gemini", AntigravityUsage.DaemonFolder(@"C:\Users\A") == @"C:\Users\A\.gemini\antigravity\daemon");
+
         PrefixPricing(root, now, check);
     }
 

@@ -9,9 +9,10 @@ public sealed class FailureNotes(Func<double> clock, Action<string> write, doubl
     private readonly object _gate = new();
     private readonly Dictionary<(string Source, string Kind), double> _last = [];
 
-    // Whether the failure was written (the first of its kind for the source, or the first after the quiet time).
+    // Whether the failure was written (the first of its kind for the source, or the first after the quiet time). The whole exception is
+    // written, with its stack: the message alone does not tell where a swallowed failure came from.
     public bool Note(string source, Exception error)
-        => Note(source, error.GetType().FullName + ":" + error.HResult, $"{error.GetType().Name}: {error.Message}");
+        => Note(source, error.GetType().FullName + ":" + error.HResult, error.ToString());
 
     // kind tells failures apart (an exception's type, or a short word); text is what is written.
     public bool Note(string source, string kind, string text)

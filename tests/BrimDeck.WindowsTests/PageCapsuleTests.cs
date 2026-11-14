@@ -16,6 +16,9 @@ public sealed class App : Application
 public partial class MainWindow
 {
     private DeckSettings Settings { get; } = new();
+    // As the real panel: its own profile decides whether it animates (Soft.For, Soft.At).
+    internal DeckSettings PanelSettings => Settings;
+    private bool Animates => Soft.For(Settings);
     private DeckPage CurrentPage { get; set; }
     private readonly Button AIUsageButton = new() { Content = "Usage", Width = 60, Height = 24 };
     private readonly Button MusicPageButton = new() { Content = "Music", Width = 60, Height = 24 };

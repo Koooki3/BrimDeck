@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace BrimDeck.Core;
 
 // Antigravity 2.x and the Antigravity CLI (agy) keep one SQLite database per conversation, in
@@ -15,6 +17,35 @@ public sealed class AntigravityUsage
 
     public static IReadOnlyList<string> Folders(string home) =>
         [Path.Combine(home, ".gemini", "antigravity", "conversations"), Path.Combine(home, ".gemini", "antigravity-cli", "conversations")];
+
+    // Each Antigravity language server writes its process id, ports and CSRF token to daemon\hub_<http port>.json. The files of
+    // servers that have ended stay behind, so a record is only used while that process listens on its ports. Reading the file
+    // works when Antigravity runs as administrator, whose command line a normal process cannot read.
+    public sealed record LanguageServer(int ProcessId, int HttpsPort, int HttpPort, string Token);
+    public static string DaemonFolder(string home) => Path.Combine(home, ".gemini", "antigravity", "daemon");
+
+    public static List<LanguageServer> ReadLanguageServers(string folder)
+    {
+        var servers = new List<LanguageServer>();
+        IEnumerable<string> files;
+        try { files = Directory.EnumerateFiles(folder, "hub_*.json").ToList(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return servers; }
+        foreach (var file in files)
+        {
+            JsonDocument? doc;
+            try { doc = SharedFile.ReadJson(file); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { continue; }
+            if (doc is null) continue;
+            using var _ = doc;
+            var root = doc.RootElement;
+            var token = root.Get("csrfToken").Text();
+            int Port(string name) => root.Get(name).Number() is { } n && n is > 0 and <= 65535 && n == Math.Floor(n) ? (int)n : 0;
+            if (root.Get("pid").Number() is not { } pid || pid <= 0 || pid > int.MaxValue || token.Length == 0) continue;
+            var server = new LanguageServer((int)pid, Port("httpsPort"), Port("httpPort"), token);
+            if (server.HttpsPort > 0 || server.HttpPort > 0) servers.Add(server);
+        }
+        return servers;
+    }
 
     public void Read(ProviderSnapshot snapshot, IDesktopSources desktop, IReadOnlyList<string> folders, DateTimeOffset start, DateTimeOffset now)
     {

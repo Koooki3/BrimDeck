@@ -359,6 +359,7 @@ public sealed partial class SettingsWindow
             ProviderId.GlmChina or ProviderId.GlmGlobal => Loc.T("GLM 套餐密钥，加密保存在本机", "GLM plan key, stored encrypted on this PC"),
             ProviderId.DeepSeek => Loc.T("DeepSeek API 密钥，加密保存在本机", "DeepSeek API key, stored encrypted on this PC"),
             ProviderId.KimiApi => Loc.T("Kimi Code API 密钥（sk-kimi-…），加密保存在本机", "Kimi Code API key (sk-kimi-…), stored encrypted on this PC"),
+            ProviderId.KimiPlatform => Loc.T("Kimi 开放平台 API 密钥，加密保存在本机", "Kimi Open Platform API key, stored encrypted on this PC"),
             ProviderId.OpenCodeGo => Loc.T("OpenCode Console API 密钥（oc_sk_…），加密保存在本机", "OpenCode Console API key (oc_sk_…), stored encrypted on this PC"),
             ProviderId.CommandCodeApi => Loc.T("Command Code API 密钥，加密保存在本机", "Command Code API key, stored encrypted on this PC"),
             ProviderId.MiMoApi => Loc.T("小米 MiMo 开放平台按量计费 API 密钥（sk-…），加密保存在本机", "Xiaomi MiMo Open Platform pay-as-you-go API key (sk-…), stored encrypted on this PC"),

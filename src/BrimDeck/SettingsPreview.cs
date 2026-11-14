@@ -40,10 +40,10 @@ public sealed partial class SettingsWindow
         {
             if (!_preview || _app.Exiting) return;
             _preview = false;
-            _app.Deck.ResumeAfterPreview();
+            _app.PreviewDeck.ResumeAfterPreview();
         });
     }
 
     // Ends the preview at once, for callers outside this window: clears this window's flag and resumes the main panel.
-    internal void EndPreview() { if (!_preview) return; _preview = false; _app.Deck.ResumeAfterPreview(); }
+    internal void EndPreview() { if (!_preview) return; _preview = false; _app.PreviewDeck.ResumeAfterPreview(); }
 }

@@ -45,7 +45,7 @@ public partial class MainWindow
             }
         }
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
-        var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
+        var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, Settings.ClockSeconds, ClockFace.Palette(Settings, CoverColor, Look), DateTime.Now, scale, Look) : null;
         var transfer = TransferBadge(scale);
         var devices = CompactDevices(scale);
         var layout = CompactMusicLayout.Calculate(10000, scale, media, apps.Count, text.Length > 0, FixedFace(scale, clock?.ReservedWidth ?? 0, transfer?.Width ?? 0, devices?.PreferredWidth ?? 0), 0, equalizer, Settings.EqualizerBars, ring: QuotaRing.Diameter(Settings.QuotaRingStyle));
@@ -54,7 +54,7 @@ public partial class MainWindow
         var strips = new List<MonitorStrip>();
         if (Settings.ShowsMonitor(EffectiveStyle))
         {
-            var colors = MonitorThemeColors.Strip(Settings);
+            var colors = MonitorThemeColors.Strip(Settings, Look);
             _stripUnavailable = _stripAdmission.Hidden;
             void Line(CompactReading reading, MonitorStrip.DriveParts drives = MonitorStrip.DriveParts.All)
             {
@@ -72,7 +72,7 @@ public partial class MainWindow
             }
         }
         _stripLayout = _stripAdmission.Layout;
-        bool animate = Soft.Enabled;
+        bool animate = Animates;
         double gap = CompactMusicLayout.Gap(scale), ringGap = CompactMusicLayout.Whole(CompactColumn.RingGap * scale);
         // The devices one below the other, with the gap the readings' lines keep.
         devices?.Stack(gap);
@@ -88,7 +88,7 @@ public partial class MainWindow
         }
         if (cover)
         {
-            var image = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius);
+            var image = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius, look: Look);
             System.Windows.Automation.AutomationProperties.SetName(image, _mediaTrack!.Caption);
             Add(image, layout.CoverSize);
         }
@@ -173,7 +173,7 @@ public partial class MainWindow
         {
             int line = i / perLine, inLine = Math.Min(perLine, rings.Length - line * perLine);
             double start = (column - (inLine * layout.RingSize + (inLine - 1) * gap)) / 2;
-            var ring = QuotaCarousel.Ring(rings[i], layout.RingSize, layout.RingThickness, layout.Scale);
+            var ring = QuotaCarousel.Ring(rings[i], layout.RingSize, layout.RingThickness, layout.Scale, Look);
             Canvas.SetLeft(ring, Math.Round(start + (i % perLine) * (layout.RingSize + gap)));
             Canvas.SetTop(ring, line * (layout.RingSize + gap));
             canvas.Children.Add(ring);

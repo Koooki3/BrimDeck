@@ -41,7 +41,7 @@ public partial class MainWindow
     private bool DevicesSettled => _app.Devices?.Settled == true;
 
     // Each device's colors and levels as the settings give them.
-    private DeviceInks Inks => new(MonitorThemeColors.For(Settings), Settings.DeviceChoices, Settings.DeviceWarningPercent, Settings.DeviceLowPercent);
+    private DeviceInks Inks => new(MonitorThemeColors.For(Settings, Look), Settings.DeviceChoices, Settings.DeviceWarningPercent, Settings.DeviceLowPercent, Look);
 
     // Asked with the monitor's demand (UpdateMonitorDemand): whenever the panel opens, closes, changes page or is hidden, and
     // whenever the collapsed row is built.
@@ -72,7 +72,7 @@ public partial class MainWindow
         }
         if (CurrentPage != DeckPage.Devices || _devicesView is null) return;
         if (DevicesKey() != _devicesKey) { RenderDevices(); return; }
-        _devicesView.Update(ShownDevices, DevicesSettled, Soft.Enabled);
+        _devicesView.Update(ShownDevices, DevicesSettled, Animates);
     }
 
     // The devices the collapsed row shows (DeviceLists.Collapsed), with their colors.
@@ -106,7 +106,7 @@ public partial class MainWindow
         return DevicesLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), ShownDevices.Count, _devicesView is not null ? _devicesLayout : null);
     }
     private string DevicesKey() => string.Join("|", CurrentDevicesLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "",
-        Inks.Key, Loc.Language, PanelTheme.Generation, SystemParameters.HighContrast);
+        Inks.Key, Loc.Language, Look.Generation, SystemParameters.HighContrast);
 
     private void RenderDevices()
     {
@@ -123,7 +123,7 @@ public partial class MainWindow
         DevicesContent.Margin = new Thickness(_header.Side, 0, _header.Side, MonitorBottom(height));
         var key = DevicesKey();
         // The same step: the page stays, and only shows the devices as they are now (a device switched off in the settings).
-        if (_devicesView is not null && key == _devicesKey && DevicesContent.Children.Contains(_devicesView)) { _devicesView.Update(ShownDevices, DevicesSettled, Soft.Enabled); return; }
+        if (_devicesView is not null && key == _devicesKey && DevicesContent.Children.Contains(_devicesView)) { _devicesView.Update(ShownDevices, DevicesSettled, Animates); return; }
         var layout = CurrentDevicesLayout();
         _devicesKey = key; _devicesLayout = layout;
         var old = shown ? _devicesView : null;

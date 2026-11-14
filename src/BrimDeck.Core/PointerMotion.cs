@@ -26,6 +26,11 @@ public static class PressFeedback
 public static class MotionConditions
 {
     public static bool Allowed(bool appSetting, bool systemAnimations, bool highContrast) => appSetting && systemAnimations && !highContrast;
+
+    // Whether text too long for its place (a song's title, the current lyric) scrolls to show the rest. Scrolling is how that text
+    // is read, not a flourish, so high contrast, which is about colors, does not stop it; the app's setting and Windows' "animation
+    // effects" still do.
+    public static bool Scrolls(bool appSetting, bool systemAnimations) => appSetting && systemAnimations;
 }
 
 // A transport button's glyph (play and pause, the playback mode, the heart) grows into place from nearly its size, and only

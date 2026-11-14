@@ -86,11 +86,11 @@ public partial class MainWindow
     }
     // animate: the page is built for the first time, not for a new size, so its power rows come in (PowerOptions.Animate).
     private PowerOptions PowerBlockFor(bool animate) => Native.BatteryProvider.SystemHasBattery
-        ? new(PowerStyle.For(MonitorThemeColors.For(Settings)), BatteryModel.LowPercent, true, Native.BatteryProvider.Quick(), animate)
-        : new(PowerStyle.For(MonitorThemeColors.For(Settings)), BatteryModel.LowPercent, false, default, animate);
+        ? new(PowerStyle.For(MonitorThemeColors.For(Settings, Look), Look), BatteryModel.LowPercent, true, Native.BatteryProvider.Quick(), animate)
+        : new(PowerStyle.For(MonitorThemeColors.For(Settings, Look), Look), BatteryModel.LowPercent, false, default, animate);
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
-    private bool MonitorMotion => Soft.Enabled;
+    private bool MonitorMotion => Animates;
 
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
@@ -155,7 +155,7 @@ public partial class MainWindow
     // that room change: when the volumes are first counted, a sensor turns out to have none or first shows, or a volume comes or
     // goes past the room.
     private string MonitorKey(ExpandedPlan plan, bool small) => string.Join("|", plan.Signature, Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "",
-        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, small, Native.BatteryProvider.SystemHasBattery, Settings.CoreDisplay);
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, Look.Generation, Settings.MonitorTemperatures, small, Native.BatteryProvider.SystemHasBattery, Settings.CoreDisplay);
     // What the shown page was built for: its volumes' places, the small gauge's room and the lines for power and the battery.
     private (int Lines, int Columns, bool Small, int Power) _monitorSensors;
     private static (int Lines, int Columns, bool Small, int Power) BuiltSensors(ExpandedPlan plan, bool small)
@@ -187,8 +187,8 @@ public partial class MainWindow
         string note = none ? Loc.T("在设置中选择展开时显示的项目。选择之前展开页不会读取任何数据。", "Choose what the expanded page shows in settings. The expanded page reads nothing until you do.")
             : Loc.T("可以在设置中换成其他监控项。", "You can choose other readings in settings.");
         var panel = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
-        panel.Children.Add(Label(title, plan.Body + 1, UI.Secondary, HorizontalAlignment.Center));
-        panel.Children.Add(Label(note, plan.Caption + .5, UI.Tertiary, HorizontalAlignment.Center, top: 4));
+        panel.Children.Add(Label(title, plan.Body + 1, Look.Secondary, HorizontalAlignment.Center));
+        panel.Children.Add(Label(note, plan.Caption + .5, Look.Tertiary, HorizontalAlignment.Center, top: 4));
         var open = PillButton(Loc.T("打开设置", "Open settings"), primary: false, () => _app.OpenSettingsPage(SettingsWindow.MonitorSettingsPage));
         open.Margin = new Thickness(0, 10, 0, 0); open.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(open);
         AutomationProperties.SetName(panel, title + ". " + note);
@@ -222,7 +222,7 @@ public partial class MainWindow
         if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
         var old = shown ? _monitorView : null;
         old?.CloseCard();
-        _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,
+        _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings, Look), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
             Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor(old is null && MonitorMotion && !Resizing), MonitorMessage(layout), Settings.CoreDisplay);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
@@ -255,14 +255,14 @@ public partial class MainWindow
     private void SortProcesses(ProcessSort sort)
     {
         if (Settings.MonitorSort == sort) return;
-        Settings.MonitorSort = sort; _app.QueueSave();
+        Settings.MonitorSort = sort; _app.PanelSettingsEdited(this);
         // Every panel's page, shown or not: a page kept for later is not built again, so it must not keep the old sort.
         foreach (var deck in _app.Decks) deck._monitorView?.SetSort(sort);
     }
     private void SwitchMonitorMain(MonitorMain main)
     {
         if (Settings.MonitorMain == main) return;
-        Settings.MonitorMain = main; _app.QueueSave();
+        Settings.MonitorMain = main; _app.PanelSettingsEdited(this);
         RefreshMonitorPages();
     }
     // The adapter shown on the page is the one the monitor shows everywhere, the collapsed readings too, so a click on the page
@@ -270,7 +270,7 @@ public partial class MainWindow
     private void SwitchMonitorGpu(GpuSample gpu)
     {
         if (Settings.MonitorGpu == gpu.Key) return;
-        Settings.MonitorGpu = gpu.Key; Settings.MonitorGpuName = gpu.Name; _app.QueueSave();
+        Settings.MonitorGpu = gpu.Key; Settings.MonitorGpuName = gpu.Name; _app.PanelSettingsEdited(this);
         _app.Monitor?.ShowGpuChoice();
     }
     private void RefreshMonitorPages()

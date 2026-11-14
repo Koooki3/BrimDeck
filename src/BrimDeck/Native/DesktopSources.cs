@@ -127,31 +127,57 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
         }
     }
 
-    // Discovery asks WMI for the process command line, so its result is kept for as long as that process lives
-    // and still listens on the same ports. Each refresh then costs one read of the system's listener table.
+    // Discovery reads the language servers' service files, otherwise asks WMI for their command lines. Its result is kept for
+    // as long as that process lives and still listens on the same ports, so each refresh then costs one read of the system's
+    // listener table.
     private (int Id, DateTime Started, IReadOnlyList<LocalEndpoint> Endpoints)[] _antigravity = [];
+    public bool AntigravityUnreadable { get; private set; }
 
     public async Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation)
     {
+        AntigravityUnreadable = false;
         var listeners = TcpListeners.Read();
         var known = _antigravity.Where(p => Alive(p.Id, p.Started) &&
             p.Endpoints.All(e => listeners.Any(l => l.ProcessId == p.Id && l.Port == e.Port))).ToArray();
         if (known.Length > 0 && known.Length == _antigravity.Length) return known.SelectMany(p => p.Endpoints).ToList();
-        // No language server running (Antigravity closed): nothing to ask WMI about.
+        // No language server running (Antigravity closed): nothing to look for.
         if (!ProcessSnapshot.Any(name => name.Contains("language_server", StringComparison.OrdinalIgnoreCase))) { _antigravity = []; return []; }
-        // A WMI query has no timeout of its own; a stalled service must not hold the refresh.
-        var processes = await Task.Run(FindAntigravityProcesses, cancellation).WaitAsync(TimeSpan.FromSeconds(15), cancellation);
-        var found = new List<(int, DateTime, IReadOnlyList<LocalEndpoint>)>();
-        foreach (var (pid, command) in processes)
+        var found = FromServiceFiles(listeners);
+        if (found.Count == 0)
         {
-            var match = Regex.Match(command, "--csrf_token(?:=|\\s+)\"?([^\\s\"]+)");
-            if (!match.Success || StartTime(pid) is not { } started) continue;
-            var endpoints = listeners.Where(l => l.ProcessId == pid).Select(l => l.Port).Distinct()
-                .SelectMany(port => new LocalEndpoint[] { new(port, "https", match.Groups[1].Value), new(port, "http", match.Groups[1].Value) }).ToList();
-            if (endpoints.Count > 0) found.Add((pid, started, endpoints));
+            // A WMI query has no timeout of its own; a stalled service must not hold the refresh.
+            var processes = await Task.Run(FindAntigravityProcesses, cancellation).WaitAsync(TimeSpan.FromSeconds(15), cancellation);
+            foreach (var (pid, command) in processes)
+            {
+                var match = Regex.Match(command, "--csrf_token(?:=|\\s+)\"?([^\\s\"]+)");
+                // WMI returns no command line for a process that runs as administrator when BrimDeck does not.
+                if (!match.Success) { AntigravityUnreadable |= command.Length == 0; continue; }
+                if (StartTime(pid) is not { } started) continue;
+                var endpoints = listeners.Where(l => l.ProcessId == pid).Select(l => l.Port).Distinct()
+                    .SelectMany(port => new LocalEndpoint[] { new(port, "https", match.Groups[1].Value), new(port, "http", match.Groups[1].Value) }).ToList();
+                if (endpoints.Count > 0) found.Add((pid, started, endpoints));
+            }
         }
         _antigravity = [.. found];
-        return found.SelectMany(p => p.Item3).ToList();
+        return found.SelectMany(p => p.Endpoints).ToList();
+    }
+
+    // A service file is used while its process is a language server listening on the ports it names; the files of servers
+    // that have ended stay behind.
+    private static List<(int Id, DateTime Started, IReadOnlyList<LocalEndpoint> Endpoints)> FromServiceFiles(List<TcpListeners.Listener> listeners)
+    {
+        var found = new List<(int, DateTime, IReadOnlyList<LocalEndpoint>)>();
+        var folder = AntigravityUsage.DaemonFolder(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        foreach (var server in AntigravityUsage.ReadLanguageServers(folder).GroupBy(s => s.ProcessId))
+        {
+            int pid = server.Key;
+            var endpoints = server.SelectMany(s => new LocalEndpoint[] { new(s.HttpsPort, "https", s.Token), new(s.HttpPort, "http", s.Token) })
+                .Where(e => listeners.Any(l => l.ProcessId == pid && l.Port == e.Port)).Distinct().ToList();
+            if (endpoints.Count == 0 || !Path.GetFileName(AppIdentity.ImagePath(pid)).Contains("language_server", StringComparison.OrdinalIgnoreCase)
+                || StartTime(pid) is not { } started) continue;
+            found.Add((pid, started, endpoints));
+        }
+        return found;
     }
 
     private static DateTime? StartTime(int pid)
@@ -177,9 +203,11 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
             {
                 try
                 {
-                    string path = WmiProperty(row, "ExecutablePath") as string ?? "";
+                    int pid = Convert.ToInt32(WmiProperty(row, "ProcessId"));
+                    // The process handle still gives the path of a process that runs as administrator, which WMI leaves empty.
+                    string path = WmiProperty(row, "ExecutablePath") as string is { Length: > 0 } listed ? listed : AppIdentity.ImagePath(pid);
                     string command = WmiProperty(row, "CommandLine") as string ?? "";
-                    if (path.Contains("antigravity", StringComparison.OrdinalIgnoreCase)) processes.Add((Convert.ToInt32(WmiProperty(row, "ProcessId")), command));
+                    if (path.Contains("antigravity", StringComparison.OrdinalIgnoreCase)) processes.Add((pid, command));
                 }
                 finally { Marshal.FinalReleaseComObject(row); }
             }

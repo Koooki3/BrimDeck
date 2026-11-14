@@ -15,7 +15,8 @@ internal static class DashboardUsageTests
         var migrated = JsonSerializer.Deserialize<DeckSettings>(serialized)!;
         migrated.Normalize();
         check("New source settings persist stable identities without the legacy Id field", migrated.Apps[0].InstanceId == oldIdentity
-            && serialized.Contains("\"QuotaSource\"") && serialized.Contains("\"UsageSource\"") && !serialized.Contains("\"Id\""));
+            && serialized.Contains("\"QuotaSource\"") && serialized.Contains("\"UsageSource\"")
+            && !JsonDocument.Parse(serialized).RootElement.GetProperty("Apps").EnumerateArray().Any(app => app.TryGetProperty("Id", out _)));
 
         var mixed = new AppEntry { QuotaSource = ProviderId.Claude, UsageSource = ProviderId.Codex };
         var duplicate = mixed.Copy(); duplicate.InstanceId = Guid.NewGuid(); duplicate.DisplayName = "工作用量"; duplicate.ThemeColor = "#FF0000";

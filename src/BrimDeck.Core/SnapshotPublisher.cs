@@ -16,9 +16,11 @@ public sealed class SnapshotPublisher(Action<IReadOnlyList<ProviderSnapshot>> pu
         lock (_sync)
         {
             if (_disposed) return;
-            if (!_clock.IsRunning || _clock.Elapsed >= interval) { Send(snapshots); return; }
+            // One reading of the clock: read twice, the wait left could come out below zero, which Timer rejects.
+            var elapsed = _clock.Elapsed;
+            if (!_clock.IsRunning || elapsed >= interval) { Send(snapshots); return; }
             _held = snapshots;
-            _timer ??= new Timer(_ => Flush(), null, interval - _clock.Elapsed, Timeout.InfiniteTimeSpan);
+            _timer ??= new Timer(_ => Flush(), null, interval - elapsed, Timeout.InfiniteTimeSpan);
         }
     }
 

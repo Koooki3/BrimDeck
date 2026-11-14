@@ -57,6 +57,8 @@ public sealed class ExpandedPlan
     // The rates the network block shows: it is one block of one line, with the download, the upload or both.
     public bool Downloads { get; init; }
     public bool Uploads { get; init; }
+    // With both rates shown: the upload at the left (the table puts it before the download).
+    public bool UploadFirst { get; init; }
     public IEnumerable<ExpandedItem> Shown => Parts.Select(part => part.Item).Where(item => item is not (ExpandedItem.Download or ExpandedItem.Upload))
         .Concat(Downloads ? [ExpandedItem.Download] : []).Concat(Uploads ? [ExpandedItem.Upload] : [])
         .Concat(List != ExpandedList.None ? [ExpandedItem.Processes] : []);
@@ -71,7 +73,7 @@ public sealed class ExpandedPlan
     public ExpandedDemand Demand(bool temperatures) => ExpandedMonitor.Demand(Shown, temperatures);
 
     // What makes two plans the same page, as far as building it goes.
-    public string Signature => string.Join("|", Kind, Steps, List, Downloads, Uploads, string.Join(",", Parts.Select(part => part.Item + ":" + part.Form)));
+    public string Signature => string.Join("|", Kind, Steps, List, Downloads, Uploads, UploadFirst, string.Join(",", Parts.Select(part => part.Item + ":" + part.Form)));
 }
 
 // The expanded page's layout from the table of items: the page before the table (MonitorLayout) made general. The rules:
@@ -338,7 +340,8 @@ public static class ExpandedLayout
         {
             Kind = ExpandedKind.Readings, Steps = steps, Scale = scale, Parts = parts, Readings = Scaled(new(0, 0, readingsW, readingsH), scale), List = list,
             ListBox = Scaled(listBox, scale), Dropped = dropped, Squeezed = squeezed, Hole = hole * scale, Width = width, Height = height,
-            Downloads = down && netShown, Uploads = up && netShown
+            Downloads = down && netShown, Uploads = up && netShown,
+            UploadFirst = down && up && netShown && order.IndexOf(ExpandedItem.Upload) < order.IndexOf(ExpandedItem.Download)
         };
         var present = plan.Shown.ToHashSet();
         dropped.AddRange(order.Where(item => !present.Contains(item)));

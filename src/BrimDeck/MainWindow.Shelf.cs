@@ -62,9 +62,10 @@ public partial class MainWindow
         HoverZone.PreviewDragLeave += ShelfDragLeave;
         HoverZone.PreviewDrop += ShelfDrop;
         // A press anywhere else on the panel lets go of the search box: the keyboard goes back to the window it came from, and the
-        // search and its results stay.
+        // search and its results stay. A panel holding the keyboard for a hotkey keeps it (PanelKeyboard).
         PreviewMouseLeftButtonDown += (_, e) =>
         {
+            if (PanelKeys.Holding) return;
             if (_searchBox is not { IsKeyboardFocusWithin: true } box || box.Parent is not Visual host) return;
             if (e.OriginalSource is Visual pressed && (host == pressed || host.IsAncestorOf(pressed))) return;
             EndTyping(); Keyboard.ClearFocus();
@@ -119,7 +120,7 @@ public partial class MainWindow
         var number = new TextBlock
         {
             Text = count.ToString(CultureInfo.InvariantCulture), FontFamily = UI.PanelFont, FontSize = CompactMusicLayout.Half(11.5 * s), FontWeight = FontWeights.SemiBold,
-            Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap
+            Foreground = UI.Brush(Look.Primary), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.NoWrap
         };
         Typography.SetNumeralAlignment(number, FontNumeralAlignment.Tabular);
         number.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -132,7 +133,7 @@ public partial class MainWindow
         var tray = new Path
         {
             Data = Geometry.Parse("M 1.5,9 L 3.5,3.5 H 12.5 L 14.5,9 V 12.5 A 1,1 0 0 1 13.5,13.5 H 2.5 A 1,1 0 0 1 1.5,12.5 Z M 1.5,9 H 5.5 L 6.5,10.5 H 9.5 L 10.5,9 H 14.5"),
-            Stroke = UI.Brush(UI.Secondary), StrokeThickness = 1.35 / grid, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            Stroke = UI.Brush(Look.Secondary), StrokeThickness = 1.35 / grid, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
             Width = 16, Height = 16, LayoutTransform = new ScaleTransform(grid, grid), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center
         };
         badge.Children.Add(tray); badge.Children.Add(number);
@@ -174,7 +175,7 @@ public partial class MainWindow
         ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
         // In the lowest panels the toolbar leaves 2 DIP under the page switch (PanelHeader); the page keeps 4 more below it.
         ShelfContent.Margin = new Thickness(layout.Side, height < 150 ? 4 : 0, layout.Side, layout.Tier == ShelfTier.Compact ? 8 : 12);
-        var build = new ShelfBuild(width, height, Settings, PanelTheme.Generation, Loc.Language, DateTime.Now.Ticks / TimeSpan.TicksPerMinute, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
+        var build = new ShelfBuild(width, height, Settings, Look.Generation, Loc.Language, DateTime.Now.Ticks / TimeSpan.TicksPerMinute, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
         bool keep = lazy && !_shelfStale && build == _shelfBuilt && ShelfContent.Children.Count > 0;
         if (lazy && !keep && !_expanded && !_preview) { _shelfStale = true; return; }
         if (!keep)
@@ -197,7 +198,7 @@ public partial class MainWindow
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.Gap) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.FileColumn) });
         var clips = ClipColumn(layout);
-        var divider = new Border { Width = 1, Background = UI.Brush(UI.Hairline), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 4) };
+        var divider = new Border { Width = 1, Background = UI.Brush(Look.Hairline), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 4) };
         Grid.SetColumn(divider, 1);
         var files = FileColumn(layout);
         Grid.SetColumn(files, 2);
@@ -283,7 +284,7 @@ public partial class MainWindow
         // The list stays visible. It stands clear of the rows: up into the gap under the filters, and out to the left past a row's
         // background (8 DIP left of the text) to 12 DIP from the icons, stopping 4 DIP short of the divider in the gap between the
         // columns; on the right, the same distance from the text, whose row ends 4 DIP past it.
-        double corner = PanelTheme.Corner(8), left = Math.Min(12, layout.Gap / 2 - 4);
+        double corner = Look.Corner(8), left = Math.Min(12, layout.Gap / 2 - 4);
         var frame = new Rectangle { RadiusX = corner, RadiusY = corner, StrokeThickness = 1, StrokeDashArray = [4, 3], Margin = new Thickness(-left, -ListGap, -(left - 4), -4), IsHitTestVisible = false };
         Grid.SetRow(frame, 1); column.Children.Add(frame); _fileFrame = frame; ShowDropFrame();
         column.Children.Add(ColumnHeader(ShelfSide.Files, layout.FileColumn, layout));
@@ -307,7 +308,7 @@ public partial class MainWindow
     private void ShowDropFrame()
     {
         if (_fileFrame is null) return;
-        var accent = PanelTheme.ColorOf("accent");
+        var accent = Look.ColorOf("accent");
         _fileFrame.Fill = _dropping ? new SolidColorBrush(Color.FromArgb(18, accent.R, accent.G, accent.B)) : Brushes.Transparent;
         _fileFrame.Stroke = _dropping ? new SolidColorBrush(Color.FromArgb(170, accent.R, accent.G, accent.B)) : Brushes.Transparent;
     }
@@ -341,17 +342,17 @@ public partial class MainWindow
             : _clipTab is not null ? Loc.T("这个分类还没有内容", "This category is empty")
             : !Settings.ClipboardRecord ? Loc.T("剪贴板记录尚未开启", "Clipboard history is off")
             : Loc.T("复制的内容会显示在这里", "What you copy appears here");
-        panel.Children.Add(Label(text, layout.Body, UI.Secondary, HorizontalAlignment.Center));
+        panel.Children.Add(Label(text, layout.Body, Look.Secondary, HorizontalAlignment.Center));
         if (!Searching && favorites)
         {
-            panel.Children.Add(Label(Loc.T("右键任意一条，选择“加入常用”", "Right-click an entry and choose Add to favorites"), layout.Aux, UI.Tertiary, HorizontalAlignment.Center, top: 4));
+            panel.Children.Add(Label(Loc.T("右键任意一条，选择“加入常用”", "Right-click an entry and choose Add to favorites"), layout.Aux, Look.Tertiary, HorizontalAlignment.Center, top: 4));
             var add = PillButton(Loc.T("在设置中添加常用语", "Add phrases in settings"), primary: false, () => _app.OpenSettingsPage(SettingsWindow.ClipboardSettingsPage));
             add.Margin = new Thickness(0, 10, 0, 0); add.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(add);
         }
         else if (!Searching && _clipTab is null && !Settings.ClipboardRecord)
         {
-            panel.Children.Add(Label(Loc.T("开启后只保存在本机", "Kept only on this computer"), layout.Aux, UI.Tertiary, HorizontalAlignment.Center, top: 4));
-            var on = PillButton(Loc.T("开启记录", "Turn on"), primary: true, () => _app.UpdateSettings(SettingsWith(s => s.ClipboardRecord = true)));
+            panel.Children.Add(Label(Loc.T("开启后只保存在本机", "Kept only on this computer"), layout.Aux, Look.Tertiary, HorizontalAlignment.Center, top: 4));
+            var on = PillButton(Loc.T("开启记录", "Turn on"), primary: true, () => _app.UpdateSettingsFor(Profile, SettingsWith(s => s.ClipboardRecord = true)));
             on.Margin = new Thickness(0, 10, 0, 0); on.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(on);
         }
         return panel;
@@ -359,8 +360,8 @@ public partial class MainWindow
     private FrameworkElement FileEmpty(ShelfLayout layout)
     {
         var panel = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, layout.Header / 2) };
-        if (Searching) { panel.Children.Add(Label(Loc.T("没有匹配的文件", "No files match"), layout.Body, UI.Secondary, HorizontalAlignment.Center)); return panel; }
-        panel.Children.Add(Label(_fileTab is null ? Loc.T("把文件拖到这里", "Drag files here") : Loc.T("这个分类还没有文件", "This category is empty"), layout.Body, UI.Secondary, HorizontalAlignment.Center));
+        if (Searching) { panel.Children.Add(Label(Loc.T("没有匹配的文件", "No files match"), layout.Body, Look.Secondary, HorizontalAlignment.Center)); return panel; }
+        panel.Children.Add(Label(_fileTab is null ? Loc.T("把文件拖到这里", "Drag files here") : Loc.T("这个分类还没有文件", "This category is empty"), layout.Body, Look.Secondary, HorizontalAlignment.Center));
         return panel;
     }
 
@@ -379,12 +380,12 @@ public partial class MainWindow
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, -4, 0) };
         Grid.SetColumn(buttons, 1);
         row.Children.Add(tabs); row.Children.Add(buttons);
-        var title = Label(name, layout.Title, UI.Primary, HorizontalAlignment.Left); title.FontWeight = FontWeights.SemiBold;
+        var title = Label(name, layout.Title, Look.Primary, HorizontalAlignment.Left); title.FontWeight = FontWeights.SemiBold;
         tabs.Children.Add(title);
         if (Searching)
         {
             int found = side == ShelfSide.Clipboard ? VisibleClips().Count : VisibleFiles().Count;
-            tabs.Children.Add(Label(Loc.T($"{found} 个结果", found == 1 ? "1 result" : $"{found} results"), layout.Aux, UI.Tertiary, HorizontalAlignment.Left, left: 10));
+            tabs.Children.Add(Label(Loc.T($"{found} 个结果", found == 1 ? "1 result" : $"{found} results"), layout.Aux, Look.Tertiary, HorizontalAlignment.Left, left: 10));
             return row;
         }
         double buttonsWidth = 0;
@@ -446,7 +447,7 @@ public partial class MainWindow
         bool fits = titleWidth + fixedWidth + ownWidth <= room;
         if (categories.Count > 0)
         {
-            tabs.Children.Add(new Border { Width = 1, Height = 12, Background = UI.Brush(UI.Hairline), Margin = new Thickness(8, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center });
+            tabs.Children.Add(new Border { Width = 1, Height = 12, Background = UI.Brush(Look.Hairline), Margin = new Thickness(8, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center });
             tabs.Children.Add(Tab(side, null, Loc.T("全部", "All"), layout, selected is null));
             if (favorites) tabs.Children.Add(Tab(side, ShelfData.Favorites, Loc.T("常用", "Favorites"), layout, selected == ShelfData.Favorites));
             if (fits)
@@ -460,7 +461,7 @@ public partial class MainWindow
         // The size of everything on the file transfer, where there is room for it beside the filters.
         if (side == ShelfSide.Files && fits && layout.FileColumn >= 260 && ShelfData.Files.Count > 0 && room - titleWidth - fixedWidth - ownWidth > 70)
         {
-            var size = Label(Shelf.Size(FilesTotal()), layout.Aux, UI.Tertiary, HorizontalAlignment.Right);
+            var size = Label(Shelf.Size(FilesTotal()), layout.Aux, Look.Tertiary, HorizontalAlignment.Right);
             size.Margin = new Thickness(0, 0, 4, 0);
             buttons.Children.Insert(0, size);
             _fileTotal = size;
@@ -485,12 +486,12 @@ public partial class MainWindow
             DockPanel.SetDock(dot, System.Windows.Controls.Dock.Left); content.Children.Add(dot);
         }
         // Without the settings' 1 DIP drop: beside the panel's filters that put the arrow below their middle (measured on screen).
-        var chevron = SettingsWindow.Chevron(); chevron.FontSize = 11; chevron.Foreground = UI.Brush(UI.Secondary);
+        var chevron = SettingsWindow.Chevron(); chevron.FontSize = 11; chevron.Foreground = UI.Brush(Look.Secondary);
         chevron.Margin = new Thickness(4, 0, 0, 0);
         DockPanel.SetDock(chevron, System.Windows.Controls.Dock.Right); content.Children.Add(chevron);
         string text = shown?.Name ?? Loc.T("分类", "Categories");
         // In the narrowest file column only "⌄" (and the dot of the category shown) is left.
-        var label = Label(text, layout.Body, shown is null ? UI.Tertiary : UI.Primary, HorizontalAlignment.Left); label.MaxWidth = 110;
+        var label = Label(text, layout.Body, shown is null ? Look.Tertiary : Look.Primary, HorizontalAlignment.Left); label.MaxWidth = 110;
         if (labelRoom >= 16) content.Children.Add(label);
         // "分类" shows whole or not at all (never "分…"); a category's own long name is trimmed.
         if (shown is null)
@@ -500,12 +501,12 @@ public partial class MainWindow
         }
         var face = new Grid();
         face.Children.Add(content);
-        if (shown is not null) face.Children.Add(new Border { Height = 2, CornerRadius = new CornerRadius(1), Background = UI.Brush(UI.Accent), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(6, 0, 6, 0) });
-        var picker = new Border { Height = 22, CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Child = face, Background = Brushes.Transparent, Cursor = Cursors.Hand,
+        if (shown is not null) face.Children.Add(new Border { Height = 2, CornerRadius = new CornerRadius(1), Background = UI.Brush(Look.Accent), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(6, 0, 6, 0) });
+        var picker = new Border { Height = 22, CornerRadius = new CornerRadius(Look.Corner(6)), Child = face, Background = Brushes.Transparent, Cursor = Cursors.Hand,
             VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         AutomationProperties.SetName(picker, Loc.T("分类：", "Categories: ") + text);
-        picker.MouseEnter += (_, _) => { label.Foreground = UI.Brush(UI.Primary); chevron.Foreground = UI.Brush(UI.Primary); };
-        picker.MouseLeave += (_, _) => { label.Foreground = UI.Brush(shown is null ? UI.Tertiary : UI.Primary); chevron.Foreground = UI.Brush(UI.Secondary); };
+        picker.MouseEnter += (_, _) => { label.Foreground = UI.Brush(Look.Primary); chevron.Foreground = UI.Brush(Look.Primary); };
+        picker.MouseLeave += (_, _) => { label.Foreground = UI.Brush(shown is null ? Look.Tertiary : Look.Primary); chevron.Foreground = UI.Brush(Look.Secondary); };
         picker.MouseLeftButtonUp += (_, e) => { e.Handled = true; OpenMenu(CategoryListMenu(side), picker); };
         picker.MouseRightButtonUp += (_, e) => e.Handled = true;
         return picker;
@@ -525,13 +526,13 @@ public partial class MainWindow
     private const string BinIcon = "M 2.5,4.5 H 13.5 M 6,4.5 V 3 H 10 V 4.5 M 4,4.5 L 4.7,13.5 H 11.3 L 12,4.5 M 6.8,7 V 11 M 9.2,7 V 11";
     private Border ClearButton(string tip, Action click)
     {
-        var glyph = MenuGlyph(BinIcon, UI.Secondary); glyph.Margin = new Thickness(0); glyph.HorizontalAlignment = HorizontalAlignment.Center;
-        var button = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Child = glyph, Background = Brushes.Transparent,
+        var glyph = MenuGlyph(BinIcon, Look.Secondary); glyph.Margin = new Thickness(0); glyph.HorizontalAlignment = HorizontalAlignment.Center;
+        var button = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(Look.Corner(6)), Child = glyph, Background = Brushes.Transparent,
             Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 2, 0) };
         HoverTip(button, tip);
         AutomationProperties.SetName(button, tip);
-        button.MouseEnter += (_, _) => { button.Background = UI.Brush(PanelTheme.Hex("hover")); glyph.Stroke = UI.Brush(UI.Primary); };
-        button.MouseLeave += (_, _) => { button.Background = Brushes.Transparent; glyph.Stroke = UI.Brush(UI.Secondary); };
+        button.MouseEnter += (_, _) => { button.Background = UI.Brush(Look.Hex("hover")); glyph.Stroke = UI.Brush(Look.Primary); };
+        button.MouseLeave += (_, _) => { button.Background = Brushes.Transparent; glyph.Stroke = UI.Brush(Look.Secondary); };
         button.MouseLeftButtonUp += (_, e) => { e.Handled = true; click(); };
         button.MouseRightButtonUp += (_, e) => e.Handled = true;
         return button;
@@ -542,13 +543,13 @@ public partial class MainWindow
     private const double DragAllWidth = 24;
     private Border DragAllButton()
     {
-        var glyph = MenuGlyph(DragOutIcon, UI.Secondary); glyph.Margin = new Thickness(0); glyph.HorizontalAlignment = HorizontalAlignment.Center;
-        var button = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Child = glyph, Background = Brushes.Transparent,
+        var glyph = MenuGlyph(DragOutIcon, Look.Secondary); glyph.Margin = new Thickness(0); glyph.HorizontalAlignment = HorizontalAlignment.Center;
+        var button = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(Look.Corner(6)), Child = glyph, Background = Brushes.Transparent,
             Cursor = Cursors.SizeAll, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 2, 0) };
         var tip = HoverTip(button, Loc.T("拖出全部文件", "Drag out all files"));
         AutomationProperties.SetName(button, Loc.T("拖出全部文件", "Drag out all files"));
-        button.MouseEnter += (_, _) => { button.Background = UI.Brush(PanelTheme.Hex("hover")); glyph.Stroke = UI.Brush(UI.Primary); };
-        button.MouseLeave += (_, _) => { button.Background = Brushes.Transparent; glyph.Stroke = UI.Brush(UI.Secondary); };
+        button.MouseEnter += (_, _) => { button.Background = UI.Brush(Look.Hex("hover")); glyph.Stroke = UI.Brush(Look.Primary); };
+        button.MouseLeave += (_, _) => { button.Background = Brushes.Transparent; glyph.Stroke = UI.Brush(Look.Secondary); };
         // A click without a drag keeps saying what it does.
         button.MouseLeftButtonUp += (_, e) => { e.Handled = true; tip.IsOpen = true; };
         button.MouseRightButtonUp += (_, e) => e.Handled = true;
@@ -560,23 +561,23 @@ public partial class MainWindow
     {
         var content = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 6, 0) };
         if (color is not null) content.Children.Add(new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(color), Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center });
-        var label = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = layout.Body, Foreground = UI.Brush(selected ? UI.Primary : UI.Tertiary),
+        var label = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = layout.Body, Foreground = UI.Brush(selected ? Look.Primary : Look.Tertiary),
             VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 140 };
         content.Children.Add(label);
         var face = new Grid();
         face.Children.Add(content);
         // The underline is in the panel theme's accent, so it follows the theme.
-        if (selected) face.Children.Add(new Border { Height = 2, CornerRadius = new CornerRadius(1), Background = UI.Brush(UI.Accent), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(6, 0, 6, 0) });
+        if (selected) face.Children.Add(new Border { Height = 2, CornerRadius = new CornerRadius(1), Background = UI.Brush(Look.Accent), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(6, 0, 6, 0) });
         var tab = new Border
         {
-            Height = 22, CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Child = face, Background = Brushes.Transparent,
+            Height = 22, CornerRadius = new CornerRadius(Look.Corner(6)), Child = face, Background = Brushes.Transparent,
             VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Hand, AllowDrop = true
         };
         AutomationProperties.SetName(tab, text);
         if (selected) AutomationProperties.SetItemStatus(tab, Loc.T("已选中", "Selected"));
         _shelfTabs.Add((tab, id, side));
-        tab.MouseEnter += (_, _) => label.Foreground = UI.Brush(UI.Primary);
-        tab.MouseLeave += (_, _) => { if (!selected) label.Foreground = UI.Brush(UI.Tertiary); };
+        tab.MouseEnter += (_, _) => label.Foreground = UI.Brush(Look.Primary);
+        tab.MouseLeave += (_, _) => { if (!selected) label.Foreground = UI.Brush(Look.Tertiary); };
         tab.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
@@ -594,7 +595,7 @@ public partial class MainWindow
     }
     private void HighlightTab(Border tab, bool on)
     {
-        var accent = PanelTheme.ColorOf("accent");
+        var accent = Look.ColorOf("accent");
         tab.BorderThickness = new Thickness(on ? 1 : 0);
         tab.BorderBrush = on ? new SolidColorBrush(accent) : null;
         if (on) tab.Background = new SolidColorBrush(Color.FromArgb(40, accent.R, accent.G, accent.B));
@@ -634,8 +635,8 @@ public partial class MainWindow
     {
         var frame = new Border
         {
-            Height = height, CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(8, 0, 4, 0), Margin = new Thickness(-8, 0, 0, 0),
-            Background = picked ? UI.Brush(UI.FillSelected) : Brushes.Transparent, Cursor = Cursors.Hand
+            Height = height, CornerRadius = new CornerRadius(Look.Corner(6)), Padding = new Thickness(8, 0, 4, 0), Margin = new Thickness(-8, 0, 0, 0),
+            Background = picked ? UI.Brush(Look.FillSelected) : Brushes.Transparent, Cursor = Cursors.Hand
         };
         return frame;
     }
@@ -660,7 +661,7 @@ public partial class MainWindow
                 Background = Brushes.Transparent, ToolTip = string.Join(Loc.T("、", ", "), marked.Select(Shelf.CategoryName)) };
             foreach (var category in marked.Take(3))
             {
-                FrameworkElement glyph = category.Id == ShelfData.Favorites ? StarGlyph(9, UI.Tertiary, filled: true) : new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(category.Color) };
+                FrameworkElement glyph = category.Id == ShelfData.Favorites ? StarGlyph(9, Look.Tertiary, filled: true) : new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(category.Color) };
                 glyph.VerticalAlignment = VerticalAlignment.Center;
                 if (marks.Children.Count > 0) glyph.Margin = new Thickness(3, 0, 0, 0);
                 marks.Children.Add(glyph);
@@ -689,19 +690,19 @@ public partial class MainWindow
             case ClipKind.Image:
             {
                 var panel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-                var thumb = new Border { Width = layout.Thumb, Height = layout.ThumbHeight, CornerRadius = new CornerRadius(PanelTheme.Corner(3)), Background = UI.Brush(UI.Fill), ClipToBounds = true, VerticalAlignment = VerticalAlignment.Center };
+                var thumb = new Border { Width = layout.Thumb, Height = layout.ThumbHeight, CornerRadius = new CornerRadius(Look.Corner(3)), Background = UI.Brush(Look.Fill), ClipToBounds = true, VerticalAlignment = VerticalAlignment.Center };
                 if (_app.Shelf.Picture(clip.Id, (int)Math.Ceiling(layout.Thumb * 2)) is { } picture)
                     thumb.Background = new ImageBrush(picture) { Stretch = Stretch.UniformToFill };
                 panel.Children.Add(thumb);
-                panel.Children.Add(Label(Loc.T("图片", "Picture") + $"  {clip.PixelWidth}×{clip.PixelHeight}", layout.Aux, UI.Secondary, HorizontalAlignment.Left, left: 8));
+                panel.Children.Add(Label(Loc.T("图片", "Picture") + $"  {clip.PixelWidth}×{clip.PixelHeight}", layout.Aux, Look.Secondary, HorizontalAlignment.Left, left: 8));
                 return panel;
             }
             case ClipKind.Color when Shelf.TryColor(clip.Text, out var c):
             {
                 var panel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-                panel.Children.Add(new Border { Width = 12, Height = 12, CornerRadius = new CornerRadius(PanelTheme.Corner(3)), Background = new SolidColorBrush(Color.FromRgb(c.R, c.G, c.B)),
-                    BorderBrush = UI.Brush(UI.Hairline), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center });
-                var text = Highlighted(clip.Text.Trim(), layout.Body, UI.Primary, mono: true); text.Margin = new Thickness(8, 0, 0, 0);
+                panel.Children.Add(new Border { Width = 12, Height = 12, CornerRadius = new CornerRadius(Look.Corner(3)), Background = new SolidColorBrush(Color.FromRgb(c.R, c.G, c.B)),
+                    BorderBrush = UI.Brush(Look.Hairline), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center });
+                var text = Highlighted(clip.Text.Trim(), layout.Body, Look.Primary, mono: true); text.Margin = new Thickness(8, 0, 0, 0);
                 panel.Children.Add(text);
                 return panel;
             }
@@ -709,8 +710,8 @@ public partial class MainWindow
             {
                 var (host, rest) = Shelf.SplitLink(clip.Text);
                 var block = new TextBlock { FontFamily = UI.PanelFont, FontSize = layout.Body, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
-                if (Searching) AddHighlighted(block.Inlines, clip.Text.Trim(), UI.Primary);
-                else { block.Inlines.Add(new Run(host) { Foreground = UI.Brush(UI.Primary) }); block.Inlines.Add(new Run(rest) { Foreground = UI.Brush(UI.Tertiary) }); }
+                if (Searching) AddHighlighted(block.Inlines, clip.Text.Trim(), Look.Primary);
+                else { block.Inlines.Add(new Run(host) { Foreground = UI.Brush(Look.Primary) }); block.Inlines.Add(new Run(rest) { Foreground = UI.Brush(Look.Tertiary) }); }
                 return block;
             }
             default:
@@ -721,13 +722,13 @@ public partial class MainWindow
                 {
                     var lines = clip.Text.Replace("\r\n", "\n").Split('\n').Select(line => line.TrimEnd()).Where(line => line.Trim().Length > 0).ToList();
                     string shown = string.Join("\n", lines.Take(2).Select(line => code ? line.Replace("\t", "  ") : line.Trim()));
-                    var block = Highlighted(shown, layout.Body, UI.Primary, mono: code);
+                    var block = Highlighted(shown, layout.Body, Look.Primary, mono: code);
                     block.TextWrapping = TextWrapping.NoWrap;
-                    if (lines.Count > 2) { block.Inlines.Add(new Run("  +" + (lines.Count - 2) + Loc.T(" 行", " lines")) { Foreground = UI.Brush(UI.Tertiary), FontSize = layout.Aux }); }
+                    if (lines.Count > 2) { block.Inlines.Add(new Run("  +" + (lines.Count - 2) + Loc.T(" 行", " lines")) { Foreground = UI.Brush(Look.Tertiary), FontSize = layout.Aux }); }
                     return block;
                 }
-                var line = Highlighted(code ? first : first, layout.Body, UI.Primary, mono: code);
-                if (more > 0) line.Inlines.Add(new Run("  +" + more + Loc.T(" 行", more == 1 ? " line" : " lines")) { Foreground = UI.Brush(UI.Tertiary), FontSize = layout.Aux, FontFamily = UI.PanelFont });
+                var line = Highlighted(code ? first : first, layout.Body, Look.Primary, mono: code);
+                if (more > 0) line.Inlines.Add(new Run("  +" + more + Loc.T(" 行", more == 1 ? " line" : " lines")) { Foreground = UI.Brush(Look.Tertiary), FontSize = layout.Aux, FontFamily = UI.PanelFont });
                 return line;
             }
         }
@@ -743,13 +744,13 @@ public partial class MainWindow
     private void AddHighlighted(InlineCollection inlines, string text, string color)
     {
         if (!Searching) { inlines.Add(new Run(text)); return; }
-        var accent = PanelTheme.ColorOf("accent");
+        var accent = Look.ColorOf("accent");
         var mark = new SolidColorBrush(Color.FromArgb(90, accent.R, accent.G, accent.B));
         int at = 0;
         foreach (var (start, length) in Shelf.MatchesIn(text, _shelfQuery))
         {
             if (start > at) inlines.Add(new Run(text[at..start]));
-            inlines.Add(new Run(text.Substring(start, length)) { Background = mark, Foreground = UI.Brush(UI.Primary) });
+            inlines.Add(new Run(text.Substring(start, length)) { Background = mark, Foreground = UI.Brush(Look.Primary) });
             at = start + length;
         }
         if (at < text.Length) inlines.Add(new Run(text[at..]));
@@ -778,12 +779,12 @@ public partial class MainWindow
         // Short of room, the name is cut at the end of its stem; an extension of up to four letters (.docx) always shows after it.
         string extension = System.IO.Path.GetExtension(file.Name);
         if (extension.Length is < 2 or > 5 || extension.Length == file.Name.Length) extension = "";
-        var stem = Label(file.Name[..^extension.Length], layout.Body, UI.Primary, HorizontalAlignment.Left);
-        var ext = Label(extension, layout.Body, UI.Primary, HorizontalAlignment.Left);
+        var stem = Label(file.Name[..^extension.Length], layout.Body, Look.Primary, HorizontalAlignment.Left);
+        var ext = Label(extension, layout.Body, Look.Primary, HorizontalAlignment.Left);
         if (Searching)
         {
-            stem.Inlines.Clear(); AddHighlighted(stem.Inlines, file.Name[..^extension.Length], UI.Primary);
-            ext.Inlines.Clear(); AddHighlighted(ext.Inlines, extension, UI.Primary);
+            stem.Inlines.Clear(); AddHighlighted(stem.Inlines, file.Name[..^extension.Length], Look.Primary);
+            ext.Inlines.Clear(); AddHighlighted(ext.Inlines, extension, Look.Primary);
         }
         var name = new DockPanel { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Opacity = exists ? 1 : .45 };
         DockPanel.SetDock(ext, System.Windows.Controls.Dock.Right);
@@ -832,10 +833,10 @@ public partial class MainWindow
     private Grid AuxSlot(string text, ShelfLayout layout, Action open, bool warn = false, (string Icon, string Note, Action Act)? extra = null)
     {
         var slot = new Grid { VerticalAlignment = VerticalAlignment.Center, MinWidth = 22, Margin = new Thickness(8, 0, 0, 0) };
-        var label = Label(text, layout.Aux, warn ? "#E5C890" : UI.Tertiary, HorizontalAlignment.Right);
+        var label = Label(text, layout.Aux, warn ? "#E5C890" : Look.Tertiary, HorizontalAlignment.Right);
         Typography.SetNumeralAlignment(label, FontNumeralAlignment.Tabular);
         // The settings' chevron (the icon font's, as the expandable rows there), turned to point right; no hover note.
-        var chevron = SettingsWindow.Chevron(); chevron.FontSize = 11; chevron.Margin = new Thickness(0); chevron.Foreground = UI.Brush(UI.Secondary);
+        var chevron = SettingsWindow.Chevron(); chevron.FontSize = 11; chevron.Margin = new Thickness(0); chevron.Foreground = UI.Brush(Look.Secondary);
         chevron.RenderTransform = new RotateTransform(-90);
         // A 22 DIP face; the press is taken over the row's whole height and 36 DIP across, reaching into the row's right padding.
         // Beside "粘贴为纯文本" both press areas narrow, so the two faces stand 4 DIP apart.
@@ -845,7 +846,7 @@ public partial class MainWindow
         // The extra button, its menu icon taking the press over 26 DIP across; it shows with "›", and takes no room before.
         if (extra is { } one)
         {
-            var glyph = MenuGlyph(one.Icon, UI.Secondary); glyph.Margin = new Thickness(0); glyph.HorizontalAlignment = HorizontalAlignment.Center;
+            var glyph = MenuGlyph(one.Icon, Look.Secondary); glyph.Margin = new Thickness(0); glyph.HorizontalAlignment = HorizontalAlignment.Center;
             var button = RowAction(glyph, 26, new Thickness(2, 0, 2, 0), layout, one.Act);
             HoverTip(button, one.Note);
             AutomationProperties.SetName(button, one.Note);
@@ -859,14 +860,14 @@ public partial class MainWindow
         return slot;
     }
     // A button at a row's end: a 22 DIP face (its icon centred, hover lights it) inside a press area as tall as the row.
-    private static Border RowAction(FrameworkElement icon, double width, Thickness faceMargin, ShelfLayout layout, Action act)
+    private Border RowAction(FrameworkElement icon, double width, Thickness faceMargin, ShelfLayout layout, Action act)
     {
-        var face = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Background = Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Right,
+        var face = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(Look.Corner(6)), Background = Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center, Margin = faceMargin, Child = icon };
         var button = new Border { Width = width, Height = layout.Row, Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = face };
         void Paint(string color) { if (icon is Shape shape) shape.Stroke = UI.Brush(color); else if (icon is TextBlock text) text.Foreground = UI.Brush(color); }
-        button.MouseEnter += (_, _) => { face.Background = UI.Brush(PanelTheme.Hex("pressed")); Paint(UI.Primary); };
-        button.MouseLeave += (_, _) => { face.Background = Brushes.Transparent; Paint(UI.Secondary); };
+        button.MouseEnter += (_, _) => { face.Background = UI.Brush(Look.Hex("pressed")); Paint(Look.Primary); };
+        button.MouseLeave += (_, _) => { face.Background = Brushes.Transparent; Paint(Look.Secondary); };
         button.MouseLeftButtonDown += (_, e) => e.Handled = true;
         button.MouseLeftButtonUp += (_, e) => { e.Handled = true; act(); };
         return button;
@@ -893,19 +894,19 @@ public partial class MainWindow
     // Hover lights the row and shows "›"; press darkens it; a click (a press and release without moving away) does the row's action.
     private void AttachRow(Border frame, Grid aux, ShelfSide side, Guid id, bool picked, Action click, Func<ContextMenu> menu, Func<DataObject>? drag)
     {
-        Brush rest = picked ? UI.Brush(UI.FillSelected) : Brushes.Transparent;
+        Brush rest = picked ? UI.Brush(Look.FillSelected) : Brushes.Transparent;
         Point? pressed = null;
         bool flashing() => _flash is { } flash && flash.Id == id && flash.Until > Environment.TickCount64;
         // While the row's own menu is open the row stays lit, though the pointer is on the menu.
         bool held = false;
-        frame.MouseEnter += (_, _) => { if (!flashing()) frame.Background = picked ? rest : UI.Brush(PanelTheme.Hex("hover")); if (!flashing()) ShowMore(aux, true); };
+        frame.MouseEnter += (_, _) => { if (!flashing()) frame.Background = picked ? rest : UI.Brush(Look.Hex("hover")); if (!flashing()) ShowMore(aux, true); };
         frame.MouseLeave += (_, _) => { pressed = null; if (!flashing() && !held) { frame.Background = rest; ShowMore(aux, false); } };
-        frame.MouseLeftButtonDown += (_, e) => { pressed = e.GetPosition(frame); if (!flashing()) frame.Background = UI.Brush(PanelTheme.Hex("pressed")); e.Handled = true; };
+        frame.MouseLeftButtonDown += (_, e) => { pressed = e.GetPosition(frame); if (!flashing()) frame.Background = UI.Brush(Look.Hex("pressed")); e.Handled = true; };
         frame.MouseLeftButtonUp += (_, e) =>
         {
             if (pressed is null) return;
             pressed = null; e.Handled = true;
-            if (!flashing()) frame.Background = picked ? rest : UI.Brush(PanelTheme.Hex("hover"));
+            if (!flashing()) frame.Background = picked ? rest : UI.Brush(Look.Hex("hover"));
             click();
         };
         frame.MouseRightButtonUp += (_, e) =>
@@ -945,7 +946,7 @@ public partial class MainWindow
             bool move = Settings.TransferDragOut == TransferDragOut.Move;
             var data = ShelfService.FileData(list.Select(file => file.Path), move);
             data.SetData(ShelfFormat, ShelfSide.Files + "|" + string.Join(",", list.Select(file => file.Id)));
-            if (source is Border row) row.Background = _picked.Count > 0 && list.Count > 1 ? UI.Brush(UI.FillSelected) : Brushes.Transparent;
+            if (source is Border row) row.Background = _picked.Count > 0 && list.Count > 1 ? UI.Brush(Look.FillSelected) : Brushes.Transparent;
             DragOut(source, data, move ? DragDropEffects.Copy | DragDropEffects.Move : DragDropEffects.Copy);
             if (move) WatchMoved(list);
             e.Handled = true;
@@ -1059,21 +1060,21 @@ public partial class MainWindow
         if (_shelfRows.TryGetValue(flash.Id, out var row))
         {
             bool over = row.Row.IsMouseOver;
-            row.Row.Background = _picked.Contains(flash.Id) ? UI.Brush(UI.FillSelected) : over ? UI.Brush(PanelTheme.Hex("hover")) : Brushes.Transparent;
-            if (row.Aux.Tag is RowEnd { Label: var label } && label.Tag is string original) { label.Text = original; label.Tag = null; label.Foreground = UI.Brush(UI.Tertiary); label.Margin = new Thickness(0); }
+            row.Row.Background = _picked.Contains(flash.Id) ? UI.Brush(Look.FillSelected) : over ? UI.Brush(Look.Hex("hover")) : Brushes.Transparent;
+            if (row.Aux.Tag is RowEnd { Label: var label } && label.Tag is string original) { label.Text = original; label.Tag = null; label.Foreground = UI.Brush(Look.Tertiary); label.Margin = new Thickness(0); }
             ShowMore(row.Aux, over);
         }
     }
     private void ShowFlash(Border row, Grid aux, string text)
     {
-        var accent = PanelTheme.ColorOf("accent");
+        var accent = Look.ColorOf("accent");
         row.Background = new SolidColorBrush(Color.FromArgb(51, accent.R, accent.G, accent.B));
         if (aux.Tag is RowEnd end)
         {
             end.Label.Tag ??= end.Label.Text;
             // On the tinted row the word keeps as far from the right edge as the entry does from the left (8 DIP: the row's right
             // padding is 4).
-            end.Label.Text = text; end.Label.Foreground = UI.Brush(UI.Primary); end.Label.Margin = new Thickness(0, 0, 4, 0);
+            end.Label.Text = text; end.Label.Foreground = UI.Brush(Look.Primary); end.Label.Margin = new Thickness(0, 0, 4, 0);
             end.Label.Visibility = Visibility.Visible; end.More.Visibility = Visibility.Hidden;
         }
     }
@@ -1188,9 +1189,9 @@ public partial class MainWindow
     private Button PillButton(string text, bool primary, Action click)
     {
         var label = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal,
-            Foreground = primary ? UI.Brush(PanelTheme.Hex("surface")) : UI.Brush(UI.Primary), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
-        var face = new Border { Height = 26, CornerRadius = new CornerRadius(PanelTheme.Corner(13)), Padding = new Thickness(12, 0, 12, 0), Child = label,
-            Background = primary ? UI.Brush(UI.Primary) : UI.Brush(UI.FillSelected) };
+            Foreground = primary ? UI.Brush(Look.Hex("surface")) : UI.Brush(Look.Primary), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        var face = new Border { Height = 26, CornerRadius = new CornerRadius(Look.Corner(13)), Padding = new Thickness(12, 0, 12, 0), Child = label,
+            Background = primary ? UI.Brush(Look.Primary) : UI.Brush(Look.FillSelected) };
         var button = new Button { Content = face, Cursor = Cursors.Hand, Focusable = false, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Brushes.Transparent };
         button.Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) };
         button.MouseEnter += (_, _) => face.Opacity = .86;

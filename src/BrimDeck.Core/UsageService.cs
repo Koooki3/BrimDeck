@@ -12,6 +12,9 @@ public interface IDesktopSources
     GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => new(false, "");
     string? ReadCursorToken(string database);
     Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation);
+    // Whether the last FindAntigravityAsync found Antigravity's language server without endpoints because its command line
+    // could not be read (Antigravity runs as administrator) and it wrote no service file.
+    bool AntigravityUnreadable => false;
     // Runs a read-only query against a local SQLite database; null means the database could not be opened or queried.
     IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) => null;
     // Decrypts the base64 of a Windows DPAPI blob of the current user (CodeAgent's sign-in); null when it cannot.
@@ -489,7 +492,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             var oauth = auth?.RootElement.Get("claudeAiOauth") ?? default;
             var token = oauth.Get("accessToken").Text();
             var plan = PlanParser.ClaudeTier(oauth.Get("rateLimitTier").Text(), oauth.Get("subscriptionType").Text());
-            if (plan.Equals("max", StringComparison.OrdinalIgnoreCase) && snapshot.Plan.StartsWith("Max ", StringComparison.Ordinal)) plan = snapshot.Plan;
+            if (plan.Equals("max", StringComparison.OrdinalIgnoreCase) && (snapshot.Plan is "Ultra" or "Max" || snapshot.Plan.StartsWith("Max ", StringComparison.Ordinal))) plan = snapshot.Plan;
             if (token.Length > 0) codeCredential = new(token, plan, ClaudeSignIn.Code, code.Account, code.Organization);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { codeReadFailed = true; }
@@ -1160,6 +1163,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private async Task ReadAntigravityAsync(ProviderSnapshot snapshot, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
         var endpoints = await desktop.FindAntigravityAsync(ct);
+        if (endpoints.Count == 0 && desktop.AntigravityUnreadable)
+        {
+            snapshot.StatusLabel = Loc.T("无法读取", "Cannot read");
+            snapshot.Status = Loc.T("Antigravity 以管理员身份运行，BrimDeck 无法读取。请以普通权限启动 Antigravity", "Antigravity runs as administrator, so BrimDeck cannot read it. Start Antigravity without administrator rights.");
+            return;
+        }
         if (endpoints.Count == 0)
         { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到 Antigravity 本地用量服务", "The Antigravity local usage service was not found."); return; }
         foreach (var endpoint in endpoints)

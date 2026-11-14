@@ -68,7 +68,7 @@ internal static class Feedback
     private static void Update(object sender)
     {
         if (sender is not ButtonBase { Template: { } template } button) return;
-        bool enabled = button.IsEnabled, animate = Soft.Enabled && button.IsVisible;
+        bool enabled = button.IsEnabled, animate = Soft.At(button) && button.IsVisible;
         bool over = enabled && PressFeedback.Hovers(button.IsMouseOver, (bool)button.GetValue(TouchedProperty)), pressed = enabled && button.IsPressed;
         Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate, over ? Soft.Hover : Soft.HoverOut);
         Show(template.FindName("PressLayer", button) as UIElement, pressed ? 1 : 0, animate, pressed ? Soft.PressFill : Soft.HoverOut);

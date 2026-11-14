@@ -41,7 +41,7 @@ internal static class MonitorLog
             var log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "monitor.log");
             Directory.CreateDirectory(Path.GetDirectoryName(log)!);
             if (File.Exists(log) && new FileInfo(log).Length > Limit) File.Delete(log);
-            File.AppendAllText(log, $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}] monitor{Environment.NewLine}{line}{Environment.NewLine}{Environment.NewLine}");
+            File.AppendAllText(log, $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}] {ApplicationVersion.Current}{Environment.NewLine}{line}{Environment.NewLine}{Environment.NewLine}");
         }
     }
 }

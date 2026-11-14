@@ -30,6 +30,7 @@
     <Compile Include="..\..\src\BrimDeck\Native\Why.cs" Link="Why.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Hid.cs" Link="Hid.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\HidBatteries.cs" Link="HidBatteries.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\DeviceReadStore.cs" Link="DeviceReadStore.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\HidppEvents.cs" Link="HidppEvents.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PushEvents.cs" Link="PushEvents.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\CorsairReader.cs" Link="CorsairReader.cs" />

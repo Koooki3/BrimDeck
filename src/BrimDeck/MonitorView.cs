@@ -9,34 +9,38 @@ namespace BrimDeck;
 // A monitor color scheme as the panel draws it on the panel theme in use: ftop's palettes in their light or dark variant by the
 // theme, or the theme's own colors (its accent and its cyan, pink and lime), or the custom colors over the scheme they start
 // from, each moved just far enough to read on the theme's surface. The page is built again when the theme changes
-// (PanelTheme.Generation is part of its key). The warning and critical colors are the collapsed readings' own settings, or the
+// (Look.Generation is part of its key). The warning and critical colors are the collapsed readings' own settings, or the
 // panel theme's.
 internal static class MonitorThemeColors
 {
-    public static MonitorColors For(DeckSettings settings) => For(settings.MonitorPalette, settings.MonitorCustomColors) with
+    // look: the look of the panel the colors are drawn on; the main look by default (the settings window's previews).
+    public static MonitorColors For(DeckSettings settings, PanelLook? look = null) => For(settings.MonitorPalette, settings.MonitorCustomColors, look) with
     {
-        Warning = Warning(settings), Critical = Critical(settings)
+        Warning = Warning(settings, look), Critical = Critical(settings, look)
     };
     // They color the readings' values too, so they are held to the text minimum (PanelThemes.LevelContrast).
-    public static string Warning(DeckSettings settings) => Drawn(settings.CompactWarningColor ?? PanelTheme.WarningDefault, PanelThemes.LevelContrast);
-    public static string Critical(DeckSettings settings) => Drawn(settings.CompactCriticalColor ?? PanelTheme.CriticalDefault, PanelThemes.LevelContrast);
+    public static string Warning(DeckSettings settings, PanelLook? look = null)
+    { var Look = look ?? PanelTheme.Main; return Drawn(Look, settings.CompactWarningColor ?? Look.WarningDefault, PanelThemes.LevelContrast); }
+    public static string Critical(DeckSettings settings, PanelLook? look = null)
+    { var Look = look ?? PanelTheme.Main; return Drawn(Look, settings.CompactCriticalColor ?? Look.CriticalDefault, PanelThemes.LevelContrast); }
 
-    public static MonitorColors For(MonitorPalette palette, MonitorCustomColors custom)
+    public static MonitorColors For(MonitorPalette palette, MonitorCustomColors custom, PanelLook? look = null)
     {
+        var Look = look ?? PanelTheme.Main;
+        string Shown(string color) => Drawn(Look, color, PanelThemes.GraphicContrast);
         if (palette == MonitorPalette.Custom)
-            return custom.Over(For(custom.Base == MonitorPalette.Custom ? MonitorPalette.Theme : custom.Base, custom), Drawn);
-        var theme = PanelTheme.Current;
+            return custom.Over(For(custom.Base == MonitorPalette.Custom ? MonitorPalette.Theme : custom.Base, custom, Look), Shown);
+        var theme = Look.Current;
         if (palette == MonitorPalette.Theme)
-            return MonitorColors.FromTheme(Drawn(theme["accent"].ToString()),
-                [.. new[] { ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime, ClockColor.Amber }.Select(color => Drawn(theme.ClockPreset(color).ToString()))],
-                Drawn(PanelTheme.WarningDefault), Drawn(PanelTheme.CriticalDefault));
-        return MonitorColors.For(palette, theme.IsDark).Map(Drawn);
+            return MonitorColors.FromTheme(Shown(theme["accent"].ToString()),
+                [.. new[] { ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime, ClockColor.Amber }.Select(color => Shown(theme.ClockPreset(color).ToString()))],
+                Shown(Look.WarningDefault), Shown(Look.CriticalDefault));
+        return MonitorColors.For(palette, theme.IsDark).Map(Shown);
     }
     // Opaque "#RRGGBB" as drawn on the theme, which ColorMath needs for the core groups' shades and for telling colors apart.
-    private static string Drawn(string color) => Drawn(color, PanelThemes.GraphicContrast);
-    private static string Drawn(string color, double minimum) => ThemeColor.Opaque(PanelTheme.Readable(ThemeColor.Opaque(color), minimum));
+    private static string Drawn(PanelLook look, string color, double minimum) => ThemeColor.Opaque(look.Readable(ThemeColor.Opaque(color), minimum));
 
-    public static StripColors Strip(DeckSettings settings) => new(For(settings));
+    public static StripColors Strip(DeckSettings settings, PanelLook? look = null) => new(For(settings, look));
 }
 
 // The system monitor page, after ftop's panel: the main gauge large with its columns (the processor's cores, or the graphics
@@ -45,6 +49,8 @@ internal static class MonitorThemeColors
 // graphics adapter the large GPU gauge names the shown adapter's kind and a click on it shows the next adapter.
 internal sealed class MonitorView : Grid
 {
+    // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
+    private PanelLook Look => PanelLook.Of(this);
     private readonly MonitorLayout _layout;
     private readonly MonitorColors _colors;
     private readonly MonitorMain _main;
@@ -166,7 +172,7 @@ internal sealed class MonitorView : Grid
         if (hasMemory || hasNetwork)
         {
             if (hasMemory) _memory = new MemoryBlock(colors, layout.Metrics != MetricsMode.Blocks, layout.Body, layout.Caption);
-            if (hasNetwork) _network = new NetworkBlock(colors, layout.Metrics, layout.Body, layout.Caption, plan.Downloads, plan.Uploads);
+            if (hasNetwork) _network = new NetworkBlock(colors, layout.Metrics, layout.Body, layout.Caption, plan.Downloads, plan.Uploads, plan.UploadFirst);
             // In the table's order: whichever of memory and the network comes first is first.
             var order = plan.Parts.Select(part => part.Item).ToList();
             bool memoryFirst = !hasNetwork || hasMemory && order.FindIndex(item => item == ExpandedItem.Memory) < order.FindIndex(item => item is ExpandedItem.Download or ExpandedItem.Upload);
@@ -291,7 +297,7 @@ internal sealed class MonitorView : Grid
     private static double SmallLine(MonitorLayout layout, bool gpu)
     {
         double figure = layout.Body + 1, gap = Math.Round(figure * .4);
-        double Width(string text, double size, bool display = false) => MonitorDraw.Text(text, size, UI.Primary, 1, display: display).WidthIncludingTrailingWhitespace;
+        double Width(string text, double size, bool display = false) => MonitorDraw.Text(text, size, PanelTheme.Main.Primary, 1, display: display).WidthIncludingTrailingWhitespace;
         string hottest = Temperatures.Detail(Temperatures.Highest - 20);
         double detail = gpu ? Math.Max(Width(Temperatures.AdapterKind(0) + " " + hottest, layout.Caption), Width(Temperatures.AdapterKind(ulong.MaxValue) + " " + hottest, layout.Caption))
             : Width(hottest, layout.Caption);
@@ -393,7 +399,7 @@ internal sealed class MonitorView : Grid
     }
 
     // A temperature's color: the text's while normal, the collapsed readings' warning or critical color above.
-    private string? Hot(MemoryLevel level) => level == MemoryLevel.Normal ? null : _colors.Level(level, UI.Tertiary);
+    private string? Hot(MemoryLevel level) => level == MemoryLevel.Normal ? null : _colors.Level(level, Look.Tertiary);
 
     // The processor's temperature with where it was read: its own sensors (with each core's range, or each CCD's), a hardware
     // monitor, or an ACPI zone, which may be the board near the processor.
@@ -427,7 +433,7 @@ internal sealed class MonitorView : Grid
         if (_list is null) return;
         if (_card?.Id == sample.Id) { CloseCard(animate: true); return; }
         CloseCard(animate: true);
-        var card = new ProcessCard(_layout.Body, _layout.Caption);
+        var card = new ProcessCard(_layout.Body, _layout.Caption, Look);
         card.Show(sample, _cores, _layout.Body, _layout.Caption);
         card.MouseLeftButtonUp += (_, e) => { e.Handled = true; CloseCard(animate: true); };
         card.Switched += () => CloseCard(animate: true);

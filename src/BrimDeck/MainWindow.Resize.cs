@@ -378,7 +378,7 @@ public partial class MainWindow
         _resizeSettling = false; _resizeCompact = false; _resizeByKey = false; _keyEdges = ResizeEdges.None;
         // Saved like any change from the settings window, which applies it to every panel and fits the window again. A press that
         // moved nothing only fits the window again.
-        if (_resizeChanged) _app.UpdateSettings(Settings.Copy()); else ApplySettings();
+        if (_resizeChanged) _app.UpdateSettingsFor(Profile, Settings.Copy()); else ApplySettings();
         // The collapsed row's windows ease from the room they followed to whole items (MainWindow.CompactFlow.cs).
         if (compact) SettleCompactFlow();
         _resizeChanged = false;

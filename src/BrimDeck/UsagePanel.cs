@@ -163,7 +163,7 @@ public partial class MainWindow
         if (columns.Count == 0) return null;
         var fit = FitColumns(columns, ContentCanvas.Width, ContentCanvas.Height);
         return new UsageBuild($"{fit.Layout.Tier}|{fit.Layout.Footer}|{fit.Inline}|{fit.Wide}|{fit.Count}", Snapshots, Settings, _applicationPage,
-            string.Join(",", _quotaPages.OrderBy(page => page.Key).Select(page => $"{page.Key:N}:{page.Value}")), PanelTheme.Generation, Loc.Language,
+            string.Join(",", _quotaPages.OrderBy(page => page.Key).Select(page => $"{page.Key:N}:{page.Value}")), Look.Generation, Loc.Language,
             DateTime.Now.Ticks / TimeSpan.TicksPerMinute, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
     }
 
@@ -225,35 +225,28 @@ public partial class MainWindow
         {
             _usageForm = "empty";
             var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            empty.Children.Add(UI.Fixed(Settings.UsagePage ? Loc.T("未选择应用", "No apps selected") : Loc.T("AI 用量已关闭", "AI usage is off"), 14, 20, UI.Secondary));
+            empty.Children.Add(UI.Fixed(Settings.UsagePage ? Loc.T("未选择应用", "No apps selected") : Loc.T("AI 用量已关闭", "AI usage is off"), 14, 20, Look.Secondary));
             var openText = Loc.T("打开设置", "Open settings");
             var open = Segmented([new(openText, openText, false, _app.OpenSettings)], 12, 22, 12, centerText: true);
             open.Margin = new Thickness(0, 12, 0, 0); open.HorizontalAlignment = HorizontalAlignment.Center;
             empty.Children.Add(open); UsageContent.Children.Add(empty);
             return;
         }
-        if (_details)
-        {
-            _usageForm = "details";
-            var shownStatistics = DashboardUsage.Statistics(Settings, Snapshots);
-            RenderModels(shownStatistics);
-            // Totals of the previous run (UsageLastSeen) are dimmed, and the page says so in its tip, until the new ones replace them.
-            var restored = shownStatistics.Where(snapshot => snapshot.LastSeenAt is not null).ToList();
-            UsageContent.Opacity = restored.Count > 0 ? .55 : 1;
-            UsageContent.ToolTip = restored.Count > 0 ? string.Join("\n", restored.Select(snapshot => snapshot.Name + " · " + snapshot.UsageNote)) : null;
-        }
-        else { UsageContent.Opacity = 1; UsageContent.ToolTip = null; RenderColumns(DashboardUsage.Columns(Settings, Snapshots)); }
+        // Totals of the previous run (UsageLastSeen) are dimmed row by row in the details (RenderModels), never the page itself, whose
+        // opacity the page hand-over animates.
+        if (_details) { _usageForm = "details"; RenderModels(DashboardUsage.Statistics(Settings, Snapshots)); }
+        else RenderColumns(DashboardUsage.Columns(Settings, Snapshots));
     }
 
     // A joined switch: one rounded strip, the selected segment filled. Buttons carry accessible names. With a glide key the fill
     // is one piece under the strip that glides to the chosen segment, as the monitor page's sort pill does; the strip is built
     // again on every choice, so where the fill was is kept by the key and the new strip's fill starts there.
-    internal static Border Segmented(IReadOnlyList<SegmentItem> items, double fontSize, double lineHeight, double padX, bool centerText = false, string? glide = null)
+    internal Border Segmented(IReadOnlyList<SegmentItem> items, double fontSize, double lineHeight, double padX, bool centerText = false, string? glide = null)
     {
         var strip = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var item in items)
         {
-            var text = centerText ? UI.Centered(item.Text, fontSize, UI.Secondary) : UI.Fixed(item.Text, fontSize, lineHeight, UI.Secondary);
+            var text = centerText ? UI.Centered(item.Text, fontSize, Look.Secondary) : UI.Fixed(item.Text, fontSize, lineHeight, Look.Secondary);
             text.ClearValue(TextBlock.ForegroundProperty); text.ClearValue(TextBlock.FontWeightProperty);
             var button = new Button { Style = (Style)Application.Current.FindResource("SegmentButton"), Content = text, Height = lineHeight, FontSize = fontSize,
                 Padding = new Thickness(padX, 0, padX, 0), Tag = item.Active ? glide is null ? "Selected" : "Chosen" : null, ToolTip = item.Tip };
@@ -266,11 +259,11 @@ public partial class MainWindow
             AutomationProperties.SetName(button, item.Name);
             strip.Children.Add(button);
         }
-        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
+        if (glide is null) return new Border { Child = strip, Background = UI.Brush(Look.Fill), CornerRadius = new CornerRadius(Look.Corner(6)), Padding = new Thickness(1) };
         // motion-review F8: the fill is laid out once at its new width; a change of width is drawn by stretching it from its
         // left edge, so the glide lays nothing out again.
         var shift = new TranslateTransform(); var stretch = new ScaleTransform();
-        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(PanelTheme.Corner(5)), HorizontalAlignment = HorizontalAlignment.Left,
+        var fill = new Border { Background = UI.Brush(Look.FillSelected), CornerRadius = new CornerRadius(Look.Corner(5)), HorizontalAlignment = HorizontalAlignment.Left,
             IsHitTestVisible = false, RenderTransform = new TransformGroup { Children = { stretch, shift } }, Visibility = Visibility.Hidden };
         var host = new Grid { Children = { fill, strip } };
         int chosen = items.ToList().FindIndex(item => item.Active);
@@ -280,7 +273,7 @@ public partial class MainWindow
             double x = button.TranslatePoint(new Point(), host).X, width = button.ActualWidth;
             fill.Height = button.ActualHeight; fill.Visibility = Visibility.Visible;
             // Only a strip that replaces one just chosen in glides; one shown afresh (model details opened again) starts in place.
-            bool slide = SegmentFills.TryGetValue(glide, out var was) && Environment.TickCount64 - was.At < 1500 && Soft.Enabled && strip.IsVisible && Math.Abs(was.X - x) > .5;
+            bool slide = SegmentFills.TryGetValue(glide, out var was) && Environment.TickCount64 - was.At < 1500 && Animates && strip.IsVisible && Math.Abs(was.X - x) > .5;
             SegmentFills[glide] = (x, width, 0);
             shift.X = x; fill.Width = width;
             if (!slide) return;
@@ -291,7 +284,7 @@ public partial class MainWindow
                 stretch.BeginAnimation(ScaleTransform.ScaleXProperty, widen);
             }
         };
-        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
+        return new Border { Child = host, Background = UI.Brush(Look.Fill), CornerRadius = new CornerRadius(Look.Corner(6)), Padding = new Thickness(1) };
     }
     // Where each gliding strip's fill was last, by its key.
     private static readonly Dictionary<string, (double X, double Width, long At)> SegmentFills = [];
@@ -337,7 +330,7 @@ public partial class MainWindow
                 button.Padding = new Thickness(6, 0, 6, 0); return button;
             }
             controls.Children.Add(PageButton("‹", Loc.T("上一页应用", "Previous apps"), -1));
-            var page = UI.Centered($"{_applicationPage + 1}/{pages}", 11, UI.Secondary); page.Margin = new Thickness(4, 0, 4, 0);
+            var page = UI.Centered($"{_applicationPage + 1}/{pages}", 11, Look.Secondary); page.Margin = new Thickness(4, 0, 4, 0);
             page.ToolTip = Loc.T($"共 {columns.Count} 项应用", $"{columns.Count} apps in total"); controls.Children.Add(page);
             controls.Children.Add(PageButton("›", Loc.T("下一页应用", "Next apps"), 1));
             ApplicationPages.Children.Add(controls); ApplicationPages.Visibility = Visibility.Visible;
@@ -387,7 +380,7 @@ public partial class MainWindow
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
         var (nameTop, chipTop, chipLift) = TitlePlaces(layout, VisualTreeHelper.GetDpi(this).DpiScaleY, _scale);
-        var name = UI.Centered(entry.Name, layout.Name, off ? UI.Secondary : UI.Primary, FontWeights.SemiBold);
+        var name = UI.Centered(entry.Name, layout.Name, off ? Look.Secondary : Look.Primary, FontWeights.SemiBold);
         name.HorizontalAlignment = HorizontalAlignment.Left;
         name.VerticalAlignment = VerticalAlignment.Top; name.Margin = new Thickness(0, nameTop, 0, 0);
         name.ToolTip = QuotaTooltip(snapshot);
@@ -405,7 +398,7 @@ public partial class MainWindow
         // The title marker belongs to the quotas; restored totals alone are dimmed and say so in their tips.
         if (snapshot.LastSeenAt is { } seenAt && !off)
         {
-            var marker = UI.Text(UsageLastSeen.Label(seenAt, DateTimeOffset.Now), Math.Max(10, layout.Reset), UI.Tertiary);
+            var marker = UI.Text(UsageLastSeen.Label(seenAt, DateTimeOffset.Now), Math.Max(10, layout.Reset), Look.Tertiary);
             marker.FontFamily = UI.PanelFont; marker.HorizontalAlignment = HorizontalAlignment.Right; marker.VerticalAlignment = VerticalAlignment.Top;
             marker.Margin = new Thickness(8, nameTop, 0, 0); marker.TextTrimming = TextTrimming.CharacterEllipsis; marker.ToolTip = snapshot.Status;
             Grid.SetColumn(marker, 2); head.Children.Add(marker);
@@ -423,7 +416,7 @@ public partial class MainWindow
             // No readings: what the state is, why, and a way to sync now, centered in the column. Left-aligned, the button's text sat
             // inside its outline and padding, so it looked further right than the lines above it.
             var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            var label = UI.Fixed(snapshot.LastSeenAt is { } seen ? UsageLastSeen.Label(seen, DateTimeOffset.Now) : snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold);
+            var label = UI.Fixed(snapshot.LastSeenAt is { } seen ? UsageLastSeen.Label(seen, DateTimeOffset.Now) : snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), Look.Secondary, FontWeights.SemiBold);
             label.TextAlignment = TextAlignment.Center; label.ToolTip = snapshot.Status;
             status.Children.Add(label);
             // The detail is dropped when it only repeats the label, and when the column is too short for it (the smallest panel):
@@ -431,7 +424,7 @@ public partial class MainWindow
             TextBlock? detail = null;
             if (snapshot.Status != snapshot.StatusLabel)
             {
-                detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
+                detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), Look.Tertiary);
                 detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.TextWrapping = TextWrapping.Wrap;
                 detail.TextAlignment = TextAlignment.Center;
                 status.Children.Add(detail);
@@ -498,13 +491,13 @@ public partial class MainWindow
             }
             body = stack;
         }
-        if (snapshot.LastSeenAt is not null) body.Opacity = .55;
+        if (snapshot.LastSeenAt is not null) body.Opacity = UsageLastSeen.Dimmed;
         Grid.SetRow(body, 1); column.Children.Add(body);
 
         if (layout.Footer)
         {
             var footer = new StackPanel();
-            footer.Children.Add(new Border { Height = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(0, layout.FootTop, 0, layout.FootBottom) });
+            footer.Children.Add(new Border { Height = 1, Background = UI.Brush(Look.Hairline), Margin = new Thickness(0, layout.FootTop, 0, layout.FootBottom) });
             string todayLabel = Loc.T("今日", "Today"), weekLabel = Loc.T("七日", "Week");
             // Both captions take the wider one's width, so they start and end on the same vertical lines.
             double captionWidth = Math.Max(JustifiedText.NaturalWidth(todayLabel, layout.Foot), JustifiedText.NaturalWidth(weekLabel, layout.Foot));
@@ -520,13 +513,13 @@ public partial class MainWindow
             {
                 var rows = new StackPanel(); rows.Children.Add(today); rows.Children.Add(week); footer.Children.Add(rows);
             }
-            if (usage.LastSeenAt is not null) footer.Opacity = .55;
+            if (usage.LastSeenAt is not null) footer.Opacity = UsageLastSeen.Dimmed;
             Grid.SetRow(footer, 2); column.Children.Add(footer);
         }
         var surface = new Border
         {
             Child = column, Padding = new Thickness(layout.ColumnPad, ColumnTopInset, layout.ColumnPad, 0),
-            BorderThickness = new Thickness(separator ? 1 : 0, 0, 0, 0), BorderBrush = UI.Brush(UI.Hairline), Tag = entry.InstanceId
+            BorderThickness = new Thickness(separator ? 1 : 0, 0, 0, 0), BorderBrush = UI.Brush(Look.Hairline), Tag = entry.InstanceId
         };
         if (view.Pages > 1)
         {
@@ -560,14 +553,14 @@ public partial class MainWindow
 
     // top and lift: from TitlePlaces. The text sits right below the border: centered, it moved by a pixel where the rounded
     // border leaves the chip half a pixel short of or over the text.
-    private static Border PlanChip(ProviderSnapshot snapshot, Layout layout, double top, double lift)
+    private Border PlanChip(ProviderSnapshot snapshot, Layout layout, double top, double lift)
     {
-        var text = UI.Centered(UI.DisplayPlan(snapshot.Plan), layout.Plan, UI.Tertiary);
+        var text = UI.Centered(UI.DisplayPlan(snapshot.Plan), layout.Plan, Look.Tertiary);
         text.VerticalAlignment = VerticalAlignment.Top;
         if (lift != 0) text.RenderTransform = new TranslateTransform(0, lift);
         return new Border
         {
-            Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(4)),
+            Child = text, BorderBrush = UI.Brush(Look.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(Look.Corner(4)),
             Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0),
             Margin = new Thickness(6, top, 0, 0), VerticalAlignment = VerticalAlignment.Top
         };
@@ -576,21 +569,21 @@ public partial class MainWindow
     // A quota's place before its first reading, in QuotaBlock's three rows: the first says it is being read and the others hold
     // a neutral bar where the period's name goes, the share is a dash, and the track is empty. The track is the quota's own bar
     // (same key), so the first reading eases it up from nothing.
-    private static Grid SkeletonBlock(AppEntry entry, Layout layout, int slot)
+    private Grid SkeletonBlock(AppEntry entry, Layout layout, int slot)
     {
         var block = new Grid();
         foreach (double height in new[] { layout.LabelRow, layout.RowGap, layout.NumberRow, layout.RowGap, layout.Track })
             block.RowDefinitions.Add(new RowDefinition { Height = new GridLength(height) });
-        FrameworkElement label = slot == 0 ? UI.Fixed(Loc.T("正在读取…", "Reading…"), layout.Label, layout.LabelRow, UI.Tertiary)
-            : new Border { Width = Math.Round(layout.Label * 3.5), Height = Math.Max(4, Math.Round(layout.Label * .7)), CornerRadius = new CornerRadius(PanelTheme.Corner(3)),
-                Background = UI.Brush(UI.Fill), VerticalAlignment = VerticalAlignment.Center };
+        FrameworkElement label = slot == 0 ? UI.Fixed(Loc.T("正在读取…", "Reading…"), layout.Label, layout.LabelRow, Look.Tertiary)
+            : new Border { Width = Math.Round(layout.Label * 3.5), Height = Math.Max(4, Math.Round(layout.Label * .7)), CornerRadius = new CornerRadius(Look.Corner(3)),
+                Background = UI.Brush(Look.Fill), VerticalAlignment = VerticalAlignment.Center };
         label.HorizontalAlignment = HorizontalAlignment.Left;
         block.Children.Add(label);
         var number = new TextBlock { FontFamily = UI.DisplayFont, LineHeight = layout.NumberRow, LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Height = layout.NumberRow,
             TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
-        number.Inlines.Add(new Run("—%") { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(UI.Tertiary) });
+        number.Inlines.Add(new Run("—%") { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(Look.Tertiary) });
         Grid.SetRow(number, 2); block.Children.Add(number);
-        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", 0, PanelTheme.AppTheme(entry)); Grid.SetRow(track, 4);
+        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", 0, Look.AppTheme(entry), Animates); Grid.SetRow(track, 4);
         block.Children.Add(track);
         AutomationProperties.SetName(block, Loc.T("正在读取配额", "Reading the quota"));
         return block;
@@ -602,19 +595,19 @@ public partial class MainWindow
     // remaining (DeckSettings.QuotaRingRemaining): a quota with a share shows what is left: the bar's length, a percentage as the big
     // number ("58% 剩余") and the share at the label's right; an amount (a balance, an amount spent) keeps its figure. The colors
     // still follow the used share, so warning and critical mean the same either way.
-    private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot, bool remaining = false)
+    private Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot, bool remaining = false)
     {
         double used = Math.Clamp(quota.UsedPercent ?? 100, 0, 100);
         bool left = remaining && quota.UsedPercent is not null;
         bool share = quota.Kind is MetricKind.Percent or MetricKind.Count;
         string valueText = left && share ? $"{100 - used:0.#}%" : quota.ValueText, valueSuffix = left && share ? Loc.T("剩余", "left") : quota.ValueSuffix;
-        string color = quota.UsedPercent is null ? PanelTheme.QuotaTheme(entry) : PanelTheme.QuotaColor(entry, used);
+        string color = quota.UsedPercent is null ? Look.QuotaTheme(entry) : Look.QuotaColor(entry, used);
         int level = quota.UsedPercent is null ? 0 : AppPresets.Level(used);
         var block = new Grid();
         foreach (double height in new[] { layout.LabelRow, layout.RowGap, layout.NumberRow, layout.RowGap, layout.Track })
             block.RowDefinitions.Add(new RowDefinition { Height = new GridLength(height) });
         var labelRow = new Grid(); labelRow.ColumnDefinitions.Add(new ColumnDefinition()); labelRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var label = UI.Fixed(MetricLabel(quota), layout.Label, layout.LabelRow, UI.Secondary); label.ToolTip = Loc.Label(quota.Label); label.HorizontalAlignment = HorizontalAlignment.Left;
+        var label = UI.Fixed(MetricLabel(quota), layout.Label, layout.LabelRow, Look.Secondary); label.ToolTip = Loc.Label(quota.Label); label.HorizontalAlignment = HorizontalAlignment.Left;
         labelRow.Children.Add(label); block.Children.Add(labelRow);
         // The number always shows in full; the countdown at the right is what gives way in a narrow column.
         var numbers = new Grid(); numbers.ColumnDefinitions.Add(new ColumnDefinition()); numbers.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -622,8 +615,8 @@ public partial class MainWindow
         var number = new TextBlock { FontFamily = UI.DisplayFont, LineHeight = layout.NumberRow, LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Height = layout.NumberRow,
             TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         // A custom item without a value leaves the row empty; the row keeps its height so blocks stay aligned.
-        if (valueText.Length > 0) number.Inlines.Add(new Run(valueText) { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : UI.Primary) });
-        if (layout.UsedWord && valueSuffix.Length > 0) number.Inlines.Add(new Run(" " + valueSuffix) { FontSize = 11, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
+        if (valueText.Length > 0) number.Inlines.Add(new Run(valueText) { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : Look.Primary) });
+        if (layout.UsedWord && valueSuffix.Length > 0) number.Inlines.Add(new Run(" " + valueSuffix) { FontSize = 11, FontFamily = UI.PanelFont, Foreground = UI.Brush(Look.Tertiary) });
         number.ToolTip = quota.Kind switch
         {
             MetricKind.Balance => Loc.T("可用 " + quota.ValueText, quota.ValueText + " available")
@@ -654,7 +647,7 @@ public partial class MainWindow
         var upperText = text ? quota.Note : offPeak ? (offPeakNow ? Loc.T("低峰时段", "Off-peak") : Loc.T("高峰时段", "Peak")) : expiryAbove ? expiryText : sideText;
         if (upperText.Length > 0)
         {
-            var reset = UI.Fixed(upperText, layout.Reset, layout.LabelRow, UI.Tertiary);
+            var reset = UI.Fixed(upperText, layout.Reset, layout.LabelRow, Look.Tertiary);
             reset.HorizontalAlignment = HorizontalAlignment.Right; reset.Margin = new Thickness(6, 0, 0, 0);
             reset.ToolTip = text ? null : offPeak ? OffPeakTooltip(entry) : expiryAbove ? quota.ExpiresAt!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
                 : countText.Length > 0 ? CountTooltip(quota) : MetricPercentTooltip(quota);
@@ -669,7 +662,7 @@ public partial class MainWindow
             : resetText.Length > 0 ? resetText : expiryText;
         if (rightText.Length > 0)
         {
-            var right = UI.Line(rightText, layout.Reset, UI.Tertiary);
+            var right = UI.Line(rightText, layout.Reset, Look.Tertiary);
             right.FontFamily = UI.PanelFont;
             right.ToolTip = text ? null : offPeak ? Loc.T($"{change:yyyy-MM-dd HH:mm} 转为" + (offPeakNow ? "高峰时段" : "低峰时段"), (offPeakNow ? "Peak" : "Off-peak") + $" from {change:yyyy-MM-dd HH:mm}")
                 : timed ? CreditHoursTooltip(quota, hours.At!.Value, hours.On)
@@ -678,7 +671,7 @@ public partial class MainWindow
             right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
         }
         block.Children.Add(numbers);
-        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", (left ? 100 - used : used) / 100, color); Grid.SetRow(track, 4);
+        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", (left ? 100 - used : used) / 100, color, Animates); Grid.SetRow(track, 4);
         block.Children.Add(track);
         return block;
     }
@@ -745,27 +738,27 @@ public partial class MainWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         // Captions end on one vertical line, so "今日" and "七日" stack cleanly and both figures start at the same distance.
-        var caption = new JustifiedText(label, layout.Foot, UI.Tertiary, captionWidth)
+        var caption = new JustifiedText(label, layout.Foot, Look.Tertiary, captionWidth)
         { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
         row.Children.Add(caption);
         // Each row prices its records once; the figure and its tooltip share the result.
         long total = entries.Sum(x => x.Total);
         var cost = snapshot.UsageAvailable ? _app.Prices.Summarize(entries) : null;
-        FrameworkElement tokens = snapshot.UsageAvailable ? UI.Centered(UI.Number(total), layout.Foot, UI.Secondary)
-            : UI.CenteredSymbol("—", layout.Foot, UI.Secondary);
+        FrameworkElement tokens = snapshot.UsageAvailable ? UI.Centered(UI.Number(total), layout.Foot, Look.Secondary)
+            : UI.CenteredSymbol("—", layout.Foot, Look.Secondary);
         tokens.HorizontalAlignment = HorizontalAlignment.Left;
         tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (snapshot.UsageAvailable ? Loc.T($"{label} Token · {total:N0}", $"{label} tokens · {total:N0}") : snapshot.UsageNote)
             + (snapshot.LastSeenAt is not null && snapshot.UsageAvailable ? "\n" + snapshot.UsageNote : ""); Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
-        FrameworkElement price = snapshot.UsageAvailable ? UI.Centered(UI.Amount(cost!), layout.Foot, UI.Primary, FontWeights.SemiBold)
-            : UI.CenteredSymbol("—", layout.Foot, UI.Tertiary, FontWeights.SemiBold);
+        FrameworkElement price = snapshot.UsageAvailable ? UI.Centered(UI.Amount(cost!), layout.Foot, Look.Primary, FontWeights.SemiBold)
+            : UI.CenteredSymbol("—", layout.Foot, Look.Tertiary, FontWeights.SemiBold);
         price.Margin = new Thickness(grouped ? 12 : 8, 0, 0, 0); price.ToolTip = snapshot.UsageAvailable ? UI.CostNote(cost!, _app.Prices) : snapshot.UsageNote; Grid.SetColumn(price, 2); row.Children.Add(price);
         // The "+" for unpriced records hangs in the arrow column, so the amounts of both rows still end on one vertical line.
         if (cost is { Unpriced: > 0 })
         {
-            var plus = UI.Centered("+", layout.Foot, UI.Primary, FontWeights.SemiBold);
+            var plus = UI.Centered("+", layout.Foot, Look.Primary, FontWeights.SemiBold);
             plus.HorizontalAlignment = HorizontalAlignment.Left; plus.ToolTip = price.ToolTip; Grid.SetColumn(plus, 3); row.Children.Add(plus);
         }
-        var arrow = UI.CenteredSymbol("›", layout.Foot + 1, UI.Tertiary); arrow.HorizontalAlignment = HorizontalAlignment.Right;
+        var arrow = UI.CenteredSymbol("›", layout.Foot + 1, Look.Tertiary); arrow.HorizontalAlignment = HorizontalAlignment.Right;
         Grid.SetColumn(arrow, 3); row.Children.Add(arrow);
         var link = DetailLink(row, Loc.T($"查看 {entry.Name} {label}明细", $"Show {entry.Name} {label.ToLowerInvariant()} details"), () => OpenModelDetails(snapshot.Id, days));
         // Extend the highlight into the column inset without shifting the aligned totals.

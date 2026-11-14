@@ -20,7 +20,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | WorkBuddy AI | 与 WorkBuddy 相同，凭据单独保存，只发往 www.workbuddy.ai；不读取 WorkBuddy AI 桌面版的登录 | 读取本地会话记录（`%USERPROFILE%\.workbuddy-ai\projects`）中的 Token 数 |
 | Xiaomi MiMo 桌面订阅 | 使用在设置中通过浏览器登录小米账号获得的登录信息（加密保存在 BrimDeck 设置目录的 `mimo-session.dat`），向 mimo-server-cn.xiaomimimo.com 查询桌面版会员额度，过期时经 account.xiaomi.com 续期；登录时打开的浏览器窗口使用独立的临时目录，登录后删除 | 读取本地数据库（`%USERPROFILE%\.local\share\mimocode\mimocode.db`） |
 | Xiaomi MiMo | 读取 Xiaomi MiMo 桌面版与 MiMo Code CLI 保存的开放平台密钥（`%USERPROFILE%\.local\share\mimocode\auth.json`），向 api.xiaomimimo.com 查询余额与本月扣费，向对应集群的 token-plan 地址查询 Token Plan 额度；不修改这个文件 | 使用 Xiaomi MiMo 的本机记录 |
-| 智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址；Kimi Code API 的密钥只发往 api.kimi.com 与 api.kimi.ai，读取的额度不写入 `kimi-quota.json`；OpenCode Go 的密钥只发往 opencode.ai；Command Code API 的密钥只发往 api.commandcode.ai；Xiaomi MiMo API 的密钥只发往 api.xiaomimimo.com；Xiaomi MiMo Token Plan 的密钥只发往 token-plan-cn、token-plan-sgp 与 token-plan-ams.xiaomimimo.com；OpenRouter 的密钥只发往 openrouter.ai。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
+| 智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、Kimi 开放平台、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址；Kimi Code API 的密钥只发往 api.kimi.com 与 api.kimi.ai，读取的额度不写入 `kimi-quota.json`；Kimi 开放平台的密钥只发往 api.moonshot.cn 与 api.moonshot.ai；OpenCode Go 的密钥只发往 opencode.ai；Command Code API 的密钥只发往 api.commandcode.ai；Xiaomi MiMo API 的密钥只发往 api.xiaomimimo.com；Xiaomi MiMo Token Plan 的密钥只发往 token-plan-cn、token-plan-sgp 与 token-plan-ams.xiaomimimo.com；OpenRouter 的密钥只发往 openrouter.ai。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
 
 - 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ZCODE_HOME`、`DSH_HOME` 或 `KIMI_CODE_HOME`（须为绝对路径）时，从该目录读取。OpenCode 按 `XDG_DATA_HOME` 与 `OPENCODE_DB` 确定数据库位置。
 - 这些账户接口与本地数据格式并非公开的稳定接口。无法读取时，面板显示实际状态，不会显示虚构的数值。
@@ -39,6 +39,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | `official-prices.json` | 从 OpenRouter 同步的模型厂商官方渠道单价，只包含记录中用到的模型，以及 Kimi Code 计费所需的 Kimi K3、K3.1 Pro 与 K3.1 Pro Highspeed。没有这个文件时，读取旧版本保存的 `moonshot-prices.json` |
 | `claude-quota.json` | 最近一次联网读取的 Claude 额度（各项百分比、重置时间与订阅名称），重启后接口被限流时用来继续显示 Fable 等额度；不含登录令牌；账户与组织仅以其 ID 的单向哈希记录（不保存 ID 本身），每个组织一条，只在同一账户登录时使用；超过 7 天不再使用，登录失效或退出登录时删除 |
 | `kimi-quota.json` | 最近一次联网读取的 Kimi Code 额度（各项百分比、重置时间、加油包与会员等级），登录过期或接口暂时不可用时继续显示，重启后同样适用；不含登录令牌与其他账户资料；账户仅以其 ID 连同服务地址的单向哈希记录（不保存 ID 本身），只在同一站点的同一账户登录时使用；超过 7 天不再使用，退出登录或账户未订阅 Kimi Code 套餐时删除 |
+| `usage-last-seen.json` | 各内置来源与用量统计来源最近一次读到的用量，用于启动后在新数据到达前先显示（标注“上次读取”）：各项额度的百分比、金额、重置时间与订阅名称，以及按日期和模型汇总的 Token 数与费用。不含登录令牌、API 密钥、账户信息、文件路径或会话内容；自定义来源不保存。超过 24 小时的读数不再显示；AI 用量页和收起时的用量显示都关闭后，最迟在下次启动时删除；删除这个文件没有影响 |
 | `update-prompt.txt`、`updates\` | 已提示过的版本号、下载的安装包或免安装压缩包（免安装版更新时还有解压出的新版本文件） |
 | `cursor-prices.json` | Cursor 合并套餐每周已含用量的读数（金额与各类 Token 数），用于估算该套餐下的费用 |
 | `apple-music-lyrics.json` | Apple Music 中每首歌匹配到的歌词编号，重启后再次播放时直接使用 |
@@ -46,6 +47,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | `themes\` | 自定义的面板主题文件 |
 | `sensor-stops.json`、`sensor-pending.json` | 系统监控因电脑卡住而停止读取的项目（硬盘或显卡的型号、主板型号与 BIOS 版本），以及正在读取的项目，用于在下次启动时发现上次卡住的读取；在设置中重新开启后删除对应记录 |
 | `crash.log` | 错误记录，超过 1 MB 时清空 |
+| `monitor.log` | 系统监控读取失败的记录（错误信息，以及读取没有回应的硬盘、显卡或主板的名称），同一项失败十分钟内只记一次，不含读数；超过 1 MB 时清空 |
 
 ## 联网与安全
 

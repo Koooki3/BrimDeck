@@ -190,7 +190,8 @@ public sealed class Pricing : IDisposable
     // Kimi Code bills its models at Moonshot AI's list prices, so Kimi K3 and K3.1 Pro are always asked for, and Kimi Code
     // records of these models stay unpriced rather than taking the catalog price until Moonshot AI's has been read.
     // The version of the program that wrote the catalog: after an update the saved catalog is read, but fetched again at launch.
-    private static readonly string CacheStamp = typeof(Pricing).Assembly.GetName().Version?.ToString() ?? "0";
+    // The application's version, prerelease label included, so one alpha or beta to the next counts as an update too.
+    private static readonly string CacheStamp = ApplicationVersion.Current;
     public const string OfficialFile = "official-prices.json", LegacyOfficialFile = "moonshot-prices.json";
     public static readonly IReadOnlyList<string> OfficialModels = ["moonshotai/kimi-k3", "moonshotai/kimi-k3.1-pro"];
     private static readonly HashSet<string> OfficialIds = OfficialModels.SelectMany(m => new[] { m, m + "-highspeed" }).ToHashSet(StringComparer.OrdinalIgnoreCase);

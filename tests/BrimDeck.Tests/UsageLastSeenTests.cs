@@ -101,6 +101,43 @@ static class UsageLastSeenTests
             var oldPath = File("age-kept.json");
             new UsageLastSeen(oldPath, () => now).Save([kept], settings);
             check("A quota kept from long before is dropped by the cap; the newer totals beside it stay", new UsageLastSeen(oldPath, () => now).Load(settings) is [{ Metrics.Count: 0, UsageAvailable: true }]);
+            // The other way round: totals that kept failing grow old while the quota beside them is read again.
+            var partsPath = File("age-parts.json");
+            var clock = now;
+            var store = new UsageLastSeen(partsPath, () => clock);
+            store.Save([Read(ProviderId.Claude, now)], settings);
+            clock = now.AddHours(23);
+            var quotaOnly = Read(ProviderId.Claude, clock, 60); quotaOnly.UsageAvailable = false; quotaOnly.Entries = [];
+            store.Save([quotaOnly], settings);
+            var shown = new UsageLastSeen(partsPath, () => now.AddHours(24.5)).Load(settings);
+            check("Totals older than the cap do not take a newer quota with them", shown is [{ Metrics.Count: 1, UsageAvailable: false, Entries.Count: 0 }]
+                && shown[0].Metrics[0].Percent == 60 && shown[0].LastSeenAt == now.AddHours(23) && shown[0].UsageNote == "");
+            check("A source whose quota and totals are both past the cap is not shown", new UsageLastSeen(partsPath, () => now.AddHours(47.5)).Load(settings).Count == 0);
+        }
+
+        // (d2) The totals of one source are kept by whole days up to the group limit, and then start where they were cut.
+        {
+            var path = File("groups.json");
+            var many = Read(ProviderId.Claude, now);
+            // 50 models a day over 10 days: 500 groups, of which 8 whole days (400) fit.
+            many.Entries = [.. Enumerable.Range(0, 10).SelectMany(day => Enumerable.Range(0, 50).Select(model => new TokenEntry("k", now.AddDays(-day), "m" + model, 10, 0, 0, 0, 1)))];
+            many.UsageStart = now.LocalDateTime.Date.AddDays(-29);
+            new UsageLastSeen(path, () => now).Save([many], settings);
+            var shown = new UsageLastSeen(path, () => now).Load(settings).Single();
+            var start = now.LocalDateTime.Date.AddDays(-7);
+            check("Whole days are kept, newest first, up to the group limit", shown.UsageAvailable && shown.Entries.Count == 400
+                && shown.Entries.Min(e => e.Time.LocalDateTime.Date) == start && shown.Entries.Sum(e => e.Total) == 400 * 11);
+            check("The totals then start at the first day kept", shown.UsageStart == start);
+            var month = ModelUsage.Filter([shown], new HashSet<ProviderId> { ProviderId.Claude }, UsageDateRange.Recent(30, now.LocalDateTime.Date));
+            var week = ModelUsage.Filter([shown], new HashSet<ProviderId> { ProviderId.Claude }, UsageDateRange.Recent(7, now.LocalDateTime.Date));
+            check("A range reaching before the cut shows the source as incomplete, one within it does not",
+                month.IncompleteProviders.Contains(ProviderId.Claude) && !week.IncompleteProviders.Contains(ProviderId.Claude));
+            var crowded = Read(ProviderId.Claude, now);
+            crowded.Entries = [.. Enumerable.Range(0, 450).Select(model => new TokenEntry("k", now, "m" + model, 10, 0, 0, 0, 1))];
+            var crowdedPath = File("groups-day.json");
+            new UsageLastSeen(crowdedPath, () => now).Save([crowded], settings);
+            check("A single day over the limit leaves no totals rather than part of them, and keeps the quota",
+                new UsageLastSeen(crowdedPath, () => now).Load(settings) is [{ UsageAvailable: false, Entries.Count: 0, Metrics.Count: 1 }]);
         }
 
         // A quota whose window has reset since is left out; a source left with nothing is not shown.
