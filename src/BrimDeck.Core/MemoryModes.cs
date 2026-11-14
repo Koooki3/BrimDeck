@@ -61,12 +61,10 @@ public sealed record MemoryPlan
     // work BrimDeck does on its own (reading the usage every minute) is not a use and does not put the clean-up off. trimmedAt: the
     // last clean-up, or null while one is owed. An owed one runs OwedAfter after the last use, or sooner in a mode that cleans up
     // sooner; the others TrimAfter after the last use and no sooner than TrimEvery after the last clean-up, in the modes that clean up.
-    // None while nothing was used since the last clean-up (and nothing let go, which makes one owed again): a compacting collection
-    // and a trimmed working set only to regrow the same pages would cost more than they give back.
     public DateTime? TrimDue(DateTime usedAt, DateTime? trimmedAt)
     {
         if (trimmedAt is not { } last) return usedAt + (TrimWhenIdle && TrimAfter < OwedAfter ? TrimAfter : OwedAfter);
-        if (!TrimWhenIdle || usedAt <= last) return null;
+        if (!TrimWhenIdle) return null;
         DateTime quiet = usedAt + TrimAfter, again = last + TrimEvery;
         return again > quiet ? again : quiet;
     }
