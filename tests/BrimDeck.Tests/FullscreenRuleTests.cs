@@ -157,6 +157,11 @@ internal static class FullscreenRuleTests
         check("Media is wanted for the indicator's progress under the peeking rule as under the plain one",
             new DeckSettings { MusicIndicatorProgress = true, MusicPage = false, Maximized = WindowBehavior.Peek }.MediaWanted
             == new DeckSettings { MusicIndicatorProgress = true, MusicPage = false, Maximized = WindowBehavior.Line }.MediaWanted);
+        check("The row that peeks wants media under a peeking rule only, even when the chosen style is the line",
+            new DeckSettings { Style = CompactStyle.Line, MusicPage = false, MusicIndicatorProgress = false, Maximized = WindowBehavior.Peek }.MediaWanted
+            && new DeckSettings { Style = CompactStyle.Line, MusicPage = false, MusicIndicatorProgress = false, FullscreenRules = [new FullscreenRule { Name = "X", Exclusive = WindowBehavior.Peek }] }.MediaWanted
+            && !new DeckSettings { Style = CompactStyle.Line, MusicPage = false, MusicIndicatorProgress = false }.MediaWanted
+            && !new DeckSettings { Style = CompactStyle.Line, MusicPage = false, MusicIndicatorProgress = false, Maximized = WindowBehavior.Peek, NotchMusic = false, NotchEqualizer = false }.MediaWanted);
         check("The row that peeks is the chosen style, or the last notch or capsule when the line is chosen",
             new DeckSettings { Style = CompactStyle.Capsule }.PeekStyle == CompactStyle.Capsule
             && new DeckSettings { Style = CompactStyle.Notch }.PeekStyle == CompactStyle.Notch
@@ -174,6 +179,10 @@ internal static class FullscreenRuleTests
         check("A resting line wakes when the pointer has left it, and peeks again", !peek.Resting && peek.Begin());
         peek.Observe(false);
         check("Observing the pointer does nothing to a peek that is showing", peek.Active && !peek.Resting);
+        var opened = new WindowPeek();
+        opened.Begin();
+        check("A panel closed from the peeking row ends the peek at once and the line rests, once",
+            opened.PanelClosed() && !opened.Active && opened.Resting && !opened.PanelClosed() && !opened.Begin());
         peek.End(); peek.Reset();
         check("A rule that is no longer the peeking one clears the state", !peek.Active && !peek.Resting && peek.Begin());
     }

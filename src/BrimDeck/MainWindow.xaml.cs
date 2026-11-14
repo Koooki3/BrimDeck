@@ -822,8 +822,9 @@ public partial class MainWindow : Window
     private void PanelClosed()
     {
         _app.UpdateCollectionLatency();
-        // A panel opened from the peeking row closes back to it; the row then ends as it does when the pointer leaves it.
-        if (_peek.Active) StartPeekLeave();
+        // A panel opened from the peeking row closes back to the line, even if the pointer is still on the row; the line rests
+        // until the pointer has left it.
+        if (_peek.PanelClosed()) { _hover.Stop(); _leave.Stop(); }
         ResetShelf();
         HotkeyPanelCollapsed();
         ReplayCompactTitle();
@@ -1158,7 +1159,8 @@ public partial class MainWindow : Window
             _popupReturnArea = null;
             _leave.Stop(); if (_expanded || IsSuppressed) return;
             // The row shown over the indicator opens the panel by a click only.
-            _hover.Stop(); if (Settings.ClickToExpand || _peek.Active) return;
+            // ClickToExpand covers the full panel only; a peeking rule still peeks on hover.
+            _hover.Stop(); if (_peek.Active || Settings.ClickToExpand && !PeekRule) return;
             _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else

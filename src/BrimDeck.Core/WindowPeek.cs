@@ -31,6 +31,9 @@ public sealed class WindowPeek
         if (!Active) return false;
         Active = false; Resting = true; return true;
     }
+    // The panel opened from the peeking row has closed: back to the line, which rests until the pointer has left it, whether or not
+    // the pointer is still on the row.
+    public bool PanelClosed() => End();
     // Each pointer check at rest: a resting line wakes once the pointer is off it.
     public void Observe(bool overIndicator)
     {
