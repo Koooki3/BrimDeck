@@ -38,6 +38,8 @@ public sealed class Pricing : IDisposable
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _wanted = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _officialAsked = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<DateTimeOffset> _now;
+    // Counts the changes of the price table, so a refresh can tell whether it changed anything.
+    private int _version;
     private readonly SemaphoreSlim _gate = new(1);
     private DateTimeOffset? _lastAttempt;
     private Dictionary<string, ModelPrice> _lookup = new(StringComparer.OrdinalIgnoreCase);
@@ -67,12 +69,14 @@ public sealed class Pricing : IDisposable
         _officialFile = Path.Combine(directory, OfficialFile);
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(15) };
         _ownsHttp = http is null; _now = now ?? (() => DateTimeOffset.UtcNow);
+        bool stamped = false;
         try
         {
             if (File.Exists(_cacheFile))
             {
                 using var cache = JsonDocument.Parse(File.ReadAllText(_cacheFile));
                 var timestamp = cache.RootElement.Get("updatedAt").Date();
+                stamped = cache.RootElement.Get("stamp").Text() == CacheStamp;
                 if (timestamp is null || timestamp > _now().AddMinutes(5)) throw new InvalidDataException();
                 var stored = cache.RootElement.Get("models");
                 var models = stored.ValueKind == JsonValueKind.Array
@@ -80,6 +84,9 @@ public sealed class Pricing : IDisposable
                     : Parse(cache.RootElement.Get("catalog"));
                 if (models.Count == 0) throw new InvalidDataException();
                 SetCatalog(models, timestamp.Value);
+                // A catalog saved less than a refresh interval ago is current: the first refresh of this process sends no request for it.
+                // A file written by another version of the program (or before the stamp existed) is used but not trusted as current.
+                if (stamped && timestamp <= _now()) _lastAttempt = timestamp;
             }
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidDataException)
@@ -105,9 +112,14 @@ public sealed class Pricing : IDisposable
             {
                 using var doc = JsonDocument.Parse(File.ReadAllText(saved));
                 var models = doc.RootElement.Get("models").Deserialize<List<ModelPrice>>() ?? [];
+                var savedAt = doc.RootElement.Get("updatedAt").Date();
                 lock (_sync)
                 {
                     foreach (var model in models.Where(m => ValidModel(m) && m.Model.Contains('/'))) _official[Normalize(model.Model)] = model;
+                    // The models whose own prices are in the file, read in the last interval, are not asked for again at launch;
+                    // one the file holds no price for (a failed read) is asked for again.
+                    if (savedAt is { } asked && asked <= _now())
+                        foreach (var model in models.Select(m => m.Model).SelectMany(m => new[] { m, OfficialBase(m) })) _officialAsked[model] = asked;
                     RebuildLookup();
                 }
             }
@@ -116,16 +128,19 @@ public sealed class Pricing : IDisposable
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or NotSupportedException) { }
     }
 
-    // The first call in each process fetches online even when a disk cache exists. The official prices of models that records
-    // were priced with since are asked for on later calls, each model once a day.
-    public async Task RefreshAsync(bool force = false, CancellationToken cancellation = default)
+    // The first call in each process fetches online only when the disk cache is a refresh interval old or missing. The official
+    // prices of models that records were priced with since are asked for on later calls, each model once a day.
+    // Returns whether the table of prices changed.
+    public async Task<bool> RefreshAsync(bool force = false, CancellationToken cancellation = default)
     {
         await _gate.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
+            var before = Volatile.Read(ref _version);
             var now = _now();
             if (force || _lastAttempt is not { } previous || now - previous >= RefreshInterval) await RefreshCatalogAsync(now, cancellation).ConfigureAwait(false);
             await RefreshOfficialAsync(force, cancellation).ConfigureAwait(false);
+            return Volatile.Read(ref _version) != before;
         }
         finally { _gate.Release(); }
     }
@@ -149,7 +164,7 @@ public sealed class Pricing : IDisposable
                 Directory.CreateDirectory(Path.GetDirectoryName(_cacheFile)!);
                 var temporary = _cacheFile + ".tmp";
                 string payload;
-                lock (_sync) payload = JsonSerializer.Serialize(new { updatedAt = updated, models = _remote.Values.ToArray() });
+                lock (_sync) payload = JsonSerializer.Serialize(new { updatedAt = updated, stamp = CacheStamp, models = _remote.Values.ToArray() });
                 await File.WriteAllTextAsync(temporary, payload, cancellation).ConfigureAwait(false);
                 File.Move(temporary, _cacheFile, true);
             }
@@ -172,6 +187,8 @@ public sealed class Pricing : IDisposable
     // answer keeps the official price saved before. Prices added by hand still win.
     // Kimi Code bills its models at Moonshot AI's list prices, so Kimi K3 and K3.1 Pro are always asked for, and Kimi Code
     // records of these models stay unpriced rather than taking the catalog price until Moonshot AI's has been read.
+    // The version of the program that wrote the catalog: after an update the saved catalog is read, but fetched again at launch.
+    private static readonly string CacheStamp = typeof(Pricing).Assembly.GetName().Version?.ToString() ?? "0";
     public const string OfficialFile = "official-prices.json", LegacyOfficialFile = "moonshot-prices.json";
     public static readonly IReadOnlyList<string> OfficialModels = ["moonshotai/kimi-k3", "moonshotai/kimi-k3.1-pro"];
     private static readonly HashSet<string> OfficialIds = OfficialModels.SelectMany(m => new[] { m, m + "-highspeed" }).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -332,6 +349,7 @@ public sealed class Pricing : IDisposable
         foreach (var model in models)
             if (OfficialIds.Contains(Normalize(model.Model)) && _remote.TryGetValue(Normalize(model.Model), out var remote) && ReferenceEquals(remote, model)) unofficial.Add(model);
         _unofficial = unofficial;
+        Interlocked.Increment(ref _version);
         _lookup = lookup; _tiers = tiers; _found = new(StringComparer.Ordinal); _maas = new(StringComparer.Ordinal); ModelCount = models.Length;
         Changed?.Invoke();
     }

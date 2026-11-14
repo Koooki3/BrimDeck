@@ -42,7 +42,15 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private (string Account, ProviderResult Result, DateTimeOffset Time)? _zcodeCoding;
     private readonly DataLocations _locations = locations ?? DataLocations.Detect();
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.Now);
-    private readonly LogReader _logs = new();
+    // One reader per source: the sources' local scans run side by side, and a reader's caches are not meant for two reads at once.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<ProviderId, LogReader> _logs = new();
+    // A provider that takes longer than this to read is named in the trace output (Trace, so a Release build has it too).
+    public TimeSpan SlowProviderLog { get; init; } = TimeSpan.FromSeconds(2);
+    // A round that has not ended by then ends with what was read (a stalled source shows a timeout, with the statistics it had).
+    public TimeSpan Deadline { get; init; } = TimeSpan.FromSeconds(90);
+    // Until a full round has ended, the sources that finished are handed to RefreshAsync's progress callback one by one.
+    private bool _published;
+    public static readonly TimeSpan ProgressInterval = TimeSpan.FromMilliseconds(250);
     // WSL is read away from the refresh itself: its file system is reached over the network share, with synchronous calls that
     // cannot be cancelled and that stall while a distribution starts, stops or hangs. A read that does not finish in time
     // is skipped for that round, and no new one starts until it has ended.
@@ -91,7 +99,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         public DateTimeOffset SavedTime;
     }
     private readonly Dictionary<string, ClaudeKept> _claudeKept = new(StringComparer.OrdinalIgnoreCase);
-    private ClaudeKept Kept(string organization) => _claudeKept.TryGetValue(organization, out var kept) ? kept : _claudeKept[organization] = new();
+    // Organizations are read side by side, so the table of what is kept for them is guarded.
+    private ClaudeKept Kept(string organization) { lock (_claudeKept) return _claudeKept.TryGetValue(organization, out var kept) ? kept : _claudeKept[organization] = new(); }
     // primary: the organization Claude Code uses, the first one read, which the file of an earlier version (it names none) belongs to.
     private ClaudeQuotaSnapshot? ClaudeRetained(string account, string organization, bool primary)
     {
@@ -122,7 +131,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     // the API is still rate limited, the kept quotas show again. organization null means every organization.
     private void ForgetClaude(string? organization, bool signedOut = true)
     {
-        if (organization is null) _claudeKept.Clear();
+        if (organization is null) { lock (_claudeKept) _claudeKept.Clear(); }
         else
         {
             var kept = Kept(organization);
@@ -139,17 +148,23 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     {
         var token = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(credential.Token)));
         var key = string.Join("|", credential.SignIn, ClaudeQuotaCache.AccountHash(credential.Account), token);
-        if (_claudeLimits.TryGetValue(key, out var limit)) return limit;
-        // Tokens are renewed now and then; the ones of the past have no pause left to keep.
-        if (_claudeLimits.Count >= 16)
-            foreach (var old in _claudeLimits.Where(pair => pair.Value.RetryAt(now) is null).Select(pair => pair.Key).ToList()) _claudeLimits.Remove(old);
-        return _claudeLimits[key] = new();
+        lock (_claudeLimits)
+        {
+            if (_claudeLimits.TryGetValue(key, out var limit)) return limit;
+            // Tokens are renewed now and then; the ones of the past have no pause left to keep.
+            if (_claudeLimits.Count >= 16)
+                foreach (var old in _claudeLimits.Where(pair => pair.Value.RetryAt(now) is null).Select(pair => pair.Key).ToList()) _claudeLimits.Remove(old);
+            return _claudeLimits[key] = new();
+        }
     }
     private static string Clock(DateTimeOffset time, DateTimeOffset now) => time.LocalDateTime.ToString(time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
     private readonly ConfiguredProviders _configured = new(secrets, http, clock);
     public Task<ProviderTestResult> TestProviderAsync(AppEntry entry, CancellationToken ct = default) => _configured.TestAsync(entry, ct);
 
-    public async Task<List<ProviderSnapshot>> RefreshAsync(DeckSettings settings, CancellationToken cancellation = default, DateTime? usageStart = null)
+    // progress, when given, receives the snapshots that have been read so far (a growing list) while the first round of this
+    // service is still running, at most once per ProgressInterval, from any thread; the returned list is always the whole result.
+    public async Task<List<ProviderSnapshot>> RefreshAsync(DeckSettings settings, CancellationToken cancellation = default, DateTime? usageStart = null,
+        Action<IReadOnlyList<ProviderSnapshot>>? progress = null)
     {
         await _gate.WaitAsync(cancellation);
         try
@@ -164,42 +179,69 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             bool grokBotLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && ProviderCatalog.ReadsLocalQuota(app));
             // A stalled source ends with a timeout status instead of holding every later refresh behind this gate.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-            deadline.CancelAfter(TimeSpan.FromSeconds(90));
+            deadline.CancelAfter(Deadline);
             // Grok Bot has no usage records, so it is read only for its online quota rows.
             var sources = ProviderCatalog.UsageSources.Where(required.Contains);
             if (grokBotOnline) sources = sources.Append(ProviderId.GrokBot);
             // Xiaomi MiMo's linked keys have no records of their own: their statistics are MiMo's.
             if (required.Contains(ProviderId.MiMoLinked)) sources = sources.Append(ProviderId.MiMoLinked);
-            var tasks = sources.Select(id => FetchAsync(id, usageStart, claudeOnline, deadline.Token, cancellation));
-            var configured = _configured.RefreshAsync(settings.EnabledApps, deadline.Token);
-            List<ProviderSnapshot> results = [.. await Task.WhenAll(tasks), .. await configured];
-            if (claudeLocal) results.Add(ReadClaudeLocal(usageStart));
-            if (grokBotLocal) results.Add(ReadGrokBotLocal(usageStart));
+            using var publisher = progress is not null && !_published ? new SnapshotPublisher(progress, ProgressInterval) : null;
+            var finished = new Dictionary<string, ProviderSnapshot>();
+            void Finished(string key, ProviderSnapshot snapshot)
+            {
+                if (publisher is null) return;
+                lock (finished) { finished[key] = snapshot; publisher.Publish([.. finished.Values]); }
+            }
+            var tasks = sources.Select(id => FetchAsync(id, usageStart, claudeOnline, deadline.Token, cancellation, snapshot => Finished("source:" + id, snapshot))).ToList();
+            // The sign-ins of custom sources are read on the calling thread before their tasks start; none of that holds up the others.
+            var configured = Task.Run(async () =>
+            {
+                var read = await _configured.RefreshAsync(settings.EnabledApps, deadline.Token);
+                for (int i = 0; i < read.Count; i++) Finished("configured:" + i, read[i]);
+                return read;
+            });
+            var locals = new List<Task<ProviderSnapshot>>();
+            if (claudeLocal) locals.Add(Task.Run(() => { var local = ReadClaudeLocal(usageStart); Finished("local:claude", local); return local; }));
+            if (grokBotLocal) locals.Add(Task.Run(() => { var local = ReadGrokBotLocal(usageStart); Finished("local:grokbot", local); return local; }));
+            // Everything is awaited once, so nothing is left running (or unobserved) when the gate is released, and a failure or the
+            // lifetime's cancellation still comes out of the one await.
+            await Task.WhenAll([.. tasks, configured, .. locals]);
+            List<ProviderSnapshot> results = [.. tasks.Select(t => t.Result), .. configured.Result, .. locals.Select(t => t.Result)];
+            _published = true;
             return results;
         }
         finally { _gate.Release(); }
     }
 
-    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct, CancellationToken lifetime)
+    // Each source runs on a pool thread from its first line, so its local scan (log files, databases) overlaps the network requests
+    // of every other source instead of delaying their start. finished gets the snapshot as soon as the source has one.
+    private async Task<ProviderSnapshot> FetchAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct, CancellationToken lifetime,
+        Action<ProviderSnapshot>? finished = null)
     {
-        try { return await FetchCoreAsync(id, usageStart, claudeOnline, ct); }
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        ProviderSnapshot result;
+        try { result = await Task.Run(() => FetchCoreAsync(id, usageStart, claudeOnline, ct, lifetime, finished), CancellationToken.None); }
         catch (Exception ex) when (!lifetime.IsCancellationRequested)
         {
             bool timedOut = ex is OperationCanceledException;
-            return new ProviderSnapshot(id)
+            result = new ProviderSnapshot(id)
             {
                 UsageStart = usageStart?.Date ?? _clock().LocalDateTime.Date.AddDays(-29),
                 StatusLabel = timedOut ? Loc.T("读取超时", "Timed out") : Loc.T("读取失败", "Read failed"),
                 Status = timedOut ? Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later.") : Loc.T("暂时无法读取数据，稍后重试", "The data cannot be read right now. Retrying later.")
             };
         }
+        if (timer.Elapsed >= SlowProviderLog) System.Diagnostics.Trace.WriteLine($"BrimDeck usage: {id} took {(long)timer.Elapsed.TotalMilliseconds} ms");
+        finished?.Invoke(result);
+        return result;
     }
 
     private IReadOnlyList<WslHome> WslHomes(DateTimeOffset now)
     {
         lock (_wslGate)
         {
-            if (_wsl is not { } found || now - found.Time > TimeSpan.FromMinutes(3) || now < found.Time) _wsl = found = (now, wsl is null ? WslLocations.Discover() : wsl());
+            // Sources read side by side take their time a little apart, so a time a few seconds before the saved one is no clock set back.
+            if (_wsl is not { } found || now - found.Time > TimeSpan.FromMinutes(3) || now < found.Time - TimeSpan.FromSeconds(5)) _wsl = found = (now, wsl is null ? WslLocations.Discover() : wsl());
             return found.Homes;
         }
     }
@@ -263,13 +305,13 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         snapshot.UsageNote = (read.LocalAvailable ? read.LocalNote + " · " : "") + result.UsageNote + tail;
     }
 
-    private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct)
+    private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct, CancellationToken lifetime, Action<ProviderSnapshot>? finished)
     {
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
-        // The reader owns a cache and is accessed serially before the first asynchronous request.
+        // Each source has a reader of its own (the reads of one source never overlap, _gate), used before the first asynchronous request.
         var snapshot = id is ProviderId.Claude or ProviderId.Codex or ProviderId.Pi or ProviderId.CodeAgent or ProviderId.CommandCode or ProviderId.WorkBuddy or ProviderId.WorkBuddyAi
-            ? _logs.Read(id, id switch { ProviderId.Pi => _locations.PiSessions, ProviderId.Codex => _locations.CodexHome, ProviderId.CodeAgent => _locations.CodeAgentHome,
+            ? _logs.GetOrAdd(id, _ => new()).Read(id, id switch { ProviderId.Pi => _locations.PiSessions, ProviderId.Codex => _locations.CodexHome, ProviderId.CodeAgent => _locations.CodeAgentHome,
                 ProviderId.CommandCode => _locations.CommandCodeHome, ProviderId.WorkBuddy => _locations.WorkBuddyHome, ProviderId.WorkBuddyAi => _locations.WorkBuddyAiHome, _ => _locations.ClaudeHome },
                 now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         var claudeAccount = id == ProviderId.Claude ? ReadClaudeProfile(snapshot) : ("", "");
@@ -365,7 +407,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 _ => Loc.T("账户接口暂时不可用", "The account API is temporarily unavailable.")
             };
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        // The overall deadline ends here too: what was read locally stays, and only the quota part is marked as not read.
+        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
         { snapshot.StatusLabel = Loc.T("读取超时", "Timed out"); snapshot.Status = Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."); }
         catch (InvalidDataException)
         { snapshot.StatusLabel = Loc.T("数据不可用", "Data unavailable"); snapshot.Status = Loc.T("数据格式发生变化，暂时无法读取配额", "The data format has changed, so the quota cannot be read for now."); }
@@ -373,7 +416,14 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         { snapshot.StatusLabel = Loc.T("检测失败", "Detection failed"); snapshot.Status = Loc.T("本地服务检测失败，稍后重试", "Detecting the local service failed. Retrying later."); }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or FormatException)
         { snapshot.StatusLabel = Loc.T("读取失败", "Read failed"); snapshot.Status = Loc.T("暂时无法读取数据，稍后重试", "The data cannot be read right now. Retrying later."); }
-        if (wslRead is not null) await MergeWslAsync(snapshot, wslRead, ct);
+        if (wslRead is not null)
+        {
+            // This PC's statistics reach the panel before the WSL ones, which can take seconds over the network share.
+            if (!wslRead.Task.IsCompleted) finished?.Invoke(snapshot.Copy());
+            try { await MergeWslAsync(snapshot, wslRead, ct); }
+            catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
+            { snapshot.UsageNote += Loc.T(" · WSL 读取超时，本轮仅显示本机数据", " · Reading WSL timed out; this round shows this PC only"); snapshot.UsageComplete = false; }
+        }
         if (!snapshot.LiveQuota && snapshot.Quotas.Count > 0) snapshot.Source = Loc.T("本地配额快照 · 可能已过时", "Local quota snapshot · may be outdated");
         return snapshot;
     }
@@ -470,14 +520,24 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         // The others are read only once the first organization is known; otherwise one of them could be the first again.
         var first = units[0];
         if (first.Organization.Length > 0)
-            foreach (var group in Desktop().Credentials.Where(c => c.Organization.Length > 0 && !Same(c.Organization, first.Organization))
-                .GroupBy(c => c.Organization, StringComparer.OrdinalIgnoreCase))
+        {
+            var others = Desktop().Credentials.Where(c => c.Organization.Length > 0 && !Same(c.Organization, first.Organization))
+                .GroupBy(c => c.Organization, StringComparer.OrdinalIgnoreCase).ToList();
+            // Each organization has its own request, up to 12 s; they run side by side (three at a time) and keep their order.
+            using var slots = new SemaphoreSlim(3);
+            units.AddRange(await Task.WhenAll(others.Select(async group =>
             {
-                // Claude Code's local account record describes its own organization, not this one.
-                var part = pristine.Copy();
-                part.Plan = ""; part.PlanSource = "";
-                units.Add(await ReadClaudeUnitAsync(part, group, group.Key, primary: false, attempted, now, ct));
-            }
+                await slots.WaitAsync(ct);
+                try
+                {
+                    // Claude Code's local account record describes its own organization, not this one.
+                    var part = pristine.Copy();
+                    part.Plan = ""; part.PlanSource = "";
+                    return await ReadClaudeUnitAsync(part, group, group.Key, primary: false, attempted, now, ct);
+                }
+                finally { slots.Release(); }
+            })));
+        }
 
         if (units.Count > 1) { MergeClaude(snapshot, units); return; }
         if (first.Failure is { } failure) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
@@ -504,7 +564,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             ct.ThrowIfCancellationRequested();
             lastFailure = null;
-            if (string.IsNullOrWhiteSpace(credential.Token) || !attempted.Add(credential.Token)) return false;
+            bool fresh;
+            lock (attempted) fresh = attempted.Add(credential.Token);
+            if (string.IsNullOrWhiteSpace(credential.Token) || !fresh) return false;
             login = credential;
             // The plan is asked at the same time as the quota, so a slow or unreachable network costs one wait, not two.
             var planRequest = loginPlan = ReadClaudePlanAsync(credential.Token, ct);

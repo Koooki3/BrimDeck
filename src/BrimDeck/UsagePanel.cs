@@ -116,10 +116,17 @@ public partial class MainWindow
         return (Layout.For(Tier.Tiny), false, wide);
     }
 
+    // A snapshot is read-only once published, so what a filter selects from it is kept with it: a render that finds the same snapshot,
+    // the same number of days and the same date takes the earlier list instead of sorting the (tens of thousands of) entries again.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ProviderSnapshot, Dictionary<(int Days, DateTime Start), List<TokenEntry>>> EntryFilters = new();
     private static List<TokenEntry> Entries(ProviderSnapshot snapshot, int days)
     {
         var start = DateTime.Now.Date.AddDays(1 - days);
-        return snapshot.Entries.Where(x => x.Time.LocalDateTime >= start).ToList();
+        var filters = EntryFilters.GetOrCreateValue(snapshot);
+        if (filters.TryGetValue((days, start), out var kept)) return kept;
+        // A new date or a new day count replaces what was kept: few filters are asked for at once.
+        if (filters.Count >= 4) filters.Clear();
+        return filters[(days, start)] = snapshot.Entries.Where(x => x.Time.LocalDateTime >= start).ToList();
     }
 
     // The cheap part of a render: clock, gear tooltip and the synchronization button. Run on every expansion.

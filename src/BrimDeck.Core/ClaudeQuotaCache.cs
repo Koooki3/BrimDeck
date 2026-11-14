@@ -80,8 +80,12 @@ public static class ClaudeQuotaCache
         return new(stored.Time, plan, plan.Length > 0 ? ClaudeSources.Plan(stored.PlanFrom, stored.SignIn) : "", ClaudeSources.Quota(stored.SignIn), quotas);
     }
 
+    // Organizations are read side by side, and the file is shared by them: each read-modify-write takes this lock.
+    private static readonly object Sync = new();
+
     public static ClaudeQuotaSnapshot? Load(string path, DateTimeOffset now, string account, string organization = "", bool earlierReading = false)
     {
+        lock (Sync)
         try { return File.Exists(path) ? Parse(File.ReadAllText(path), now, account, organization, earlierReading) : null; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
@@ -91,6 +95,7 @@ public static class ClaudeQuotaCache
     // never leaves half a file. A failed write keeps the previous file; the reading is still kept in memory for this run.
     public static void Save(string path, ClaudeQuotaSnapshot snapshot, string account, ClaudeSignIn signIn, ClaudePlanOrigin planFrom, string organization = "")
     {
+        lock (Sync)
         try
         {
             var entry = Entry(snapshot, account, signIn, planFrom, organization);
@@ -113,6 +118,7 @@ public static class ClaudeQuotaCache
     // A signed-out or rejected organization keeps no quota of its own, on disk either; null forgets every organization.
     public static void Delete(string path, string? organization = null)
     {
+        lock (Sync)
         try
         {
             var entries = organization is null || !File.Exists(path) ? [] : Entries(File.ReadAllText(path));

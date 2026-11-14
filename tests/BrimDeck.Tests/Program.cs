@@ -136,6 +136,7 @@ try
     await KimiUsageTests.Run(root, Check);
     await ClaudeRateLimitTests.Run(root, Check);
     await ClaudeUpgradeCacheTests.Run(root, Check);
+    await UsageStartupTests.Run(root, Check);
     await OpenCodeUsageTests.Run(root, Check);
     await OfficialPriceTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
@@ -165,7 +166,7 @@ try
     {
         Check("Downloaded catalog survives restart", cached.ModelCount == 4 && cached.UpdatedAt == pricing.UpdatedAt);
         await cached.RefreshAsync();
-        Check("Restart refreshes online even with fresh cache", handler.Calls == 2);
+        Check("Restart with a fresh cache sends no request", handler.Calls == 1);
     }
 
     // The editable layer is independent of downloaded prices and must survive refresh and restart.
@@ -753,22 +754,22 @@ try
     handler.Json = catalogJson.Replace("0.000003", "0.000004", StringComparison.Ordinal).Replace("vendor/dynamic-price", "vendor/new-catalog-model", StringComparison.Ordinal).Replace("\"-1\"", "\"0.000001\"", StringComparison.Ordinal);
     priceTime = priceTime.AddMinutes(59).AddSeconds(59);
     await pricing.RefreshAsync();
-    Check("Daily catalog request waits for the full 24 hours", handler.Calls == 2 && !pricing.IsStale);
+    Check("Daily catalog request waits for the full 24 hours", handler.Calls == 1 && !pricing.IsStale);
     priceTime = priceTime.AddSeconds(1);
     await pricing.RefreshAsync();
-    Check("Price changes update without a new build", handler.Calls == 3 && pricing.Find("claude-sonnet-4-5")?.Prices.Input == .000004m);
+    Check("Price changes update without a new build", handler.Calls == 2 && pricing.Find("claude-sonnet-4-5")?.Prices.Input == .000004m);
     Check("New remote models require no local list update", pricing.ModelCount == 5 && pricing.Find("new-catalog-model") is not null);
     handler.Fail = true;
     await pricing.RefreshAsync(true);
     Check("Network failure keeps last successful catalog", pricing.ModelCount == 5 && pricing.LastError is not null && pricing.Find("claude-sonnet-4-5")?.Prices.Input == .000004m);
     await pricing.RefreshAsync();
-    Check("Network failure does not trigger an immediate catalog retry", handler.Calls == 4);
+    Check("Network failure does not trigger an immediate catalog retry", handler.Calls == 3);
     priceTime = priceTime.AddMinutes(6); handler.Fail = false;
     await pricing.RefreshAsync();
-    Check("Network failure does not add a five-minute catalog retry", handler.Calls == 4 && pricing.LastError is not null);
+    Check("Network failure does not add a five-minute catalog retry", handler.Calls == 3 && pricing.LastError is not null);
     priceTime = priceTime.AddHours(23).AddMinutes(54);
     await pricing.RefreshAsync();
-    Check("Next daily catalog refresh recovers", handler.Calls == 5 && pricing.LastError is null);
+    Check("Next daily catalog refresh recovers", handler.Calls == 4 && pricing.LastError is null);
     var cacheBefore = File.ReadAllText(Path.Combine(priceDirectory, "model-prices.json"));
     handler.Json = "{\"data\":[]}";
     await pricing.RefreshAsync(true);
