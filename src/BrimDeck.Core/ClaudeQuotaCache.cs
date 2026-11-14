@@ -93,15 +93,16 @@ public static class ClaudeQuotaCache
     // Replaces the reading of this organization and keeps those of the account's other organizations; readings of another
     // account and readings past MaxAge are dropped. Written whole and then moved into place, so a reading cut short by an exit
     // never leaves half a file. A failed write keeps the previous file; the reading is still kept in memory for this run.
-    public static void Save(string path, ClaudeQuotaSnapshot snapshot, string account, ClaudeSignIn signIn, ClaudePlanOrigin planFrom, string organization = "")
+    public static void Save(string path, ClaudeQuotaSnapshot snapshot, string account, ClaudeSignIn signIn, ClaudePlanOrigin planFrom, string organization = "", bool primary = false)
     {
         lock (Sync)
         try
         {
             var entry = Entry(snapshot, account, signIn, planFrom, organization);
             var entries = File.Exists(path) ? Entries(File.ReadAllText(path)) : [];
-            // A reading that names no organization (an earlier version's) is replaced by the first one saved with its name.
-            entries = [.. entries.Where(old => old.Account == entry.Account && old.Organization is not null && old.Organization != entry.Organization && snapshot.Time - old.Time <= MaxAge), entry];
+            // A reading that names no organization (an earlier version's) belongs to the first organization (primary): only that one's
+            // save replaces it, so another organization's save leaves it for the primary one, which may not have been read yet.
+            entries = [.. entries.Where(old => old.Account == entry.Account && (old.Organization is null ? !primary : old.Organization != entry.Organization) && snapshot.Time - old.Time <= MaxAge), entry];
             Write(path, entries);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
@@ -116,14 +117,15 @@ public static class ClaudeQuotaCache
     }
 
     // A signed-out or rejected organization keeps no quota of its own, on disk either; null forgets every organization.
-    public static void Delete(string path, string? organization = null)
+    // primary: the organization is the first one read; only it takes with it the reading an earlier version kept (it names none).
+    public static void Delete(string path, string? organization = null, bool primary = false)
     {
         lock (Sync)
         try
         {
             var entries = organization is null || !File.Exists(path) ? [] : Entries(File.ReadAllText(path));
             var hash = OrganizationHash(organization ?? "");
-            var kept = entries.Where(entry => entry.Organization is not null && entry.Organization != hash).ToList();
+            var kept = entries.Where(entry => entry.Organization is null ? !primary : entry.Organization != hash).ToList();
             if (kept.Count == 0) File.Delete(path);
             else if (kept.Count < entries.Count) Write(path, kept);
         }

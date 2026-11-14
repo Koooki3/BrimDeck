@@ -119,7 +119,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         return kept.Retained;
     }
-    private void KeepOnline(ClaudeQuotaSnapshot snapshot, ClaudeCredential credential, string organization, ClaudePlanOrigin planFrom)
+    private void KeepOnline(ClaudeQuotaSnapshot snapshot, ClaudeCredential credential, string organization, ClaudePlanOrigin planFrom, bool primary)
     {
         var kept = Kept(organization);
         kept.Retained = snapshot; kept.Account = ClaudeQuotaCache.AccountHash(credential.Account); kept.CacheRead = true;
@@ -127,12 +127,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var key = string.Join("|", kept.Account, snapshot.Plan, planFrom, credential.SignIn, string.Join(";", snapshot.Quotas));
         if (key == kept.Saved && snapshot.Time - kept.SavedTime < ClaudeQuotaCache.RewriteAfter) return;
         kept.Saved = key; kept.SavedTime = snapshot.Time;
-        ClaudeQuotaCache.Save(quotaCache, snapshot, credential.Account, credential.SignIn, planFrom, organization);
+        ClaudeQuotaCache.Save(quotaCache, snapshot, credential.Account, credential.SignIn, planFrom, organization, primary);
     }
     // A sign-in that is gone or rejected keeps no quota, on disk either. A sign-in that could not be read just now only drops
     // the reading of this run; the file is read again the next time a reading is needed, so once the sign-in can be read and
     // the API is still rate limited, the kept quotas show again. organization null means every organization.
-    private void ForgetClaude(string? organization, bool signedOut = true)
+    private void ForgetClaude(string? organization, bool signedOut = true, bool primary = false)
     {
         if (organization is null) { lock (_claudeKept) _claudeKept.Clear(); }
         else
@@ -141,7 +141,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             kept.Retained = null; kept.Account = ""; kept.Saved = "";
             kept.CacheRead = signedOut;
         }
-        if (signedOut && quotaCache is not null) ClaudeQuotaCache.Delete(quotaCache, organization);
+        if (signedOut && quotaCache is not null) ClaudeQuotaCache.Delete(quotaCache, organization, primary);
     }
     // The pause after a 429 from the Claude quota API, for each token (with its sign-in and account): a new sign-in starts without
     // one, and the several tokens of one Desktop account, tried in turn, do not replace each other's. Only used while _gate is held.
@@ -611,7 +611,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 snapshot.PlanSource = ClaudeSources.Plan(planFrom, credential.SignIn);
                 Connected(snapshot, ClaudeSources.Quota(credential.SignIn), now);
                 snapshot.UsageNote += ClaudeUsageNote;
-                KeepOnline(new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList()), credential, key, planFrom);
+                KeepOnline(new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList()), credential, key, planFrom, primary);
                 return true;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is
@@ -642,7 +642,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         ClaudeUnit Unit(Exception? left) => new(snapshot, organization,
             snapshot.Plan.Length > 0 ? snapshot.Plan : info.Plan.Length > 0 ? info.Plan : login?.Plan ?? "", info.Name, left, login is not null);
         if (read || failure is null) return Unit(null);
-        if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) ForgetClaude(key);
+        if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) ForgetClaude(key, primary: primary);
         // The reading shown in place of the failed one must belong to the account of the sign-in that was asked.
         else if (Freshest(now, login?.Account ?? "", key, primary) is { } local)
         {
