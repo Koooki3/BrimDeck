@@ -32,6 +32,9 @@ internal static class AppIdentityChecks
                 var (name, path) = AppIdentity.NameAndPath(other.Id);
                 // Not opened (it ended, or is protected): the name came from Process itself.
                 if (path.Length == 0) continue;
+                // A running program whose file was renamed under it (an updater or Defender moving it aside to "name.exe~RF1234.TMP") has
+                // that name on disk while Process keeps the one it started with: not a mismatch of the two readings.
+                if (!path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
                 compared++;
                 if (name != expected) different.Add($"{expected} / {name}");
             }
