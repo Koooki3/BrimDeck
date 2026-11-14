@@ -911,8 +911,6 @@ public partial class MainWindow : Window
     {
         if ((_peek.Active || _peek.Resting) && !PeekRule) _peek.Reset();
     }
-    // One animated track: where it starts and ends, as fractions of the configured duration.
-    private readonly record struct Track(double Start, double End);
     // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
     // corners and shoulders, and a rounded clip made every frame of the title and the bars cost a quarter more. The rounded clip
     // comes back before anything changes the surface; the rectangle only once the closing has had its whole length. A theme whose
