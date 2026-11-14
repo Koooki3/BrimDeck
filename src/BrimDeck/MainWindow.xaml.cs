@@ -129,7 +129,7 @@ public partial class MainWindow : Window
     // The panel is a topmost overlay: kept above other windows, or an ordinary panel a window rule turns into the indicator,
     // which shows above the window that fills the screen.
     private bool KeepsAbove => Settings.AlwaysOnTop
-        || !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line;
+        || !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind).IsIndicator();
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
     // Set when the first read has ended, with data or without (RefreshAsync); until then the usage page shows its skeleton.
     private bool _firstReadEnded;
@@ -148,6 +148,7 @@ public partial class MainWindow : Window
         {
             _hover!.Stop();
             if (IsSuppressed || !_pointerInside) return;
+            if (!_expanded && PeekRule && !_peek.Active) { BeginPeek(); return; }
             OpenAtPointer();
         });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
@@ -393,6 +394,7 @@ public partial class MainWindow : Window
         // An exception added or removed in settings changes the context before the next poll; read it again so that the
         // panel hides or returns in this pass.
         _context = _host.DetectNow();
+        KeepPeekCurrent();
         // A new edge waits for the island to be cleared before the window moves (MainWindow.Edge.cs).
         if (ClearBeforeMoving(animatePage)) return;
         bool wasVisible = IsVisible;
@@ -551,7 +553,7 @@ public partial class MainWindow : Window
         _screenMonitor = new DipRect(0, 0, bounds.Width / scale, bounds.Height / scale); _screenWork = screenWork;
         // The style shown decides the edge: a window rule that turns the notch or the capsule into the line shows it where the line's
         // own settings put it.
-        var (edge, overTaskbar) = Dock(EffectiveStyle);
+        var (edge, overTaskbar) = Dock(DockStyle);
         _frame = EdgeFrame.For(edge, bounds.Width / scale, bounds.Height / scale, screenWork, overTaskbar);
         _framedDock = (edge, overTaskbar);
         var frame = _frame.Monitor;
@@ -875,7 +877,42 @@ public partial class MainWindow : Window
         if (!_expanded) SetExpanded(false);
     }
 
-    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    private CompactStyle EffectiveStyle
+    {
+        get
+        {
+            if (_preview) return Settings.Style;
+            var behavior = Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind);
+            // An indicator that peeks shows the collapsed row while the pointer is on it (WindowPeek).
+            return behavior == WindowBehavior.Peek ? _peek.Active ? Settings.PeekStyle : CompactStyle.Line
+                : behavior == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+        }
+    }
+    // The row shown over the indicator keeps the indicator's edge, so that the pointer that woke it is still on it.
+    private CompactStyle DockStyle => _peek.Active ? CompactStyle.Line : EffectiveStyle;
+    private readonly WindowPeek _peek = new();
+    private bool PeekRule => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Peek;
+    // The open delay ran out on the indicator: the collapsed row grows from it, as a new style morphs in from the settings.
+    private void StartPeekLeave() { _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.CloseDelay)); _leave.Start(); }
+    private void BeginPeek()
+    {
+        if (!_peek.Begin()) return;
+        _hover.Stop();
+        MorphShape();
+    }
+    private void EndPeek()
+    {
+        if (!_peek.End()) return;
+        _hover.Stop(); _leave.Stop();
+        MorphShape();
+    }
+    // A context change or a new setting may take the peeking rule away.
+    private void KeepPeekCurrent()
+    {
+        if ((_peek.Active || _peek.Resting) && !PeekRule) _peek.Reset();
+    }
+    // One animated track: where it starts and ends, as fractions of the configured duration.
+    private readonly record struct Track(double Start, double End);
     // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
     // corners and shoulders, and a rounded clip made every frame of the title and the bars cost a quarter more. The rounded clip
     // comes back before anything changes the surface; the rectangle only once the closing has had its whole length. A theme whose
@@ -904,6 +941,8 @@ public partial class MainWindow : Window
     private void PanelClosed()
     {
         _app.UpdateCollectionLatency();
+        // A panel opened from the peeking row closes back to it; the row then ends as it does when the pointer leaves it.
+        if (_peek.Active) StartPeekLeave();
         ResetShelf();
         HotkeyPanelCollapsed();
         ReplayCompactTitle();
@@ -1172,7 +1211,7 @@ public partial class MainWindow : Window
     private void Island_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         bool pressed = _islandPressed; _islandPressed = false;
-        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed || !Settings.ClickToExpand) return;
+        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed || !Settings.ClickToExpand && !_peek.Active) return;
         e.Handled = true;
         _hover.Stop(); _leave.Stop();
         OpenAtPointer();
@@ -1245,6 +1284,9 @@ public partial class MainWindow : Window
         // A notice over the island takes the pointer itself (IslandNotice); the panel only keeps track, so that a notice ending
         // under a resting pointer does not open the panel.
         if (NoticeCovering) { _cursorInCompact = inCompact; if (_pointerInside) PointerChanged(false); return; }
+        // The indicator that has just ended a peek stays quiet until the pointer has left it.
+        _peek.Observe(inCompact);
+        if (_peek.Resting) { _cursorInCompact = inCompact; return; }
         if (inCompact != _cursorInCompact) { _cursorInCompact = inCompact; PointerChanged(inCompact); }
         else if (!inCompact && _pointerInside) PointerChanged(false);
     }
@@ -1264,12 +1306,15 @@ public partial class MainWindow : Window
             _leave.Stop();
             if (_expanded && !_preview) _app.Notices?.DeckLeaving(this, false);
             if (_expanded || IsSuppressed) return;
-            _hover.Stop(); if (Settings.ClickToExpand) return;
+            // The row shown over the indicator opens the panel by a click only.
+            _hover.Stop(); if (Settings.ClickToExpand || _peek.Active) return;
             _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
         {
-            _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) return;
+            _hover.Stop();
+            if (_peek.Active && !_expanded) { StartPeekLeave(); return; }
+            if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) return;
             int delay = Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay);
             _leftAt = Environment.TickCount64;
             // Notices arriving from now on show from the island once the panel has closed, not only on its page.
@@ -1281,6 +1326,8 @@ public partial class MainWindow : Window
     {
         if (IsHotkeyPinned || Resizing) { _leave.Stop(); return; }
         if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) { _leave.Stop(); return; }
+        // The pointer has been away from the row shown over the indicator: back to the line.
+        if (_peek.Active && !_expanded) { _leave.Stop(); EndPeek(); return; }
         // Closing a calendar with either button must leave a path back to the results.
         // Keep checking until the cursor leaves that area; entering the island restores normal hover behavior.
         if (_popupReturnArea is { } area && area.Contains(screenPoint)) return;

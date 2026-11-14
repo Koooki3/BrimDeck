@@ -46,7 +46,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private event Action? PaletteChanged;
 
     public static string StyleName(CompactStyle style) => style switch { CompactStyle.Notch => Loc.T("刘海", "Notch"), CompactStyle.Capsule => Loc.T("胶囊", "Capsule"), _ => Loc.T("指示条", "Indicator") };
-    public static string BehaviorName(WindowBehavior behavior) => behavior switch { WindowBehavior.Normal => Loc.T("保持原有样式", "Keep style"), WindowBehavior.Line => Loc.T("显示为指示条", "As indicator"), _ => Loc.T("隐藏", "Hide") };
+    public static string BehaviorName(WindowBehavior behavior) => behavior switch { WindowBehavior.Normal => Loc.T("保持原有样式", "Keep style"), WindowBehavior.Line => Loc.T("显示为指示条", "As indicator"), WindowBehavior.Peek => Loc.T("指示条+预览", "Indicator + peek"), _ => Loc.T("隐藏", "Hide") };
 
     private const double DefaultWidth = 960, DefaultHeight = 780;
     // The minimum size is 840 x 640, reduced where the screen's work area (less a 24 margin) is smaller. Returns the
@@ -1351,13 +1351,14 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed, WindowBehavior fallback)
     {
         // Wide enough for the longest option with its "默认" mark.
-        var options = new UniformGrid { Columns = 3, Width = Loc.IsEnglish ? 384 : 354 };
-        foreach (var behavior in Enum.GetValues<WindowBehavior>())
+        var options = new UniformGrid { Columns = 4, Width = Loc.IsEnglish ? 512 : 472 };
+        foreach (var behavior in WindowBehaviors.All)
         {
             var option = new RadioButton { Content = BehaviorName(behavior), Style = (Style)FindResource("SettingsSegment"), GroupName = "Behavior" + title, IsChecked = selected == behavior };
             AutomationProperties.SetName(option, title + " · " + BehaviorName(behavior)); option.Checked += (_, _) => changed(behavior); options.Children.Add(option);
             if (behavior == fallback) MarkDefault(option);
         }
-        return Row(title, SegmentBorder(options));
+        return Row(title, SegmentBorder(options), help: () => Loc.T("“指示条+预览”：平时是指示条，鼠标停在上面时弹出收起行（刘海或胶囊），点击再展开面板；移开后回到指示条。",
+            "\"Indicator + peek\": the indicator at rest; hovering it shows the collapsed row (notch or capsule), a click opens the panel, and moving away returns to the indicator."));
     }
 }
