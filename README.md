@@ -148,6 +148,7 @@ For how to use it and its settings, see [Clipboard and file transfer](docs/en-US
 - **Expand on**: Hover or click (Settings › General › Hover and animation).
 - **Mouse pass-through**: Hovering no longer opens the panel and clicks go through it to the window beneath; only shortcuts open it. This suits gaming (Settings › General › Compatibility).
 - **Scale**: The panel can be drawn at 100% or 150% for high-resolution displays.
+- **Follow Windows text size**: On by default. Open Windows Settings › Accessibility › Text size to adjust it. Both the collapsed and expanded panel scale with this setting. BrimDeck multiplies it by the panel scale above, up to a combined 200%. The settings window and tray menu keep their own text size.
 - **Resource use**: Saver, Balanced and Smooth (Settings › General › Startup and resources).
 
 ## Install
