@@ -390,11 +390,14 @@ static class BrandsMouseTests
         [
             Shape(0x373E, 0x001C, 0xFFFF, 0, 2, feature: 65, featureIds: [0x00]), Shape(0x1915, 0xAE11, 0xFFA0, 1, feature: 32, featureIds: [0x05]),
             Shape(0xA8A5, 0x2255, 0xFF01, 0x10, input: 65, output: 65, outputIds: [0x00]), Shape(0x3151, 0x402D, 0xFFFF, 2, 2, feature: 65, featureIds: [0x00]),
-            Shape(0x3151, 0x5007, 0xFFFF, 2, 2, feature: 65, featureIds: [0x00, 0x05]), Shape(0x3710, 0x3414, 0xFF02, 2, 1, 17, 17, outputIds: [0x08]),
+            Shape(0x3710, 0x3414, 0xFF02, 2, 1, 17, 17, outputIds: [0x08]),
             Shape(0x3554, 0xF5F7, 0xFF02, 2, 1, 17, 17, outputIds: [0x08]), Shape(0x249A, 0x5C2F, 0x0001, 0, 2, 33, 33, outputIds: [0x00]),
             Shape(0x1D57, 0xFA60, 0x000A, 1, 2), Shape(0x38A6, 0x0030, 0xFFAB, 1), Shape(0x03F0, 0x05B7, 0xFF13, 1),
         ];
-        check("Mouse families: no collection another reader has (LAMZU, Ninjutso, Gmouse, LINGBAO, Compx, AJAZZ, Beken, AULA G9, HyperX Cloud III) and not AM Infinity",
+        check("Mouse families: no collection another reader has (LAMZU, Ninjutso, Gmouse, LINGBAO, Compx, AJAZZ, Beken, AULA G9, HyperX Cloud III)",
             others.All(shape => Untaken(shape)));
+        // The Angry Miao Infinity 8K's receiver 3151:5007 is in MonsGeek's receiver list: the F7 status, read for its mouse.
+        check("Mouse families: the AM Infinity 8K's receiver takes the Rongyuan status read, not a mouse family's",
+            BrandFamilies.Find(Shape(0x3151, 0x5007, 0xFFFF, 2, 2, feature: 65, featureIds: [0x00, 0x05])) is { Family.Brand: "Rongyuan receiver" });
     }
 }

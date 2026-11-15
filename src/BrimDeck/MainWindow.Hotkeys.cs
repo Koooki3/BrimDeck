@@ -9,10 +9,11 @@ namespace BrimDeck;
 
 // How a panel follows the global hotkeys (see App.Hotkeys.cs).
 // Opened by the expand hotkey, the panel stays open until the pointer has been inside it once; after that the usual leave
-// rules close it (under mouse pass-through, a panel that ignores the pointer stays open until a hotkey or Esc closes it). While
+// rules close it (under mouse pass-through, a panel that ignores the pointer stays open until a hotkey closes it). While
 // the panels are hidden, the expand hotkey still opens this panel; once it closes, it hides again.
 // Opened by a hotkey, the panel also takes the keyboard (Tab, arrows, Enter and Space work its pages) and gives it back to the
-// window that had it when it closes (PanelKeyboard). Opened by the pointer, it leaves the keyboard where it is.
+// window that had it when it closes (PanelKeyboard); under mouse pass-through only with ClickThroughKeyboard on. Opened by the
+// pointer, it leaves the keyboard where it is.
 public partial class MainWindow
 {
     // Shown for the expand hotkey while the panels are hidden.
@@ -52,7 +53,7 @@ public partial class MainWindow
         _hotkeyPinned = true;
         SetExpanded(true, keyboard: byKey);
         if (!_expanded) { _hotkeyPinned = false; if (_hotkeyOpened) { _hotkeyOpened = false; ApplySettings(); } }
-        else if (byKey) TakeKeyboard();
+        else if (byKey && PanelTakesKeyboard) TakeKeyboard();
     }
 
     // The panel becomes a window that can be active, takes the foreground and puts the focus on the button of the page shown.

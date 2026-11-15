@@ -253,6 +253,8 @@ public static class Razer
         new(0x0086, "Razer Basilisk Ultimate", 0x1F, 0, 31_000, true), new(0x0088, "Razer Basilisk Ultimate", 0x1F, 0, 31_000, true),
         new(0x008F, "Razer Naga Pro", 0x1F, 0, 600, true), new(0x0090, "Razer Naga Pro", 0x1F, 0, 31_000, true),
         new(0x0094, "Razer Orochi V2", 0x1F, 0, 400_000, false), new(0x0095, "Razer Orochi V2", 0x1F, 0, 400_000, false),
+        // The Orochi V2's 2026 receiver, as openrazer lists it (GPL; facts only): the same transaction and wait.
+        new(0x00E0, "Razer Orochi V2", 0x1F, 0, 400_000, false),
         new(0x009A, "Razer Pro Click Mini", 0x1F, 0, 31_000, true), new(0x009C, "Razer DeathAdder V2 X HyperSpeed", 0x1F, 0, 31_000, false),
         new(0x009E, "Razer Viper Mini SE", 0x1F, 0, 59_900, true), new(0x009F, "Razer Viper Mini SE", 0x1F, 0, 59_900, true),
         new(0x00A5, "Razer Viper V2 Pro", 0x1F, 0, 31_000, true), new(0x00A6, "Razer Viper V2 Pro", 0x1F, 0, 31_000, true),
@@ -281,6 +283,8 @@ public static class Razer
         new(0x0271, "Razer BlackWidow V3 Mini HyperSpeed", 0x9F, 3, 31_000, true, DeviceKind.Keyboard), new(0x0258, "Razer BlackWidow V3 Mini HyperSpeed", 0x1F, 3, 31_000, true, DeviceKind.Keyboard),
         new(0x02BA, "Razer BlackWidow V4 Mini HyperSpeed", 0x9F, 3, 31_000, true, DeviceKind.Keyboard), new(0x02B9, "Razer BlackWidow V4 Mini HyperSpeed", 0x1F, 3, 31_000, true, DeviceKind.Keyboard),
         new(0x02D5, "Razer BlackWidow V4 Tenkeyless HyperSpeed", 0x9F, 2, 31_000, true, DeviceKind.Keyboard), new(0x02D7, "Razer BlackWidow V4 Tenkeyless HyperSpeed", 0x1F, 3, 31_000, true, DeviceKind.Keyboard),
+        // The Joro keyboard, openrazer's keyboard driver (GPL; facts only): transaction 0x1F, its report on interface 3.
+        new(0x02CD, "Razer Joro", 0x1F, 3, 31_000, true, DeviceKind.Keyboard),
         // HaloBattery's razer.py (MIT): the Mouse Dock Pro (0x1F, OpenRazer's id), and the Pro Type Ultra's receiver (0x9F, its
         // level measured in #196). Neither's interface is documented: any (-1), the device's own collection first.
         new(0x00A4, "Razer Mouse Dock Pro", 0x1F, -1, 31_000, true), new(0x027B, "Razer Pro Type Ultra", 0x9F, -1, 31_000, true, DeviceKind.Keyboard),
@@ -310,8 +314,8 @@ public static class Dongles
     // K75 V2 sit behind the same 3554:FA09 receiver on the same frames. Its answer to 13 05 (13 05 01 00 0A, checksummed) names
     // the keyboard with six bytes at 5: the codes below, as vigil-watt measured them (aula.md, lingbao.md and mchose.md, MIT:
     // the F99 Pro, the K98 and the G75 Pro) and its table from M HUB lists the KX75's, and MouseDock (MIT) the K75 V2's (which
-    // it asks with 06 at 4; asked with 00 here, it may not answer with it). A code not known (the F87 Pro's and the F75's are
-    // not published) leaves the receiver's own name. The level comes in the push 13 0A 01 00 04 05 <percent> <flags> or the answer 13 4A 01 00 02
+    // it asks with 06 at 4; asked with 00 here, it may not answer with it). A code not known leaves the
+    // receiver's own name. The level comes in the push 13 0A 01 00 04 05 <percent> <flags> or the answer 13 4A 01 00 02
     // <percent> <flags>, every frame checksummed (byte 19 the low byte of the sum of the nineteen before it, MouseDock's check):
     // the flags' high nibble is charging (0x10 on the cable, measured on the F99 Pro), its low nibble full, which is not.
     public static readonly (byte[] Code, string Name)[] AulaModels =
@@ -321,6 +325,8 @@ public static class Dongles
         ([0x03, 0x00, 0x00, 0x00, 0x03, 0xA2], "KZZI K75 V2"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0xC7], "MCHOSE KX75"),
         // NaoCoding/ShowMeTheConnection's kzzi_k75_lite.py (MIT), from KZZI's own driver (asked with 06 at 4 there as well).
         ([0x03, 0x00, 0x00, 0x00, 0x01, 0x44], "KZZI K75 Lite"),
+        // KZZI's web driver's model table (its donglePassword values; names only).
+        ([0x03, 0x00, 0x00, 0x00, 0x03, 0xF3], "KZZI I98"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0x68], "KZZI I75"), ([0x03, 0x00, 0x00, 0x00, 0x03, 0xBB], "KZZI Z75"),
     ];
     private static bool AulaChecked(byte[] r)
     {
@@ -392,8 +398,17 @@ public static class Dongles
 
     // ATK's keyboards answer that same frame on the same page: the Z87 Pro's dongle (373B:1012, "ATK Z87 Dongle", usage page
     // 0xFF1C, usage 0x0092, 64-byte reports) answered 04 00 00 1A 06 00 00 00 5C ... to it on a keyboard at 92 %, which is what
-    // VgnBattery reads. Measured; the sibling keyboards of the family are not, so only this pair is sent to.
-    public static readonly (int Product, string Name)[] AtkKeyboards = [(0x1012, "ATK Z87 Pro")];
+    // VgnBattery reads. Measured. ATK HUB (bpcdn.atkgear.com/hub-v3, its "EVISION" keyboards) gives the same frame and page to
+    // its other keyboards' receivers, listed after it (not measured by us; the Z87 Pro's 1012 and 1013 serve as both a cable
+    // and a receiver in its table), and reads charging as 2 at 9 (AtkKeyboardBattery).
+    public static readonly (int Product, string Name)[] AtkKeyboards =
+    [
+        (0x1012, "ATK Z87 Pro"), (0x1013, "ATK Z87 Pro"), (0x1023, "YOGO Q75"), (0x1029, "VGN S87"), (0x10DA, "ATK TV88"), (0x118D, "ATK S99"),
+        (0x118F, "ATK S87"), (0x11FB, "ATK TV99"), (0x305F, "ATK V100"), (0x3060, "ATK V100 Pro"), (0x4288, "ATK TV108"),
+    ];
+    // The receivers ATK HUB adds (not the measured Z87 Pro's, which keeps VgnBattery): charging only as 2 at 9, and a level of 0
+    // (a keyboard away) is no reading.
+    public static BatteryRead? AtkKeyboardBattery(byte[] reply) => VgnBattery(reply) is { Percent: > 0 } read ? read with { Charging = reply[9] == 2 } : null;
     public static string? AtkKeyboard(int product)
     {
         foreach (var (id, name) in AtkKeyboards) if (id == product) return name;
@@ -407,6 +422,9 @@ public static class Dongles
 
     // VAXEE (VID 0x3057, usage page 0xFF05, feature 0x0E): 0E A5 0B 01 01; byte 5 is the level 0 to 20, five points each.
     public const int VaxeeVendor = 0x3057;
+    // The Pulsar X2 Wireless on 3710:9604, 5602 and 9605: Pulsar's web driver sends them to its "vMouse" page, which matches
+    // VAXEE's 3057 ids too and asks this same feature report on 0xFF05 (bbb.pulsar.gg). Not measured by us.
+    public static readonly int[] PulsarVaxeeProducts = [0x9604, 0x5602, 0x9605];
     public static byte[] VaxeeRequest(int length) { var frame = new byte[Math.Max(5, length)]; frame[0] = 0x0E; frame[1] = 0xA5; frame[2] = 0x0B; frame[3] = 0x01; frame[4] = 0x01; return frame; }
     public static BatteryRead? VaxeeBattery(byte[] reply) => reply.Length >= 6 && reply[0] == 0x0E && reply[5] <= 20 ? new(reply[5] * 5, Coarse: true) : null;
 
@@ -460,18 +478,88 @@ public static class Dongles
         // Ultralight (#290; 1B1C is Corsair's own id, which has other protocols, so the exact pair).
         (0x3554, 0xF5DF), (0x3554, 0xF5DE), (0x3554, 0xF5DC), (0x3554, 0xF505), (0x3554, 0xF506), (0x3554, 0xF5D5), (0x3554, 0xF55E),
         (0x3554, 0xF523), (0x3554, 0xF510), (0x3554, 0xF50F), (0x3770, 0x0300), (0x1B1C, 0x2B2A),
+        // The Sabre v2 Pro's other receivers, which OpenLinkHub reads as 2B2A (GPL; facts only; not measured by us).
+        (0x1B1C, 0x2B34), (0x1B1C, 0x2B35),
         // MouseDock's profiles verified upstream (MIT): the EWEADN Z7's receiver and the ATK Zero; and the two its reader
         // table gives the same frame (ATK 12E9, the LAMZU Crystal's F50D), not measured.
         (0x3554, 0xF517), (AtkVendor, 0x11D8), (AtkVendor, 0x12E9), (0x3554, 0xF50D),
     ];
-    public static bool IsCompxFramed(int vendor, int product) => CompxFramed.Contains((vendor, product));
+    private static readonly HashSet<(int, int)> CompxFramedSet = [.. CompxFramed];
+    public static bool IsCompxFramed(int vendor, int product) => CompxFramedSet.Contains((vendor, product));
+    // The pairs the brands' official web drivers (2026-11-15) read with this frame: their 17-byte 0xFF02 / usage 2 collection
+    // gets it, and, unlike the pairs above, their other collections go on to the rules after (an ATK mouse's 0xFF05 keeps the
+    // BitMouse read it was sent before these were listed).
+    public static readonly (int Vendor, int Product)[] CompxOfficial =
+    [
+        // Not measured by us. ATK HUB (bpcdn.atkgear.com/hub-v3): every ATK and VXE mouse and receiver it reads with this frame
+        // (its "COMPX" class), less the update-mode ids (3554:F2FF and F400 to F410, 373B:2xxx) and the A9 Ultra's pair
+        // CompxVerified sends to its own way.
+        (AtkVendor, 0x1014), (AtkVendor, 0x1016), (AtkVendor, 0x1017), (AtkVendor, 0x1018), (AtkVendor, 0x1019), (AtkVendor, 0x102F),
+        (AtkVendor, 0x1030), (AtkVendor, 0x103C), (AtkVendor, 0x103D), (AtkVendor, 0x103E), (AtkVendor, 0x1045), (AtkVendor, 0x104A),
+        (AtkVendor, 0x104B), (AtkVendor, 0x105B), (AtkVendor, 0x1065), (AtkVendor, 0x1066), (AtkVendor, 0x1067), (AtkVendor, 0x1068),
+        (AtkVendor, 0x1069), (AtkVendor, 0x106A), (AtkVendor, 0x1084), (AtkVendor, 0x1086), (AtkVendor, 0x1087), (AtkVendor, 0x10AC),
+        (AtkVendor, 0x10C8), (AtkVendor, 0x10CA), (AtkVendor, 0x10CB), (AtkVendor, 0x10CC), (AtkVendor, 0x10E7), (AtkVendor, 0x10E8),
+        (AtkVendor, 0x10E9), (AtkVendor, 0x10FD), (AtkVendor, 0x1106), (AtkVendor, 0x1107), (AtkVendor, 0x110D), (AtkVendor, 0x110E),
+        (AtkVendor, 0x1115), (AtkVendor, 0x1116), (AtkVendor, 0x1117), (AtkVendor, 0x111B), (AtkVendor, 0x1135), (AtkVendor, 0x113E),
+        (AtkVendor, 0x113F), (AtkVendor, 0x1149), (AtkVendor, 0x114A), (AtkVendor, 0x114B), (AtkVendor, 0x114C), (AtkVendor, 0x1157),
+        (AtkVendor, 0x1158), (AtkVendor, 0x1159), (AtkVendor, 0x115B), (AtkVendor, 0x115C), (AtkVendor, 0x115D), (AtkVendor, 0x115E),
+        (AtkVendor, 0x11A0), (AtkVendor, 0x11A6), (AtkVendor, 0x11A7), (AtkVendor, 0x11A9), (AtkVendor, 0x11AA), (AtkVendor, 0x11AB),
+        (AtkVendor, 0x11B3), (AtkVendor, 0x11C8), (AtkVendor, 0x11CC), (AtkVendor, 0x11CD), (AtkVendor, 0x11CE), (AtkVendor, 0x11CF),
+        (AtkVendor, 0x11D2), (AtkVendor, 0x11DD), (AtkVendor, 0x11E3), (AtkVendor, 0x11E5), (AtkVendor, 0x11E7), (AtkVendor, 0x11EC),
+        (AtkVendor, 0x11ED), (AtkVendor, 0x11F0), (AtkVendor, 0x11F2), (AtkVendor, 0x11F3), (AtkVendor, 0x11F4), (AtkVendor, 0x11F5),
+        (AtkVendor, 0x11F6), (AtkVendor, 0x11F7), (AtkVendor, 0x11F9), (AtkVendor, 0x11FD), (AtkVendor, 0x11FE), (AtkVendor, 0x1201),
+        (AtkVendor, 0x120A), (AtkVendor, 0x120B), (AtkVendor, 0x120D), (AtkVendor, 0x120E), (AtkVendor, 0x121F), (AtkVendor, 0x1230),
+        (AtkVendor, 0x1245), (AtkVendor, 0x1246), (AtkVendor, 0x1248), (AtkVendor, 0x1249), (AtkVendor, 0x124A), (AtkVendor, 0x124E),
+        (AtkVendor, 0x1256), (AtkVendor, 0x125A), (AtkVendor, 0x1266), (AtkVendor, 0x1269), (AtkVendor, 0x126C), (AtkVendor, 0x126D),
+        (AtkVendor, 0x126E), (AtkVendor, 0x126F), (AtkVendor, 0x1270), (AtkVendor, 0x1271), (AtkVendor, 0x1272), (AtkVendor, 0x1273),
+        (AtkVendor, 0x1274), (AtkVendor, 0x1279), (AtkVendor, 0x127A), (AtkVendor, 0x127C), (AtkVendor, 0x127E), (AtkVendor, 0x127F),
+        (AtkVendor, 0x1285), (AtkVendor, 0x1286), (AtkVendor, 0x1289), (AtkVendor, 0x128A), (AtkVendor, 0x128B), (AtkVendor, 0x128C),
+        (AtkVendor, 0x128D), (AtkVendor, 0x128E), (AtkVendor, 0x1292), (AtkVendor, 0x1296), (AtkVendor, 0x129B), (AtkVendor, 0x129C),
+        (AtkVendor, 0x129D), (AtkVendor, 0x12A2), (AtkVendor, 0x12A7), (AtkVendor, 0x12A8), (AtkVendor, 0x12AB), (AtkVendor, 0x12AF),
+        (AtkVendor, 0x12B0), (AtkVendor, 0x12B3), (AtkVendor, 0x12B4), (AtkVendor, 0x12BF), (AtkVendor, 0x12C6), (AtkVendor, 0x12CC),
+        (AtkVendor, 0x12D7), (AtkVendor, 0x12F7), (AtkVendor, 0x12F9), (AtkVendor, 0x12FA), (AtkVendor, 0x12FB), (AtkVendor, 0x12FF),
+        (AtkVendor, 0x1316), (AtkVendor, 0x131A), (AtkVendor, 0x132A), (AtkVendor, 0x132B), (AtkVendor, 0x133B), (AtkVendor, 0x1340),
+        (AtkVendor, 0x1341), (AtkVendor, 0x1342), (AtkVendor, 0x1358), (AtkVendor, 0x1359), (AtkVendor, 0x1363), (0x3554, 0xF50A), (0x3554, 0xF50B),
+        (0x3554, 0xF58D), (0x3554, 0xFB12),
+        // VGN HUB (hub.vgnlab.com): the Dragonfly and F-series mice and receivers on 0xFF02 / 2.
+        (0x3554, 0xF511), (0x3554, 0xFB51), (0x3554, 0xFB50), (0x3554, 0xFB49), (0x3554, 0xFB4A), (0x3554, 0xFB4B), (0x3554, 0xFB53),
+        (0x3554, 0xFB52), (0x3554, 0xFB55), (0x3554, 0xFB54), (0x3554, 0xFB58), (0x3554, 0xFB59), (0x391D, 0x1005), (0x391D, 0x1A05),
+        (0x391D, 0x101D), (0x391D, 0x1A1A), (0x391D, 0x1034), (0x391D, 0x1A2F), (0x391D, 0x1032), (0x391D, 0x102D), (0x391D, 0x1036),
+        (0x391D, 0x1A31), (0x391D, 0x1035), (0x391D, 0x1A30), (0x391D, 0x1038), (0x391D, 0x1A32), (0x391D, 0x1039), (0x391D, 0x1A33),
+        // Pulsar's web driver (bbb.pulsar.gg, its "cMouse" list; 3554:F40A there is an update-mode id and is left out, and so
+        // are 3710:F004 and F005, whose role no source says).
+        (0x3710, 0x5603), (0x3710, 0x5407), (0x3710, 0x5501), (0x3710, 0x5502), (0x3710, 0x5503), (0x3710, 0x5504), (0x3710, 0x3415),
+        (0x3710, 0x3501), (0x3710, 0x3502), (0x3710, 0x3503), (0x3710, 0x3504), (0x3710, 0x3505), (0x3710, 0x3506), (0x3710, 0x3507),
+        (0x3710, 0x3508), (0x3710, 0x3509), (0x3710, 0x3510), (0x3710, 0x3511), (0x3710, 0x3512), (0x3710, 0x3513), (0x3710, 0x3514),
+        (0x3710, 0x3515), (0x3710, 0x3516), (0x3710, 0x3517), (0x3710, 0x3518), (0x3710, 0x3519), (0x3710, 0x3520), (0x3710, 0x3521),
+        (0x3710, 0x3522), (0x3710, 0x3523), (0x3710, 0x3524), (0x3710, 0x3525), (0x3710, 0x3526), (0x3710, 0x3527), (0x3710, 0x3528),
+        (0x3710, 0x3529), (0x3710, 0x7501), (0x3710, 0x7502), (0x3710, 0x7503), (0x3710, 0x7504), (0x3710, 0x7505), (0x3710, 0x7506),
+        (0x3710, 0x7507), (0x3710, 0x7508), (0x3710, 0x7509), (0x3710, 0x7510), (0x3710, 0x9502), (0x3710, 0x9601), (0x3710, 0x7601),
+        (0x3710, 0x3601), (0x3710, 0x5601), (0x3710, 0x7602), (0x3710, 0x7604), (0x3710, 0x3603),
+        (0x3710, 0x7603), (0x3710, 0x9503), (0x3710, 0x3611), (0x3710, 0x3604), (0x3710, 0x3605), (0x3710, 0x3606), (0x3710, 0x3607),
+        (0x3710, 0x3608), (0x3710, 0x3609), (0x3710, 0x3612), (0x3710, 0x3613), (0x3710, 0x3614), (0x3710, 0x3615), (0x3710, 0x3618),
+        (0x3710, 0x3619), (0x3710, 0x3610), (0x3710, 0x7605),
+        // Scyrox (F5F4 receiver, F515 cable), Attack Shark (FB43, FB44 receivers, F50E, F516 cables; the keyboard receiver F809,
+        // which DELUX's driver also lists), EWEADN's "jiangmeng" mice (F59F to F5B5 the X23 Max, FB35 to FB48 the S9 and A8,
+        // FB5E and FB5F the EXX Alpha6), AJAZZ's (F564, F567, F545 receivers, F566, F546 cables), DELUX's (FB26 and FB23
+        // receivers, FB25 cable) and DAREU's receivers.
+        (0x3554, 0xF5F4), (0x3554, 0xF515), (0x3554, 0xFB43), (0x3554, 0xFB44), (0x3554, 0xF50E), (0x3554, 0xF516), (0x3554, 0xF809),
+        (0x3554, 0xF59F), (0x3554, 0xF5A0), (0x3554, 0xF5B2), (0x3554, 0xF5B3), (0x3554, 0xF5B5), (0x3554, 0xFB35), (0x3554, 0xFB36),
+        (0x3554, 0xFB45), (0x3554, 0xFB47), (0x3554, 0xFB48), (0x3554, 0xFB5E), (0x3554, 0xFB5F), (0x3554, 0xF564), (0x3554, 0xF567),
+        (0x3554, 0xF545), (0x3554, 0xF566), (0x3554, 0xF546), (0x3554, 0xFB26), (0x3554, 0xFB23), (0x3554, 0xFB25), (0x260D, 0x1108),
+        (0x260D, 0x1114), (0x260D, 0x1115), (0x260D, 0x1135), (0x260D, 0x1156), (0x260D, 0x1163), (0x260D, 0x1219), (0x260D, 0x1227),
+        (0x260D, 0x1238), (0x260D, 0x1246), (0x260D, 0x1257), (0x260D, 0x1258), (0x260D, 0x1261), (0x260D, 0x1288), (0x260D, 0x1333),
+    ];
+    private static readonly HashSet<(int, int)> CompxOfficialSet = [.. CompxOfficial];
+    public static bool IsCompxOfficial(int vendor, int product) => CompxOfficialSet.Contains((vendor, product));
     // G-Wolves' shared 8K receiver and the Lycan on its cable belong to the 0x83 family (F83Models), but a unit without that
     // feature report answers this frame on its 17-byte collection instead (HaloBattery's pulsar.py, measured on a WARG's
     // receiver, #297; Fan4Metal's mouse_tray lists the pair for it, facts only). Asked only where the 0x83 exchange has no
     // collection, so neither family takes a collection the other does.
     public static readonly (int Vendor, int Product)[] CompxBesideF83 = [(GwolvesVendor, 0x3854), (GwolvesVendor, 0x4719)];
     // The keyboards among them (the Teevolution Terra Pro's receiver); the rest are mice.
-    public static DeviceKind CompxKind(int vendor, int product) => (vendor, product) == (0x3554, 0xF523) ? DeviceKind.Keyboard : DeviceKind.Mouse;
+    // F809, Attack Shark's and DELUX's keyboard receiver, is one too.
+    public static DeviceKind CompxKind(int vendor, int product) => (vendor, product) is (0x3554, 0xF523) or (0x3554, 0xF809) ? DeviceKind.Keyboard : DeviceKind.Mouse;
     public static bool CompxFramedCollection(int usagePage, int usage, int inputLength, int outputLength)
         => usagePage == 0xFF02 && usage == 0x0002 && inputLength == 17 && outputLength == 17;
     // A reply counts only when its checksum holds and it answers command 0x04: the receivers push 0x03 frames of their own on
@@ -533,8 +621,9 @@ public static class Dongles
     // the collection whose feature report is exactly 65 bytes, as its web driver picks it.
     public enum F83Exchange { New, Old }
     // Receiver: for a mouse on its cable, the product of its receiver (Twins).
+    // BrandOnly: Name is the brand alone (the model unknown), so the product string names the device where it has one.
     public sealed record F83Model(int Vendor, int Product, string Name, bool Cable, F83Exchange Exchange = F83Exchange.New, bool Strict = false,
-        bool Clamp = false, int Interface = -1, int Receiver = -1);
+        bool Clamp = false, int Interface = -1, int Receiver = -1, bool BrandOnly = false);
     public const int WlmouseVendor = 0x36A7, GwolvesVendor = 0x33E4;
     public static readonly IReadOnlyList<F83Model> F83Models = BuildF83();
     private static List<F83Model> BuildF83()
@@ -555,6 +644,15 @@ public static class Dongles
             // The shared 8K receiver does not say which mouse is behind it.
             new(GwolvesVendor, 0x3854, "G-Wolves", false, Strict: true),
         };
+        // LAMZU's other receivers (the 4K and 8K ones, and the 1K ones 37B0:000B to 002B and 373E:001D), from LAMZU's web driver
+        // (its 0x83 class), on interface 2 as the Maya X and Inca; not measured by us.
+        // Left out: 000C (the Tachi's, which HaloBattery took off its list), and 0048 and 0054 (the LM20 receivers, whose
+        // firmware-update mode keeps the same id, so a receiver being updated would be asked).
+        foreach (var product in new[] { 0x0015, 0x000E, 0x001B, 0x0023, 0x001E, 0x0027, 0x002A, 0x002E, 0x0032, 0x0036, 0x003B, 0x003F,
+            0x000B, 0x000F, 0x0013, 0x000D, 0x0019, 0x0003, 0x002B })
+            models.Add(new(0x37B0, product, "LAMZU", false, Interface: 2, BrandOnly: true));
+        models.Add(new(0x373E, 0x0016, "LAMZU", false, Interface: 2, BrandOnly: true));
+        models.Add(new(0x373E, 0x001D, "LAMZU", false, Interface: 2, BrandOnly: true));
         // The mice on the shared receiver, on their cables (G-Wolves' web driver's PIDWired).
         foreach (var (product, name) in new[] { (0x5418, "HTS Plus"), (0x5419, "HTS Plus"), (0x5219, "HTS Plus Pro"), (0x4718, "Lycan"), (0x4719, "Lycan"),
             (0x5618, "HTXU"), (0x5619, "HTXU"), (0x3619, "Fenrir Pro"), (0x3519, "Fenrir Asym"), (0x2719, "HTX Mini"), (0x4219, "WARG") })
@@ -658,17 +756,20 @@ public static class Dongles
 
     // MCHOSE's own vendor id 0x3837 carries several chips, each with its own read: the 7 series' RealTek exchange above, the
     // status read on output report 0x55 that M HUB (MCHOSE's driver) uses for its newer devices, M HUB's framed read for its
-    // headsets on the same report, the 0x4D frame of the web driver's mice, and the Gmouse query. Which one a model speaks is
+    // headsets on the same report, the 0x4D frame of the web driver's mice, the Gmouse query, the configuration read of the
+    // keyboards on the 3033 receiver (MchoseConfig), the battery command of the G98 V3 and K87 V3 (MchoseQhw) and the 13 4A read
+    // of M HUB's "BY" keyboards (MchoseKeyboardRequest). Which one a model speaks is
     // not something a receiver can be asked, so it is not looked up by model: each read goes only to the collection shape its
     // source documents and only where the collection declares the read's report id, the kind (MchoseKind) decides the
     // order (the reads measured on hardware first), and a reply counts only when it has that read's exact shape. The read
     // that answers is kept for the device (HidBatteries), and the others are no longer sent to it. 0x3837 is
     // MCHOSE's alone, so every firmware behind it is MCHOSE's; the chip makers' and shared ids keep their lists (Gmouse's
     // 0xA8A5, the A5 Pro Max's 0x2023, the 41E4 keyboards), and 0x5253 gets the RealTek exchange only.
-    public enum MchoseRead { Realtek, Status, Audio, Frame4D, Gmouse }
+    public enum MchoseRead { Realtek, Status, Audio, Frame4D, Gmouse, Config, Qhw, By }
     // The kind by the name, else for the products whose name does not say it: the V9 Turbo's dongle and headset and the X9
-    // headset, and the G98 V3 keyboard (which does not answer the RealTek exchange, HaloBattery #362). The MagDock (1012) is
-    // sent nothing.
+    // headset, the G98 V3 keyboard (which does not answer the RealTek exchange, HaloBattery #362) and the keyboards' 3033
+    // receiver and their cables, whose names do not say it, and M HUB's BY keyboard on 201B. The MagDock (1012) and the ids M
+    // HUB lists in firmware-update mode (MchoseUpdateProducts) are sent nothing.
     // The V9 Turbo headset's dock (6009), V9 Turbo (600D), V9 Pro 2 (6011) and R9 (6013) are headsets and the K20 Pro (6003),
     // K20 (60C4) and K20 GT (60C6) speakers, by wzk112/MchoseHub's device catalog (no license; the ids only).
     // Legacy: without those hints, as the device keys were made before them (a key keeps its prefix).
@@ -679,7 +780,8 @@ public static class Dongles
         0x6008 or 0x600A or 0x6045 => DeviceKind.Headphones,
         0x6009 or 0x600D or 0x6011 or 0x6013 when !legacy => DeviceKind.Headphones,
         0x6003 or 0x60C4 or 0x60C6 when !legacy => DeviceKind.Speaker,
-        0x1015 => DeviceKind.Keyboard,
+        0x1015 or 0x2023 or 0x2025 or 0x201B => DeviceKind.Keyboard,
+        _ when MchoseConfigProducts.Contains(product) => DeviceKind.Keyboard,
         _ => null
     };
     // outputIds, featureIds: the report ids the collection declares; null where they are not known (Find, which only decides
@@ -687,7 +789,14 @@ public static class Dongles
     public static IReadOnlyList<MchoseRead> MchoseReads(int product, string name, int usagePage, int usage, int featureLength, int outputLength,
         IReadOnlySet<byte>? outputIds = null, IReadOnlySet<byte>? featureIds = null)
     {
-        MchoseRead[] order = MchoseKind(product, name) switch
+        // The keyboards whose read the web driver gives get that read alone: their other vendor collections are for firmware
+        // updates (the cables' 0xFF00) or unknown, and are sent nothing. The G98 V3 and K87 V3 keep the status read they were
+        // asked before, after it.
+        MchoseRead[] order = MchoseUpdateProducts.Contains(product) ? []
+            : MchoseConfigProducts.Contains(product) ? [MchoseRead.Config]
+            : MchoseQhwProducts.Contains(product) ? [MchoseRead.Qhw, MchoseRead.Status]
+            : product == 0x201B ? [MchoseRead.By]
+            : MchoseKind(product, name) switch
         {
             DeviceKind.Mouse => [MchoseRead.Realtek, MchoseRead.Frame4D, MchoseRead.Gmouse, MchoseRead.Status],
             DeviceKind.Keyboard => [MchoseRead.Status],
@@ -702,8 +811,66 @@ public static class Dongles
             MchoseRead.Status or MchoseRead.Audio => usagePage >= 0xFF00 && outputLength >= 64 && Output(0x55),
             MchoseRead.Frame4D => usagePage is 0xFF01 or 0xFF0B && usage != 0x0010 && Output(0x4D),
             MchoseRead.Gmouse => usagePage == 0xFF01 && usage == 0x0010 && outputLength >= 65 && Output(0x00),
+            MchoseRead.Config => MchoseConfigProducts.Contains(product) && usagePage == 0x0001 && usage == 0x0000 && outputLength >= 65 && Output(0x00),
+            MchoseRead.Qhw => MchoseQhwProducts.Contains(product) && !name.Contains("CH585", StringComparison.OrdinalIgnoreCase)
+                && usagePage == 0xFF80 && usage == 0x0001 && outputLength >= 9 && Output(0x4D),
+            MchoseRead.By => product == 0x201B && usagePage == 0xFF02 && outputLength >= 20 && Output(0x13),
             _ => false
         })];
+    }
+
+    // MCHOSE's keyboards on the 2.4 GHz receiver 3837:3033 and on their cables (K87S 200E, G87 V2 2015, K99 V3 2020, G75 V2
+    // 2021, the driver's table giving the cables the same collection and battery feature): the K87S, G87 V2, K99 V3 and G75
+    // V2, the receiver's told apart by the product string. The cables' 0xFF00 collection is only for firmware updates and is
+    // never sent to. The vendor's web driver (mchose.com.cn/cizhou) lists them so and gives the battery to these four among its
+    // keyboards; it speaks to the collection on usage page 1, usage 0, with 64-byte reports and no report id, in frames
+    // 55 <command> 00 <sum> <size> <offset low> <offset high> 00 <data>, answered AA <command> 00 <sum> <size> <offset low>
+    // <offset high> 00 <data>, the sum being the low byte of every byte after it. Command 05 reads the function configuration,
+    // 64 bytes a profile, whose byte 32 holds the level in its low seven bits and charging in bit 7. Asked here as the driver
+    // asks on connecting: profile 0's first 56 bytes (55 05 00 38 38 00 00 00), the level then at 8 + 32 of the answer.
+    // Measured on a K87S (#291): 0x35 on battery and 0xB5 charging at 53 %, 0x42 and 0xC2 at 66 %, the same in profiles 0 and
+    // 1 whichever is active, the sum holding on every answer. The keyboard also sends FA FB 07 <level> <charging> unasked, but
+    // only when its charging changes (nothing else in half an hour there), so it is asked. The 4D frames do not reach these
+    // keyboards (nothing answered there). A level of 0 is no reading.
+    // The ids M HUB's tables give devices in firmware-update mode (the keyboards' boot ids, the Qhw keyboards' 1017, 2024 and
+    // 2026, the 0xFF00 update collections' 200F to 303D): never sent to, whatever their collections.
+    public static readonly IReadOnlySet<int> MchoseUpdateProducts = new HashSet<int>
+        { 0x1017, 0x2024, 0x2026, 0x200F, 0x2010, 0x2019, 0x201F, 0x2022, 0x3009, 0x300B, 0x3014, 0x3027, 0x3029, 0x3034, 0x303D, 0x301F };
+    public const int MchoseConfigReceiver = 0x3033;
+    public static readonly IReadOnlySet<int> MchoseConfigProducts = new HashSet<int> { MchoseConfigReceiver, 0x200E, 0x2015, 0x2020, 0x2021 };
+    public static byte[] MchoseConfigRequest()
+    {
+        var frame = new byte[65];
+        new byte[] { 0x00, 0x55, 0x05, 0x00, 0x38, 0x38, 0x00, 0x00, 0x00 }.CopyTo(frame, 0);
+        return frame;
+    }
+    public static BatteryRead? MchoseConfig(byte[] r)
+    {
+        if (r.Length < 41 || r[0] != 0xAA || r[1] != 0x05 || r[5] != 0x00 || r[6] != 0x00) return null;
+        int size = r[4];
+        if (size is < 33 or > 0x38 || r.Length < 8 + size) return null;
+        int sum = 0;
+        for (int i = 4; i < 8 + size; i++) sum += r[i];
+        if (r[3] != (byte)sum) return null;
+        int level = r[40] & 0x7F;
+        return level is > 0 and <= 100 ? new(level, (r[40] & 0x80) != 0) : null;
+    }
+
+    // The G98 V3 and K87 V3 on their receiver 3837:1015 and cables 2025 and 2023: the web driver's "Qhw" channel (mchose.com.cn/
+    // cizhou), output report 0x4D on usage page 0xFF80, usage 1, packets of 31 bytes after the id: version 01, flags 03, the
+    // data's length, the command (low byte first), a business code 00, a sequence number, the data, and the XOR of every byte
+    // from the flags on. Its getBattery is command 0x0904 with no data: 4D 01 03 00 04 09 00 00 0E. The answer has the same
+    // header (the driver matches version, flags, command, code and sequence), its data at 8: the charge status (0 on battery,
+    // 1 charging, 2 full) and the level. Not measured by us. The same ids in firmware-update mode are named "CH585" and are
+    // never sent to; the driver's 1017, 2024 and 2026 are update modes too and not in the list. The 4D frame that enters update
+    // mode (AA 55 AA 55 AA 55) is never sent. A level of 0 is no reading.
+    public static readonly IReadOnlySet<int> MchoseQhwProducts = new HashSet<int> { 0x1015, 0x2025, 0x2023 };
+    public static byte[] MchoseQhwRequest() => [0x4D, 0x01, 0x03, 0x00, 0x04, 0x09, 0x00, 0x00, 0x0E];
+    public static BatteryRead? MchoseQhw(byte[] r)
+    {
+        if (r.Length < 10 || r[0] != 0x4D || r[1] != 0x01 || r[2] != 0x03 || r[4] != 0x04 || r[5] != 0x09 || r[6] != 0x00 || r[7] != 0x00 || r[3] < 2) return null;
+        int level = r[9];
+        return level is > 0 and <= 100 && r[8] <= 2 ? new(level, r[8] == 1) : null;
     }
 
     // The status read on report 0x55: 55 65 01, zeros to 64 bytes, answered by 55 65 <level> <state>, the state 2 on battery,
@@ -755,6 +922,9 @@ public static class Dongles
     // The A5 V2 Ultra on its cable, 41E4:1101: the RealTek exchange on its 0xFF01 collection (WanCixiong/MCHOSE-Tray-Indicator,
     // MIT, measured; its receiver is 3837:100C).
     public const int MchoseA5Cable = 0x1101;
+    // MCHOSE's second 4K receiver on 41E4:1102 (the web driver's ryMouseFilters and its "4k_v2_dongle" firmware for 0x1102, the
+    // receiver 3837:100C also is): the same RealTek exchange on 0xFF01.
+    public const int MchoseRealtekV2Receiver = 0x1102;
     public static byte[] MchoseKeyboardRequest()
     {
         var frame = new byte[20]; frame[0] = 0x13; frame[1] = 0x4A; frame[2] = 0x01;
@@ -778,6 +948,22 @@ public static class Dongles
         => vendor == 0xA8A4 && product == 0x2255 && name.Trim() is var trimmed
         && (trimmed.Equals("MCHOSE G7", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("MCHOSE G7 Pro", StringComparison.OrdinalIgnoreCase));
     public static byte[] GmouseRequest() { var frame = new byte[65]; new byte[] { 0x00, 0x55, 0x30, 0xA5, 0x0B, 0x2E, 0x01, 0x01, 0x01 }.CopyTo(frame, 0); return frame; }
+    // The VGN N87 keyboard on the same receiver A8A5:2255 and on its cable A8A4:2355 (VGN HUB's table: the 0xFF01 / 0x10
+    // collection of interface 2, report 0xF0): its "yjx" protocol, a 63-byte output report F0 <command> 02 <check> <length>
+    // <address, 2> 00 <data>, the check the low byte of the sum of every byte from the length on (set in answers that carry
+    // data). getBattery is command 0x30 with a length of 2: F0 30 02 00 02 00 00 00; the answer F0 30 02 <check> <length> ..
+    // <level> <charging 1> from 8. The Gmouse query goes only where the collection declares report 0, the N87's only where it
+    // declares 0xF0. Not measured by us.
+    public static readonly (int Vendor, int Product) N87Cable = (0xA8A4, 0x2355);
+    public static readonly (int Vendor, int Product)[] N87Ids = [(0xA8A5, 0x2255), N87Cable];
+    public static byte[] N87Request() => BrandFamilies.Frame(64, 0xF0, 0x30, 0x02, 0x00, 0x02);
+    public static BatteryRead? N87Battery(byte[] r)
+    {
+        if (r.Length < 10 || r[0] != 0xF0 || r[1] != 0x30 || r[2] != 0x02 || r[4] is < 2) return null;
+        int sum = 0; for (int i = 4; i < r.Length && i < 64; i++) sum += r[i];
+        if (r[3] != (byte)sum) return null;
+        return r[8] is > 0 and <= 100 ? new(r[8], r[9] == 1) : null;
+    }
     // A level of 0 is the placeholder of an answer not ready yet (vigil-watt's MchoseGmouseCodec.cs), no reading.
     public static BatteryRead? GmouseBattery(byte[] reply)
     {
@@ -1012,7 +1198,7 @@ public static class Dongles
     public enum Protocol
     {
         BitMouse, Compx, Vgn, Endgame, Vaxee, Inphic, Mchose, Ajazz, CompxFramed, F83, Nordic, MchoseRealtek, Gmouse, Lingbao, Nzxt, Cherry, Hecate,
-        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit
+        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial
     }
 
     // The Compx receivers atkctl documents (the ATK A9 Ultra), by vendor, product and usage page.
@@ -1037,18 +1223,22 @@ public static class Dongles
         if (vendor == AulaVendor && product == AulaF87Pro)
             return usagePage == 0xFF02 && usage == 0x0002 && inputLength == 20 && outputLength == 20 && featureLength == 0 && (outputIds is null || outputIds.Contains(0x13)) ? Protocol.Aula : null;
         if (IsCompxFramed(vendor, product)) return CompxFramedCollection(usagePage, usage, inputLength, outputLength) ? Protocol.CompxFramed : null;
+        if (IsCompxOfficial(vendor, product) && CompxFramedCollection(usagePage, usage, inputLength, outputLength)) return Protocol.CompxFramed;
         if (F83Find(vendor, product) is { } f83)
             return F83Collection(f83, iface, usagePage, featureLength) ? Protocol.F83
                 : CompxBesideF83.Contains((vendor, product)) && CompxFramedCollection(usagePage, usage, inputLength, outputLength) ? Protocol.CompxFramed : null;
-        if (Gmouse.Contains((vendor, product)) || GmouseNamed(vendor, product, productName))
-            return usagePage == 0xFF01 && usage == 0x0010 && outputLength >= 65 && (outputIds is null || outputIds.Contains(0x00)) ? Protocol.Gmouse : null;
+        if (Gmouse.Contains((vendor, product)) || GmouseNamed(vendor, product, productName) || (vendor, product) == N87Cable)
+            return usagePage == 0xFF01 && usage == 0x0010
+                && (outputLength >= 65 && (outputIds is null || outputIds.Contains(0x00)) && (vendor, product) != N87Cable
+                    || N87Ids.Contains((vendor, product)) && outputLength >= 64 && outputIds?.Contains(0xF0) == true)
+                ? Protocol.Gmouse : null;
         if (CompxSplitFind(vendor, product) is not null) return CompxSplitCommand(usagePage, usage, featureLength) ? Protocol.CompxSplit : null;
         if (vendor == NordicVendor && NinjutsoProducts.Contains(product)) return usagePage == 0xFFA0 && featureLength >= 32 ? Protocol.Nordic : null;
         // MCHOSE: on 0x5253 the 7 series' exchange on its configuration collection; on 0x3837 whichever of the brand's reads
         // the collection's shape takes (MchoseReads).
         if (vendor == MchoseRealtek) return usagePage == 0xFF01 && featureLength >= 21 ? Protocol.MchoseRealtek : null;
         if (vendor == MchoseVendor) return MchoseReads(product, productName, usagePage, usage, featureLength, outputLength).Count > 0 ? Protocol.Mchose : null;
-        if (vendor == MchoseKeyboardVendor && product == MchoseA5Cable) return usagePage == 0xFF01 && featureLength >= 21 ? Protocol.MchoseRealtek : null;
+        if (vendor == MchoseKeyboardVendor && product is MchoseA5Cable or MchoseRealtekV2Receiver) return usagePage == 0xFF01 && featureLength >= 21 ? Protocol.MchoseRealtek : null;
         if (vendor == MchoseKeyboardVendor && product == MchoseKeyboardReceiver)
             return usagePage == 0xFF02 && inputLength >= 20 && outputLength >= 20 && (outputIds is null || outputIds.Contains(0x13)) ? Protocol.MchoseKeyboard : null;
         if (vendor == 0x3151 && product == 0x402D) return iface == 2 && usagePage == 0xFFFF && usage == 0x0002 && featureLength == 65 ? Protocol.Lingbao : null;
@@ -1059,13 +1249,18 @@ public static class Dongles
         if (SteelSeriesMice.Find(vendor, product) is { } mouse) return SteelSeriesMice.Collection(mouse, iface, usagePage, outputLength) ? Protocol.SteelSeries : null;
         if (vendor == RapooVendor && RapooGen1Products.Contains(product)) return usagePage >= 0xFF00 && outputLength >= 33 ? Protocol.RapooGen1 : null;
         if (vendor == AtkVendor && usagePage == 0xFF05) return Protocol.BitMouse;
+        // ATK's N9 Pro and N9 Ultra: their consumer collection (the one ATK HUB lists them by) only finds the device; nothing is
+        // sent to it, the battery being read on the device's serial port (AtkHeadsets.SerialRequest).
+        if (vendor == AtkVendor && AtkHeadsets.SerialProducts.Any(p => p.Product == product))
+            return usagePage == 0x000C && usage == 0x0001 ? Protocol.AtkSerial : null;
         if (CompxVerified.Contains((vendor, product, usagePage))) return Protocol.Compx;
         if (vendor == VgnVendor && usagePage == 0xFF1C && product == 0x5088) return Protocol.Vgn;
-        // ATK's keyboards on the same page, answered with VGN's frame (AtkKeyboards): only a product measured here, and only its
-        // keyboard collection.
+        // ATK's keyboards on the same page, answered with VGN's frame (AtkKeyboards): the measured Z87 Pro and the receivers ATK
+        // HUB lists, and only their keyboard collection.
         if (vendor == AtkVendor && AtkKeyboard(product) is not null) return usagePage == 0xFF1C && usage == 0x0092 && outputLength >= 64 ? Protocol.Vgn : null;
         if (vendor == EndgameVendor && usagePage == 0xFF01) return Protocol.Endgame;
         if (vendor == VaxeeVendor && usagePage == 0xFF05) return Protocol.Vaxee;
+        if (vendor == 0x3710 && PulsarVaxeeProducts.Contains(product)) return usagePage == 0xFF05 && featureLength >= 6 ? Protocol.Vaxee : null;
         if (vendor == InphicVendor && product is 0x5B2E or 0x5B2F && featureLength >= 33) return Protocol.Inphic;
         // The 2.4 GHz receiver's product is not fixed (InphicBatteryTray): only its vendor collection.
         if (vendor == InphicWireless && usagePage >= 0xFF00 && featureLength >= 33) return Protocol.Inphic;
@@ -1110,6 +1305,8 @@ public static class Asus
         new(0x19F4, "TUF Gaming M4 Wireless", Family.Mouse, 0), new(0x1A8D, "TX Gaming Mouse", Family.Mouse, 0),
         new(0x1AF5, "TX Gaming Mini", Family.Mouse, 0), new(0x1AF3, "TX Gaming Mini", Family.Mouse, 0),
         new(0x1C57, "TUF Gaming Mini Miku", Family.Mouse, 0), new(0x1C56, "TUF Gaming Mini Miku", Family.Mouse, 0),
+        // HaloBattery's asus.py (MIT): the TX Gaming Mouse Mini Miku on the mice's frame; not measured by us.
+        new(0x1C5A, "TX Gaming Mouse Mini Miku", Family.Mouse, 0),
         new(0x1C69, "ROG Harpe II Ace", Family.Mouse, 0), new(0x1AD0, "ROG Harpe II Ace", Family.Mouse, 2, ReportId: 0x03, Collection: 3),
         new(0x1B16, "ROG Keris II Ace", Family.Mouse, 0), new(0x1C0C, "ROG Keris II Origin", Family.Mouse, 0), new(0x1D4C, "ROG Keris II Origin KJP", Family.Mouse, 0),
         new(0x1A24, "ASUS MD200", Family.Mouse, 2), new(0x1CD3, "ASUS MD301", Family.Mouse, 3), new(0x1CD5, "ASUS MD301", Family.Mouse, 3),
@@ -1434,11 +1631,29 @@ public static class Corsair
         new(0x2B07, "Corsair K65 PLUS Wireless", DeviceKind.Keyboard, false), new(0x1BDC, "Corsair M75 Wireless", DeviceKind.Mouse, false),
         new(0x2A08, "Corsair Void v2 Wireless", DeviceKind.Headphones, true, Session: true), new(0x2A02, "Corsair Virtuoso Max Wireless", DeviceKind.Headphones, true, Session: true),
         new(0x0A97, "Corsair HS80 Max Wireless", DeviceKind.Headphones, true, Session: true),
+        // Not measured by us. Corsair's other SLIPSTREAM receivers, which OpenLinkHub (GPL; facts only) and ckb-next (GPL) read
+        // the same way as 1B7F, route 9 on the report-id-0 frame: the general receivers 1BA6 and 2B00 (any Slipstream device may
+        // be paired, so the kind is not known), the Harpoon's 1B65, the Dark Core RGB Pro's 1B81, the Ironclaw's 1B66 and the
+        // K57's 1B62; the receiver's own name is shown where it has one. The first Virtuoso RGB Wireless's receivers (0A42,
+        // 0A44), as the Virtuoso SE; the headset dongle 0A73 OpenLinkHub reads for the HS80 RGB and the Virtuoso alike; the
+        // HS80 RGB Wireless's receiver 0A6B and cable 0A69, on the
+        // same frame (HaloBattery's corsair.py, MIT, after ST1CKEL/HS80_Control's measurement); and the Virtuoso Max, HS80 Max
+        // and Void Max ids OpenLinkHub reads with the Void v2 family (2A03, 2A0F, 2A0C, 2A05, 2A12).
+        new(0x1BA6, "Corsair Slipstream Wireless", DeviceKind.Other, false), new(0x2B00, "Corsair Slipstream Wireless", DeviceKind.Other, false),
+        new(0x1B65, "Corsair Harpoon RGB Wireless", DeviceKind.Mouse, false), new(0x1B81, "Corsair Dark Core RGB Pro", DeviceKind.Mouse, false),
+        new(0x1B66, "Corsair Ironclaw RGB Wireless", DeviceKind.Mouse, false), new(0x1B62, "Corsair K57 RGB Wireless", DeviceKind.Keyboard, false),
+        new(0x0A42, "Corsair Virtuoso RGB Wireless", DeviceKind.Headphones, true), new(0x0A44, "Corsair Virtuoso RGB Wireless", DeviceKind.Headphones, true),
+        new(0x0A73, "Corsair Wireless Headset", DeviceKind.Headphones, true),
+        new(0x0A6B, "Corsair HS80 RGB Wireless", DeviceKind.Headphones, true),
+        new(0x0A69, "Corsair HS80 RGB Wireless", DeviceKind.Headphones, true, Cable: true, Receiver: 0x0A6B),
+        .. new[] { 0x2A03, 0x2A0F, 0x2A0C, 0x2A05, 0x2A12 }.Select(product => new Model(product, "Corsair Wireless Headset", DeviceKind.Headphones, true, Session: true)),
     ];
     public static Model? Find(int vendor, int product) => vendor == Vendor ? Catalog.FirstOrDefault(model => model.Product == product) : null;
-    // The charge state (0x10) is asked only of the Virtuoso SE and XT, as corsair.py limits it; the Void v2 family's answer
-    // has no charging flag there and HeadsetControl does not ask it, so those are not asked something no source has seen.
-    public static bool AsksCharging(Model model) => model.Bare && model.Product is 0x0A40 or 0x0A3E or 0x0A3D or 0x0A64 or 0x0A62;
+    // The charge state (0x10) is asked only of the Virtuoso SE and XT (and the first Virtuoso RGB Wireless's receivers, the
+    // same headset family), as corsair.py limits it; the Void v2 family's answer has no charging flag there and HeadsetControl
+    // does not ask it, so those are not asked something no source has seen. A cable model not asked (the HS80 RGB's) is
+    // charging while its level is read: corsair.py takes it so, the protocol carrying no flag.
+    public static bool AsksCharging(Model model) => model.Bare && model.Product is 0x0A40 or 0x0A3E or 0x0A3D or 0x0A64 or 0x0A62 or 0x0A42 or 0x0A44;
     // The receiver's vendor collections, usage 1 first.
     public static bool Collection(int usagePage) => usagePage == 0xFF42;
     public static IReadOnlyList<byte> Routes(Model model) => model.Cable ? [RouteReceiver, RouteDevice] : model.Product is 0x0A3E or 0x0A64 ? [RouteDevice, RouteReceiver] : [RouteDevice];
@@ -1452,16 +1667,21 @@ public static class Corsair
     }
     // The value of a get answer; null for anything else (the receiver's device list, notices, the heartbeats' answers that
     // do not match every field).
-    public static int? Value(byte[] reply)
+    // route: the route the question went to. An answer through the receiver's own route (8) is taken only for a question asked
+    // there: anything else answered by the receiver itself (its firmware, its own properties) is not the device's.
+    public static int? Value(byte[] reply, byte route = RouteDevice)
     {
         var r = reply.Length >= 65 && reply[0] == 0x00 ? reply[1..] : reply;
         if (r.Length < 5 || r[0] != 0x01) return null;
         if (r[1] == 0x02 && r[2] == 0x00) return r[3] | r[4] << 8;
         if (r.Length >= 6 && r[1] == 0x01 && r[2] == 0x02 && r[3] == 0x00) return r[4] | r[5] << 8;
+        // The answer through the receiver's own route (8, a headset on its cable): 01 00 02 00 <low> <high>, the route less 8 at
+        // 1 (HaloBattery's corsair.py, from the HS80's measurement, the only place it takes it).
+        if (route == RouteReceiver && r.Length >= 6 && r[1] == 0x00 && r[2] == 0x02 && r[3] == 0x00) return r[4] | r[5] << 8;
         return null;
     }
-    public static int? Percent(byte[] reply) => Value(reply) is int value and > 0 and <= 1000 ? value / 10 : null;
-    public static bool? Charging(byte[] reply) => Value(reply) switch { 1 => true, 2 => false, _ => null };
+    public static int? Percent(byte[] reply, byte route = RouteDevice) => Value(reply, route) is int value and > 0 and <= 1000 ? value / 10 : null;
+    public static bool? Charging(byte[] reply, byte route = RouteDevice) => Value(reply, route) switch { 1 => true, 2 => false, _ => null };
     // How long an answer may take: the first ask, then the confirming one (the device is awake by then), and the whole
     // reading of one receiver.
     public const int AskMs = 6000, ConfirmMs = 3000, BudgetMs = 7000;

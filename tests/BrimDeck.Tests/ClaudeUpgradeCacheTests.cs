@@ -78,6 +78,19 @@ static class ClaudeUpgradeCacheTests
                 !File.ReadAllText(path).Contains("\"Organization\":null", StringComparison.Ordinal)
                 && ClaudeQuotaCache.Load(path, Start.AddMinutes(5), "account-a", "org-personal") is { Quotas.Count: 1 }
                 && ClaudeQuotaCache.Load(path, Start.AddMinutes(5), "account-a", "org-team", earlierReading: true) is null);
+
+            // The earlier version's reading counts as the one of the organization "": a save under "" replaces it, whichever
+            // organization comes first, so the new reading is the one found (Parse takes the first that matches).
+            File.WriteAllText(path, earlier);
+            var unnamed = new ClaudeQuotaSnapshot(Start.AddMinutes(3), "Pro", "", "", [new Quota("每周额度", 12, null, 10080)]);
+            ClaudeQuotaCache.Save(path, unnamed, "account-a", ClaudeSignIn.Code, ClaudePlanOrigin.Account);
+            check("Claude upgrade cache: a save under the organization \"\" replaces the earlier reading, which no longer stands in",
+                ClaudeQuotaCache.Load(path, Start.AddMinutes(5), "account-a") is { Plan: "Pro" }
+                && !File.ReadAllText(path).Contains("\"Organization\":null", StringComparison.Ordinal));
+            File.WriteAllText(path, earlier);
+            ClaudeQuotaCache.Delete(path, "");
+            check("Claude upgrade cache: the organization \"\" rejected takes the earlier reading with it",
+                ClaudeQuotaCache.Load(path, Start.AddMinutes(5), "account-a") is null);
         }
         finally { try { File.Delete(path); } catch (IOException) { } }
     }

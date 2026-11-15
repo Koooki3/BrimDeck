@@ -83,7 +83,8 @@ static class VramFigureTests
     private static SensorStates States(SensorState gpu) => new(SensorState.None, gpu, SensorState.Unknown, SensorState.Unknown);
 
     // The memory joins once its first figure arrives, like a temperature: not before, not unless chosen with the ring's figure on,
-    // never where the sensor is known to be missing, and it stays through a figure missing for a moment.
+    // whether or not the temperature can be read, it stays through a figure missing for a moment and while the adapter sleeps, and
+    // leaves only when the adapter shown has no memory of its own.
     private static void Admission(Action<string, bool> check)
     {
         var readings = Readings([Usage, Vram]);
@@ -100,9 +101,18 @@ static class VramFigureTests
         var integrated = new StripAdmission();
         integrated.Update(Snapshot(null, null), readings, States(SensorState.Found));
         check("VRAM admission: an adapter that reports no memory never shows it", !integrated.Shows(Gpu, StripAdmission.VideoMemory) && integrated.Layout == before);
+        var noHeat = new StripAdmission();
+        noHeat.Update(Snapshot(2, 8), Readings([Usage, Vram, Temperature]), States(SensorState.None));
+        check("VRAM admission: shown where the GPU temperature cannot be read", noHeat.Shows(Gpu, StripAdmission.VideoMemory) && !noHeat.Shows(Gpu, StripAdmission.Heat));
+        noHeat.Update(Snapshot(2, 8, noReadings: true), Readings([Usage, Vram, Temperature]), States(SensorState.None));
+        check("VRAM admission: an adapter asleep keeps its place", noHeat.Shows(Gpu, StripAdmission.VideoMemory));
         var gone = new StripAdmission();
-        gone.Update(Snapshot(2, 8), Readings([Usage, Vram]), States(SensorState.None));
-        check("VRAM admission: not where the graphics sensor is known to be missing", !gone.Shows(Gpu, StripAdmission.VideoMemory));
+        gone.Update(Snapshot(2, 8), readings, States(SensorState.Found));
+        gone.Update(Snapshot(null, null), readings, States(SensorState.Found));
+        check("VRAM admission: leaves once the adapter shown has no memory of its own", !gone.Shows(Gpu, StripAdmission.VideoMemory) && gone.Layout == before);
+        check("VRAM missing: only an adapter without a memory size", CompactFigures.MemoryMissing(Snapshot(null, null)) && CompactFigures.MemoryMissing(Snapshot(null, 0))
+            && !CompactFigures.MemoryMissing(Snapshot(null, 8)) && !CompactFigures.MemoryMissing(Snapshot(null, 8, noReadings: true))
+            && !CompactFigures.MemoryMissing(null) && !CompactFigures.MemoryMissing(MonitorSnapshot.Empty(4, "waiting")));
 
         var plain = new StripAdmission();
         plain.Update(Snapshot(2, 8), Readings(null), States(SensorState.Found));

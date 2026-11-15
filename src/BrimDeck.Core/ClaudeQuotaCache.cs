@@ -100,13 +100,17 @@ public static class ClaudeQuotaCache
         {
             var entry = Entry(snapshot, account, signIn, planFrom, organization);
             var entries = File.Exists(path) ? Entries(File.ReadAllText(path)) : [];
-            // A reading that names no organization (an earlier version's) belongs to the first organization (primary): only that one's
-            // save replaces it, so another organization's save leaves it for the primary one, which may not have been read yet.
-            entries = [.. entries.Where(old => old.Account == entry.Account && (old.Organization is null ? !primary : old.Organization != entry.Organization) && snapshot.Time - old.Time <= MaxAge), entry];
+            entries = [.. entries.Where(old => old.Account == entry.Account && !Replaced(old, entry.Organization ?? "", primary) && snapshot.Time - old.Time <= MaxAge), entry];
             Write(path, entries);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
+
+    // Whether a save or removal for the organization named by hash takes the stored reading with it. A reading that names no
+    // organization (an earlier version's) counts as the one of the organization "", as Parse finds it, and goes with the first
+    // organization's (primary) too; another organization's save or removal leaves it for the first one, which may not have been read yet.
+    private static bool Replaced(Stored stored, string hash, bool primary) =>
+        (stored.Organization ?? "") == hash || (primary && stored.Organization is null);
 
     private static void Write(string path, List<Stored> entries)
     {
@@ -125,7 +129,7 @@ public static class ClaudeQuotaCache
         {
             var entries = organization is null || !File.Exists(path) ? [] : Entries(File.ReadAllText(path));
             var hash = OrganizationHash(organization ?? "");
-            var kept = entries.Where(entry => entry.Organization is null ? !primary : entry.Organization != hash).ToList();
+            var kept = entries.Where(entry => !Replaced(entry, hash, primary)).ToList();
             if (kept.Count == 0) File.Delete(path);
             else if (kept.Count < entries.Count) Write(path, kept);
         }

@@ -478,9 +478,11 @@ public sealed class DeckSettings
         }
     }
     // Mouse pass-through: hovering does not open the panel and every click goes to the window beneath; only the shortcuts open
-    // it. ClickThroughPanel lets the open panel take clicks as usual.
+    // it. ClickThroughPanel lets the open panel take clicks as usual; ClickThroughKeyboard lets a panel opened by a shortcut take
+    // the keyboard and Esc, which it otherwise leaves to the window in use (a game).
     public bool ClickThrough { get; set; }
     public bool ClickThroughPanel { get; set; }
+    public bool ClickThroughKeyboard { get; set; }
     public bool MusicPage { get; set; } = true;
     public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
@@ -640,6 +642,22 @@ public sealed class DeckSettings
     public bool ClipboardKeepHistory { get; set; }
     public HistoryLength ClipboardKeepFor { get; set; } = HistoryLength.Month;
     public TransferDragOut TransferDragOut { get; set; } = TransferDragOut.Copy;
+    // Which columns the page shows: both, or only the clipboard or only the file transfer over the whole width. Only with both are
+    // they arranged (ShelfArrangement): side by side or stacked as cards (ShelfLayout), and side by side the file transfer's share
+    // of the width in percent, set by dragging the divider between them or in the settings.
+    public ShelfShown ShelfShown { get; set; } = ShelfShown.Both;
+    public ShelfArrangement ShelfArrangement { get; set; } = ShelfArrangement.Split;
+    public double ShelfFileShare { get; set; } = ShelfLayout.DefaultShare;
+    // Stacked, further ways to bring the card behind forward, besides a click on its side strip, on the title of the card in
+    // front or on the page's own button: resting the pointer on the side strip, a middle click anywhere on the page, and a
+    // two-finger sideways swipe or Shift with the wheel.
+    public bool ShelfHoverSwitch { get; set; }
+    public bool ShelfMiddleSwitch { get; set; } = true;
+    public bool ShelfSwipeSwitch { get; set; }
+    // How each column shows its entries (ClipView, FileView), chosen for each by itself. At first the clipboard shows one line an
+    // entry, and the file transfer two, under a larger icon.
+    public ClipView ShelfClipView { get; set; } = ClipView.Single;
+    public FileView ShelfFileView { get; set; } = FileView.Two;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
     // The Custom scheme's colors; kept while another scheme is chosen.
@@ -654,6 +672,8 @@ public sealed class DeckSettings
     public CoreDisplay CoreDisplay { get; set; } = CoreDisplay.Auto;
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
+    // The span the traffic shown beside the network's rates is summed over, from Windows' own record (TrafficPeriods).
+    public TrafficPeriod MonitorTrafficPeriod { get; set; } = TrafficPeriod.Today;
     public bool MonitorProcesses { get; set; } = true;
     public ProcessSort MonitorSort { get; set; }
     public MonitorMain MonitorMain { get; set; }
@@ -815,8 +835,10 @@ public sealed class DeckSettings
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
     public bool ShowsDevices(CompactStyle style) => style switch { CompactStyle.Notch => NotchDevices, CompactStyle.Capsule => CapsuleDevices, _ => false };
-    // The file transfer's count needs the page: with the page off, nothing can be dropped there.
-    public bool ShowsTransfer(CompactStyle style) => ClipboardPage && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
+    // The file transfer's count needs the page and its column: with either hidden, nothing can be dropped there.
+    public bool ShowsTransfer(CompactStyle style) => ClipboardPage && ShelfShown != ShelfShown.Clipboard && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
+    // The page's columns are stacked as cards only while it shows both.
+    public bool ShelfStacked() => ShelfShown == ShelfShown.Both && ShelfArrangement == ShelfArrangement.Stacked;
     public IReadOnlyList<CompactPart> CompactOrder(CompactStyle style) => style == CompactStyle.Capsule ? CapsuleOrder : NotchOrder;
     public void SetCompactOrder(CompactStyle style, IEnumerable<CompactPart> order) { if (style == CompactStyle.Notch) NotchOrder = [.. order]; else if (style == CompactStyle.Capsule) CapsuleOrder = [.. order]; }
     public bool CompactAutoWidth(CompactStyle style) => style switch { CompactStyle.Notch => NotchAutoWidth, CompactStyle.Capsule => CapsuleAutoWidth, _ => false };
@@ -957,6 +979,11 @@ public sealed class DeckSettings
         ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;
         if (!Enum.IsDefined(TransferDragOut)) TransferDragOut = TransferDragOut.Copy;
+        if (!Enum.IsDefined(ShelfShown)) ShelfShown = ShelfShown.Both;
+        if (!Enum.IsDefined(ShelfArrangement)) ShelfArrangement = ShelfArrangement.Split;
+        if (!Enum.IsDefined(ShelfClipView)) ShelfClipView = ClipView.Single;
+        if (!Enum.IsDefined(ShelfFileView)) ShelfFileView = FileView.Two;
+        ShelfFileShare = ShelfLayout.ClampShare(Math.Round(ShelfFileShare, 1), ShelfFileView);
         if (!Enum.IsDefined(ClipboardKeepFor)) ClipboardKeepFor = HistoryLength.Month;
         ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);
@@ -967,6 +994,7 @@ public sealed class DeckSettings
         CompactWarningColor = AppPresets.NormalizeColor(CompactWarningColor) is { Length: > 0 } warning ? warning : null;
         CompactCriticalColor = AppPresets.NormalizeColor(CompactCriticalColor) is { Length: > 0 } critical ? critical : null;
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
+        if (!Enum.IsDefined(MonitorTrafficPeriod)) MonitorTrafficPeriod = TrafficPeriod.Today;
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
         if (!Enum.IsDefined(MonitorGpuUsage)) MonitorGpuUsage = GpuUsageSource.Driver;
@@ -1114,7 +1142,14 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
     // True when the last Load found no settings file, or none it could read, and returned defaults.
     public bool IsFirstStart { get; private set; }
     // Without saved settings the interface follows the Windows display language; saved settings keep their language.
-    private DeckSettings FirstStart() { IsFirstStart = true; return new() { Language = Loc.SystemLanguage() }; }
+    // Normalized as read settings are: the start relies on what Normalize ensures, such as one current profile (Profiles.Keep).
+    private DeckSettings FirstStart()
+    {
+        IsFirstStart = true;
+        var settings = new DeckSettings { Language = Loc.SystemLanguage() };
+        settings.Normalize();
+        return settings;
+    }
     public DeckSettings Load()
     {
         _snapshots = []; _newerFile = null; _unknown = []; IsFirstStart = false; _loadWarning = null;

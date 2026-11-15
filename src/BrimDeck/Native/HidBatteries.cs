@@ -767,6 +767,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             Dongles.Protocol.RapooGen1 => RapooGen1,
             Dongles.Protocol.Aula => Aula,
             Dongles.Protocol.MchoseKeyboard => MchoseKeyboard,
+            Dongles.Protocol.AtkSerial => AtkSerial,
             Dongles.Protocol.CompxSplit => CompxSplit,
             _ => null
         };
@@ -817,10 +818,11 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private static IEnumerable<DeviceBattery> Vgn(HidInfo info, HashSet<string> claimed)
     {
         using var device = new HidDevice(info);
-        var read = Hid.Transact<object>([device], () => device.Write(Dongles.VgnRequest()), r => Dongles.VgnBattery(r) is { } b ? b : null, 500);
+        bool atk = info.Vendor == Dongles.AtkVendor;
+        Func<byte[], BatteryRead?> parse = atk && info.Product != 0x1012 ? Dongles.AtkKeyboardBattery : Dongles.VgnBattery;
+        var read = Hid.Transact<object>([device], () => device.Write(Dongles.VgnRequest()), r => parse(r) is { } b ? b : null, 500);
         if (read is not BatteryRead battery) return [];
         claimed.Add(info.Path);
-        bool atk = info.Vendor == Dongles.AtkVendor;
         return [Mouse(atk ? "atkkb" : "vgn", info, atk ? "ATK" : "VGN", battery, DeviceKind.Keyboard, atk ? Dongles.AtkKeyboard(info.Product) : null)];
     }
 
@@ -856,7 +858,10 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         return [Mouse(prefix, info, fallback, battery)];
     }
     private static IEnumerable<DeviceBattery> Endgame(HidInfo info, HashSet<string> claimed) => Feature(info, claimed, "endgame", "Endgame Gear", Dongles.EndgameRequest(info.FeatureLength), 350, Dongles.EndgameBattery);
-    private static IEnumerable<DeviceBattery> Vaxee(HidInfo info, HashSet<string> claimed) => Feature(info, claimed, "vaxee", "VAXEE", Dongles.VaxeeRequest(info.FeatureLength), 120, Dongles.VaxeeBattery);
+    // The Pulsar X2 Wireless (3710) takes VAXEE's read and is named Pulsar where its product string is empty.
+    private static IEnumerable<DeviceBattery> Vaxee(HidInfo info, HashSet<string> claimed) => info.Vendor == 0x3710
+        ? Feature(info, claimed, "pulsar", "Pulsar", Dongles.VaxeeRequest(info.FeatureLength), 120, Dongles.VaxeeBattery)
+        : Feature(info, claimed, "vaxee", "VAXEE", Dongles.VaxeeRequest(info.FeatureLength), 120, Dongles.VaxeeBattery);
 
     // Inphic IN9: the handshake, then the battery, with one sequence number (InphicBatteryTray's order).
     private static IEnumerable<DeviceBattery> Inphic(HidInfo info, HashSet<string> claimed)
@@ -1118,18 +1123,23 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             }
             default:
             {
-                // Status and Audio: twice, 400 ms each (HaloBattery's budget); the 0x4D frame three times, 30 ms apart.
-                var (request, parse, attempts) = read switch
+                // Status, Audio, the keyboards' configuration read and the Qhw command: twice, 400 ms each (HaloBattery's budget);
+                // the BY keyboards' 13 4A read once, for 1500 ms (the time mchose-battery-tray gives it); the 0x4D frame three
+                // times, 30 ms apart. The configuration read is on reports without an id, so the id is dropped from its answers.
+                var (request, parse, attempts, timeout) = read switch
                 {
-                    Dongles.MchoseRead.Status => (Dongles.MchoseStatusRequest(), (Func<byte[], BatteryRead?>)Dongles.MchoseStatus, 2),
-                    Dongles.MchoseRead.Audio => (Dongles.MchoseAudioRequest(), Dongles.MchoseAudio, 2),
-                    _ => (Dongles.MchoseRequest(), Dongles.MchoseBattery, 3)
+                    Dongles.MchoseRead.Status => (Dongles.MchoseStatusRequest(), (Func<byte[], BatteryRead?>)Dongles.MchoseStatus, 2, 400),
+                    Dongles.MchoseRead.Audio => (Dongles.MchoseAudioRequest(), Dongles.MchoseAudio, 2, 400),
+                    Dongles.MchoseRead.Config => (Dongles.MchoseConfigRequest(), Dongles.MchoseConfig, 2, 400),
+                    Dongles.MchoseRead.Qhw => (Dongles.MchoseQhwRequest(), Dongles.MchoseQhw, 2, 400),
+                    Dongles.MchoseRead.By => (Dongles.MchoseKeyboardRequest(), Dongles.MchoseKeyboardBattery, 1, 1500),
+                    _ => (Dongles.MchoseRequest(), Dongles.MchoseBattery, 3, 400)
                 };
-                using var device = new HidDevice(info);
+                using var device = new HidDevice(info) { StripZero = read == Dongles.MchoseRead.Config };
                 for (int attempt = 0; attempt < attempts; attempt++)
                 {
                     if (attempt > 0) Thread.Sleep(30);
-                    if (Hid.Transact<object>([device], () => device.Write(request), r => parse(r) is { } b ? b : null, 400) is BatteryRead battery) return (battery, null);
+                    if (Hid.Transact<object>([device], () => device.Write(request), r => parse(r) is { } b ? b : null, timeout) is BatteryRead battery) return (battery, null);
                 }
                 return null;
             }
@@ -1164,7 +1174,10 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         var read = Hid.Transact<object>([device], () => device.Write(Dongles.CompxRequest(0x04)), r => Dongles.CompxFrame(r) is { } b ? b : null, 600);
         if (read is not BatteryRead battery) return [];
         claimed.Add(info.Path);
-        return [Mouse("compx", info, "Compx", battery, Dongles.CompxKind(info.Vendor, info.Product))];
+        // An ATK mouse listed from ATK HUB was read with BitMouse on its 0xFF05 collection before (key "atk:"); it keeps that key
+        // whichever of its collections answers, so its settings stay and it is one device.
+        string prefix = info.Vendor == Dongles.AtkVendor && Dongles.IsCompxOfficial(info.Vendor, info.Product) ? "atk" : "compx";
+        return [Mouse(prefix, info, "Compx", battery, Dongles.CompxKind(info.Vendor, info.Product))];
     }
 
     // The Compx frame split over two collections (Dongles.CompxSplit): set as a feature report on the command collection this
@@ -1208,13 +1221,27 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         }
         if (read is not { } battery) return [];
         claimed.Add(info.Path);
-        return [Mouse("f83", info, model.Name, battery, preferredName: model.Name)];
+        return [Mouse("f83", info, model.Name, battery, preferredName: model.BrandOnly ? null : model.Name)];
     }
 
     private static IEnumerable<DeviceBattery> Nordic(HidInfo info, HashSet<string> claimed)
         => Feature(info, claimed, "nordic", "Ninjutso Sora V2", Dongles.NordicRequest(32), 90, Dongles.NordicBattery);
     private static IEnumerable<DeviceBattery> Lingbao(HidInfo info, HashSet<string> claimed)
         => Feature(info, claimed, "lingbao", "LINGBAO M5PRO Max", Dongles.LingbaoRequest(), 50, Dongles.LingbaoBattery);
+
+    // ATK's N9 Pro and N9 Ultra: read on the serial port of the device whose consumer collection this is (AtkHeadsets.Serial*),
+    // through Family so a read that goes wrong is never sent again. Nothing is sent to the HID collection.
+    private static IEnumerable<DeviceBattery> AtkSerial(HidInfo info, HashSet<string> claimed)
+    {
+        var ports = UsbSerial.Ports(info.Vendor, info.Product);
+        if (ports.Count == 0) return [];
+        if (Family(info, ["atk.n9-serial"], _ => ports.Select(port => UsbSerial.Exchange(port, AtkHeadsets.SerialBaud, AtkHeadsets.SerialRequest(),
+                AtkHeadsets.SerialPacket, AtkHeadsets.SerialBattery, 1500)).FirstOrDefault(read => read is not null) is { } read ? (read, null) : null) is not { } found)
+            return [];
+        claimed.Add(info.Path);
+        string name = AtkHeadsets.SerialProducts.First(p => p.Product == info.Product).Name;
+        return [Mouse("atk-headset", info, name, found.Read, DeviceKind.Headphones, name)];
+    }
 
     // MCHOSE's 7 series on 0x5253 (the RealTek exchange alone; MCHOSE's other reads are for 0x3837).
     private static IEnumerable<DeviceBattery> MchoseRealtek(HidInfo info, HashSet<string> claimed)
@@ -1260,6 +1287,15 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
 
     private static IEnumerable<DeviceBattery> Gmouse(HidInfo info, HashSet<string> claimed)
     {
+        // The VGN N87's collection on the same receiver (report 0xF0, Dongles.N87Request).
+        if (info.OutputIds.Contains(0xF0) && Dongles.N87Ids.Contains((info.Vendor, info.Product)))
+        {
+            using var keyboard = new HidDevice(info);
+            var answer = Hid.Transact<object>([keyboard], () => keyboard.Write(Dongles.N87Request()), r => Dongles.N87Battery(r) is { } b ? b : null, 600);
+            if (answer is not BatteryRead level) return [];
+            claimed.Add(info.Path);
+            return [Mouse("vgn", info, "VGN N87", level, DeviceKind.Keyboard)];
+        }
         using var device = new HidDevice(info) { StripZero = true };
         var read = Hid.Transact<object>([device], () => device.Write(Dongles.GmouseRequest()), r => Dongles.GmouseBattery(r) is { } b ? b : null, 800);
         if (read is not BatteryRead battery) return [];

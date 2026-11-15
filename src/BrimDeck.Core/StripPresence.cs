@@ -79,7 +79,7 @@ public sealed class StripAdmission
                 if (heat && reading.ShowValue)
                     yield return (reading.Item, Heat, (reading.Item == CompactMonitorItems.Cpu ? states.Cpu : states.Gpu) == SensorState.None);
                 if (reading.ShowValue && reading.Item == CompactMonitorItems.Gpu && CompactFigures.Shows(reading, CompactFigures.Vram))
-                    yield return (reading.Item, VideoMemory, states.Gpu == SensorState.None);
+                    yield return (reading.Item, VideoMemory, CompactFigures.MemoryMissing(latest));
             }
         }
     }

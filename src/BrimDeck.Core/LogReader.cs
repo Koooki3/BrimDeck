@@ -392,11 +392,9 @@ public static class QuotaParser
         if (groups.ValueKind != JsonValueKind.Array) groups = root.Get("groups");
         foreach (var group in groups.Items())
             foreach (var bucket in group.Get("buckets").Items())
-                if (bucket.Get("remainingFraction").Number() is { } fraction)
+                if (bucket.Get("remainingFraction").Number() is { } fraction && bucket.Get("disabled").ValueKind != JsonValueKind.True)
                 {
-                    var id = bucket.Get("bucketId").Text();
-                    var label = id switch { "gemini-5h" => "Gemini · 5 小时", "gemini-weekly" => "Gemini · 每周", "3p-5h" => "Claude · 5 小时", "3p-weekly" => "Claude · 每周", _ => id };
-                    int? minutes = id switch { "gemini-5h" or "3p-5h" => 300, "gemini-weekly" or "3p-weekly" => 10080, _ => null };
+                    var (label, minutes) = AntigravityBucket(bucket, group.Get("displayName").Text());
                     result.Add(new(label, (1 - Math.Clamp(fraction, 0, 1)) * 100, bucket.Get("resetTime").Date(), minutes));
                 }
         if (result.Count > 0) return result;
@@ -405,5 +403,28 @@ public static class QuotaParser
             if (model.Get("quotaInfo").Get("remainingFraction").Number() is { } fraction)
                 result.Add(new(model.Get("label").Text(), (1 - Math.Clamp(fraction, 0, 1)) * 100, model.Get("quotaInfo").Get("resetTime").Date()));
         return result;
+    }
+
+    // A quota summary bucket carries an id ("gemini-weekly", "3p-5h"), a window ("weekly", "5h") and sits in a group named by the
+    // service ("Gemini Models", "Claude and GPT models"). Google AI Pro adds a weekly-only Gemini 4 Argon quota whose id has not
+    // been seen, so the window decides the period and an id naming Argon gets a group of its own. Other unknown buckets are
+    // grouped by the service's group name.
+    private static (string Label, int? Minutes) AntigravityBucket(JsonElement bucket, string groupName)
+    {
+        var id = bucket.Get("bucketId").Text();
+        var window = bucket.Get("window").Text().ToLowerInvariant();
+        if (window.Length == 0) window = id.EndsWith("-5h", StringComparison.OrdinalIgnoreCase) ? "5h" : id.EndsWith("-weekly", StringComparison.OrdinalIgnoreCase) ? "weekly" : "";
+        var (period, minutes) = window switch
+        {
+            "5h" => ("5 小时", (int?)300),
+            "daily" or "1d" => ("每日", 1440),
+            "weekly" or "7d" => ("每周", 10080),
+            _ => (bucket.Get("displayName").Text() is { Length: > 0 } name ? name : id, (int?)null)
+        };
+        var group = id.Contains("argon", StringComparison.OrdinalIgnoreCase) ? "Argon"
+            : id.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase) ? "Gemini"
+            : id.StartsWith("3p-", StringComparison.OrdinalIgnoreCase) ? "Claude"
+            : groupName.Replace('·', ' ').Trim();
+        return (group.Length > 0 ? $"{group} · {period.Replace('·', ' ').Trim()}" : period, minutes);
     }
 }

@@ -64,7 +64,13 @@ public sealed partial class SettingsWindow
                 [(CoreDisplay.Auto, Loc.T("自动", "Auto")), (CoreDisplay.Columns, Loc.T("柱状", "Columns")), (CoreDisplay.Matrix, Loc.T("点阵", "Dot matrix"))],
                 v => Change(s => s.CoreDisplay = v), keepPreview: true,
                 help: Loc.T("自动：核心较少时用柱状，柱子多到看不清时用点阵。",
-                    "Auto: columns while there are few cores, the dot matrix when there are too many columns to read.")));
+                    "Auto: columns while there are few cores, the dot matrix when there are too many columns to read.")),
+            MusicChoice(Loc.T("流量统计时长", "Traffic period"), S.MonitorTrafficPeriod,
+                [(TrafficPeriod.Today, TrafficPeriods.Name(TrafficPeriod.Today)), (TrafficPeriod.Day, TrafficPeriods.Name(TrafficPeriod.Day)),
+                    (TrafficPeriod.Week, TrafficPeriods.Name(TrafficPeriod.Week)), (TrafficPeriod.Month, TrafficPeriods.Name(TrafficPeriod.Month))],
+                v => Change(s => s.MonitorTrafficPeriod = v),
+                help: Loc.T("与 Windows 流量统计一致，最近的流量稍后计入。当天从 0 点算起。",
+                    "Matches Windows' data usage; recent traffic is counted a little later. Today counts from midnight.")));
         CompactMonitorOptions();
         SectionTitle(Loc.T("展开时", "When expanded"));
         // What the page shows (chips, the temperatures among them, and a sketch of the page whose blocks are dragged to order it), then
@@ -391,7 +397,7 @@ public sealed partial class SettingsWindow
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
-
+        CompactMonitorItems.DownloadTotal => Loc.T("累计下载", "Downloaded"), CompactMonitorItems.UploadTotal => Loc.T("累计上传", "Uploaded"),
         CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), CompactMonitorItems.Power => Loc.T("整机功耗", "System power"),
         CompactMonitorItems.Charge => Loc.T("本机电池", "This PC's battery"), CompactMonitorItems.Frames => Loc.T("帧率", "Frame rate"),
         CompactMonitorItems.Battery => Loc.T("设备电量", "Device batteries"), _ => "CPU"
@@ -412,12 +418,6 @@ public sealed partial class SettingsWindow
         if (CompactFigures.Has(item))
         {
             var menu = FiguresMenu(item, refresh, edit);
-            Grid.SetColumn(menu, 2); row.Children.Add(menu);
-        }
-        // The download and the upload choose between their rate and the bytes moved in a menu at the same place.
-        if (CompactTraffic.Has(item))
-        {
-            var menu = TrafficMenu(item, refresh, edit);
             Grid.SetColumn(menu, 2); row.Children.Add(menu);
         }
         // The frame rate chooses what it shows of its program in a menu at the same place.
@@ -443,7 +443,7 @@ public sealed partial class SettingsWindow
         // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
         bool choice = CompactMonitor.HasValueChoice(item);
         var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Storage or CompactMonitorItems.Battery or CompactMonitorItems.Power or CompactMonitorItems.Charge or CompactMonitorItems.Frames };
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.DownloadTotal or CompactMonitorItems.UploadTotal or CompactMonitorItems.Storage or CompactMonitorItems.Power or CompactMonitorItems.Charge or CompactMonitorItems.Battery or CompactMonitorItems.Frames };
         AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
         if (!choice)
         {
@@ -457,7 +457,8 @@ public sealed partial class SettingsWindow
                 CompactMonitorItems.Battery => Loc.T("在“设置 › 设备”中选择显示哪些设备、是否显示数字和顺序。", "Choose which devices show, with or without figures, and their order under Settings › Devices."),
                 CompactMonitorItems.Frames => Loc.T("前台程序每秒绘制的帧数；前台程序不在绘制时，显示最近一个在绘制的程序。首次开启时需要授权，未授权时不显示。",
                     "The frames the program in front draws each second; while it draws nothing, the last program that did. Needs permission the first time; hidden until then."),
-                _ => Loc.T("下载和上传显示速率或累计流量，在左侧的菜单中选择。", "Download and upload show their rate or the bytes moved; choose in the menu at the left.")
+                CompactMonitorItems.DownloadTotal or CompactMonitorItems.UploadTotal => Loc.T("统计时长在“通用”中设置。", "Set the period under General."),
+                _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);
         }
@@ -643,34 +644,6 @@ public sealed partial class SettingsWindow
         };
         TogglePopup(select, menu);
         return select;
-    }
-
-    // What the collapsed download or upload shows (CompactTraffic): its rate (the default), or the bytes moved since the app began reading
-    // the network. As wide as the other readings' menus.
-    private ComboBox TrafficMenu(CompactMonitorItems item, List<Action> refresh, Action<Action<DeckSettings>> edit)
-    {
-        string name = ReadingName(item);
-        var labels = new[] { Loc.T("速率", "Rate"), Loc.T("累计流量", "Total moved") };
-        var choice = new ComboBox { Width = 150, Height = 30, Style = (Style)FindResource("SettingsCombo"), ItemsSource = labels,
-            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 6, 0),
-            ToolTip = Loc.T("收起行显示当前速率，或自本次启动读取网络起的累计流量；展开页两者都显示。重启后清零。",
-                "The collapsed row shows the current rate, or the bytes moved since the app began reading the network; the expanded page shows both. Starts over when the app restarts.") };
-        AutomationProperties.SetName(choice, Loc.T($"{name}显示的内容", $"What {name} shows")); PopupMotion.Attach(choice);
-        bool syncing = false;
-        refresh.Add(() =>
-        {
-            syncing = true;
-            try { choice.SelectedIndex = CompactTraffic.Shows(Reading(S, item)) ? 1 : 0; }
-            finally { syncing = false; }
-        });
-        choice.SelectionChanged += (_, _) =>
-        {
-            if (syncing || choice.SelectedIndex < 0) return;
-            bool total = choice.SelectedIndex == 1;
-            if (total == CompactTraffic.Shows(Reading(S, item))) return;
-            edit(s => Reading(s, item).Figures = total ? [CompactTraffic.Total] : null);
-        };
-        return choice;
     }
 
     // Whether the collapsed frame rate shows the icon of the program it counts (CompactFrames): the icon (the default), or the screen

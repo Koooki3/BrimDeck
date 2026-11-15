@@ -130,7 +130,9 @@ internal sealed class FigureGauge : FrameworkElement
     private Eased _share, _hover = new(0, Eased.Hover);
     private bool _hasShare, _pressed;
     private string _number = "—", _unit = "", _detail = "", _tip = "", _detailColor = PanelTheme.Main.Tertiary;
-    private readonly DrawingCache<(string, string, string, string, double, double, double)> _text = new();
+    // The graphics memory's share after the detail ("显存 26%"), in its own level's color, apart from the temperature's.
+    private string _memory = "", _memoryColor = PanelTheme.Main.Tertiary;
+    private readonly DrawingCache<(string, string, string, string, string, string, string, double, double, double)> _text = new();
     private readonly DrawingCache<(IReadOnlyList<double>, double, double)> _trend = new();
     private IReadOnlyList<double> _history = [];
 
@@ -168,15 +170,18 @@ internal sealed class FigureGauge : FrameworkElement
     {
         string name = _letter switch { "C" => "CPU", "G" => "GPU", _ => _letter };
         string reading = _hasShare ? Loc.T($"{name} 占用 {_number}{_unit}", $"{name} usage {_number}{_unit}") : name + " · " + DrawnPeer.FirstLine(ToolTip);
-        return reading + (_detail.Length > 0 ? " · " + _detail : "") + (_button && !string.IsNullOrEmpty(_buttonName) ? Loc.T("，", ", ") + _buttonName : "");
+        return reading + (_detail.Length > 0 ? " · " + _detail : "") + (_memory.Length > 0 ? " · " + _memory : "") + (_button && !string.IsNullOrEmpty(_buttonName) ? Loc.T("，", ", ") + _buttonName : "");
     }
 
-    // detailColor: the detail's color, the tertiary text color by default (a temperature takes its level's).
-    public void Set(double? share, string number, string unit, string detail, string tip, bool motion, string? detailColor = null)
+    // detailColor: the detail's color, the tertiary text color by default (a temperature takes its level's). memory: the graphics
+    // memory's share after the detail, in memoryColor (the tertiary text color by default, its own level's when high).
+    public void Set(double? share, string number, string unit, string detail, string tip, bool motion, string? detailColor = null,
+        string memory = "", string? memoryColor = null)
     {
-        detailColor ??= Look.Tertiary;
-        bool changed = number != _number || unit != _unit || detail != _detail || detailColor != _detailColor || (share is not null) != _hasShare;
-        _number = number; _unit = unit; _detail = detail; _detailColor = detailColor; _hasShare = share is not null;
+        detailColor ??= Look.Tertiary; memoryColor ??= Look.Tertiary;
+        bool changed = number != _number || unit != _unit || detail != _detail || detailColor != _detailColor || memory != _memory || memoryColor != _memoryColor
+            || (share is not null) != _hasShare;
+        _number = number; _unit = unit; _detail = detail; _detailColor = detailColor; _memory = memory; _memoryColor = memoryColor; _hasShare = share is not null;
         if (tip != _tip) { _tip = tip; ToolTip = tip.Length > 0 ? tip : null; }
         if (share is { } value && _share.Set(value, motion)) Motion.Start(this, Step);
         else if (changed || share is not null) InvalidateVisual();
@@ -198,8 +203,13 @@ internal sealed class FigureGauge : FrameworkElement
         var number = MonitorDraw.Text(_number, _figure, Look.Primary, ppd, display: true);
         var unit = MonitorDraw.Text(_unit, _small, Look.Secondary, ppd);
         var detail = MonitorDraw.Text(_detail, _small, _detailColor, ppd);
-        double width = badge + gap + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0)
-            + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0);
+        // The memory's share follows the detail after a dot in the tertiary color, so the dot takes neither one's level.
+        string joiner = _detail.Length > 0 && _memory.Length > 0 ? " · " : "", tertiary = Look.Tertiary;
+        var join = MonitorDraw.Text(joiner, _small, tertiary, ppd);
+        var memory = MonitorDraw.Text(_memory, _small, _memoryColor, ppd);
+        bool tail = _detail.Length > 0 || _memory.Length > 0;
+        double tailWidth = tail ? gap + detail.WidthIncludingTrailingWhitespace + join.WidthIncludingTrailingWhitespace + memory.WidthIncludingTrailingWhitespace : 0;
+        double width = badge + gap + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0) + tailWidth;
         double x = _right ? Math.Max(0, w - width) : 0, baseline = Math.Round(h / 2 + number.Baseline - number.Height / 2 + _figure * .05);
         var center = new Point(x + badge / 2, h / 2);
         double hover = _button ? PressFeedback.FillShown(Math.Clamp(_hover.At(now), 0, 1), _pressed) : 0;
@@ -216,24 +226,36 @@ internal sealed class FigureGauge : FrameworkElement
         {
             // From after the figures (and any detail) to the right edge, half the line's height, centred on it.
             double end = start + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0)
-                + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0) + gap * 1.5;
+                + tailWidth + gap * 1.5;
             var area = new Rect(end, Math.Round(h * .2), Math.Max(0, w - end - 6), Math.Round(h * .6));
             if (area.Width >= 48)
                 MonitorDraw.Place(drawing, area.TopLeft, _trend.Get((_history, area.Width, area.Height), context =>
                     MonitorDraw.Sparkline(context, new Rect(0, 0, area.Width, area.Height), _history, 1, _color, .14, 1.3)));
         }
-        drawing.DrawDrawing(_text.Get((_number, _unit, _detail, _detailColor, w, h, ppd), context =>
+        drawing.DrawDrawing(_text.Get((_number, _unit, _detail, _detailColor, _memory, _memoryColor, tertiary, w, h, ppd), context =>
         {
             double x = start;
             MonitorDraw.Baseline(context, number, x, baseline); x += number.WidthIncludingTrailingWhitespace;
             if (_unit.Length > 0) { MonitorDraw.Baseline(context, unit, x + 2, baseline); x += 2 + unit.WidthIncludingTrailingWhitespace; }
-            if (_detail.Length > 0)
-            {
-                // A long detail is cut to the room left, with an ellipsis.
-                double room = w - x - gap;
-                if (room > 12) MonitorDraw.Baseline(context, detail.WidthIncludingTrailingWhitespace <= room ? detail : MonitorDraw.Trimmed(_detail, _small, _detailColor, room, ppd), x + gap, baseline);
-            }
+            if (!tail) return;
+            // A long detail is cut to the room left, with an ellipsis; the memory's share after it only where its dot and some of it fit.
+            x += gap;
+            x = Part(context, detail, _detail, _detailColor, x, w, baseline, ppd);
+            if (joiner.Length > 0 && w - x <= join.WidthIncludingTrailingWhitespace + 12) return;
+            x = Part(context, join, joiner, tertiary, x, w, baseline, ppd);
+            Part(context, memory, _memory, _memoryColor, x, w, baseline, ppd);
         }));
+    }
+
+    // A piece of the detail at x, whole or cut with an ellipsis to the room before end; where it ends (end once cut, x when empty
+    // or with no room left).
+    private double Part(DrawingContext context, FormattedText text, string words, string color, double x, double end, double baseline, double ppd)
+    {
+        double room = end - x;
+        if (words.Length == 0 || room <= 12) return words.Length == 0 ? x : end;
+        if (text.WidthIncludingTrailingWhitespace <= room) { MonitorDraw.Baseline(context, text, x, baseline); return x + text.WidthIncludingTrailingWhitespace; }
+        MonitorDraw.Baseline(context, MonitorDraw.Trimmed(words, _small, color, room, ppd), x, baseline);
+        return end;
     }
 
     // Touch and a pen do not hover (motion-review F4).
@@ -691,7 +713,8 @@ internal sealed class NetworkBlock : FrameworkElement
     public void Set(Reading<NetworkSample> reading, IReadOnlyList<double> down, IReadOnlyList<double> up)
     {
         _rates = reading.OrDefault; _reason = reading.HasValue ? "" : reading.Reason; _down = down; _up = up;
-        static string Total(double? bytes) => bytes is { } moved ? Loc.T("，累计 ", ", total ") + MonitorFormat.Total(moved).Text : "";
+        // The traffic over the period chosen after each rate: "下载 1.2 MB/s，当天 2.31 GB".
+        string Total(double? bytes) => bytes is { } moved ? Loc.T("，", ", ") + TrafficPeriods.Name(_rates!.TotalPeriod) + " " + MonitorFormat.Total(moved).Text : "";
         string? downText = _rates is { } d && _download ? Loc.T("下载 ", "Download ") + MonitorFormat.Rate(d.DownBytesPerSecond).Text + Total(d.DownTotalBytes) : null;
         string? upText = _rates is { } u && _upload ? Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(u.UpBytesPerSecond).Text + Total(u.UpTotalBytes) : null;
         ToolTip = _rates is not null ? string.Join(" · ", (_uploadFirst ? new[] { upText, downText } : [downText, upText]).OfType<string>())
@@ -715,7 +738,7 @@ internal sealed class NetworkBlock : FrameworkElement
         else Half(drawing, 0, w, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _rates?.UpTotalBytes, _up, _colors.Upload, ppd);
     }
 
-    // total: the bytes moved since the app began reading, at the end of the half in the caption's type where there is room for it (with
+    // total: the traffic over the period chosen (TrafficPeriods), at the end of the half in the caption's type where there is room for it (with
     // its label if that fits, else the figure alone), and the curve ends before it.
     private void Half(DrawingContext drawing, double left, double width, double line, MonitorGlyph glyph, double? rate, double? total, IReadOnlyList<double> history, string color, double ppd)
     {
@@ -733,7 +756,7 @@ internal sealed class NetworkBlock : FrameworkElement
         if (total is { } moved)
         {
             var figure = MonitorFormat.Total(moved).Text;
-            foreach (var label in new[] { Loc.T("累计 ", "Total ") + figure, figure })
+            foreach (var label in new[] { TrafficPeriods.Name(_rates?.TotalPeriod ?? TrafficPeriod.Today) + " " + figure, figure })
             {
                 var drawn = MonitorDraw.Text(label, _caption, Look.Tertiary, ppd);
                 double drawnWidth = Math.Ceiling(drawn.WidthIncludingTrailingWhitespace);

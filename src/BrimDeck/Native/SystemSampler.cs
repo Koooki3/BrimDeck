@@ -57,6 +57,9 @@ internal sealed class SystemSampler : IDisposable
     // Where the adapters' usage comes from (DeckSettings.MonitorGpuUsage), set on the UI thread and read on the sampling thread.
     private volatile GpuUsageSource _gpuUsage;
     public GpuUsageSource GpuUsage { set => _gpuUsage = value; }
+    // The span the network's traffic is summed over (DeckSettings.MonitorTrafficPeriod), set on the UI thread, read on the sampling thread.
+    private volatile TrafficPeriod _trafficPeriod;
+    public TrafficPeriod TrafficPeriod { set => _trafficPeriod = value; }
     // The whole machine's power and the machine's battery (PowerProvider, BatteryProvider), made on the sampling thread.
     private PowerProvider? _power;
     private BatteryProvider? _battery;
@@ -72,6 +75,7 @@ internal sealed class SystemSampler : IDisposable
     // The frame rate of the program in front, while a collapsed row or an open page shows it (SetExtras; FrameRates).
     private readonly FrameRates _frames = new();
     private readonly NetworkProvider _network = new();
+    private readonly TrafficRecord _traffic = new();
     private readonly ProcessProvider _processes = new();
     private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
     // Listing processes, the costliest reading, runs about every two seconds whatever the interval, and only while the page is
@@ -333,7 +337,7 @@ internal sealed class SystemSampler : IDisposable
     private void Rest()
     {
         ForgetWindowed();
-        // Sampling paused as a whole: the network's baseline goes (the totals stay), so the time paused is not counted when it resumes.
+        // Sampling paused as a whole: the network's baseline goes, so the first rate after it is not an average over the pause.
         _network.Forget();
         _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _bridges.Rest();
         _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
@@ -390,6 +394,14 @@ internal sealed class SystemSampler : IDisposable
         // average over the time off and old readings do not join new ones.
         if (!_readNetwork || _networkRestart) { _networkRestart = false; _network.Forget(); _history.Clear(); }
         var network = _readNetwork ? _network.Sample(now) : Reading<NetworkSample>.Unavailable(Why.Waiting);
+        // The traffic over the period chosen, from Windows' record, joins the rates once it has been read for that period.
+        if (_readNetwork)
+        {
+            var period = _trafficPeriod;
+            _traffic.Refresh(period, now);
+            if (network.TryGet(out var withRates) && _traffic.For(period) is { } moved)
+                network = Reading<NetworkSample>.Of(withRates with { DownTotalBytes = moved.Received, UpTotalBytes = moved.Sent, TotalPeriod = period });
+        }
         if (network.TryGet(out var rates))
         {
             if (_history.Count == HistoryLength) _history.Dequeue();
@@ -608,22 +620,19 @@ internal sealed class NetworkProvider : IDisposable
     private List<ulong> _adapters = [];
     private int _sinceList = Relist;
     private double? _time;
-    private readonly TrafficTotals _totals = new();
     private readonly IntPtr _row = Marshal.AllocHGlobal(RowSize);
 
     // Starts over: the next sample only sets the baseline, and the adapters are listed again.
-    // The sums of the traffic stay (TrafficTotals), but not the time the network was not read.
-    public void Forget() { _previous = []; _time = null; _sinceList = Relist; _totals.Forget(); }
+    public void Forget() { _previous = []; _time = null; _sinceList = Relist; }
 
     public Reading<NetworkSample> Sample(double now)
     {
         var current = _sinceList++ >= Relist ? List() : Read();
         if (current is null) return Reading<NetworkSample>.Unavailable(Why.NoNetwork);
         // No physical adapter is not the same as no traffic.
-        if (current.Count == 0) { _previous = []; _time = null; _totals.Forget(); return Reading<NetworkSample>.Unavailable(Why.NoAdapter); }
+        if (current.Count == 0) { _previous = []; _time = null; return Reading<NetworkSample>.Unavailable(Why.NoAdapter); }
         var previous = _previous; var then = _time;
         _previous = current; _time = now;
-        var (downTotal, upTotal) = _totals.Add(current, now);
         if (then is not { } start || now - start <= 0) return Reading<NetworkSample>.Unavailable(Why.Waiting);
         double seconds = now - start, down = 0, up = 0;
         foreach (var (luid, (received, sent)) in current)
@@ -632,7 +641,7 @@ internal sealed class NetworkProvider : IDisposable
             down += MonitorMetrics.Rate(before.Received, received, seconds) ?? 0;
             up += MonitorMetrics.Rate(before.Sent, sent, seconds) ?? 0;
         }
-        return new NetworkSample(down, up) { DownTotalBytes = downTotal, UpTotalBytes = upTotal };
+        return new NetworkSample(down, up);
     }
 
     // Every interface, keeping the physical adapters and their counters.

@@ -47,8 +47,6 @@ internal sealed class MonitorStrip : FrameworkElement
     // (empty when one shows), and whether each shows its space and its temperature. _inline: the readings showing both figures
     // side by side rather than one above the other.
     private readonly CompactMonitorItems _usage, _heat, _vram, _inline;
-    // The download and the upload showing the bytes moved since the app began in place of their rate (CompactTraffic).
-    private readonly CompactMonitorItems _total;
     private readonly string[] _letters, _tags;
     private readonly bool[] _letterUsage, _letterHeat;
     // Whether the frame rate shows its program's icon in place of the glyph (CompactFrames).
@@ -82,7 +80,6 @@ internal sealed class MonitorStrip : FrameworkElement
             // settings menu locks the arrangement as soon as it is chosen), so the row does not change its layout when the first figure arrives.
             if (reading.FiguresInLine || reading.Item == CompactMonitorItems.Gpu && CompactFigures.Shows(reading, CompactFigures.Vram)) _inline |= reading.Item;
         }
-        foreach (var reading in readings) if (CompactTraffic.Shows(reading)) _total |= reading.Item;
         var drives = readings.FirstOrDefault(reading => reading.Item == CompactMonitorItems.Storage) ?? new CompactReading { Item = CompactMonitorItems.Storage };
         bool driveUsage = CompactFigures.Shows(drives, CompactFigures.Usage), driveHeat = CompactFigures.Shows(drives, CompactFigures.Temperature);
         if (drives.FiguresInLine) _inline |= CompactMonitorItems.Storage;
@@ -116,11 +113,10 @@ internal sealed class MonitorStrip : FrameworkElement
         var widths = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
-
-            FramesSlot + Math.Round(3 * _scale) + FigureWidth(WidestFrames) + Math.Round(2 * _scale) + SmallWidth(FramesUnit));
-        // A total takes the room of its widest figure ("999M", "99.9M", "99.9G", "999B"), its own rather than the rate's.
-        double totalWidth = Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(Math.Max(text("999M"), text("99.9M")), Math.Max(text("99.9G"), text("999B"))));
-        _width = item => (_total & item) != 0 ? totalWidth : widths(item);
+            FramesSlot + Math.Round(3 * _scale) + FigureWidth(WidestFrames) + Math.Round(2 * _scale) + SmallWidth(FramesUnit),
+            // The traffic over a period at its widest figure ("999M", "999G", "99.9M", "99.9G", "999B"): a month runs to hundreds of gigabytes.
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(new[] { "999M", "999G", "99.9M", "99.9G", "999B" }.Max(text)));
+        _width = widths;
     }
 
     private const string WidestDegrees = "125°", WidestPercent = "100%";
@@ -220,7 +216,8 @@ internal sealed class MonitorStrip : FrameworkElement
         {
             if ((Shown & item) == 0 || !CompactMonitor.Order.Contains(item)) continue;
             double width = Math.Max(0, _width(item));
-            if (item == CompactMonitorItems.Upload && previous == CompactMonitorItems.Download) widths[^1] += _gap + width;
+            if (item == CompactMonitorItems.Upload && previous == CompactMonitorItems.Download
+                || item == CompactMonitorItems.UploadTotal && previous == CompactMonitorItems.DownloadTotal) widths[^1] += _gap + width;
             else widths.Add(width);
             previous = item;
         }
@@ -270,12 +267,11 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Memory when s?.Memory.OrDefault is { } memory: parts.Add(Loc.T("内存 ", "Memory ") + MonitorFormat.Percent(memory.UsedFraction) + "%"); break;
                 case CompactMonitorItems.Gpu when s?.Gpu.OrDefault is { NoReadings: false } gpu: 
                     parts.Add(MonitorSpeech.StripGpu(gpu.Usage, (_values & item) != 0 && (_vram & item) != 0 ? CompactFigures.Memory(item, s)?.Share : null)); break;
-                case CompactMonitorItems.Download when s?.Network.OrDefault is { } down:
-                    if (MonitorSpeech.StripTraffic(true, down.DownBytesPerSecond, down.DownTotalBytes, (_total & item) != 0) is { Length: > 0 } said) parts.Add(said);
-                    break;
-                case CompactMonitorItems.Upload when s?.Network.OrDefault is { } up:
-                    if (MonitorSpeech.StripTraffic(false, up.UpBytesPerSecond, up.UpTotalBytes, (_total & item) != 0) is { Length: > 0 } sent) parts.Add(sent);
-                    break;
+                case CompactMonitorItems.Download when s?.Network.OrDefault is { } down: parts.Add(Loc.T("下载 ", "Download ") + MonitorFormat.Rate(down.DownBytesPerSecond).Text); break;
+                case CompactMonitorItems.Upload when s?.Network.OrDefault is { } up: parts.Add(Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(up.UpBytesPerSecond).Text); break;
+                case CompactMonitorItems.DownloadTotal or CompactMonitorItems.UploadTotal when s?.Network.OrDefault is { } traffic
+                    && MonitorSpeech.StripTotal(item == CompactMonitorItems.DownloadTotal, CompactTraffic.Of(item, s), traffic.TotalPeriod) is { Length: > 0 } said:
+                    parts.Add(said); break;
                 case CompactMonitorItems.Power when s?.Power.OrDefault is { } power:
                     parts.Add(Loc.T("整机功耗 ", "System power ") + PowerText.Watts(power.Watts) + Loc.T("，", ", ") + (power.Estimated ? Loc.T("估算", "estimated") : Loc.T("实测", "measured"))); break;
                 case CompactMonitorItems.Frames when FrameOf(s) is { } frames: parts.Add(Loc.T("帧率 ", "Frame rate ") + FramesFigure(frames.PerSecond) + " FPS" + Loc.T("，", ", ") + frames.Program); break;
@@ -388,10 +384,11 @@ internal sealed class MonitorStrip : FrameworkElement
                     var memory = s?.Memory.OrDefault;
                     Gauge(drawing, dial, left, center, item, _memory.At(now), memory?.UsedFraction, memory is null ? Look.Tertiary : color, level, "M", s, ppd); break;
                 case CompactMonitorItems.Gpu: Gauge(drawing, dial, left, center, item, _gpu.At(now), s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, color, level, "G", s, ppd); break;
-                case CompactMonitorItems.Download when (_total & item) != 0: Rate(drawing, left, center, MonitorGlyph.Down, TotalFigure(CompactTraffic.Of(item, s)), _colors.At(item, MemoryLevel.Normal), MemoryLevel.Normal, ppd); break;
-                case CompactMonitorItems.Upload when (_total & item) != 0: Rate(drawing, left, center, MonitorGlyph.Up, TotalFigure(CompactTraffic.Of(item, s)), _colors.At(item, MemoryLevel.Normal), MemoryLevel.Normal, ppd); break;
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, RateFigure(s?.Network.OrDefault?.DownBytesPerSecond), color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, RateFigure(s?.Network.OrDefault?.UpBytesPerSecond), color, level, ppd); break;
+                // The traffic has no level: it keeps the text color.
+                case CompactMonitorItems.DownloadTotal: Rate(drawing, left, center, MonitorGlyph.DownTotal, TotalFigure(CompactTraffic.Of(item, s)), color, MemoryLevel.Normal, ppd); break;
+                case CompactMonitorItems.UploadTotal: Rate(drawing, left, center, MonitorGlyph.UpTotal, TotalFigure(CompactTraffic.Of(item, s)), color, MemoryLevel.Normal, ppd); break;
                 case CompactMonitorItems.Storage: Drives(drawing, left, center, s, ppd); break;
                 case CompactMonitorItems.Power: Power(drawing, left, center, s?.Power.OrDefault, ppd); break;
                 case CompactMonitorItems.Charge: Charge(drawing, left, center, s?.Battery.OrDefault, _charge.At(now), level, ppd); break;

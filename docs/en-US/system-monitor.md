@@ -48,6 +48,17 @@ Choose it under "General > Core display":
 
 The squares are as large as the room allows, on whole device pixels at any display scale, with a one-pixel gap where there is room and touching where there is not. The frequency line of a column has no equivalent in the matrix; point at a square to see it.
 
+## Traffic
+
+On the expanded page, the network line shows the traffic over a period after the download and upload rates, such as "Today 2.31 GB"; with less room it shows the figure alone, and with less still only in the tooltip. In the collapsed row, the readings table has "Downloaded" and "Uploaded" rows of their own, shown with a double arrow; turn either on alongside the rates or without them.
+
+Choose the period under General › Traffic period:
+
+- Today: from midnight local time, starting over each midnight.
+- 1 day, 7 days, 30 days: that long back from now.
+
+The traffic comes from Windows' own record, the one the Data usage page in Windows Settings shows, so it includes the time BrimDeck was not running and does not start over when it restarts. Wi-Fi, Ethernet and cellular networks are counted; a VPN or another virtual network is not counted again, as its traffic is already counted on the network it runs over. Windows updates its record a little later, so traffic that has just happened may be counted some time afterwards.
+
 ## Drives
 
 - Shows the space in use for each drive letter; when the page has no room for them all, the remaining letters share one line.

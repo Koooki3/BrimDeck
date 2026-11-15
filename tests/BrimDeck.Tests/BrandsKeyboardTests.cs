@@ -132,9 +132,11 @@ static class BrandsKeyboardTests
             && RongyuanStatus.Battery(Padded(65, "00 00 52 00 00 01 01 01")) == new BatteryRead(82)
             && RongyuanStatus.Battery(Padded(65, "00 00 48 00 00 01 01 01")) == new BatteryRead(72)
             && RongyuanStatus.Battery(Padded(65, "00 00 3D 00 01 01 01 01")) == new BatteryRead(null, Asleep: true));
-        check("Rongyuan: the request read back, zeros, a mouse alone, a zero or too high level are none",
+        check("Rongyuan: the request read back, zeros, a mouse alone without a level, a zero or too high level are none; a mouse alone away is asleep",
             RongyuanStatus.Battery(bare) is null && RongyuanStatus.Battery(summed) is null && RongyuanStatus.Battery(new byte[65]) is null
-            && RongyuanStatus.Battery(Padded(65, "00 00 29 00 00 01 01 02")) is null && RongyuanStatus.Battery(Padded(65, "00 01 00 00 00 01 01 01")) is null
+            && RongyuanStatus.Battery(Padded(65, "00 00 29 00 00 00 01 02")) is null
+            && RongyuanStatus.Battery(Padded(65, "00 00 29 00 00 01 01 02")) == new BatteryRead(null, Asleep: true)
+            && RongyuanStatus.Battery(Padded(65, "00 01 00 00 00 01 01 01")) is null
             && RongyuanStatus.Battery(Padded(65, "00 00 65 00 00 01 01 01")) is null);
     }
 
@@ -142,8 +144,8 @@ static class BrandsKeyboardTests
     {
         var raw = Shape(0x05AC, 0x024F, 0xFF60, 0x61, 3, input: 33, output: 33, outputIds: [0x00], name: "2.4G Wireless Receiver");
         check("Sonix: the borrowed 05AC:024F receiver's raw collection on interface 3, or named by the keyboard, takes the query",
-            Names(BrandFamilies.Find(raw)).SequenceEqual(["sonix.query"])
-            && Names(BrandFamilies.Find(raw with { Interface = 2, Name = "F108Pro Dongle" })).SequenceEqual(["sonix.query"])
+            Names(BrandFamilies.Find(raw)).SequenceEqual(["sonix.query", "huafenda.info"])
+            && Names(BrandFamilies.Find(raw with { Interface = 2, Name = "F108Pro Dongle" })).SequenceEqual(["sonix.query", "huafenda.info"])
             && BrandFamilies.Find(raw with { Name = "F108Pro Dongle" })?.Family.DisplayName(raw with { Name = "F108Pro Dongle" }) == "AULA F108 Pro"
             && BrandFamilies.Find(raw with { Interface = 2, Name = "GANSS GS3104T-Pro" })?.Family.DisplayName(raw with { Name = "GANSS" }) == "GANSS GS3104T-Pro");
         check("Sonix: not Apple's keyboard, another interface without a name, nor the 65-byte collection beside it",
@@ -152,9 +154,9 @@ static class BrandsKeyboardTests
             && BrandFamilies.Find(raw with { Usage = 0x62 }) is null);
         var x87 = raw with { Vendor = 0x0C45, Product = 0xFEFE, Name = "" };
         check("Sonix: EWEADN X87's receiver on interface 3 only, named by its product string (AULA's F87 Pro V2D shares 0C45:FEFE)",
-            BrandFamilies.Find(x87) is { Family.Brand: "EWEADN" } found && Names(found).SequenceEqual(["eweadn.query"]) && found.Family.DisplayName(x87) is null
+            BrandFamilies.Find(x87) is { Family.Brand: "EWEADN" } found && Names(found).SequenceEqual(["eweadn.query", "huafenda.info"]) && found.Family.DisplayName(x87) is null
             && BrandFamilies.Find(x87 with { Interface = 4, InputLength = 65, OutputLength = 65 }) is null && BrandFamilies.Find(x87 with { Interface = 4 }) is null
-            && BrandFamilies.Find(x87 with { Product = 0xFEFD }) is null);
+            && BrandFamilies.Find(x87 with { Product = 0xFEFD }) is { Family.Brand: "Huafenda keyboard" });
         check("Sonix: the query is 00 20 01 ... 21",
             SonixQuery.Request() is { Length: 33 } q && q[1] == 0x20 && q[2] == 0x01 && q[32] == 0x21 && q.Skip(3).Take(29).All(b => b == 0));
         var bad = Summed(32, "20 01 00 61"); bad[31] ^= 0x01;

@@ -25,6 +25,17 @@ internal sealed class ShelfService : IDisposable
     public ShelfData Data { get; private set; } = new();
     // A copy was recorded, an entry changed, files were added: the panels show the page again.
     public event Action? Changed;
+    // The category each column shows, null for "全部". It is one for every panel, as the entries are: chosen on one display, it
+    // is the one shown on the others, so no display shows an empty category while another shows everything.
+    public Guid? ClipTab { get; private set; }
+    public Guid? FileTab { get; private set; }
+    public event Action? TabChanged;
+    public void ShowTab(ShelfSide side, Guid? category)
+    {
+        if ((side == ShelfSide.Clipboard ? ClipTab : FileTab) == category) return;
+        if (side == ShelfSide.Clipboard) ClipTab = category; else FileTab = category;
+        TabChanged?.Invoke();
+    }
     private Func<DeckSettings> _settings = () => new();
 
     public ShelfService(string folder, Dispatcher dispatcher)
@@ -123,7 +134,12 @@ internal sealed class ShelfService : IDisposable
     }
 
     // ---- Pictures ----
-    private readonly Dictionary<Guid, BitmapSource?> _thumbs = [];
+    // The thumbnails read so far, each with the width it was decoded at: a wider one is read when a wider one is asked for.
+    private readonly Dictionary<Guid, (BitmapSource? Image, int Width)> _thumbs = [];
+    private readonly Dictionary<Guid, (int Width, List<Action<BitmapSource?>> Waiting)> _decoding = [];
+    private static int _reading;
+    // Thumbnails being decoded; for the pictures of the README, which wait for them.
+    public static int Reading => Volatile.Read(ref _reading);
     private string PicturePath(Guid id) => Path.Combine(_pictures, id.ToString("N") + ".dat");
     private bool WritePicture(Guid id, byte[] png)
     {
@@ -155,7 +171,44 @@ internal sealed class ShelfService : IDisposable
     // The picture decoded at most this many pixels wide; the row's thumbnails are kept, the details' full picture is not.
     public BitmapSource? Picture(Guid id, int decodeWidth = 0)
     {
-        if (decodeWidth > 0 && _thumbs.TryGetValue(id, out var known)) return known;
+        if (decodeWidth > 0 && _thumbs.TryGetValue(id, out var known) && known.Width >= decodeWidth) return known.Image;
+        var image = Decode(id, decodeWidth);
+        if (decodeWidth > 0) Keep(id, image, decodeWidth);
+        return image;
+    }
+    private void Keep(Guid id, BitmapSource? image, int width)
+    {
+        if (_thumbs.Count > 300) _thumbs.Clear();
+        _thumbs[id] = (image, width);
+    }
+    // An entry's thumbnail for a list. A picture the size of a screenshot takes some 60 ms to decode (measured: 2560 x 1440,
+    // whatever the width asked), which held up the list each time such an entry scrolled into view. So it is decoded on a pool
+    // thread: this gives the thumbnail when it has been read at that width or wider, else the narrower one read before, or
+    // nothing, and `arrived` is called on this thread with the new one when it is there (null when the picture cannot be read).
+    public BitmapSource? Thumb(Guid id, int width, Action<BitmapSource?> arrived)
+    {
+        _thumbs.TryGetValue(id, out var known);
+        if (known.Width >= width) return known.Image;
+        if (_decoding.TryGetValue(id, out var under) && under.Width >= width) { under.Waiting.Add(arrived); return known.Image; }
+        var waiting = new List<Action<BitmapSource?>> { arrived };
+        _decoding[id] = (width, waiting);
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        Interlocked.Increment(ref _reading);
+        Task.Run(() =>
+        {
+            var image = Decode(id, width);
+            dispatcher.BeginInvoke(() =>
+            {
+                Interlocked.Decrement(ref _reading);
+                if (_decoding.TryGetValue(id, out var now) && now.Waiting == waiting) _decoding.Remove(id);
+                Keep(id, image, width);
+                foreach (var each in waiting) each(image);
+            });
+        });
+        return known.Image;
+    }
+    private BitmapSource? Decode(Guid id, int decodeWidth)
+    {
         BitmapSource? image = null;
         if (PictureBytes(id) is { } bytes)
         {
@@ -168,7 +221,6 @@ internal sealed class ShelfService : IDisposable
             }
             catch (Exception error) when (error is NotSupportedException or ArgumentException or InvalidOperationException or FileFormatException) { }
         }
-        if (decodeWidth > 0) { if (_thumbs.Count > 300) _thumbs.Clear(); _thumbs[id] = image; }
         return image;
     }
 

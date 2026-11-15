@@ -74,7 +74,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 
 
-System.Management 10.0.0 and System.CodeDom 10.0.0
+System.Management 10.0.0, System.CodeDom 10.0.0 and System.IO.Ports 10.0.0
 https://github.com/dotnet/dotnet
 
 Copyright (c) Microsoft Corporation. All rights reserved.
