@@ -50,6 +50,7 @@ internal static class Program
                 LiquidIdleTests.Run(Check);
             }
             CheckPageToolTips();
+            NoticeFlashWatchTests.Run(Check);
             if (!hosted)
             {
                 var bannerRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-WindowsTests-" + Guid.NewGuid().ToString("N"));

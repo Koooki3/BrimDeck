@@ -30,6 +30,7 @@ try
     NoticeCoreTests.Run(root, Check);
     NoticeWindowsAppTests.Run(Check);
     NoticeFocusTests.Run(Check);
+    NoticeFlashTests.Run(Check);
     NoticeTimeTests.Run(Check);
     NoticeEventLogTests.Run(Check);
     NoticeLoopFollowupTests.Run(Check);

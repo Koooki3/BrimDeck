@@ -32,6 +32,9 @@ internal sealed class NoticeCenter : IDisposable
     private readonly WslNoticeBridge _wsl = new();
     private readonly NoticeQuiet _quiet;
     private NoticePipeServer? _pipe;
+    private TaskbarFlashWatch? _flash;
+    // Why the taskbar flash source could not start, for the settings page; null while it runs or is off.
+    public string? ChatFlashError { get; private set; }
     private volatile NoticeHistory? _history;
     // Whether notices are kept on disk, for a save finishing on a worker thread (see NoticeHistory.Save).
     private volatile bool _keepHistory;
@@ -151,6 +154,7 @@ internal sealed class NoticeCenter : IDisposable
         {
             _windows.Stop(); _wsl.Apply([]);
             _pipe?.Dispose(); _pipe = null;
+            StopChatFlash();
             _maintenance.Stop(); _quietCheck.Stop();
             ScheduleDue();
             // Whatever shows ends and nothing waiting shows later; quota alerts and track changes keep working through the
@@ -167,6 +171,7 @@ internal sealed class NoticeCenter : IDisposable
         AutoClear();
         if (_pipe is null) { _pipe = new NoticePipeServer(HandlePipeAsync) { Failed = Log }; _pipe.Start(); }
         if (settings.NoticeWindowsSource) _windows.Start(); else _windows.Stop();
+        if (settings.NoticeChatFlash) StartChatFlash(); else StopChatFlash();
         _wsl.Apply(settings.NoticeWslDistros);
         _maintenance.Start();
         Hub.Prune(DateTimeOffset.UtcNow);
@@ -174,6 +179,29 @@ internal sealed class NoticeCenter : IDisposable
         ScheduleDue();
         Banners.Update();
         Changed?.Invoke();
+    }
+
+    // The taskbar flash source (ChatFlash): a hook window while the setting is on, nothing at all otherwise.
+    private void StartChatFlash()
+    {
+        if (_flash is not null) return;
+        try
+        {
+            _flash = new TaskbarFlashWatch(input => { if (_enabled && !_disposed && Settings.NoticeChatFlash) Receive(input); });
+            ChatFlashError = null;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or EntryPointNotFoundException)
+        {
+            ChatFlashError = ex.Message; Log(ex);
+        }
+        Changed?.Invoke();
+    }
+
+    private void StopChatFlash()
+    {
+        bool had = _flash is not null || ChatFlashError is not null;
+        _flash?.Dispose(); _flash = null; ChatFlashError = null;
+        if (had) Changed?.Invoke();
     }
 
     // Asks Windows for access to its notifications (from the settings page) and reads the list once access is granted.
@@ -871,6 +899,7 @@ internal sealed class NoticeCenter : IDisposable
         if (_disposed) return;
         // The sources stop first, so nothing arrives after the last save (core-L3).
         _pipe?.Dispose(); _pipe = null;
+        _flash?.Dispose(); _flash = null;
         _windows.Dispose(); _wsl.Dispose();
         // "Clear on exit": the list is emptied before the last save, so nothing of it is left on disk.
         if (_enabled && Settings.NoticeAutoClear == NoticeAutoClear.OnExit)

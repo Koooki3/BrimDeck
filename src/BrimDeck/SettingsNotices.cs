@@ -82,6 +82,18 @@ public sealed partial class SettingsWindow
                 "While BrimDeck shows Windows notifications on the island, Windows' own banner shows each one a second time. When this is on, BrimDeck turns off \"Show notification banners\" in Windows for other apps: the apps in the Start menu and those already in Windows' notification settings; an app installed later is added at BrimDeck's next start or with its first notification. Notifications still go to the notification center, where BrimDeck reads them; only the banner goes, the sound still plays. BrimDeck itself, and apps set to off or muted under \"Apps\" below, are left alone: their notifications show only in Windows.\n\nBefore it changes anything, BrimDeck records each app's previous setting (including that there was none) in notice-banners.json in its data folder, and restores it when you switch this off, quit or uninstall BrimDeck: a value that was not there is deleted, one that was is written back. If you turn an app's banner on again in Windows, BrimDeck keeps your choice and leaves that app alone while this stays on. Anything it could not restore after an unexpected exit is restored at the next start.\n\nThe setting (HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\<app>\\ShowBanner) is not documented by Windows and may stop working in a later version. If banners still appear with this on, turn them off per app in Windows Settings › System › Notifications.")));
     }
 
+    // "New messages of WeChat and other chat apps (taskbar flash)": off by default; says exactly what is and is not read.
+    private void NoticeChatFlashRow(NoticeCenter center)
+    {
+        string title = Loc.T("微信等聊天应用的新消息提示（任务栏闪烁）", "New-message notices of WeChat and other chat apps (taskbar flash)");
+        var status = StatusLine(() => center.ChatFlashError is { } error && S.NoticeChatFlash ? (Loc.T("无法启动：", "Could not start: ") + error, true) : ("", false));
+        Group(Toggle(title, S.NoticeChatFlash, value => Change(s => s.NoticeChatFlash = value),
+            help: Loc.T("桌面版微信不发送 Windows 通知，只会让任务栏图标闪烁。打开后，BrimDeck 只接收 Windows 的“某个窗口在任务栏闪烁”事件，读取闪烁窗口所属程序的文件名（目前只认微信：Weixin.exe、WeChat.exe），并显示一条“微信 有新消息”。\n\n读取的只有：哪个窗口闪烁、它的程序文件名。不读取消息内容、发送人或会话，不读取也不修改微信的内存、文件和界面（不使用界面自动化），不访问网络。微信已在前台时不提示；约 3 分钟内的连续闪烁合并为一条。\n\n只在有事件时才工作，没有定时器或轮询；关闭后立即注销监听并销毁窗口。默认关闭。微信缩在托盘或设为免打扰时是否闪烁取决于微信自己，不同版本可能不同。",
+                "Desktop WeChat sends no Windows notification; it only flashes its taskbar button. When this is on, BrimDeck receives only Windows' event \"a window is flashing on the taskbar\", reads the file name of the flashing window's program (only WeChat for now: Weixin.exe, WeChat.exe) and shows one \"WeChat New message\" notice.\n\nWhat is read: which window flashed and its program's file name. Not read: message text, sender or chats; nothing in WeChat's memory, files or interface is read or changed (no UI Automation), and nothing goes to the network. Nothing shows while WeChat is in front; flashes within about 3 minutes make up one notice.\n\nIt works only when an event arrives, with no timer or polling; switching it off deregisters the listener and destroys its window at once. Off by default. Whether WeChat flashes while parked in the tray or for do-not-disturb chats is up to WeChat and may differ between versions.")),
+            status);
+        Note(Loc.T("只读取“哪个窗口闪烁、它的程序文件名”，不读取消息内容和发送人。", "Reads only which window flashed and its program's file name, never message text or sender."));
+    }
+
     private (string Text, bool Problem) BannerStatus(NoticeCenter center)
     {
         var banners = center.Banners;
@@ -147,6 +159,7 @@ public sealed partial class SettingsWindow
                 "Reads the current user's app notifications in Windows' notification center (source, icon, time and text). It does not read messages inside apps, and never clears or changes the notification center. As an ordinary desktop program BrimDeck gets no change events from Windows, so it reads whenever Windows' push notification event log records a notification (event log mode), and polls when that log is turned off or unavailable.")));
 
         NoticeBannerRow(center);
+        NoticeChatFlashRow(center);
 
         // WSL: one switch per distribution; none on by default.
         var distributions = WslLocations.Distributions();

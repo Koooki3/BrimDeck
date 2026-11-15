@@ -752,6 +752,9 @@ public sealed class DeckSettings
     public bool NoticeWindowsSource { get; set; } = true;
     // Turns off other applications' own Windows banners while BrimDeck shows their notices (NoticeBanners); off by default.
     public bool NoticeHideBanners { get; set; }
+    // Chat applications that only flash their taskbar button for a new message (WeChat): a notice that says so, nothing of the
+    // message is read (ChatFlash). Off by default.
+    public bool NoticeChatFlash { get; set; }
     // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
     // copied into a distribution only once the user chooses it.
     public List<string> NoticeWslDistros { get; set; } = [];
