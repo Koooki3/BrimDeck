@@ -35,6 +35,7 @@ try
     ChatAppsTests.Run(Check);
     NoticeTimeTests.Run(Check);
     NoticeEventLogTests.Run(Check);
+    ToastActivationTests.Run(Check);
     NoticeLoopFollowupTests.Run(Check);
     NoticeRobustTests.Run(Check);
     NoticeBannerTests.Run(root, Check);

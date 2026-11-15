@@ -16,11 +16,15 @@ internal static class WindowsToastPicture
     private static string Database => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "Windows", "Notifications", "wpndatabase.db");
 
     // The picture's reference for the notification with this id from this application, or null.
-    public static string? Find(uint id, string appUserModelId)
+    public static string? Find(uint id, string appUserModelId) => Payload(id, appUserModelId) is { } payload ? FromToast(payload) : null;
+
+    // The toast's XML as Windows keeps it, or null. Also read, once, when the user opens the application from the notice and
+    // has chosen to replay the toast's launch string (ToastActivation); nothing is read for it before that.
+    public static string? Payload(uint id, string appUserModelId)
     {
         var rows = Sqlite.QueryDatabase(Database,
             $"SELECT n.Payload FROM Notification n JOIN NotificationHandler h ON n.HandlerId = h.RecordId WHERE n.Id = {id} AND h.PrimaryId = '{appUserModelId.Replace("'", "''")}' LIMIT 1");
-        return rows is [{ } row, ..] && row[0] is { Length: > 0 } payload ? FromToast(payload) : null;
+        return rows is [{ } row, ..] && row[0] is { Length: > 0 } payload ? payload : null;
     }
 
     // The app logo override if there is one, else the first image of the toast's visual.

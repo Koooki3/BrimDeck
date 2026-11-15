@@ -419,15 +419,73 @@ internal sealed class WindowsNoticeSource : IDisposable
         catch (Exception ex) when (ex is COMException or ArgumentException or InvalidOperationException or UnauthorizedAccessException or System.IO.IOException) { return null; }
     }
 
-    // Starts or brings forward the application a notice came from. True when Windows accepted the request. An application that
-    // already has an ordinary window open is brought forward by that window first (NoticeAppWindows), before the first await so
-    // that it still runs inside the click that asked; no window, a tray-only app or a refusal leaves it to the launch below.
-    public async Task<bool> LaunchAsync(string appId)
+    // The notification whose toast is to be replayed when the application is opened (ToastActivation).
+    public readonly record struct Replay(uint Id);
+
+    private static readonly TimeSpan ActivationLimit = TimeSpan.FromSeconds(2.5);
+
+    [System.Runtime.InteropServices.ComImport, System.Runtime.InteropServices.Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), System.Runtime.InteropServices.InterfaceType(System.Runtime.InteropServices.ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IApplicationActivationManager
+    {
+        [System.Runtime.InteropServices.PreserveSig] int ActivateApplication([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string appUserModelId,
+            [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string? arguments, int options, out uint processId);
+        [System.Runtime.InteropServices.PreserveSig] int ActivateForFile(IntPtr appUserModelId, IntPtr itemArray, IntPtr verb, out uint processId);
+        [System.Runtime.InteropServices.PreserveSig] int ActivateForProtocol(IntPtr appUserModelId, IntPtr itemArray, out uint processId);
+    }
+
+    [System.Runtime.InteropServices.ComImport, System.Runtime.InteropServices.Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
+    private class ApplicationActivationManager { }
+
+    // What a click on the toast would do, as far as it is safe to do it (ToastActivation decides): the toast's own link, or the
+    // packaged application started with the toast's launch string. The toast is read here, once, for this notification, and its
+    // launch string is neither kept nor logged. False when nothing was replayed; the application is then started as usual.
+    private static async Task<bool> ReplayAsync(string appId, Replay replay, bool packaged)
+    {
+        try
+        {
+            var xml = await Task.Run(() => WindowsToastPicture.Payload(replay.Id, appId));
+            var plan = ToastActivation.Decide(true, ToastActivation.ParseToast(xml), appId, packaged);
+            switch (plan.Kind)
+            {
+                case ToastActivationKind.Protocol when plan.Uri is { } uri:
+                    int colon = uri.IndexOf(':');
+                    var scheme = uri[..colon];
+                    // A scheme nobody handles would only raise Windows' "choose an app" dialog.
+                    if (!scheme.Equals("http", StringComparison.OrdinalIgnoreCase) && !scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
+                    {
+                        using var handler = Registry.ClassesRoot.OpenSubKey(scheme);
+                        if (handler?.GetValue("URL Protocol") is null) return false;
+                    }
+                    using (System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri) { UseShellExecute = true })) { }
+                    return true;
+                case ToastActivationKind.PackageLaunch when plan.Arguments is { } arguments:
+                    // Windows' own activation call, with the arguments as one string, on a thread of its own: it can wait on the application.
+                    var started = await Task.Run(() =>
+                    {
+                        var manager = (IApplicationActivationManager)new ApplicationActivationManager();
+                        try { return manager.ActivateApplication(appId, arguments, 0, out _) >= 0; }
+                        finally { Marshal.ReleaseComObject(manager); }
+                    }).WaitAsync(ActivationLimit);
+                    return started;
+                default: return false;
+            }
+        }
+        catch (Exception ex) when (ex is COMException or InvalidCastException or DllNotFoundException or EntryPointNotFoundException or System.IO.IOException
+            or InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or TimeoutException or System.Security.SecurityException) { return false; }
+    }
+
+    // Starts or brings forward the application a notice came from. True when Windows accepted the request. When the user chose to
+    // replay the toast (replay is not null), that comes first, so that the exact conversation opens; if it did nothing, the
+    // steps below run as before. An application that already has an ordinary window open is brought forward by that window
+    // (NoticeAppWindows), before the first await when there is no replay so that it still runs inside the click that asked; no
+    // window, a tray-only app or a refusal leaves it to the launch below.
+    public async Task<bool> LaunchAsync(string appId, Replay? replay = null)
     {
         Windows.ApplicationModel.AppInfo? app;
         lock (_apps) _apps.TryGetValue(appId, out app);
-        if (FocusOpenWindow(appId, app)) return true;
         string? family = app is null ? null : Safe(() => app.PackageFamilyName);
+        if (replay is { } toast && await ReplayAsync(appId, toast, !string.IsNullOrEmpty(family))) return true;
+        if (FocusOpenWindow(appId, app)) return true;
         if (!string.IsNullOrEmpty(family))
         {
             try
