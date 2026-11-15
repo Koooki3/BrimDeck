@@ -28,6 +28,7 @@ try
     await NoticeWsl2OpsTests.Run(Check);
     NoticeArchTests.Run(Check);
     NoticeCoreTests.Run(root, Check);
+    NoticeCodeTests.Run(root, Check);
     NoticeWindowsAppTests.Run(Check);
     NoticeFocusTests.Run(Check);
     NoticeFlashTests.Run(Check);

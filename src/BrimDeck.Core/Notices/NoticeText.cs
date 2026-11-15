@@ -28,12 +28,22 @@ public static class NoticeText
     public static string Count(int count) => Loc.T($"{count} 条新通知", Loc.Count(count, "new notice", "new notices"));
 
     // The single line an arriving notice shows under its title, by the application's privacy choice.
-    public static (string Title, string Summary) Presented(Notice notice, NoticePrivacy privacy) => privacy switch
+    // A verification code in the words is hidden by codes (Dots to be read, Spoken for a screen reader).
+    public static (string Title, string Summary) Presented(Notice notice, NoticePrivacy privacy, CodeMask codes = CodeMask.Off)
     {
-        NoticePrivacy.AppOnly => (notice.AppName, Loc.T("新通知", "New notice")),
-        NoticePrivacy.TitleOnly => (notice.Title.Length > 0 ? notice.Title : notice.AppName, ""),
-        _ => (notice.Title.Length > 0 ? notice.Title : notice.AppName, Summary(notice.Body))
-    };
+        string title = notice.Title, body = notice.Body;
+        if (codes != CodeMask.Off && NoticeCodes.Words(notice, true) is { HasCode: true } words)
+        {
+            title = codes == CodeMask.Spoken ? words.SpokenTitle : words.Title;
+            body = codes == CodeMask.Spoken ? words.SpokenBody : words.Body;
+        }
+        return privacy switch
+        {
+            NoticePrivacy.AppOnly => (notice.AppName, Loc.T("新通知", "New notice")),
+            NoticePrivacy.TitleOnly => (title.Length > 0 ? title : notice.AppName, ""),
+            _ => (title.Length > 0 ? title : notice.AppName, Summary(body))
+        };
+    }
 
     // The first line of the body, with runs of white space collapsed.
     public static string Summary(string body)

@@ -863,7 +863,8 @@ internal sealed class NoticeCenter : IDisposable
         if (_history is not { } history || !CanSave) return;
         if (_saving) { _savePending = true; return; }
         _saving = true;
-        var notices = Hub.Notices.Select(n => n.Copy()).ToList();
+        bool codes = Settings.NoticeCodes;
+        var notices = Hub.Notices.Select(n => NoticeCodes.ForHistory(n, codes).Copy()).ToList();
         var apps = Hub.KnownApps.ToList();
         long order = history.NextOrder();
         bool written = false;
@@ -890,7 +891,7 @@ internal sealed class NoticeCenter : IDisposable
         if (!_saveTimer.IsEnabled && !_savePending && !_saving) return;
         _saveTimer.Stop(); _savePending = false;
         if (_history is not { } history || !CanSave) return;
-        try { if (history.Save(Hub.Notices, Hub.KnownApps)) Retire(history); }
+        try { if (history.Save(Hub.Notices.Select(n => NoticeCodes.ForHistory(n, Settings.NoticeCodes)).ToList(), Hub.KnownApps)) Retire(history); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) { }
     }
 

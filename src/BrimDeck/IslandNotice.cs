@@ -794,12 +794,13 @@ internal sealed class IslandNotice : Window
 
     private NoticePrivacy Privacy(Notice notice) => Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
 
-    private (string Title, string Summary) Texts()
+    // spoken: the words for a screen reader, in which a verification code is not dots but a note that it is hidden.
+    private (string Title, string Summary) Texts(bool spoken = false)
     {
         if (_item is { Kind: AttentionKind.Summary, Payload: int count })
             return (NoticeText.Count(count), Loc.T("在 BrimDeck 安静期间收到", "Arrived while BrimDeck kept quiet"));
         if (Notice is not { } notice) return ("", "");
-        var (title, summary) = NoticeText.Presented(notice, Privacy(notice));
+        var (title, summary) = NoticeText.Presented(notice, Privacy(notice), !Settings.NoticeCodes ? CodeMask.Off : spoken ? CodeMask.Spoken : CodeMask.Dots);
         if (NoticeClock.Live(notice.Timing, DateTimeOffset.UtcNow, TimeZoneInfo.Local) is { } live) summary = live;
         if (title.Length == 0) title = notice.AppName;
         if (_item is { Count: > 1 } item) summary = (summary.Length > 0 ? summary + " · " : "") + NoticeText.Count(item.Count);
@@ -884,7 +885,8 @@ internal sealed class IslandNotice : Window
             if (Notice is { } timed && NoticeClock.IsLive(timed.Timing, DateTimeOffset.UtcNow)) _liveRun = words;
         }
         Directed(line, title + summary);
-        string spoken = (Notice?.AppName is { Length: > 0 } app ? app + ": " : "") + (summary.Length > 0 ? title + ", " + summary : title);
+        var (said, saidSummary) = Settings.NoticeCodes ? Texts(spoken: true) : (title, summary);
+        string spoken = (Notice?.AppName is { Length: > 0 } app ? app + ": " : "") + (saidSummary.Length > 0 ? said + ", " + saidSummary : said);
         AutomationProperties.SetName(line, spoken);
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
         _announced = line;
