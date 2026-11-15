@@ -11,7 +11,7 @@ public enum ScreenEdge { Top, Bottom, Left, Right }
 // What the notch or the line hangs from on its edge where a taskbar is: the screen's edge, over the taskbar, or the taskbar's inner
 // edge. Without a taskbar on that edge the two are the same line. See DeckSettings.Dock.
 public enum EdgeAnchor { Screen, Taskbar }
-// Peek: the indicator while the pointer is away; hovering it shows the collapsed row (WindowPeek). Appended, so saved numbers keep their meaning.
+// Peek: the indicator that shows a readout of the system readings beside it while the pointer is on it (WindowPeek). Appended, so saved numbers keep their meaning.
 public enum WindowBehavior { Normal, Line, Hide, Peek }
 // BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen }
@@ -365,8 +365,6 @@ public sealed class DeckSettings
     // The notch or the capsule last chosen, which the line style hotkey (HotkeyKind.LineStyle) returns to from the line. Normalize
     // keeps it up to date.
     public CompactStyle ShapeStyle { get; set; } = CompactStyle.Notch;
-    // The row an indicator that peeks shows: the chosen style, or the last notch or capsule when the line is the chosen one.
-    [JsonIgnore] public CompactStyle PeekStyle => Style != CompactStyle.Line ? Style : ShapeStyle is CompactStyle.Capsule ? CompactStyle.Capsule : CompactStyle.Notch;
     // Size and position of each collapsed style in DIPs; limits and defaults are in CollapsedLimits. OffsetX moves the surface
     // from the centre; each monitor narrows the offset to what fits (CollapsedGeometry) without changing the saved value.
     public double NotchWidth { get; set; } = CollapsedLimits.NotchWidthDefault;
@@ -762,12 +760,8 @@ public sealed class DeckSettings
     }
     // Media is detected for the expanded music page, the chosen style's music or equalizer, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
-    [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || ShowsEqualizer(Style) || PeekWantsMedia || MusicIndicatorProgress
+    [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || ShowsEqualizer(Style) || MusicIndicatorProgress
         && (Style == CompactStyle.Line || Maximized.IsIndicator() || Borderless.IsIndicator() || Exclusive.IsIndicator());
-    // The row an indicator peeks with (PeekStyle) shows music or the equalizer, though the chosen style, the line, does not.
-    [JsonIgnore] private bool PeekWantsMedia => (Maximized == WindowBehavior.Peek || Borderless == WindowBehavior.Peek || Exclusive == WindowBehavior.Peek
-        || FullscreenRules.Any(rule => rule.Maximized == WindowBehavior.Peek || rule.Borderless == WindowBehavior.Peek || rule.Exclusive == WindowBehavior.Peek))
-        && (ShowsMusic(PeekStyle) || ShowsEqualizer(PeekStyle));
     // The switched-on applications. Their quotas are read for the AI usage page or for the rings of the chosen compact
     // style; the two are shown independently, so either one keeps the data current.
     [JsonIgnore] public IReadOnlyList<AppEntry> ConfiguredApps => Apps.Where(app => app.Enabled).Take(AppPresets.MaximumShownApps).ToList();

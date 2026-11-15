@@ -157,16 +157,6 @@ internal static class FullscreenRuleTests
         check("Media is wanted for the indicator's progress under the peeking rule as under the plain one",
             new DeckSettings { MusicIndicatorProgress = true, MusicPage = false, Maximized = WindowBehavior.Peek }.MediaWanted
             == new DeckSettings { MusicIndicatorProgress = true, MusicPage = false, Maximized = WindowBehavior.Line }.MediaWanted);
-        check("The row that peeks wants media under a peeking rule only, even when the chosen style is the line",
-            new DeckSettings { Style = CompactStyle.Line, MusicPage = false, MusicIndicatorProgress = false, Maximized = WindowBehavior.Peek }.MediaWanted
-            && new DeckSettings { Style = CompactStyle.Line, MusicPage = false, MusicIndicatorProgress = false, FullscreenRules = [new FullscreenRule { Name = "X", Exclusive = WindowBehavior.Peek }] }.MediaWanted
-            && !new DeckSettings { Style = CompactStyle.Line, MusicPage = false, MusicIndicatorProgress = false }.MediaWanted
-            && !new DeckSettings { Style = CompactStyle.Line, MusicPage = false, MusicIndicatorProgress = false, Maximized = WindowBehavior.Peek, NotchMusic = false, NotchEqualizer = false }.MediaWanted);
-        check("The row that peeks is the chosen style, or the last notch or capsule when the line is chosen",
-            new DeckSettings { Style = CompactStyle.Capsule }.PeekStyle == CompactStyle.Capsule
-            && new DeckSettings { Style = CompactStyle.Notch }.PeekStyle == CompactStyle.Notch
-            && new DeckSettings { Style = CompactStyle.Line, ShapeStyle = CompactStyle.Capsule }.PeekStyle == CompactStyle.Capsule
-            && new DeckSettings { Style = CompactStyle.Line, ShapeStyle = CompactStyle.Line }.PeekStyle == CompactStyle.Notch);
 
         // The peek's state: begins once, ends once, and rests until the pointer has left the line.
         var peek = new WindowPeek();

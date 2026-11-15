@@ -1320,7 +1320,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             var option = new RadioButton { Content = BehaviorName(behavior), Style = (Style)FindResource("SettingsSegment"), GroupName = "Behavior" + title, IsChecked = selected == behavior };
             AutomationProperties.SetName(option, title + " · " + BehaviorName(behavior)); option.Checked += (_, _) => changed(behavior); options.Children.Add(option);
         }
-        return Row(title, SegmentBorder(options), help: () => Loc.T("“指示条+预览”：平时是指示条，鼠标停在上面时弹出收起行（刘海或胶囊），点击再展开面板；移开后回到指示条。",
-            "\"Indicator + peek\": the indicator at rest; hovering it shows the collapsed row (notch or capsule), a click opens the panel, and moving away returns to the indicator."));
+        return Row(title, SegmentBorder(options), help: () => Loc.T("“指示条+预览”：平时是指示条，鼠标停在上面时在它旁边弹出一个只读的小气泡，显示所选的系统读数；点击气泡或指示条再展开面板，移开后气泡消失。",
+            "\"Indicator + peek\": the indicator at rest; hovering it shows a small read-only bubble beside it with your chosen system readings, a click on the bubble or the indicator opens the panel, and moving away hides the bubble."));
     }
 }

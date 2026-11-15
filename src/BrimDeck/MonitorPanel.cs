@@ -30,7 +30,7 @@ public partial class MainWindow
         // Plugging in or unplugging changes what the power reading can come from (battery discharge on battery only): asked again then.
         Microsoft.Win32.PowerModeChangedEventHandler powerChanged = (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.StatusChange) Dispatcher.BeginInvoke(UpdateMonitorDemand); };
         Microsoft.Win32.SystemEvents.PowerModeChanged += powerChanged;
-        Closed += (_, _) => { _app.MonitorUpdated -= MonitorUpdated; Microsoft.Win32.SystemEvents.PowerModeChanged -= powerChanged; _app.PresentMonitor(this, false, false); };
+        Closed += (_, _) => { _app.MonitorUpdated -= MonitorUpdated; Microsoft.Win32.SystemEvents.PowerModeChanged -= powerChanged; _app.PresentMonitor(this, false, false); _peekBubble?.Dismiss(false); };
     }
 
     // Asked whenever the panel opens, closes, changes page or is hidden, and whenever the collapsed row is built.
@@ -45,8 +45,10 @@ public partial class MainWindow
         // only hidden for now (the panel open, or a notice in its place, which leaves no row built: RenderCompact) keeps its
         // temperatures read while the sampler runs (App.UpdateMonitorExtras). A row whose only chosen reading is the battery reads the
         // devices (UpdateDevicesDemand), not the system.
-        bool heldStrip = StripNeedsSystem && (_compactStrip is not null || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !DisplayPower.Off && EffectiveStyle != CompactStyle.Line;
-        bool strip = heldStrip && !_expanded && _alert is null;
+        // The readout bubble of a peeking indicator reads the system while it shows, as a collapsed row with readings does (MainWindow.Peek.cs).
+        bool peekReads = _peekBubble is not null && StripNeedsSystem && IsVisible && !IsSuppressed && !DisplayPower.Off;
+        bool heldStrip = peekReads || StripNeedsSystem && (_compactStrip is not null || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !DisplayPower.Off && EffectiveStyle != CompactStyle.Line;
+        bool strip = peekReads || heldStrip && !_expanded && _alert is null;
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -96,6 +98,7 @@ public partial class MainWindow
     {
         Motion.Enabled = MonitorMotion;
         bool admitted = AdmitStrip(snapshot);
+        UpdatePeekBubble(snapshot);
         if (!_expanded)
         {
             // The drives or the battery got their first figure: the row is built again with them, and they come in with the row's own
