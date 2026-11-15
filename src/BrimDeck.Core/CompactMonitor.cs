@@ -45,8 +45,9 @@ public enum CompactMonitorItems
 // the warning and critical levels. They are kept to read older files, which DeckSettings.Normalize moves into the custom
 // scheme and the level colors (CompactMonitor.MoveColors), and are not written.
 // Figures: what CPU, GPU and the drives show after their glyph, the share in use and the temperature, and for the GPU also its
-// memory's share (CompactFigures), what the frame rate shows of its program, its icon or not (CompactFrames), and what download and
-// upload show, the rate or the bytes moved since the app began (CompactTraffic); Sources:
+// memory's share (CompactFigures), and what the
+// frame rate shows of its program, its icon or not (CompactFrames), and what download and upload show, the rate or the bytes moved
+// since the app began (CompactTraffic); Sources:
 // the drive letters the drives show (CompactSources). Both chosen in the table's menus, null for the default. FiguresInLine:
 // both figures side by side in the row's type rather than one above the other in two smaller lines.
 public sealed class CompactReading
