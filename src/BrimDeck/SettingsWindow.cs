@@ -425,6 +425,10 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             SelectedIndex=Math.Max(0,scales.ToList().IndexOf(PanelScales.Fit(S.PanelScale))) };
         AutomationProperties.SetName(scale,Loc.T("缩放", "Scale")); PopupMotion.Attach(scale);
         scale.SelectionChanged+=(_,_)=> { if(scale.SelectedIndex>=0) { var value=scales[scale.SelectedIndex]; Change(s=>s.PanelScale=value); } };
+        // Windows' "Text size" (Settings > Accessibility > Text size), followed on top of the scale (DeckSettings.FollowTextSize, TextScales).
+        var textSize = Toggle(Loc.T("跟随系统文字大小", "Follow Windows text size"), S.FollowTextSize, on => Change(s => s.FollowTextSize = on),
+            help: Loc.T("系统设置“辅助功能 > 文字大小”调大时，BrimDeck 随之放大（最大 200%，与上面的缩放相乘）。系统文字大小为 100% 时没有任何变化。",
+                "When Windows' Text size (Settings > Accessibility) is raised, BrimDeck is drawn larger with it (up to 200 %, together with the scale above). At 100 % nothing changes."));
         // The surface's transparency (DeckSettings.SurfaceTransparency).
         var transparency = SliderRow(Loc.T("背景透明度", "Background transparency"), S.SurfaceTransparency, 0, DeckSettings.MaxSurfaceTransparency, 5, "%",
             value => Change(s => s.SurfaceTransparency = (int)value));
@@ -464,7 +468,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             followRow = Toggle(Loc.T("字体应用到设置窗口", "Apply font to settings window"), S.SettingsFollowsFont,
                 on => { Change(s => s.SettingsFollowsFont = on); RebuildTheme(); });
         }
-        Group(Row(Loc.T("主题", "Theme"),SegmentBorder(themes)),Row(Loc.T("语言", "Language"),language),Row(Loc.T("缩放", "Scale"),scale),transparency,
+        Group(Row(Loc.T("主题", "Theme"),SegmentBorder(themes)),Row(Loc.T("语言", "Language"),language),Row(Loc.T("缩放", "Scale"),scale),textSize,transparency,
             fontRow,followRow,Row(Loc.T("字体预览", "Font preview"),fontSample));
         Interaction(); WindowRules();
     }
@@ -648,7 +652,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         {
             switch(_page)
             {
-                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.MemoryMode=defaults.MemoryMode;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.PanelScale=defaults.PanelScale;s.SurfaceTransparency=defaults.SurfaceTransparency;s.UiFont=defaults.UiFont;s.SettingsFollowsFont=defaults.SettingsFollowsFont;
+                case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.MemoryMode=defaults.MemoryMode;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.FullscreenRules=[];s.PanelScale=defaults.PanelScale;s.SurfaceTransparency=defaults.SurfaceTransparency;s.UiFont=defaults.UiFont;s.SettingsFollowsFont=defaults.SettingsFollowsFont;s.FollowTextSize=defaults.FollowTextSize;
                     s.ClickThrough=defaults.ClickThrough;s.ClickThroughPanel=defaults.ClickThroughPanel;s.ClickThroughKeyboard=defaults.ClickThroughKeyboard;s.WindowCapture=defaults.WindowCapture;break;
                 case HotkeysPage:foreach(var kind in Enum.GetValues<HotkeyKind>())s.SetHotkey(kind,defaults.Hotkey(kind));break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;

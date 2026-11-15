@@ -20,7 +20,7 @@ public partial class MainWindow
 
     // The choice the row is built for: the panel's scale (the whole row is drawn again at another size), which readings are shown, and
     // whether the row shows any.
-    private string ReadingsChoice() => Settings.PanelScale + ":" + (!Settings.ShowsMonitor(EffectiveStyle) ? "" : string.Join(",", Settings.CompactReadings.Where(r => r.Visible).Select(r => (int)r.Item)));
+    private string ReadingsChoice() => _scale + ":" + (!Settings.ShowsMonitor(EffectiveStyle) ? "" : string.Join(",", Settings.CompactReadings.Where(r => r.Visible).Select(r => (int)r.Item)));
 
     // Called as the collapsed row is about to be built again: a picture of the row on show if its choice of readings has changed.
     private Image? RowFadeStart()

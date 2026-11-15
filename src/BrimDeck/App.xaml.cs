@@ -31,6 +31,10 @@ public partial class App : Application
     // The main panel. It owns the tray icon, reads the usage data and takes the settings preview; every other chosen
     // monitor gets a panel that shows the same data.
     public MainWindow Deck { get; private set; } = null!;
+    // Windows' text size (TextScales): the panels are drawn larger by it while DeckSettings.FollowTextSize is on.
+    private readonly Native.WindowsTextSize _windowsTextSize = new();
+    private TextSize? _textSize;
+    public TextSize TextSize => _textSize ??= new(_windowsTextSize);
     private readonly Dictionary<string, MainWindow> _otherDecks = [];
     public IEnumerable<MainWindow> Decks => _otherDecks.Values.Prepend(Deck);
     public IReadOnlyList<DisplayInfo> Displays { get; private set; } = [];
@@ -107,6 +111,7 @@ public partial class App : Application
         DeviceReadStore.Start(folder);
         DeviceReadSwitches.Use(Settings.DeviceChoices);
         UseLanguage(); UseFont();
+        _windowsTextSize.Watch(() => { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(TextSizeChanged); });
         PanelTheme.Use(Settings);
         ScheduleDaylight();
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
@@ -288,6 +293,12 @@ public partial class App : Application
     internal void CollapsedChanged() => _settingsWindow?.CollapsedChanged();
     // A new reading may bring quotas an application row's ring choices did not have yet (SettingsWindow.QuotasChanged).
     internal void SnapshotsChanged() => _settingsWindow?.QuotasChanged();
+    // Windows' text size changed: every panel is laid out again at the new scale (MainWindow.ApplyScale); one that does not follow it is left alone.
+    private void TextSizeChanged()
+    {
+        if (Exiting || !TextSize.Refresh()) return;
+        foreach (var deck in Decks.ToList()) if (deck.PanelSettings.FollowTextSize) deck.ApplySettings();
+    }
     private void SystemThemeChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
     {
         if (Dispatcher.HasShutdownStarted) return;
@@ -610,7 +621,7 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _windowsTextSize.Dispose(); _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
         Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); DeviceReadStore.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }

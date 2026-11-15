@@ -23,7 +23,7 @@ public partial class MainWindow
     // Takes the scale from the settings; ApplySettings calls it before it sizes the window.
     private void ApplyScale()
     {
-        double scale = PanelScales.Factor(Settings);
+        double scale = PanelScales.Factor(Settings, _app.TextSize.Factor);
         if (scale == _scale) return;
         _scale = scale; _unscaled.Scale = scale;
         UI.Scale(ExpandedContent, scale);

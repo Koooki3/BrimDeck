@@ -360,6 +360,9 @@ public sealed class DeckSettings
     // On, the settings window is drawn in the chosen font too; off (the default), it keeps the app's own fonts. Either way the
     // font row itself keeps them, so a font that is hard to read can still be changed back.
     public bool SettingsFollowsFont { get; set; }
+    // On (the default), BrimDeck is drawn larger by the size Windows' "Text size" is set to (TextScales), on top of PanelScale. At
+    // Windows' default of 100 % this changes nothing. A file saved before the setting existed reads as on.
+    public bool FollowTextSize { get; set; } = true;
     public CompactStyle Style { get; set; } = CompactStyle.Notch;
     // The notch or the capsule last chosen, which the line style hotkey (HotkeyKind.LineStyle) returns to from the line. Normalize
     // keeps it up to date.

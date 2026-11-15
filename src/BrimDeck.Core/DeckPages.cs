@@ -79,4 +79,6 @@ public static class PanelScales
     public static readonly IReadOnlyList<int> Choices = [100, 150];
     public static int Fit(int percent) => Choices.Contains(percent) ? percent : Default;
     public static double Factor(DeckSettings settings) => Fit(settings.PanelScale) / 100d;
+    // With Windows' text size followed (DeckSettings.FollowTextSize) the scale is the chosen one times the text size (TextScales.Combine).
+    public static double Factor(DeckSettings settings, double textSize) => TextScales.Combine(Factor(settings), settings.FollowTextSize ? textSize : 1);
 }
