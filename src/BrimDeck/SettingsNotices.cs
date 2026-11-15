@@ -320,11 +320,14 @@ public sealed partial class SettingsWindow
         Group(SliderRow(Loc.T("停留时间", "Shown for"), S.NoticeDuration, 2, 30, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeDuration = (int)Math.Round(value))),
             SliderRow(Loc.T("高优先级停留", "High priority shown for"), S.NoticeHighDuration, 2, 60, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeHighDuration = (int)Math.Round(value))),
             MusicChoice(Loc.T("显示在", "Show on"), S.NoticeScreen, [(NoticeScreen.Foreground, Loc.T("前台窗口所在屏幕", "Foreground window's screen")), (NoticeScreen.Main, Loc.T("主面板所在屏幕", "Main panel's screen"))], value => Change(s => s.NoticeScreen = value)),
-            MusicChoice(Loc.T("到达时显示", "On arrival show"), S.NoticePrivacy, [(NoticePrivacy.Full, Loc.T("标题和摘要", "Title and summary")), (NoticePrivacy.TitleOnly, Loc.T("仅标题", "Title only")), (NoticePrivacy.AppOnly, Loc.T("仅应用", "App only"))], value => Change(s => s.NoticePrivacy = value)),
+            MusicChoice(Loc.T("到达时显示", "On arrival show"), S.NoticePrivacy, [(NoticePrivacy.Full, Loc.T("标题和摘要", "Title and summary")), (NoticePrivacy.TitleOnly, Loc.T("仅标题", "Title only")), (NoticePrivacy.AppOnly, Loc.T("仅应用", "App only"))], value => { Change(s => { s.NoticePrivacy = value; s.NoticeChatAppsFollowGlobal = true; }); ShowPage(NoticesSettingsPage); }),
             MusicChoice(Loc.T("点击岛上的通知", "Clicking a notice on the island"), S.NoticeClick, [(NoticeClickTarget.Page, Loc.T("打开通知页", "Open the notices page")), (NoticeClickTarget.SourceApp, Loc.T("打开来源应用", "Open the source app"))], value => Change(s => s.NoticeClick = value)),
             Toggle(Loc.T("识别验证码并遮罩，提供复制按钮", "Hide verification codes and offer a copy button"), S.NoticeCodes, value => Change(s => s.NoticeCodes = value),
                 help: Loc.T("在本机识别通知里的验证码（不联网，不写日志），在灵动提示和通知页里用圆点遮住，即使显示摘要也一样，并在通知页给出“复制验证码”按钮。只有点按钮时才写入剪贴板，并要求 Windows 不把它收入剪贴板历史、不同步到云端；60 秒后如果剪贴板里仍是这个验证码，就清空。通知历史里保存的也是遮住的文字，所以重启后无法再复制。",
                     "Recognizes a verification code in a notice on this PC (nothing goes online or into a log) and hides it with dots on the island and the notices page, even where summaries show; the notices page gets a \"Copy code\" button. The clipboard is written only when you click it, marked so that Windows keeps it out of the clipboard history and cloud sync; after 60 seconds it is emptied if it still holds that code. The notice history keeps the hidden text, so a code cannot be copied after a restart.")),
+            Toggle(Loc.T("聊天应用也使用上面的设置", "Chat apps follow this setting too"), S.ChatAppsFollowGlobal, value => { Change(s => s.NoticeChatAppsFollowGlobal = value); ShowPage(NoticesSettingsPage); },
+                help: Loc.T("关闭时，微信、QQ、企业微信、飞书、钉钉、Telegram、Discord、WhatsApp、Signal、Slack、LINE、KakaoTalk 等聊天应用到达时只显示应用名和“有新消息”，不显示发送者和内容，因为聊天内容常含私人信息；其他应用按上面的设置。单个应用可在下方单独设置，优先于此开关。升级前已把上面改为“标题和摘要”以外选项的用户保持原样；其余用户升级后默认关闭此开关。",
+                    "When off, chat apps such as WeChat, QQ, WeCom, Feishu, DingTalk, Telegram, Discord, WhatsApp, Signal, Slack, LINE and KakaoTalk show only the app name and \"New message\" on arrival, without the sender or text, because chat often holds private details; other apps follow the setting above. Each app can be set below, which takes precedence over this switch. Users who had already chosen something other than \"Title and summary\" above before this existed keep their behavior; for everyone else the switch starts off.")),
             Toggle(Loc.T("专注与演示时不打扰", "Quiet during focus and presentations"), S.NoticeRespectFocus, value => Change(s => s.NoticeRespectFocus = value),
                 help: (center.FocusSupported ? Loc.T("Windows 专注会话或演示模式期间不弹出提示，结束后显示一次数量汇总。", "No notices pop up during a Windows focus session or presentation mode; afterwards one summary shows how many arrived.")
                     : Loc.T("此 Windows 版本不提供专注会话接口，仅识别演示模式。", "This version of Windows does not report focus sessions; only presentation mode is recognized."))
@@ -367,8 +370,9 @@ public sealed partial class SettingsWindow
                 option.Checked += (_, _) => Edit(r => { r.Enabled = value != 0; r.Muted = value == 1; r.Priority = value == 3 ? NoticePriority.High : NoticePriority.Normal; });
                 choices.Children.Add(option);
             }
-            var privacy = new ComboBox { Width = 112, Style = (Style)FindResource("SettingsCombo"), Margin = new Thickness(10, 0, 0, 0),
-                ItemsSource = new[] { Loc.T("默认显示", "Default"), Loc.T("标题和摘要", "Full"), Loc.T("仅标题", "Title only"), Loc.T("仅应用", "App only") },
+            var chatDefault = !S.ChatAppsFollowGlobal && ChatApps.IsChat(key, name);
+            var privacy = new ComboBox { Width = chatDefault ? 168 : 112, Style = (Style)FindResource("SettingsCombo"), Margin = new Thickness(10, 0, 0, 0),
+                ItemsSource = new[] { chatDefault ? Loc.T("聊天应用默认：仅应用", "Chat default: app only") : Loc.T("默认显示", "Default"), Loc.T("标题和摘要", "Full"), Loc.T("仅标题", "Title only"), Loc.T("仅应用", "App only") },
                 SelectedIndex = rule?.Privacy is { } p ? (int)p + 1 : 0 };
             AutomationProperties.SetName(privacy, name + " · " + Loc.T("到达时显示", "On arrival show"));
             privacy.SelectionChanged += (_, _) => Edit(r => r.Privacy = privacy.SelectedIndex <= 0 ? null : (NoticePrivacy)(privacy.SelectedIndex - 1));

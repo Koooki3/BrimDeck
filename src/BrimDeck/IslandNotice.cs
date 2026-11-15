@@ -792,7 +792,7 @@ internal sealed class IslandNotice : Window
 
     // ----- Content -----
 
-    private NoticePrivacy Privacy(Notice notice) => Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
+    private NoticePrivacy Privacy(Notice notice) => Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
 
     // spoken: the words for a screen reader, in which a verification code is not dots but a note that it is hidden.
     private (string Title, string Summary) Texts(bool spoken = false)

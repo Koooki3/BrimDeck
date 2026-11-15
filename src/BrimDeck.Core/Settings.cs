@@ -768,6 +768,12 @@ public sealed class DeckSettings
     // Recognises a verification code in a notice, hides it wherever the notice is shown and offers a button that copies it (see
     // NoticeCodes). Off by default: it reads the notices' words and, on a click, writes the clipboard.
     public bool NoticeCodes { get; set; }
+    // Whether chat applications (ChatApps) are shown with NoticePrivacy like every other application. By default (null) they
+    // show only the application and that there is a new message, unless the user had already chosen a global value other than
+    // "Title and summary" before this setting existed (then it counts as true, so nothing changes for them). Choosing the global
+    // value, or turning the switch on or off, stores true or false.
+    public bool? NoticeChatAppsFollowGlobal { get; set; }
+    [JsonIgnore] public bool ChatAppsFollowGlobal => NoticeChatAppsFollowGlobal ?? NoticePrivacy != NoticePrivacy.Full;
     // Holds notices back during a Windows focus session or presentation mode.
     public bool NoticeRespectFocus { get; set; } = true;
     // Notices are held back until this time (BrimDeck's own pause); null when not paused.
@@ -1077,6 +1083,9 @@ public sealed class DeckSettings
         Core.Profiles.Normalize(this);
     }
     public NoticeAppRule? NoticeRule(string appKey) => NoticeApps.FirstOrDefault(rule => rule.Key == appKey);
+    // What an arriving notice of the application shows: its own rule, else the global setting or the chat application default.
+    public NoticePrivacy NoticePrivacyFor(string appKey, string appName)
+        => ChatApps.EffectivePrivacy(NoticePrivacy, ChatAppsFollowGlobal, NoticeRule(appKey)?.Privacy, ChatApps.IsChat(appKey, appName));
 }
 
 // appVersion is the running application's version; it defaults to the entry assembly's version.
