@@ -62,6 +62,7 @@ internal static class ChatAppsTests
         check("A chat notice shown by application only says there is a new message", NoticeText.Presented(notice, NoticePrivacy.AppOnly) == ("微信", "有新消息"));
         check("The sender and text do not appear", NoticeText.Presented(notice, NoticePrivacy.AppOnly) is var (title, summary) && !title.Contains("Alice") && !summary.Contains("see you"));
         check("Another application shown by application only keeps the plain wording", NoticeText.Presented(Chat("windows:x", "Outlook"), NoticePrivacy.AppOnly) == ("Outlook", "新通知"));
+        check("The chat flash notices of every flash application count as chat applications", ChatFlashApps.All.All(app => ChatApps.IsChat("flash:" + app.Id, app.NameZh) && ChatApps.IsChat("flash:" + app.Id, app.NameEn)));
         check("The full privacy still shows sender and text", NoticeText.Presented(notice, NoticePrivacy.Full) == ("Alice", "see you at 8"));
         Loc.Use(Loc.English);
         check("The chat wording is translated", NoticeText.Presented(notice, NoticePrivacy.AppOnly).Summary == "New message");
