@@ -267,7 +267,10 @@ public sealed partial class SettingsWindow
         Group(SliderRow(Loc.T("停留时间", "Shown for"), S.NoticeDuration, 2, 30, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeDuration = (int)Math.Round(value))),
             SliderRow(Loc.T("高优先级停留", "High priority shown for"), S.NoticeHighDuration, 2, 60, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeHighDuration = (int)Math.Round(value))),
             MusicChoice(Loc.T("显示在", "Show on"), S.NoticeScreen, [(NoticeScreen.Foreground, Loc.T("前台窗口所在屏幕", "Foreground window's screen")), (NoticeScreen.Main, Loc.T("主面板所在屏幕", "Main panel's screen"))], value => Change(s => s.NoticeScreen = value)),
-            MusicChoice(Loc.T("到达时显示", "On arrival show"), S.NoticePrivacy, [(NoticePrivacy.Full, Loc.T("标题和摘要", "Title and summary")), (NoticePrivacy.TitleOnly, Loc.T("仅标题", "Title only")), (NoticePrivacy.AppOnly, Loc.T("仅应用", "App only"))], value => Change(s => s.NoticePrivacy = value)),
+            MusicChoice(Loc.T("到达时显示", "On arrival show"), S.NoticePrivacy, [(NoticePrivacy.Full, Loc.T("标题和摘要", "Title and summary")), (NoticePrivacy.TitleOnly, Loc.T("仅标题", "Title only")), (NoticePrivacy.AppOnly, Loc.T("仅应用", "App only"))], value => { Change(s => { s.NoticePrivacy = value; s.NoticeChatAppsFollowGlobal = true; }); ShowPage(NoticesSettingsPage); }),
+            Toggle(Loc.T("聊天应用也使用上面的设置", "Chat apps follow this setting too"), S.ChatAppsFollowGlobal, value => { Change(s => s.NoticeChatAppsFollowGlobal = value); ShowPage(NoticesSettingsPage); },
+                help: Loc.T("关闭时，微信、QQ、企业微信、飞书、钉钉、Telegram、Discord、WhatsApp、Signal、Slack、LINE、KakaoTalk 等聊天应用到达时只显示应用名和“有新消息”，不显示发送者和内容，因为聊天内容常含私人信息；其他应用按上面的设置。单个应用可在下方单独设置，优先于此开关。升级前已把上面改为“标题和摘要”以外选项的用户保持原样；其余用户升级后默认关闭此开关。",
+                    "When off, chat apps such as WeChat, QQ, WeCom, Feishu, DingTalk, Telegram, Discord, WhatsApp, Signal, Slack, LINE and KakaoTalk show only the app name and \"New message\" on arrival, without the sender or text, because chat often holds private details; other apps follow the setting above. Each app can be set below, which takes precedence over this switch. Users who had already chosen something other than \"Title and summary\" above before this existed keep their behavior; for everyone else the switch starts off.")),
             Toggle(Loc.T("专注与演示时不打扰", "Quiet during focus and presentations"), S.NoticeRespectFocus, value => Change(s => s.NoticeRespectFocus = value),
                 help: (center.FocusSupported ? Loc.T("Windows 专注会话或演示模式期间不弹出提示，结束后显示一次数量汇总。", "No notices pop up during a Windows focus session or presentation mode; afterwards one summary shows how many arrived.")
                     : Loc.T("此 Windows 版本不提供专注会话接口，仅识别演示模式。", "This version of Windows does not report focus sessions; only presentation mode is recognized."))
@@ -310,8 +313,9 @@ public sealed partial class SettingsWindow
                 option.Checked += (_, _) => Edit(r => { r.Enabled = value != 0; r.Muted = value == 1; r.Priority = value == 3 ? NoticePriority.High : NoticePriority.Normal; });
                 choices.Children.Add(option);
             }
-            var privacy = new ComboBox { Width = 112, Style = (Style)FindResource("SettingsCombo"), Margin = new Thickness(10, 0, 0, 0),
-                ItemsSource = new[] { Loc.T("默认显示", "Default"), Loc.T("标题和摘要", "Full"), Loc.T("仅标题", "Title only"), Loc.T("仅应用", "App only") },
+            var chatDefault = !S.ChatAppsFollowGlobal && ChatApps.IsChat(key, name);
+            var privacy = new ComboBox { Width = chatDefault ? 168 : 112, Style = (Style)FindResource("SettingsCombo"), Margin = new Thickness(10, 0, 0, 0),
+                ItemsSource = new[] { chatDefault ? Loc.T("聊天应用默认：仅应用", "Chat default: app only") : Loc.T("默认显示", "Default"), Loc.T("标题和摘要", "Full"), Loc.T("仅标题", "Title only"), Loc.T("仅应用", "App only") },
                 SelectedIndex = rule?.Privacy is { } p ? (int)p + 1 : 0 };
             AutomationProperties.SetName(privacy, name + " · " + Loc.T("到达时显示", "On arrival show"));
             privacy.SelectionChanged += (_, _) => Edit(r => r.Privacy = privacy.SelectedIndex <= 0 ? null : (NoticePrivacy)(privacy.SelectedIndex - 1));

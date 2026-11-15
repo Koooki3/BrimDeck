@@ -18,7 +18,7 @@ internal static class NoticeLetter
     }
 
     // Whether a notice may show its picture: not when the user keeps it to the application's name.
-    public static bool ShowsPicture(Notice notice, DeckSettings settings) => notice.Picture is not null && (settings.NoticeRule(notice.AppKey)?.Privacy ?? settings.NoticePrivacy) != NoticePrivacy.AppOnly;
+    public static bool ShowsPicture(Notice notice, DeckSettings settings) => notice.Picture is not null && settings.NoticePrivacyFor(notice.AppKey, notice.AppName) != NoticePrivacy.AppOnly;
 
     // bell: a summary of notices, which has no application.
     public static FrameworkElement Plate(string? appName, double size, Color accent, bool bell = false)

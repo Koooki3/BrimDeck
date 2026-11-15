@@ -28,9 +28,12 @@ public static class NoticeText
     public static string Count(int count) => Loc.T($"{count} 条新通知", Loc.Count(count, "new notice", "new notices"));
 
     // The single line an arriving notice shows under its title, by the application's privacy choice.
-    public static (string Title, string Summary) Presented(Notice notice, NoticePrivacy privacy) => privacy switch
+    public static (string Title, string Summary) Presented(Notice notice, NoticePrivacy privacy) => Presented(notice, privacy, ChatApps.IsChat(notice.AppKey, notice.AppName));
+
+    // A chat application's notice that shows only the application says that there is a new message.
+    public static (string Title, string Summary) Presented(Notice notice, NoticePrivacy privacy, bool chat) => privacy switch
     {
-        NoticePrivacy.AppOnly => (notice.AppName, Loc.T("新通知", "New notice")),
+        NoticePrivacy.AppOnly => (notice.AppName, chat ? Loc.T("有新消息", "New message") : Loc.T("新通知", "New notice")),
         NoticePrivacy.TitleOnly => (notice.Title.Length > 0 ? notice.Title : notice.AppName, ""),
         _ => (notice.Title.Length > 0 ? notice.Title : notice.AppName, Summary(notice.Body))
     };

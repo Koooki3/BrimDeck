@@ -567,7 +567,7 @@ internal sealed class IslandNotice : Window
 
     // ----- Content -----
 
-    private NoticePrivacy Privacy(Notice notice) => Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
+    private NoticePrivacy Privacy(Notice notice) => Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
 
     private (string Title, string Summary) Texts()
     {
