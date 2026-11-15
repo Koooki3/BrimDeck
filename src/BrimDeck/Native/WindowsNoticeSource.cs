@@ -419,11 +419,14 @@ internal sealed class WindowsNoticeSource : IDisposable
         catch (Exception ex) when (ex is COMException or ArgumentException or InvalidOperationException or UnauthorizedAccessException or System.IO.IOException) { return null; }
     }
 
-    // Starts or brings forward the application a notice came from. True when Windows accepted the request.
+    // Starts or brings forward the application a notice came from. True when Windows accepted the request. An application that
+    // already has an ordinary window open is brought forward by that window first (NoticeAppWindows), before the first await so
+    // that it still runs inside the click that asked; no window, a tray-only app or a refusal leaves it to the launch below.
     public async Task<bool> LaunchAsync(string appId)
     {
         Windows.ApplicationModel.AppInfo? app;
         lock (_apps) _apps.TryGetValue(appId, out app);
+        if (FocusOpenWindow(appId, app)) return true;
         string? family = app is null ? null : Safe(() => app.PackageFamilyName);
         if (!string.IsNullOrEmpty(family))
         {
@@ -449,6 +452,16 @@ internal sealed class WindowsNoticeSource : IDisposable
             return shell is not null;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return false; }
+    }
+
+    private static bool FocusOpenWindow(string appId, Windows.ApplicationModel.AppInfo? app)
+    {
+        try
+        {
+            string? folder = app is null ? null : Safe(() => app.Package?.InstalledLocation?.Path);
+            return NoticeAppWindows.TryFocus(NoticeAppWindows.Hint(appId, folder), new AppWindowSystem(), Environment.ProcessId);
+        }
+        catch (Exception ex) when (ex is COMException or System.ComponentModel.Win32Exception or InvalidOperationException or UnauthorizedAccessException or ArgumentException or System.IO.IOException) { return false; }
     }
 
     // A loop reports only while its run is current: after Stop the state stays Off.
