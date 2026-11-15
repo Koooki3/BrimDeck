@@ -812,8 +812,12 @@ public sealed class DeckSettings
     }
     // Media is detected for the expanded music page, the chosen style's music or equalizer, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
-    [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || ShowsEqualizer(Style) || MusicIndicatorProgress
+    [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || ShowsEqualizer(Style) || PeekWantsMedia || MusicIndicatorProgress
         && (Style == CompactStyle.Line || Maximized.IsIndicator() || Borderless.IsIndicator() || Exclusive.IsIndicator());
+    // The row an indicator peeks with (PeekStyle) shows music or the equalizer, though the chosen style, the line, does not.
+    [JsonIgnore] private bool PeekWantsMedia => (Maximized == WindowBehavior.Peek || Borderless == WindowBehavior.Peek || Exclusive == WindowBehavior.Peek
+        || FullscreenRules.Any(rule => rule.Maximized == WindowBehavior.Peek || rule.Borderless == WindowBehavior.Peek || rule.Exclusive == WindowBehavior.Peek))
+        && (ShowsMusic(PeekStyle) || ShowsEqualizer(PeekStyle));
     // The switched-on applications. Their quotas are read for the AI usage page or for the rings of the chosen compact
     // style; the two are shown independently, so either one keeps the data current.
     [JsonIgnore] public IReadOnlyList<AppEntry> ConfiguredApps => Apps.Where(app => app.Enabled).Take(AppPresets.MaximumShownApps).ToList();
