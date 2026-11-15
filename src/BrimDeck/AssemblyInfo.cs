@@ -11,3 +11,6 @@ using System.Windows;
 
 // The glyph preview (tests/BrimDeck.GlyphPreview) draws the notice glyphs with the app's own elements and checks the liquid motion's boundary.
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("BrimDeck.GlyphPreview")]
+
+// The notice window's warm-up check (tests/BrimDeck.IslandChecks) runs the real IslandNotice offscreen.
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("BrimDeck.IslandChecks")]

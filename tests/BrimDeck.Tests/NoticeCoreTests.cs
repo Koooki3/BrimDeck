@@ -14,6 +14,7 @@ internal static class NoticeCoreTests
         Coordinator(check);
         History(root, check);
         Routing(check);
+        ClickTarget(check);
         Intake(check);
         Pages(check);
         SettingsValues(root, check);
@@ -343,6 +344,22 @@ internal static class NoticeCoreTests
         history.Delete();
     }
 
+    private static void ClickTarget(Action<string, bool> check)
+    {
+        static Notice Made(NoticeOrigin origin, string appId, NoticeCapabilities caps) => new() { Origin = origin, AppId = appId, Capabilities = caps };
+        var windows = Made(NoticeOrigin.Windows, "Chat.App!App", NoticeCapabilities.OpenApp);
+        check("Click: by default a notice on the island opens the notices page", new DeckSettings().NoticeClick == NoticeClickTarget.Page
+            && NoticeClick.Decide(windows, new DeckSettings().NoticeClick) == NoticeClickAction.OpenPage);
+        check("Click: set to the source app, a Windows notice with an application opens it", NoticeClick.Decide(windows, NoticeClickTarget.SourceApp) == NoticeClickAction.OpenApp);
+        check("Click: a Windows notice without an application id opens the page", NoticeClick.Decide(Made(NoticeOrigin.Windows, "", NoticeCapabilities.OpenApp), NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage);
+        check("Click: a Windows notice that cannot be opened opens the page", NoticeClick.Decide(Made(NoticeOrigin.Windows, "Chat.App!App", NoticeCapabilities.None), NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage);
+        check("Click: a WSL notice opens the page, even with an open capability or actions", NoticeClick.Decide(Made(NoticeOrigin.Wsl, "", NoticeCapabilities.Actions), NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage
+            && NoticeClick.Decide(Made(NoticeOrigin.Wsl, "x", NoticeCapabilities.OpenApp | NoticeCapabilities.Actions), NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage);
+        check("Click: a brim-notify notice opens the page", NoticeClick.Decide(Made(NoticeOrigin.Cli, "", NoticeCapabilities.None), NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage);
+        check("Click: no notice opens the page", NoticeClick.Decide(null, NoticeClickTarget.SourceApp) == NoticeClickAction.OpenPage);
+        check("Click: with the page chosen, every kind opens the page", NoticeClick.Decide(windows, NoticeClickTarget.Page) == NoticeClickAction.OpenPage);
+    }
+
     private static void Routing(Action<string, bool> check)
     {
         NoticeRouting.Candidate[] panels = [new("main", 1, true, true), new("second", 2, false, true), new("hidden", 3, false, false)];
@@ -402,6 +419,9 @@ internal static class NoticeCoreTests
         check("Notice settings are normalized", odd.NoticeScreen == NoticeScreen.Foreground && odd.NoticeDuration == 2 && odd.NoticeHistoryHours == 168
             && odd.NoticesWidth == 460 && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeHistoryFolder == "" && odd.NoticeApps.Count == 1 && odd.NoticeApps[0].AccentColor == "#FF0000"
             && odd.NoticeApps[0].Priority == NoticePriority.Normal && odd.NoticeApps[0].Privacy is null);
+        var strange = new DeckSettings { NoticeClick = (NoticeClickTarget)7 };
+        strange.Normalize();
+        check("An unknown click choice goes back to the notices page", strange.NoticeClick == NoticeClickTarget.Page);
         var copy = odd.Copy();
         copy.NoticeApps[0].Muted = true; copy.NoticeWslDistros.Add("Arch");
         check("Copies do not share notice rules or distributions", !odd.NoticeApps[0].Muted && odd.NoticeWslDistros.Count == 2);
@@ -410,6 +430,12 @@ internal static class NoticeCoreTests
         store.Save(saved);
         var json = File.ReadAllText(store.FilePath);
         var back = store.Load();
+        var chosen = new DeckSettings { NoticeClick = NoticeClickTarget.SourceApp };
+        store.Save(chosen);
+        check("The click choice survives saving", store.Load().NoticeClick == NoticeClickTarget.SourceApp);
+        File.WriteAllText(store.FilePath, "{\"NoticesEnabled\":true}");
+        check("Settings saved before the click choice existed open the notices page", store.Load().NoticeClick == NoticeClickTarget.Page);
+        store.Save(saved);
         check("Notice settings survive saving", back.NoticesEnabled && back.NoticePrivacy == NoticePrivacy.TitleOnly && back.LastPage == DeckPage.Notices && back.NoticesPausedUntil == T0
             && back.NoticeRule("windows:X")?.Priority == NoticePriority.High && JsonDocument.Parse(json).RootElement.GetProperty("LastPage").GetInt32() == 5);
     }

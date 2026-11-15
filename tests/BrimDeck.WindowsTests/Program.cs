@@ -34,11 +34,13 @@ internal static class Program
             CheckSettledClip();
             CheckPageToolTips();
             NoticeProtectionTests.Run(Check);
+            NoticeFlashWatchTests.Run(Check);
             var bannerRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-WindowsTests-" + Guid.NewGuid().ToString("N"));
             try { NoticeBannerRegistryTests.Run(bannerRoot, Check); NoticeBannerKeeperTests.Run(System.IO.Path.Combine(bannerRoot, "keeper"), Check); }
             finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
             LayoutRetryTests.Run(Check);
             NoticePanelTests.Run(Check);
+            NoticeRowBatchTests.Run(Check);
             DrawnAutomationTests.Run(Check);
             RingLetterChecks.Run(Check);
             SettingsFocusTests.Run(Check);

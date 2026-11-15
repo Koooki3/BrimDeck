@@ -10,6 +10,8 @@ public enum NoticeCategory { Message, Task, Success, Warning, Error, Info }
 public enum NoticePriority { Low, Normal, High }
 // How much an arriving notice shows: icon, title and summary; icon and title; or the application's icon and name only.
 public enum NoticePrivacy { Full, TitleOnly, AppOnly }
+// What a click on a notice shown on the collapsed island does: open the notices page (the default), or open the source application.
+public enum NoticeClickTarget { Page, SourceApp }
 
 // Clears the whole recent list on a schedule, besides dropping each notice once it is older than the retention.
 public enum NoticeAutoClear { Off, OnExit, Daily, Weekly }

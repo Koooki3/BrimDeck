@@ -40,7 +40,7 @@ internal sealed class IslandNotice : Window
     private CollapsedShape _shape = null!;
     private NoticeLook _look = NoticeLook.Current();
     private Rect _stageRect, _island;
-    private bool _leaving, _arrivedUnderPointer, _held;
+    private bool _leaving, _arrivedUnderPointer, _held, _opening;
     private int _generation;
 
     // The motion: its model, when it started, the factor from its design size to DIPs, and the shapes it draws each frame.
@@ -59,7 +59,14 @@ internal sealed class IslandNotice : Window
         Content = _stage;
         // Back to front: the shadow, the backlight (or the indicator's bloom) behind the island, the island, the beads that trail its
         // ripples, the content and the area that takes the pointer.
-        foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts }) _stage.Children.Add(layer);
+        foreach (var layer in new[] { _shadow, _glowWide, _glowCore, _bloomWide, _bloomMiddle, _bloomSmall, _body, _parts })
+        {
+            // Nothing is drawn before the island has been laid out (Layout sets _shape): Prepare shows the window once, far off screen,
+            // before any notice, and the layers' first render then asked for the island's form (a NullReferenceException on every start
+            // that left the window shown).
+            layer.Ready = () => _shape is not null;
+            _stage.Children.Add(layer);
+        }
         _stage.Children.Add(_content); _stage.Children.Add(_hit);
         _shadow.Draw = DrawShadow; _glowWide.Draw = d => DrawGlow(d, wide: true); _glowCore.Draw = d => DrawGlow(d, wide: false);
         _bloomWide.Draw = d => DrawBloom(d, 3, 4, .55); _bloomMiddle.Draw = d => DrawBloom(d, 1.5, 1.5, .6); _bloomSmall.Draw = d => DrawBloom(d, .5, 0, .8);
@@ -69,7 +76,7 @@ internal sealed class IslandNotice : Window
         _hoverOpen = new(Dispatcher, () => { _hoverOpen!.Stop(); if (_item is not null && !_leaving && _hit.IsMouseOver) OpenPage(byKey: false); });
         _hit.MouseEnter += (_, _) => PointerEntered();
         _hit.MouseLeave += (_, _) => PointerLeft();
-        _hit.MouseLeftButtonUp += (_, e) => { e.Handled = true; if (_item is not null && !_leaving) OpenPage(byKey: false); };
+        _hit.MouseLeftButtonUp += (_, e) => { e.Handled = true; if (_item is not null && !_leaving) Activate(byKey: false); };
         _hit.MouseRightButtonUp += (_, e) => e.Handled = true;
         SourceInitialized += (_, _) => WindowsHost.ConfigureOverlay(this, _app.Settings.WindowCapture);
         _app.Notices.Icons.Loaded += IconLoaded;
@@ -87,7 +94,12 @@ internal sealed class IslandNotice : Window
         WindowStartupLocation = WindowStartupLocation.Manual;
         Left = -32000; Top = -32000; Width = 16; Height = 16; Opacity = 0;
         try { Show(); UpdateLayout(); Hide(); }
-        finally { Left = left; Top = top; Width = width; Height = height; Opacity = opacity; }
+        finally
+        {
+            // A warm-up that failed half way must not leave the window shown (Covering would then hold the island's hover back).
+            if (IsVisible && _item is null) Hide();
+            Left = left; Top = top; Width = width; Height = height; Opacity = opacity;
+        }
     }
 
     // True while a notice covers the island: the panel then leaves hovering to this window.
@@ -127,6 +139,7 @@ internal sealed class IslandNotice : Window
             AfterFrames(HandFrames, () => { if (generation == _generation && _item is not null) _deck.SetIslandCovered(true); });
         }
         _arrivedUnderPointer = _island.Contains(CursorInStage());
+        NameHit();
         BuildContent();
         _content.BeginAnimation(OpacityProperty, null);
         _content.Opacity = 0;
@@ -142,6 +155,7 @@ internal sealed class IslandNotice : Window
     {
         if (_item is null) return;
         _item = item;
+        NameHit();
         BuildContent();
     }
 
@@ -198,7 +212,7 @@ internal sealed class IslandNotice : Window
     }
 
     // The notices hotkey with a notice on the island: the panel opens on the notices page and takes the keyboard.
-    public void EnterKeyboard() { if (_item is not null) OpenPage(byKey: true); }
+    public void EnterKeyboard() { if (_item is not null) Activate(byKey: true); }
 
     // reveal: the notice ran out and the island takes over in place. The island shows again first and this window, drawing the same
     // island, leaves only once the island is on screen, a few frames later: the two windows reach the screen on frames of their own,
@@ -241,6 +255,30 @@ internal sealed class IslandNotice : Window
         CompositionTarget.Rendering += step;
     }
 
+    // A click or the hotkey: the notices page, or with NoticeClick set to the source application, that application. A notice with no
+    // application to open (WSL, brim-notify), or one that could not be opened, opens the page instead. The launch is the one the
+    // details use (NoticeCenter.OpenAsync); no window is activated here.
+    private async void Activate(bool byKey)
+    {
+        var notice = Notice;
+        if (notice is null || _opening || NoticeClick.Decide(notice, Settings.NoticeClick) != NoticeClickAction.OpenApp) { OpenPage(byKey); return; }
+        _opening = true;
+        bool opened = false;
+        try { opened = await Center.OpenAsync(notice); }
+        catch (Exception) { opened = false; }
+        finally { _opening = false; }
+        // The notice may have ended or been replaced while the application started.
+        if (_item is null || _leaving || !ReferenceEquals(Notice, notice) && Notice?.Id != notice.Id) return;
+        if (opened) Center.Dismiss(_deck, reportToSource: false); else OpenPage(byKey);
+    }
+
+    // The screen reader's name for the click area says what a click does.
+    private void NameHit()
+    {
+        bool app = NoticeClick.Decide(Notice, Settings.NoticeClick) == NoticeClickAction.OpenApp;
+        AutomationProperties.SetName(_hit, app ? Loc.T("灵动提示，点击打开来源应用", "Live notice, click to open the source app") : Loc.T("灵动提示", "Live notice"));
+    }
+
     private void OpenPage(bool byKey)
     {
         string? id = Notice?.Id;
@@ -254,8 +292,9 @@ internal sealed class IslandNotice : Window
         if (_item is null || _leaving) return;
         Hold();
         // A notice that arrives under a resting pointer does not open the panel by itself: the pointer leaves and comes back, or clicks.
-        // With the panel set to open on a click (ClickToExpand), resting on the notice does not open it either.
-        if (_arrivedUnderPointer || Settings.ClickToExpand) return;
+        // With the panel set to open on a click (ClickToExpand), resting on the notice does not open it either; nor when a click on the
+        // notice opens its application (NoticeClick), or the page would open under the pointer before the click could.
+        if (_arrivedUnderPointer || Settings.ClickToExpand || Settings.NoticeClick == NoticeClickTarget.SourceApp) return;
         _hoverOpen.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay));
         _hoverOpen.Start();
     }
@@ -676,7 +715,9 @@ internal sealed class IslandNotice : Window
     private sealed class Layer : FrameworkElement
     {
         public Action<DrawingContext>? Draw;
+        // False until the window has laid the island out: nothing is drawn then.
+        public Func<bool>? Ready;
         public Layer() { IsHitTestVisible = false; }
-        protected override void OnRender(DrawingContext drawingContext) => Draw?.Invoke(drawingContext);
+        protected override void OnRender(DrawingContext drawingContext) { if (Ready?.Invoke() != false) Draw?.Invoke(drawingContext); }
     }
 }

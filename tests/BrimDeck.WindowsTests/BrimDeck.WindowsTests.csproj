@@ -18,6 +18,7 @@
     <Compile Include="..\..\src\BrimDeck\Native\SettingsChrome.cs" Link="SettingsChrome.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeProtection.cs" Link="NoticeProtection.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\TaskbarFlashWatch.cs" Link="TaskbarFlashWatch.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeBannerRegistry.cs" Link="NoticeBannerRegistry.cs" />
     <Compile Include="..\..\src\BrimDeck\NoticeBannerKeeper.cs" Link="NoticeBannerKeeper.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\FrameRates.cs" Link="FrameRates.cs" />

@@ -36,6 +36,7 @@ internal static class ChatAppsTests
             ("windows:x", "Elementary"), ("windows:x", "Larkspur"), ("windows:x", "Timer"), ("cli:claude", "claude"), ("", "")
         ];
         foreach (var (key, name) in other) check($"Not a chat app: {name} {key}", !ChatApps.IsChat(key, name));
+        check("The chat flash notices of every flash application count as chat applications", ChatFlashApps.All.All(app => ChatApps.IsChat("flash:" + app.Id, app.NameZh) && ChatApps.IsChat("flash:" + app.Id, app.NameEn)));
     }
 
     private static void Precedence(Action<string, bool> check)

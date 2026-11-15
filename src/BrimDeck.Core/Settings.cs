@@ -695,6 +695,9 @@ public sealed class DeckSettings
     public bool NoticeWindowsSource { get; set; } = true;
     // Turns off other applications' own Windows banners while BrimDeck shows their notices (NoticeBanners); off by default.
     public bool NoticeHideBanners { get; set; }
+    // Chat applications that only flash their taskbar button for a new message (WeChat): a notice that says so, nothing of the
+    // message is read (ChatFlash). Off by default.
+    public bool NoticeChatFlash { get; set; }
     // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
     // copied into a distribution only once the user chooses it.
     public List<string> NoticeWslDistros { get; set; } = [];
@@ -709,6 +712,8 @@ public sealed class DeckSettings
     // value, or turning the switch on or off, stores true or false.
     public bool? NoticeChatAppsFollowGlobal { get; set; }
     [JsonIgnore] public bool ChatAppsFollowGlobal => NoticeChatAppsFollowGlobal ?? NoticePrivacy != NoticePrivacy.Full;
+    // What a click on a notice shown on the collapsed island opens; the notices page unless changed.
+    public NoticeClickTarget NoticeClick { get; set; }
     // Holds notices back during a Windows focus session or presentation mode.
     public bool NoticeRespectFocus { get; set; } = true;
     // Notices are held back until this time (BrimDeck's own pause); null when not paused.
@@ -971,6 +976,7 @@ public sealed class DeckSettings
         NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
         if (!Enum.IsDefined(NoticePrivacy)) NoticePrivacy = NoticePrivacy.Full;
+        if (!Enum.IsDefined(NoticeClick)) NoticeClick = NoticeClickTarget.Page;
         if (!Enum.IsDefined(NoticeAutoClear)) NoticeAutoClear = NoticeAutoClear.Off;
         NoticeDuration = Math.Clamp(NoticeDuration, 2, 30);
         NoticeHighDuration = Math.Clamp(NoticeHighDuration, 2, 60);
