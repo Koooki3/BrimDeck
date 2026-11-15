@@ -11,6 +11,7 @@ using System.Windows.Threading;
 using BrimDeck.Core;
 using BrimDeck.Native;
 using MediaState = BrimDeck.Core.MediaState;
+using static BrimDeck.Tracks;
 
 namespace BrimDeck;
 
@@ -1258,7 +1259,7 @@ public partial class MainWindow
     // the moving edges only uncovered or covered them. Instead each part starts where it was and travels with its end of the surface:
     // the parts before the text and the text itself with the left end, the parts after it with the right end, on the surface's own
     // curve; the text's room opens with them, so a longer line never runs under the parts after it. delta: the surface's change of width.
-    private void SlideCompactRow(double delta, int duration, Track track, IEasingFunction easing)
+    private void SlideCompactRow(double delta, int duration, BrimDeck.Core.Notices.NoticeMotion.Track track, IEasingFunction easing)
     {
         if (duration <= 0 || !double.IsFinite(delta) || Math.Abs(delta) < .5 || _compactMarquee is not { } title
             || CompactRings.Children.Count == 0 || CompactRings.Children[0] is not Grid grid) return;
