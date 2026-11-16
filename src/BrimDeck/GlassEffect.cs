@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using BrimDeck.Core;
 using Windows.Graphics.Effects;
 using Windows.UI.Composition;
 using WinRT;
@@ -60,10 +61,10 @@ internal static class GlassEffect
     // And again ("液态玻璃再调透0.05，磨砂质感做淡一点"): the open panel .40 to .35, the collapsed island .35 to .30; the frost
     // lighter by a thinner tint layer (the even veil over the blur: .23 dark and .25 light to .20 both) and half the noise
     // (AcrylicNoise). The blur itself is DWM's host backdrop, its radius not ours to set.
-    public const double LuminosityBase = .35, LuminosityBaseLight = .35, LuminosityMost = .95;
+    public const double LuminosityBase = GlassMaterial.DefaultExpandedVeil, LuminosityBaseLight = LuminosityBase, LuminosityMost = GlassMaterial.MaximumVeil;
     // Size makes thickness (step 4 of round 16): the collapsed island, the control layer, thinner and clearer (.35); the open
     // panel, the content layer, its full base - in between with the opening.
-    public const double LuminosityCapsule = .30;
+    public const double LuminosityCapsule = GlassMaterial.DefaultCollapsedVeil;
     public static double PanelBase(bool dark) => dark ? LuminosityBase : LuminosityBaseLight;
     public static double Thickness(double openness, bool dark) => LuminosityCapsule + (PanelBase(dark) - LuminosityCapsule) * Math.Clamp(openness, 0, 1);
     // The luminosity opacity shown: what the text needs (LuminosityFor) and never under the thickness for the opening; in steps.
@@ -82,7 +83,7 @@ internal static class GlassEffect
 
     // The luminosity opacity the text needs over a backdrop whose brightest tenth reaches bright (the dark look) or whose
     // darkest tenth reaches dark (the light look), from the recipe's lightness ((1 - L) b + L t)(1 - k) + k t: never under
-    // LuminosityCapsule, at most LuminosityMost. In steps of .05, so a brush is made again only for a real change.
+    // zero, at most LuminosityMost. The appearance then applies its own floor, in steps of .05.
     public static double LuminosityFor(bool darkLook, double bright, double dark)
     {
         var look = darkLook ? AcrylicDark : AcrylicLight;
@@ -90,7 +91,7 @@ internal static class GlassEffect
         double need = darkLook
             ? (b - target) * (1 - t) <= 1e-4 ? 0 : ((1 - t) * b + t * target - DarkMost) / ((1 - t) * (b - target))
             : (target - b) * (1 - t) <= 1e-4 ? 0 : (LightLeast - (1 - t) * b - t * target) / ((1 - t) * (target - b));
-        return Math.Ceiling(Math.Clamp(need, LuminosityCapsule, LuminosityMost) * 20 - 1e-9) / 20;
+        return Math.Ceiling(Math.Clamp(need, 0, LuminosityMost) * 20 - 1e-9) / 20;
     }
     private static readonly Dictionary<AcrylicLook, CompositionEffectFactory> AcrylicFactories = [];
 

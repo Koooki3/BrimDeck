@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -75,6 +75,7 @@ internal sealed class GlassBackdrop : IDisposable
     // How much of the held blur lies under the island's material now (0 to 1): the tint thins to PanelTheme.HeldOpacity by as much.
     // While the surface is aside (SurfaceAside), how much of the island is liquid glass (its material), which the surface leaves
     // to the glass (SurfaceOpacity).
+    public Func<int>? AcrylicTransparency { get; set; }
     public event Action<double>? Held;
 
     // The island as drawn, in device pixels from the panel window's corner: its bounds, corners and shoulder at that size, its
@@ -474,7 +475,7 @@ internal sealed class GlassBackdrop : IDisposable
             // lies along that outline.
             if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
             // The luminosity layer for the text (the probe's) and the thickness for the island's size (GlassEffect.Shown).
-            double shownLuminosity = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0, PanelTheme.Current.IsDark);
+            double shownLuminosity = GlassMaterial.LuminosityOpacity(_luminosity, Openness?.Invoke() ?? 0, AcrylicTransparency?.Invoke() ?? GlassMaterial.DefaultTransparency);
             if (shownLuminosity != _luminosityShown) { _luminosityShown = shownLuminosity; _brushFor = null; }
             Dress();
             // The body's sides (the shoulders are not the body: a rectangle as wide as the flare would stand out past the sides);
@@ -1161,7 +1162,7 @@ internal sealed class GlassBackdrop : IDisposable
 
         void Redress()
         {
-            double shown = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0, PanelTheme.Current.IsDark);
+            double shown = GlassMaterial.LuminosityOpacity(_luminosity, Openness?.Invoke() ?? 0, AcrylicTransparency?.Invoke() ?? GlassMaterial.DefaultTransparency);
             if (shown == _luminosityShown) return;
             _luminosityShown = shown; _brushFor = null; Dress();
         }

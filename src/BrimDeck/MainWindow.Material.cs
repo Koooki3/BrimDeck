@@ -245,6 +245,7 @@ public partial class MainWindow
             _glass.Look += (dark, instant) => _app.TurnGlass(this, dark, instant);
             _glass.Crossed += () => _app.GlassCrossed(this);
             _glass.Openness = GlassOpenness;
+            _glass.AcrylicTransparency = () => Settings.GlassTransparency;
             _glass.Measured += ShadowBackdrop;
             _glass.ContentArea = GlassContentArea;
             _glass.TextRegions = GlassTextRegions;
