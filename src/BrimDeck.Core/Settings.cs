@@ -775,6 +775,9 @@ public sealed class DeckSettings
     // Chat applications that only flash their taskbar button for a new message (WeChat): a notice that says so, nothing of the
     // message is read (ChatFlash). Off by default.
     public bool NoticeChatFlash { get; set; }
+    // A click on the WeChat notice of the taskbar flash source asks WeChat, through its own weixin:// address, to bring its main window
+    // forward (ChatRestore). Off by default.
+    public bool NoticeChatFlashRestore { get; set; }
     // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
     // copied into a distribution only once the user chooses it.
     public List<string> NoticeWslDistros { get; set; } = [];

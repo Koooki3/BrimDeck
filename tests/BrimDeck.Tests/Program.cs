@@ -34,6 +34,7 @@ try
     NoticeFocusTests.Run(Check);
     NoticeFlashTests.Run(Check);
     ChatAppsTests.Run(Check);
+    NoticeChatRestoreTests.Run(Check);
     NoticeTimeTests.Run(Check);
     NoticeEventLogTests.Run(Check);
     ToastActivationTests.Run(Check);

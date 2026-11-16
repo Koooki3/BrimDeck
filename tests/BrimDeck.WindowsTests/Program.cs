@@ -52,6 +52,7 @@ internal static class Program
             }
             CheckPageToolTips();
             NoticeFlashWatchTests.Run(Check);
+            NoticeChatRestoreWindowsTests.Run(Check);
             if (!hosted)
             {
                 var bannerRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-WindowsTests-" + Guid.NewGuid().ToString("N"));

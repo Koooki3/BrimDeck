@@ -275,7 +275,7 @@ internal sealed class IslandNotice : Window
     private async void Activate(bool byKey)
     {
         var notice = Notice;
-        if (notice is null || _opening || NoticeClick.Decide(notice, Settings.NoticeClick) != NoticeClickAction.OpenApp) { OpenPage(byKey); return; }
+        if (notice is null || _opening || NoticeClick.Decide(notice, Settings.NoticeClick) != NoticeClickAction.OpenApp && !Center.ClicksRestore(notice)) { OpenPage(byKey); return; }
         _opening = true;
         bool opened = false;
         try { opened = await Center.OpenAsync(notice); }
@@ -289,7 +289,7 @@ internal sealed class IslandNotice : Window
     // The screen reader's name for the click area says what a click does.
     private void NameHit()
     {
-        bool app = NoticeClick.Decide(Notice, Settings.NoticeClick) == NoticeClickAction.OpenApp;
+        bool app = NoticeClick.Decide(Notice, Settings.NoticeClick) == NoticeClickAction.OpenApp || Center.ClicksRestore(Notice);
         AutomationProperties.SetName(_hit, app ? Loc.T("灵动提示，点击打开来源应用", "Live notice, click to open the source app") : Loc.T("灵动提示", "Live notice"));
     }
 
@@ -308,7 +308,7 @@ internal sealed class IslandNotice : Window
         // A notice that arrives under a resting pointer does not open the panel by itself: the pointer leaves and comes back, or clicks.
         // With the panel set to open on a click (ClickToExpand), resting on the notice does not open it either; nor when a click on the
         // notice opens its application (NoticeClick), or the page would open under the pointer before the click could.
-        if (_arrivedUnderPointer || Settings.ClickToExpand || Settings.NoticeClick == NoticeClickTarget.SourceApp) return;
+        if (_arrivedUnderPointer || Settings.ClickToExpand || Settings.NoticeClick == NoticeClickTarget.SourceApp || Center.ClicksRestore(Notice)) return;
         _hoverOpen.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay));
         _hoverOpen.Start();
     }
