@@ -20,6 +20,11 @@ internal static class GlassMaterialTests
         check("Glass transparency: the rim softens through expansion and stays visible",
             GlassMaterial.RimStrength(50, 0) == 1 && GlassMaterial.RimStrength(50, 1) == .8
             && GlassMaterial.RimStrength(0, 1) > 0);
+        check("Liquid glass advertises Beta separately from the stable theme name",
+            new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id =>
+                PanelThemes.BuiltIn(id) is { File.Stage: "Beta" } theme
+                && !theme.File.Name.EndsWith("alpha", StringComparison.OrdinalIgnoreCase)
+                && !theme.File.NameEn.EndsWith("alpha", StringComparison.OrdinalIgnoreCase)));
         var settings = JsonSerializer.Deserialize<DeckSettings>("{}")!;
         check("Glass transparency: older settings use the current look", settings.GlassTransparency == 50);
         settings.GlassTransparency = 101;

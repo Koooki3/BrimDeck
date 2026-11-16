@@ -83,7 +83,7 @@ public sealed partial class SettingsWindow
             if (stage is null && theme.File.Stage is { Length: > 0 } written) stage = written;
             var card = KeepPreview(new RadioButton { Style = (Style)FindResource("SettingsChoice"), Content = ThemePreview(id, theme, stage),
                 Margin = new Thickness(Space.Tight, 3, Space.Tight, Space.Tight), Tag = own ? "" : caption, GroupName = "PanelTheme", IsChecked = id == chosen });
-            AutomationProperties.SetName(card, Loc.T("面板主题 ", "Panel theme ") + name);
+            AutomationProperties.SetName(card, Loc.T("面板主题 ", "Panel theme ") + caption + (stage is null ? "" : " · " + stage));
             AutomationProperties.SetAutomationId(card, "panel-theme-" + id);
             card.Checked += (_, _) =>
             {

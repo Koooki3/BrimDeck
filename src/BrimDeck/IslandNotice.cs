@@ -430,6 +430,7 @@ internal sealed class IslandNotice : Window
     private Border? _glassFrame;
     // The tint's opacity over the blur and whether the island's own surface steps aside for liquid glass (GlassBackdrop.Held).
     private double _fillOpacity = 1;
+    private Brush? _glassGrain;
     private bool _aside;
     private System.Windows.Media.Effects.DropShadowEffect? _halo;
 
@@ -454,6 +455,7 @@ internal sealed class IslandNotice : Window
         _glass = new GlassBackdrop(this, _glassFrame, () => (new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius), _shape.Shoulder, 1));
         // The liquid glass themes' acrylic body takes the island's tint alpha, and its whole face is a content row (the words).
         _glass.LiquidTint = () => _look.Surface.A / 255d;
+        _glass.AcrylicTransparency = () => Settings.GlassTransparency;
         _glass.ContentArea = () => _glassFrame is { ActualWidth: > 1, ActualHeight: > 1 } frame ? new Rect(frame.RenderSize) : null;
         _glass.Held += GlassHeld;
     }
@@ -477,7 +479,16 @@ internal sealed class IslandNotice : Window
         if (_closed || _glass is null) return;
         bool aside = _glass.SurfaceAside;
         double opacity = GlassBackdrop.SurfaceOpacity(aside, held, _look.Surface.A / 255d);
-        if (aside == _aside && Math.Abs(opacity - _fillOpacity) < .002) return;
+        var grain = aside && GlassBackdrop.AcrylicSettingsApply
+            ? LiquidGlass.AcrylicNoise.Brush(Dpi(), GlassMaterial.GrainStrength(Settings.GlassTransparency)) : null;
+        if (aside == _aside && Math.Abs(opacity - _fillOpacity) < .002)
+        {
+            if (ReferenceEquals(grain, _glassGrain)) return;
+            _glassGrain = grain;
+            _body.InvalidateVisual();
+            return;
+        }
+        _glassGrain = grain;
         bool turned = aside != _aside;
         _aside = aside; _fillOpacity = opacity;
         if (turned) Halo(aside);
@@ -621,7 +632,7 @@ internal sealed class IslandNotice : Window
             if (_fillOpacity < 1) drawing.Pop();
         }
         // The island's grain: liquid glass has the acrylic's noise (as the island has it), the other themes their own pattern.
-        var grain = _aside && !GlassBackdrop.Refraction ? LiquidGlass.AcrylicNoise.Brush(Dpi()) : _look.Pattern;
+        var grain = _aside && _glassGrain is not null ? _glassGrain : _look.Pattern;
         if (grain is not null) drawing.DrawGeometry(grain, null, body);
         // Liquid glass draws its own rim light and edge (the island's painted ones step aside while it is shown).
         if (_aside) return;
