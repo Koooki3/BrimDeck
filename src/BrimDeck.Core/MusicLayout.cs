@@ -1,5 +1,10 @@
 namespace BrimDeck.Core;
 
+public enum MusicLyricsLayout { Stacked, Columns }
+
+// Where the artist's column of the stacked layout sits when the cover is not shown: against the page's left edge or centred.
+public enum MusicLyricsAlign { Left, Center }
+
 // Type sizes and spacing of the music page. Each value is given at the three size presets and at the largest panel
 // (density 0, 1, 2 and 3) and runs linearly between them, so a panel between two presets gets sizes between theirs.
 // Bottom is the margin below the transport glyphs and equals Side, so the page has the same inset on three sides.
@@ -100,11 +105,13 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
             timeline ? progressY : 0, timeline ? c.SeekRow : 0, timesY, controlsY, gap, tripletX, tripletW, modeX, enable, fullControlRoom) { UpperHeight = upper };
     }
 
-    // Without the cover the upper part has two columns, so the titles and the lyrics are not read as one block: the title,
-    // artist and album centred in the left one, and the lyrics right of a thin divider. The left column takes about a third of
-    // the width; a wider panel gives the lyrics the rest. The lyrics fill the upper part's height, the current line a size
-    // larger, with as many lines before it as after it (one more after when the count is even). Without lyrics the titles
-    // are centred across the whole width. The album, then the equalizer below the titles, give way to a short upper part.
+    // In the column layout the upper part has two columns, so the titles and the lyrics are not read as one block: the title,
+    // artist and album centred in the left one, and the lyrics right of a thin divider. The cover, when shown, stands above the
+    // titles in the left column, or beside them when the column is too short for that; beside the cover the titles read from the
+    // left. The left column takes about a third of the width; a wider panel gives the lyrics the rest. The lyrics fill the upper
+    // part's height, the current line a size larger, with as many lines before it as after it (one more after when the count is
+    // even). Without lyrics the titles are centred across the whole width. The album, then the equalizer below the titles, give
+    // way to a short upper part.
     public MusicColumns Columns(bool lyrics)
     {
         var c = Metrics;
@@ -121,7 +128,7 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
     }
 }
 
-// The two columns of the music page without the cover (MusicLayout.Columns). Widths and positions are relative to the page body.
+// The two columns of the music page's column layout (MusicLayout.Columns). Widths and positions are relative to the page body.
 public sealed record MusicColumns(double Height, double InfoWidth, double DividerGap, double LyricsX, double LyricsWidth,
     double CurrentLyric, double CurrentLine, int Before, int After, bool ShowAlbum, bool ShowEqualizer, double EqualizerGap)
 {
