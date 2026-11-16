@@ -1,0 +1,89 @@
+{
+  // Liquid glass, light: the island is a pane of frosted glass over the desktop rather than a painted surface.
+  //   Material: a milky white tint over the desktop, dense enough that dark text keeps 7:1 even where the desktop behind is
+  //   black. What lies behind is blurred where Windows can (GlassBackdrop) and shows faintly where it cannot. With transparency effects off or in high
+  //   contrast the surface is the pale frosted color below.
+  //   Light: a specular rim, bright at the top left and the bottom right, and light gathered along the inner edge as a thick
+  //   lens gathers it. The glint travels slowly around the rim; a hovered control catches light like a glass bead.
+  "formatVersion": 1,
+  "id": "liquid-glass-light",
+  "name": "液态玻璃（浅色）",
+  "nameEn": "Liquid Glass (light)",
+  "stage": "Beta",
+  "description": "乳白色的玻璃：模糊岛下方的桌面（系统不支持时为清透玻璃），镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的磨砂底色。部分录屏方式可能无法捕捉岛或玻璃效果。",
+  "descriptionEn": "Milky glass that blurs the desktop behind the island (clear where Windows cannot), with a specular glint gliding along its rim; opaque frost when Windows turns transparency off. Some capture methods may omit the island or its glass effect.",
+  "author": "BrimDeck",
+  "license": "Apache-2.0",
+  "base": "light",
+  "colors": {
+    // The opaque surface (transparency effects off, high contrast, the blur's fallback): Windows' light acrylic fallback
+    // color (microsoft-ui-xaml, MIT), so the island matches the system's flyouts and Start menu then.
+    "surface": "#F9F9F9",
+    "textPrimary": "#101217",
+    "textSecondary": "#C6000000",
+    "textTertiary": "#A0000000",
+    "accent": "#0057AE",
+    "onAccent": "#FFFFFF",
+    "danger": "#94142A",
+    "success": "#156C43",
+    "caution": "#815600",
+    "liked": "#B51A32",
+    "clock": "#101217",
+    "equalizer": "#94000000",
+    "hairline": "#17000000",
+    "track": "#34000000",
+    "ringTrack": "#24000000",
+    "fill": "#0F000000",
+    "fillSelected": "#1C000000",
+    "hover": "#12000000",
+    "pressed": "#21000000",
+    "outline": "#29000000",
+    "popup": "#F6F7F9",
+    "popupBorder": "#2B000000",
+    "input": "#ECEEF2",
+    "rangeFill": "#2E0057AE",
+    "coverPlaceholder": "#0F000000",
+    "coverOutline": "#1F000000",
+    "scrollThumb": "#9399A6",
+    "rim": "#B3FFFFFF",
+    "shadow": "#000000",
+    "indicator": "#A4A8B0",
+    "indicatorProgress": "#33363C",
+    "switchFill": "#0D000000",
+    "seekRail": "#26000000",
+    "rowDivider": "#12000000",
+    "rowHover": "#0D000000",
+    "menuDetail": "#94000000",
+    "tooltip": "#F6F7F9",
+    "tooltipBorder": "#2E000000",
+    "bubble": "#F6F7F9",
+    "bubbleBorder": "#26000000"
+  },
+  "apps": {
+    "claude": "#9E4523", "codex": "#18703F", "antigravity": "#2C58B8", "cursor": "#5A5D66", "zcode": "#334C86",
+    "dsh": "#3553AE", "grokBot": "#5A5D66", "kimi": "#086A86", "opencode": "#2A2C31", "codeagent": "#0E8885", "commandcode": "#3C1FB2", "workbuddy": "#1A7F37", "mimo": "#CC5600", "manual": "#7E3AA8", "other": "#5A5D66", "warning": "#7D5200", "critical": "#A81E2E"
+  },
+  "clock": {
+    "style": "minimal", "color": "default",
+    "palette": { "amber": "#704100", "cyan": "#055459", "pink": "#8C2257", "lime": "#355400" },
+    "gradients": [
+      { "name": "日落", "nameEn": "Sunset", "stops": ["#7E360A", "#8C2257", "#4E35A8"] },
+      { "name": "海洋", "nameEn": "Ocean", "stops": ["#055459", "#164995", "#4436A3"] },
+      { "name": "极光", "nameEn": "Aurora", "stops": ["#1F5723", "#055459", "#164995"] },
+      { "name": "火焰", "nameEn": "Ember", "stops": ["#704100", "#7E360A", "#94142A"] },
+      { "name": "霓虹", "nameEn": "Neon", "stops": ["#822176", "#4E35A8", "#055459"] }
+    ]
+  },
+  "effects": {
+    // A specular rim: bright where light strikes the top left, dim along the long edges, catching again at the bottom right.
+    "rimGradient": ["#F2FFFFFF", "#80FFFFFF", "#4DFFFFFF", "#59FFFFFF", "#D9FFFFFF"],
+    "rimWidth": 1.25,
+    // The shadow of liquid-glass-web's glass (box-shadow: 0 4px 8px rgba(0,0,0,.22); MIT), kept while the panel is open.
+    "shadowBlur": 12,
+    "shadowDepth": 4,
+    "shadowOpacity": 0.22,
+    // Over Windows' blur the backdrop is held bright (85 % to full brightness) and its colors doubled in saturation, so the tint
+    // keeps a fifth of its alpha there: what lies behind shows through as soft color, never darker than the glass over black.
+    "glass": { "tint": "#E0F8FAFD", "edge": 0.6, "highlight": "#FFFFFF", "blurOpacity": 0.2, "backdrop": [0.85, 1], "saturation": 2 }
+  }
+}

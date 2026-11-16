@@ -21,7 +21,7 @@ public sealed record PanelThemeAdjustment(string Key, string Before, string Afte
 }
 
 public sealed record PanelThemeEffectValues(IReadOnlyList<ThemeColor> SurfaceGradient, IReadOnlyList<ThemeColor> RimGradient, double RimWidth,
-    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, double Pixel = 0, double Texture = 0, PanelDecor? Decor = null);
+    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, double Pixel = 0, double Texture = 0, PanelDecor? Decor = null, PanelGlass? Glass = null);
 
 // A theme's motifs (PanelThemeDecor, fitted); null parts are not drawn.
 public sealed record PanelDecor(PanelHorizon? Horizon, ThemeColor? Caustics, ThemeColor? Palm)
@@ -32,6 +32,29 @@ public sealed record PanelHorizon(double At, ThemeColor Sea, ThemeColor? Line)
 {
     // The sea deepens from Sea at the horizon to this at the bottom, as open water does away from the light.
     public ThemeColor Deep => Sea with { R = (byte)(Sea.R * .9), G = (byte)(Sea.G * .92), B = (byte)(Sea.B * .95) };
+}
+
+// The glass a theme's surface is made of (PanelThemeGlass, fitted): the tint over the backdrop, the strength of the light along
+// its inner edge and the color of that light.
+public sealed record PanelGlass(ThemeColor Tint, double Edge, ThemeColor Highlight, double BlurOpacity = 1, double Low = 0, double High = 1, double Saturation = 1)
+{
+    // How far the band is taken in for its saturated colors: a saturated color held to the band's brightness reads a little
+    // darker or lighter than a gray of that brightness.
+    public const double BandMargin = .03;
+    // The tint over the darkest and the lightest backdrop it can stand on: without the blur any desktop, black to white; over the
+    // held blur, the band's grays. Text must read on all of them.
+    public IReadOnlyList<ThemeColor> Extremes => Held
+        ? [Tint.Over(ThemeColor.Black), Tint.Over(ThemeColor.White), BlurTint.Over(Gray(Low - BandMargin)), BlurTint.Over(Gray(High + BandMargin))]
+        : [Tint.Over(ThemeColor.Black), Tint.Over(ThemeColor.White)];
+    // Whether the blur is held to a band, with the tint thinned over it.
+    public bool Held => BlurOpacity < 1;
+    // The tint over the held blur: the same color, BlurOpacity of its alpha.
+    public ThemeColor BlurTint => Tint with { A = (byte)Math.Round(Tint.A * BlurOpacity) };
+    private static ThemeColor Gray(double level)
+    {
+        byte v = (byte)Math.Round(255 * Math.Clamp(level, 0, 1));
+        return new ThemeColor(255, v, v, v);
+    }
 }
 
 // A theme ready to draw: every token has a color, every effect a value, and the contrast rules hold (see PanelThemes.Build).

@@ -20,6 +20,16 @@ internal static class GlassMaterialTests
         check("Glass transparency: the rim softens through expansion and stays visible",
             GlassMaterial.RimStrength(50, 0) == 1 && GlassMaterial.RimStrength(50, 1) == .8
             && GlassMaterial.RimStrength(0, 1) > 0);
+        foreach (string id in new[] { PanelThemes.GlassLight, PanelThemes.GlassDark })
+        {
+            var theme = PanelThemes.BuiltIn(id)!;
+            var palette = PanelThemes.Resolve(theme);
+            check($"Glass Beta: {id} declares the material and keeps its opaque fallback",
+                theme.File.Stage == "Beta" && palette.Effects.Glass is { Held: true }
+                && palette.Colors["surface"].A == 255);
+            check($"Glass Beta: arbitrary theme files cannot opt into {id}'s glass material",
+                PanelThemes.Build(id, theme.File).Effects.Glass is null);
+        }
         var settings = JsonSerializer.Deserialize<DeckSettings>("{}")!;
         check("Glass transparency: older settings use the current look", settings.GlassTransparency == 50);
         settings.GlassTransparency = 101;

@@ -18,7 +18,7 @@ public static partial class PanelThemes
         look = Available(theme.File, look);
         var files = look switch { DaylightLook.Night => ResolvedNights, DaylightLook.Dusk => ResolvedDusks, _ => ResolvedFiles };
         if (theme.BuiltIn ? ResolvedBuiltIns.TryGetValue((theme.Id, look), out var cached) : files.TryGetValue(theme, out cached)) return cached;
-        var palette = Build(theme.Id, theme.File, look);
+        var palette = Build(theme.Id, theme.File, look, allowGlass: theme.BuiltIn && (theme.Id is GlassLight or GlassDark));
         if (theme.BuiltIn) ResolvedBuiltIns[(theme.Id, look)] = palette; else files.AddOrUpdate(theme, palette);
         return palette;
     }
@@ -33,7 +33,9 @@ public static partial class PanelThemes
     // night lays the file's night look over it, when it has one.
     public static PanelPalette Build(string id, PanelThemeFile file, bool night = false) => Build(id, file, night ? DaylightLook.Night : DaylightLook.Day);
     // The night or dusk look is laid over the day look, when the file has it.
-    public static PanelPalette Build(string id, PanelThemeFile file, DaylightLook look)
+    public static PanelPalette Build(string id, PanelThemeFile file, DaylightLook look) => Build(id, file, look, allowGlass: false);
+
+    private static PanelPalette Build(string id, PanelThemeFile file, DaylightLook look, bool allowGlass)
     {
         var colors = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var apps = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
@@ -61,8 +63,8 @@ public static partial class PanelThemes
         var surface = colors["surface"] = colors["surface"].Over(ThemeColor.Black);
         colors["tooltip"] = colors["tooltip"].Over(surface);
         colors["bubble"] = colors["bubble"].Over(surface);
-        var values = EffectValues(effects);
-        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. TextureStops(values, colors, surface), .. DecoratedStops(values, colors, surface)];
+        var values = EffectValues(effects) with { Glass = allowGlass ? GlassValues(file.Effects?.Glass) : null };
+        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? [], .. TextureStops(values, colors, surface), .. DecoratedStops(values, colors, surface)];
 
         var adjustments = new List<PanelThemeAdjustment>();
         var popup = colors["popup"].Over(surface);
@@ -221,6 +223,21 @@ public static partial class PanelThemes
         return new(surfaceGradient.Count >= 2 ? surfaceGradient : [], rimGradient.Count >= 2 ? rimGradient : [],
             Value("rimWidth"), Value("shadowBlur"), Value("shadowDepth"), Value("shadowOpacity"), Value("scanlines"), pixel, pixel > 0 ? Value("texture") : 0,
             DecorValues(effects.Decor));
+    }
+
+    private static PanelGlass? GlassValues(PanelThemeGlass? file)
+    {
+        PanelGlass? glass = file is { Tint: { } tintText } glassFile && ThemeColor.TryParse(tintText, out var tint) && tint.A is > 0 and < 255
+            ? new PanelGlass(tint, Fit(glassFile.Edge, 0, 1, .5), glassFile.Highlight is { } light && ThemeColor.TryParse(light, out var highlight) ? highlight : ThemeColor.White)
+            : null;
+        // The held blur: a band of at least a tenth, and a tint thinner over it.
+        if (glass is not null && file!.BlurOpacity is { } blurOpacity && double.IsFinite(blurOpacity) && blurOpacity < 1
+            && file.Backdrop is [var low, var high] && double.IsFinite(low) && double.IsFinite(high))
+        {
+            low = Math.Clamp(low, 0, .9); high = Math.Clamp(high, low + .1, 1);
+            glass = glass with { BlurOpacity = Math.Clamp(blurOpacity, 0, 1), Low = low, High = high, Saturation = Fit(file.Saturation, 1, 2, 1) };
+        }
+        return glass;
     }
 
     // The motifs in their ranges; a part without a color it can use is left out. The caustics and the palm stay faint (their

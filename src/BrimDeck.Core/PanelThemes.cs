@@ -32,7 +32,7 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 // hue, just far enough to reach it (PanelThemes.Build.cs).
 public static partial class PanelThemes
 {
-    public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners", PixelBlocks = "pixel-blocks";
+    public const string SystemId = "system", Dark = "dark", Light = "light", GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", Demo = "cyberpunk-edgerunners", PixelBlocks = "pixel-blocks";
     public const string IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2";
     public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2, ThumbContrast = 2;
     // The warning and critical colors, the theme's and those chosen for an application or the collapsed readings: they color a
@@ -126,7 +126,7 @@ public static partial class PanelThemes
     // name, which a test keeps equal to the id inside the file.
     private const string ThemeResources = ".Themes.";
     // Dark and light first, then the ported editor themes, then BrimDeck's own extensions with the custom demo last.
-    private static readonly string[] BuiltInOrder = [Dark, Light, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, IslandHoliday2, PixelBlocks, Demo];
+    private static readonly string[] BuiltInOrder = [Dark, Light, GlassLight, GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, IslandHoliday2, PixelBlocks, Demo];
     private static (string Id, string Resource)[]? _builtInIndex;
     private static (string Id, string Resource)[] BuiltInIndex => _builtInIndex ??= [.. typeof(PanelThemes).Assembly.GetManifestResourceNames()
         .Where(name => name.Contains(ThemeResources, StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal))
@@ -141,7 +141,7 @@ public static partial class PanelThemes
         {
             if (key != id) continue;
             // The demo theme sits with the extensions, so the custom section holds only the user's own themes.
-            var kind = id is Dark or Light ? PanelThemeKind.Basic : PanelThemeKind.Extension;
+            var kind = id is Dark or Light or GlassLight or GlassDark ? PanelThemeKind.Basic : PanelThemeKind.Extension;
             return ParsedBuiltIns[id] = new PanelThemeInfo(id, kind, Parse(Resource(resource)), null, null);
         }
         return null;

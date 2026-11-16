@@ -223,14 +223,14 @@ internal static class PanelThemeTests
             var copy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", original, theme.Id)));
             reproduced &= original.Colors.All(pair => copy[pair.Key] == pair.Value) && copy.Adjustments.Count == 0
                 && original.Effects.SurfaceGradient.SequenceEqual(copy.Effects.SurfaceGradient) && original.Effects.RimGradient.SequenceEqual(copy.Effects.RimGradient)
-                && original.Effects with { SurfaceGradient = [], RimGradient = [] } == copy.Effects with { SurfaceGradient = [], RimGradient = [] }
+                && original.Effects with { SurfaceGradient = [], RimGradient = [], Glass = null } == copy.Effects with { SurfaceGradient = [], RimGradient = [] }
                 && Enum.GetValues<ProviderId>().All(id => original.AppDefault(id) == copy.AppDefault(id))
                 && original.Clock is { } clock && copy.Clock is { } copyClock && clock.Style == copyClock.Style && clock.Color == copyClock.Color
                 && ClockColors.Swatches.All(color => original.ClockPreset(color) == copy.ClockPreset(color))
                 && original.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops)).SequenceEqual(copy.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops)))
                 && original.HasOwnSwatches == copy.HasOwnSwatches && original.Swatches.SequenceEqual(copy.Swatches);
         }
-        check("A theme made from another starts out identical: colors, effects, apps, clock and swatches", reproduced);
+        check("A theme copy preserves colors, shareable effects, apps, clock and swatches", reproduced);
         // Motifs: fitted into their ranges, inherited value by value, held under the text and carried by a copy.
         PanelPalette Decor(string decor) => PanelThemes.Build("decor", PanelThemes.Parse(
             $$"""{ "formatVersion": 1, "id": "decor", "base": "light", "effects": { "decor": {{decor}} } }"""));
