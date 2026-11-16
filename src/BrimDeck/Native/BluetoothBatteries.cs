@@ -109,7 +109,14 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
         watcher.EnumerationCompleted += (_, _) => Post(() => { if (node) _nodesListed = true; _listed++; Publish(); });
         try { watcher.Start(); _watchers.Add(watcher); } catch { }
     }
-    private static Dictionary<string, object?> Copy(IReadOnlyDictionary<string, object> properties) => properties.ToDictionary(pair => pair.Key, pair => (object?)pair.Value);
+    // Windows sometimes reports the same property twice (e.g. System.Devices.InterfaceEnabled), and ToDictionary
+    // throws on a duplicate key; indexer assignment keeps the last value instead, so callers never crash on it.
+    private static Dictionary<string, object?> Copy(IReadOnlyDictionary<string, object> properties)
+    {
+        var copy = new Dictionary<string, object?>(properties.Count);
+        foreach (var pair in properties) copy[pair.Key] = pair.Value;
+        return copy;
+    }
 
     private void Add(string id, string name, Dictionary<string, object?> properties, bool lowEnergy)
     {
@@ -139,7 +146,9 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
     }
     private static string? Text(Dictionary<string, object?> properties, string key) => properties.TryGetValue(key, out var value) ? value switch
     {
-        string text => text, string[] list => string.Join(",", list), _ => null
+        string text => text,
+        string[] list => string.Join(",", list),
+        _ => null
     } : null;
 
     private void Publish()
@@ -181,7 +190,7 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
             // device) is listed only with a level: without one it is a line that says nothing. The settings can switch each off.
             if (level is null && kind is DeviceKind.Other or DeviceKind.Phone) continue;
             plain.Add(new DeviceBattery("bt:" + address, endpoint.Name, kind, DeviceSource.Bluetooth, level is { } l ? Devices.Clamp(l) : null)
-                { Address = address, Hardware = hardware, Charging = charging });
+            { Address = address, Hardware = hardware, Charging = charging });
         }
         foreach (var gone in _gatt.Keys.Where(address => !wanted.Contains(address)).ToList()) { _gatt[gone].Dispose(); _gatt.Remove(gone); }
         report(DeviceSource.Bluetooth, plain);

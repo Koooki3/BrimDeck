@@ -40,6 +40,8 @@
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.stats.cso" LogicalName="BrimDeck.LiquidGlass.Frost.stats.cso" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl.sha256" />
     <Compile Include="..\..\src\BrimDeck\Native\PasteInput.cs" Link="PasteInput.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\RightFileDrag.cs" Link="RightFileDrag.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\PointerPressObserver.cs" Link="PointerPressObserver.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PanelKeyboard.cs" Link="PanelKeyboard.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\DisplayPower.cs" Link="DisplayPower.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\TaskbarFlashWatch.cs" Link="TaskbarFlashWatch.cs" />

@@ -38,6 +38,7 @@ public partial class MainWindow
     private DeckPage? _dropReturn;
     private DispatcherTimer? _dropLeave;
     private ContextMenu? _shelfMenu;
+    private PointerPressObserver? _shelfMenuPress;
     private TextBox? _searchBox, _editBox;
     private double _clipOffset, _fileOffset;
     private Rectangle? _fileFrame;
@@ -986,38 +987,67 @@ public partial class MainWindow
     private void AttachFileDrag(FrameworkElement source, Func<List<TransferFile>> files)
     {
         Point? start = null;
-        source.PreviewMouseLeftButtonDown += (_, e) => start = e.GetPosition(source);
+        bool right = false, suppressMenu = false;
+        source.PreviewMouseLeftButtonDown += (_, e) => { if (_draggingOut) return; right = false; start = e.GetPosition(source); };
+        source.PreviewMouseRightButtonDown += (_, e) => { if (_draggingOut) return; right = true; suppressMenu = false; start = e.GetPosition(source); };
+        source.PreviewMouseRightButtonUp += (_, e) => { start = null; if (suppressMenu) { e.Handled = true; suppressMenu = false; } };
         source.PreviewMouseLeftButtonUp += (_, _) => start = null;
-        source.MouseLeave += (_, e) => { if (e.LeftButton != MouseButtonState.Pressed) start = null; };
+        source.MouseLeave += (_, e) => { if ((right ? e.RightButton : e.LeftButton) != MouseButtonState.Pressed) start = null; };
         source.PreviewMouseMove += (_, e) =>
         {
-            if (start is not { } from || e.LeftButton != MouseButtonState.Pressed) return;
+            if (_draggingOut || start is not { } from || (right ? e.RightButton : e.LeftButton) != MouseButtonState.Pressed) return;
             var now = e.GetPosition(source);
             if (Math.Abs(now.X - from.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(now.Y - from.Y) < SystemParameters.MinimumVerticalDragDistance) return;
             start = null;
             var list = files();
             if (list.Count == 0) return;
-            bool move = Settings.TransferDragOut == TransferDragOut.Move;
+            suppressMenu = right;
+            bool move = (right ? Settings.TransferRightDragOut : Settings.TransferDragOut) == TransferDragOut.Move;
             var data = ShelfService.FileData(list.Select(file => file.Path), move);
             data.SetData(ShelfFormat, ShelfSide.Files + "|" + string.Join(",", list.Select(file => file.Id)));
             if (source is Border row) row.Background = _picked.Count > 0 && list.Count > 1 ? PickedFill : row.Tag as Brush ?? Brushes.Transparent;
-            DragOut(source, data, move ? DragDropEffects.Copy | DragDropEffects.Move : DragDropEffects.Copy);
-            if (move) WatchMoved(list);
+            bool removeCopy = move && Settings.TransferRemoveAfterCopyDrop;
+            var allowed = move ? DragDropEffects.Copy | DragDropEffects.Move : DragDropEffects.Copy;
+            if (removeCopy) allowed |= DragDropEffects.Link;
+            var result = DragOut(source, data, allowed, right);
+            // Copy-configured gestures never consume transfer entries, even when
+            // the optional fallback for move-configured gestures is enabled.
+            if (move && removeCopy && (result is DragDropEffects.Copy or DragDropEffects.Link) && _externalFileDrop)
+                RemoveFiles(list);
+            else if (move) WatchMoved(list);
             e.Handled = true;
         };
     }
     // Dragged out of the panel, clipboard entries are copied; files are copied, or, when the drag is set to move, moved where the
     // target takes moves (a chat window or a browser takes only copies).
-    private void DragOut(DependencyObject source, DataObject data, DragDropEffects allowed = DragDropEffects.Copy)
+    private bool _externalFileDrop;
+    private DragDropEffects DragOut(DependencyObject source, DataObject data, DragDropEffects allowed = DragDropEffects.Copy, bool right = false)
     {
         _draggingOut = true;
-        try { DragDrop.DoDragDrop(source, data, allowed); }
+        // Finish the popup's input lifetime before injecting buttons or entering
+        // OLE. Popup.Closed may arrive later than IsOpen becoming false.
+        CloseMenu();
+        _externalFileDrop = false;
+        QueryContinueDragEventHandler dropping = (_, e) =>
+        {
+            if (!e.EscapePressed && (e.KeyStates & (DragDropKeyStates.LeftMouseButton | DragDropKeyStates.RightMouseButton | DragDropKeyStates.MiddleMouseButton)) == 0)
+                _externalFileDrop = FileDropTarget.IsExternalCopyTarget() && !PasteInput.KeyDown(0x11);
+        };
+        if (source is UIElement dragSource) dragSource.PreviewQueryContinueDrag += dropping;
+        try
+        {
+            using var gesture = right && source is UIElement element ? RightFileDrag.Begin(element) : null;
+            if (right && gesture is null) return DragDropEffects.None;
+            return DragDrop.DoDragDrop(source, data, allowed);
+        }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or InvalidOperationException) { }
         finally
         {
+            if (source is UIElement dragSourceEnd) dragSourceEnd.PreviewQueryContinueDrag -= dropping;
             _draggingOut = false;
             if (_expanded && !_pointerInside) PointerChanged(false);
         }
+        return DragDropEffects.None;
     }
     // Files dragged out to be moved leave the list once they are gone from where they were. The drag's result does not tell: the
     // Explorer moves files itself and reports no move, and it may still be moving them after the drag ends (a large file to another

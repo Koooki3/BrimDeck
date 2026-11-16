@@ -586,7 +586,12 @@ public partial class MainWindow
         Width = 16, Height = 16, LayoutTransform = new ScaleTransform(.875, .875), Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center
     };
     private Separator Separator() => new() { Style = (Style)FindResource("ShelfMenuSeparator") };
-    private void CloseMenu() { if (_shelfMenu is { IsOpen: true } menu) menu.IsOpen = false; }
+    private void CloseMenu()
+    {
+        _shelfMenuPress?.Dispose();
+        _shelfMenuPress = null;
+        if (_shelfMenu is { IsOpen: true } menu) menu.IsOpen = false;
+    }
     // The menu's frame keeps 12 DIP around it for its shadow (ShelfResources.xaml); the offsets take that back.
     private void OpenMenu(ContextMenu menu, FrameworkElement target, bool atPointer = false)
     {
@@ -600,9 +605,11 @@ public partial class MainWindow
         // The panel does not take the foreground, so a press in another app goes to that app and the menu never learns of it:
         // the menu would stay open, and hold the panel open with it. A press outside this app's windows closes it.
         var press = new PointerPressObserver(Dispatcher, point => { if (menu.IsOpen && !WindowsHost.OwnWindowAt(point)) menu.IsOpen = false; });
+        _shelfMenuPress = press;
         menu.Closed += (_, _) =>
         {
             press.Dispose();
+            if (ReferenceEquals(_shelfMenuPress, press)) _shelfMenuPress = null;
             if (ReferenceEquals(_shelfMenu, menu)) _shelfMenu = null;
             Dispatcher.BeginInvoke(() => { if (_expanded && !_pointerInside && !ShelfHolds) PointerChanged(false); });
         };

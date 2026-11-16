@@ -90,6 +90,9 @@ public partial class SettingsWindow
                     Group(ColumnWidths());
                 else
                 {
+                    Group(MusicChoice(Loc.T("堆叠位置", "Stack position"), S.ShelfSameSideStack,
+                        [(false, Loc.T("异侧堆叠", "Opposite sides")), (true, Loc.T("同侧堆叠", "Same side"))],
+                        value => Change(s => s.ShelfSameSideStack = value)));
                     SectionTitle(Loc.T("切换方式", "Switching"), help: () => Loc.T(
                         "单击侧条、卡片标题或当前页图标也能切换。",
                         "A click on the side strip, the card's title or the current page's icon switches as well."));
