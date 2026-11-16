@@ -69,11 +69,9 @@ internal static class PopupMotion
             var root = VisualTreeHelper.GetParent(element) as Visual ?? element;
             if (PresentationSource.FromVisual(root) is not HwndSource real || PresentationSource.FromVisual(window) is null) return;
             var offset = root == element ? new Vector() : VisualTreeHelper.GetOffset(element);
-            var at = window.PointFromScreen(root.PointToScreen(new Point(offset.X, offset.Y)));
             var picture = new Image { Stretch = Stretch.Fill, IsHitTestVisible = false };
             placed.Picture = picture; placed.Window = window;
-            var ghost = placed.Ghost = new Popup { PlacementTarget = window, Placement = PlacementMode.Relative, HorizontalOffset = at.X, VerticalOffset = at.Y,
-                AllowsTransparency = true, StaysOpen = true, IsHitTestVisible = false, Focusable = false, Child = picture, IsOpen = true };
+            var ghost = placed.Ghost = OpenGhost(window, root.PointToScreen(new Point(offset.X, offset.Y)), picture);
             if (PresentationSource.FromVisual(picture) is HwndSource own) Native.WindowsHost.PlaceBelow(own.Handle, real.Handle);
             // First once the content has entered, then again only after something that can change it. After a change it is taken
             // again once the theme's hover fade has had time to settle.
@@ -123,6 +121,17 @@ internal static class PopupMotion
                 element.RemoveHandler(ScrollViewer.ScrollChangedEvent, scrolled);
             };
         });
+    }
+
+    // The picture's pop-up, opened with its top-left corner at a place on screen in physical pixels. It is placed by the screen,
+    // not against the window: when Windows opens menus right-aligned (SystemParameters.MenuDropAlignment, the left-handed pen
+    // setting), a pop-up placed relative to a window hangs from that place by its right edge, and the picture lay one list's
+    // width to the left of the list, which showed twice side by side. An absolute place is not turned round that way.
+    internal static Popup OpenGhost(Window window, Point screen, UIElement picture)
+    {
+        var at = PresentationSource.FromVisual(window)?.CompositionTarget is { } target ? target.TransformFromDevice.Transform(screen) : window.PointFromScreen(screen);
+        return new Popup { PlacementTarget = window, Placement = PlacementMode.Absolute, HorizontalOffset = at.X, VerticalOffset = at.Y,
+            AllowsTransparency = true, StaysOpen = true, IsHitTestVisible = false, Focusable = false, Child = picture, IsOpen = true };
     }
 
     // The content as it is drawn now (PageHandover.Snapshot).
