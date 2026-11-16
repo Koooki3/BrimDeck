@@ -1149,7 +1149,7 @@ internal sealed class GlassBackdrop : IDisposable
         // after the backdrop stayed calmer for ProbeDwellMs.
         if (_luminosityLook != dark) { _luminosityLook = dark; _luminosity = wanted; _lowerSince = -1; _riseSeen = false; Redress(); }
         else if (wanted > _luminosity && _riseSeen) { _luminosity = wanted; _lowerSince = -1; _riseSeen = false; Redress(); }
-        else if (wanted > _luminosity) _riseSeen = true;
+        else if (wanted > _luminosity) { _lowerSince = -1; _riseSeen = true; }
         else if (wanted < _luminosity)
         {
             _riseSeen = false;
