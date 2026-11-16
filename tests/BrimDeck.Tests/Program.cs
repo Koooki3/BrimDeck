@@ -63,6 +63,8 @@ try
     MonitorStartupTests.Run(Check);
     StripAdmissionTests.Run(Check);
     DevicesTests.Run(Check);
+    PhoneLinkCardTests.Run(Check);
+    PhoneLinkMergeTests.Run(Check);
     DeviceProtocolTests.Run(Check);
     DeviceSafetyTests.Run(Check);
     DeviceReadTests.Run(Check);

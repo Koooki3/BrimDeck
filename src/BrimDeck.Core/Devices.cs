@@ -10,7 +10,7 @@ public enum DeviceKind { Mouse, Keyboard, Headphones, Earbuds, Controller, Pen, 
 
 // Where a reading comes from, roughly from the most to the least exact. A device seen by more than one source keeps the
 // reading of the first in this order that has a percentage (DeviceRoster.Merge).
-public enum DeviceSource { Logitech, Razer, SteelSeries, HyperX, Sony, Apple, Gatt, Gaming, Hid, Bluetooth }
+public enum DeviceSource { PhoneLink, Logitech, Razer, SteelSeries, HyperX, Sony, Apple, Gatt, Gaming, Hid, Bluetooth }
 
 // The parts of earbuds that report their own charge.
 public enum BatteryPart { Left, Right, Case }
@@ -212,6 +212,7 @@ public static class Devices
 
     public static string SourceName(DeviceSource source) => source switch
     {
+        DeviceSource.PhoneLink => Loc.T("手机连接", "Phone Link"),
         DeviceSource.Logitech => Loc.T("罗技接收器", "Logitech receiver"), DeviceSource.Razer => "Razer", DeviceSource.SteelSeries => "SteelSeries",
         DeviceSource.HyperX => "HyperX", DeviceSource.Sony => "PlayStation", DeviceSource.Gatt => Loc.T("蓝牙电池服务", "Bluetooth battery service"),
         DeviceSource.Gaming => Loc.T("游戏控制器", "Game controller"), DeviceSource.Hid => Loc.T("HID 电量", "HID battery"), DeviceSource.Apple => Loc.T("Apple 广播", "Apple broadcast"),
@@ -264,6 +265,39 @@ public static class Devices
         var runs = System.Text.RegularExpressions.Regex.Matches(id, @"(?<=[_&\\])([0-9A-Fa-f]{12})(?![0-9A-Fa-f])");
         return runs.Count > 0 ? runs[^1].Groups[1].Value.ToUpperInvariant() : null;
     }
+
+    // Suspensions of a phone's Bluetooth name that still name the same phone: "Xiaomi 13 Ultra 5G" is the "Xiaomi 13
+    // Ultra" Phone Link shows. Anything else after the shorter name is a different model ("Pixel 8" and "Pixel 8 Pro").
+    private static readonly string[] PhoneSuffixes = ["5g", "4g", "lte", "5ge", "nr", "dualsim", "双卡", "双卡双待"];
+
+    // Whether two names are the same phone: letters and digits only, in lower case, then equal, or one the start of the
+    // other followed only by the way a phone names its link (Phone Link and Bluetooth may differ by that).
+    public static bool SamePhone(string? a, string? b)
+    {
+        var left = PhoneName(a); var right = PhoneName(b);
+        if (left.Length == 0 || right.Length == 0) return false;
+        if (left == right) return true;
+        var (shorter, longer) = left.Length <= right.Length ? (left, right) : (right, left);
+        return shorter.Length >= 6 && longer.StartsWith(shorter, StringComparison.Ordinal)
+            && PhoneSuffixes.Contains(longer[shorter.Length..], StringComparer.Ordinal);
+    }
+    private static string PhoneName(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return "";
+        var builder = new System.Text.StringBuilder(name.Length);
+        foreach (var c in name) if (char.IsLetterOrDigit(c)) builder.Append(char.ToLowerInvariant(c));
+        return builder.ToString();
+    }
+
+    // The name a phone is known by, without the suffixes that only name its link: a phone seen as "Xiaomi 13 Ultra",
+    // "Xiaomi 13 Ultra 5G" and "Xiaomi 13 Ultra LTE" keeps one identity, so the address it was seen with does too.
+    internal static string PhoneIdentity(string? name)
+    {
+        var key = PhoneName(name);
+        foreach (var suffix in PhoneSuffixes)
+            if (key.Length > suffix.Length && key.EndsWith(suffix, StringComparison.Ordinal)) return key[..^suffix.Length];
+        return key;
+    }
 }
 
 // The devices of every source as one list. Each source hands over its whole current list (Set); entries of several sources
@@ -273,19 +307,22 @@ public static class Devices
 public sealed class DeviceRoster
 {
     private readonly Dictionary<DeviceSource, IReadOnlyList<DeviceBattery>> _sources = [];
+    // The address each phone was last seen with, by name: Phone Link may keep a phone while Bluetooth stops listing it (the
+    // app reaches it over Wi-Fi), and the entry keeps the key the settings remember.
+    private readonly Dictionary<string, string> _addresses = new(StringComparer.Ordinal);
     public IReadOnlyList<DeviceBattery> All { get; private set; } = [];
 
     // Returns whether the merged list changed.
     public bool Set(DeviceSource source, IReadOnlyList<DeviceBattery> devices)
     {
         if (devices.Count == 0) _sources.Remove(source); else _sources[source] = devices;
-        var merged = Merge(_sources.Values.SelectMany(list => list));
+        var merged = Merge(_sources.Values.SelectMany(list => list), _addresses);
         bool changed = merged.Count != All.Count || merged.Where((device, i) => !device.Same(All[i])).Any();
         All = merged;
         return changed;
     }
 
-    public void Clear() { _sources.Clear(); All = []; }
+    public void Clear() { _sources.Clear(); _addresses.Clear(); All = []; }
 
     // One source's own list, before merging.
     public IReadOnlyList<DeviceBattery> Of(DeviceSource source) => _sources.TryGetValue(source, out var list) ? list : [];
@@ -294,9 +331,35 @@ public sealed class DeviceRoster
     // make one). Then a controller without an address (Windows.Gaming.Input, a PlayStation controller's HID) joins one with an
     // address by its vendor and product, but only where that vendor and product is one entry on either side, so two controllers
     // of one model stay two.
-    public static List<DeviceBattery> Merge(IEnumerable<DeviceBattery> devices)
+    public static List<DeviceBattery> Merge(IEnumerable<DeviceBattery> devices, IDictionary<string, string>? seen = null)
     {
         var list = devices.ToList();
+        // Phone Link is the primary reading for a phone: while it reports one, the Bluetooth entry of that phone is left
+        // out, so the page shows one phone with the fresher reading and its charging state. Its address goes to the Phone
+        // Link entry first, so the merged key stays "bt:<address>" and the name, colors and hidden state the settings
+        // remember still find the phone; once Bluetooth has stopped listing the phone, the address it was last seen with
+        // stands in, since Phone Link reaches it over Wi-Fi as well. With no Phone Link reading (the app closed, the phone
+        // away) the Bluetooth entry stands in unchanged; a phone it does not name is kept.
+        var linked = list.Where(device => device.Source == DeviceSource.PhoneLink && device.Kind == DeviceKind.Phone).ToList();
+        if (linked.Count > 0)
+        {
+            var dropped = new HashSet<DeviceBattery>(ReferenceEqualityComparer.Instance);
+            var carries = new Dictionary<DeviceBattery, string>(ReferenceEqualityComparer.Instance);
+            foreach (var phone in linked)
+            {
+                var bluetooth = list.FirstOrDefault(device => device.Source == DeviceSource.Bluetooth && device.Kind == DeviceKind.Phone
+                    && device.Address is not null && !dropped.Contains(device) && Devices.SamePhone(phone.Name, device.Name));
+                if (bluetooth is not null) dropped.Add(bluetooth);
+                if ((bluetooth?.Address ?? Seen(seen, Devices.PhoneIdentity(phone.Name))) is not { } address) continue;
+                carries[phone] = address;
+                // One address per phone, whatever suffix the name carries this time: the identity, not the name, is the key.
+                if (seen is not null) seen[Devices.PhoneIdentity(phone.Name)] = address;
+            }
+            if (dropped.Count > 0)
+                list = list.Where(device => !dropped.Contains(device)).ToList();
+            if (carries.Count > 0)
+                list = list.Select(device => carries.TryGetValue(device, out var address) ? device with { Address = address } : device).ToList();
+        }
         var parent = Enumerable.Range(0, list.Count).ToArray();
         int Find(int i) { while (parent[i] != i) i = parent[i] = parent[parent[i]]; return i; }
         void Join(int a, int b) { a = Find(a); b = Find(b); if (a != b) parent[b] = a; }
@@ -327,6 +390,10 @@ public sealed class DeviceRoster
         result.Sort(Devices.Order);
         return result;
     }
+
+    // The address a phone was last seen with, by the identity its names share ("Xiaomi 13 Ultra 5G" is "Xiaomi 13 Ultra").
+    private static string? Seen(IDictionary<string, string>? seen, string identity)
+        => seen is not null && seen.TryGetValue(identity, out var address) ? address : null;
 }
 
 // The devices page's layout, in steps as the monitor page's: the type and the rings change only from one step to the next, never
