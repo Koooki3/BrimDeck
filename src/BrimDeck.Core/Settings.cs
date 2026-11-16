@@ -719,6 +719,8 @@ public sealed class DeckSettings
     // Notices are held back until this time (BrimDeck's own pause); null when not paused.
     public DateTimeOffset? NoticesPausedUntil { get; set; }
     public bool NoticeHistory { get; set; } = true;
+    // Opening an application from a Windows notice replays the toast's own launch string (ToastActivation); off until chosen.
+    public bool NoticeOpenReplay { get; set; }
     public int NoticeHistoryHours { get; set; } = 24;
     // Where the encrypted recent notices are kept; empty for the default (a folder in BrimDeck's install folder).
     public string NoticeHistoryFolder { get; set; } = "";

@@ -33,6 +33,7 @@ try
     AuditFollowupTests.Run(Check);
     AuditWin2Tests.Run(Check);
     NoticeEventLogTests.Run(Check);
+    ToastActivationTests.Run(Check);
     NoticeLoopFollowupTests.Run(Check);
     NoticeRobustTests.Run(Check);
     NoticeBannerTests.Run(root, Check);

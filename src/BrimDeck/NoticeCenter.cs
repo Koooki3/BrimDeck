@@ -464,7 +464,13 @@ internal sealed class NoticeCenter : IDisposable
     public async Task<bool> OpenAsync(Notice notice)
     {
         Hub.MarkViewed(notice.Id);
-        if (notice.Origin == NoticeOrigin.Windows) return notice.AppId.Length > 0 && await _windows.LaunchAsync(notice.AppId);
+        if (notice.Origin == NoticeOrigin.Windows)
+        {
+            if (notice.AppId.Length == 0) return false;
+            // Only when chosen: the toast is read now, for this one notice, and its launch string is used once and not kept.
+            WindowsNoticeSource.Replay? replay = Settings.NoticeOpenReplay && ToastActivation.NotificationId(notice.InstanceKey, notice.AppId) is { } id ? new WindowsNoticeSource.Replay(id) : null;
+            return await _windows.LaunchAsync(notice.AppId, replay);
+        }
         if (notice.Actions.Any(action => action.Key == "default")) return Invoke(notice, "default");
         return false;
     }
