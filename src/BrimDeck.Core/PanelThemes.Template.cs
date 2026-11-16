@@ -76,16 +76,16 @@ public static partial class PanelThemes
     // end of the file. The daylight member keeps a mode and a dusk length only when the source names them.
     private static string AppendNight(string text, PanelThemeFile night, PanelThemeFile? dusk, PanelThemeDaylight? daylight)
     {
-        string? Layer(PanelThemeFile look)
+        static string? Layer(PanelThemeFile look)
         {
             var layer = new PanelThemeFile { Colors = look.Colors, Apps = look.Apps, Effects = look.Effects, Motion = look.Motion, Clock = look.Clock };
-            if (JsonSerializer.SerializeToNode(layer, Json) is not System.Text.Json.Nodes.JsonObject json) return null;
+            if (JsonSerializer.SerializeToNode(layer, Json) is not JsonObject json) return null;
             // Only what the layer sets: no format, empty strings (an id, a name, an unset clock style) or names made for display.
             json.Remove("formatVersion");
-            static void Trim(System.Text.Json.Nodes.JsonNode? node)
+            static void Trim(JsonNode? node)
             {
-                if (node is System.Text.Json.Nodes.JsonArray array) { foreach (var item in array) Trim(item); return; }
-                if (node is not System.Text.Json.Nodes.JsonObject members) return;
+                if (node is JsonArray array) { foreach (var item in array) Trim(item); return; }
+                if (node is not JsonObject members) return;
                 foreach (var key in members.Where(pair => pair.Key == "displayName" || pair.Value is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var text) && text.Length == 0)
                     .Select(pair => pair.Key).ToList()) members.Remove(key);
                 foreach (var (_, value) in members) Trim(value);

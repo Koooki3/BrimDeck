@@ -1033,7 +1033,7 @@ public sealed class DeckSettings
         AnimationDuration = AnimationLength.Clamp(AnimationDuration);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
-        // Anything but "system" or a valid pair of different times goes back to the theme's own choice.
+        // "system" or two valid, different times; anything else keeps the theme's own choice.
         ThemeDaylight = PanelThemes.NormalizeDaylightSetting(ThemeDaylight);
         Language = Loc.Normalize(Language);
         UiFont = UiFonts.Normalize(UiFont);

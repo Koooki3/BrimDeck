@@ -81,6 +81,8 @@ public static partial class PanelThemes
         var dusk = DuskLength(file, setting);
         return dusk > TimeSpan.Zero && Within(Wrap(night - dusk), night, now) ? DaylightLook.Dusk : DaylightLook.Day;
     }
+    // Whether the night look is due at this local time by the clock (what LookAt says for a theme that goes by the clock).
+    public static bool IsNight(PanelThemeFile file, DateTime local, string? setting = null) => LookAt(file, local, true, setting) == DaylightLook.Night;
     // Whether a time of day falls in [from, to), the span running past midnight when to comes first.
     private static bool Within(TimeSpan from, TimeSpan to, TimeSpan time) => from < to ? time >= from && time < to : time >= from || time < to;
     private static TimeSpan Wrap(TimeSpan time) => time < TimeSpan.Zero ? time + TimeSpan.FromDays(1) : time;
