@@ -296,7 +296,9 @@ public partial class App : Application
             if (Exiting) return;
             // High contrast turned on or off, or its scheme changed, shows the system's colors on the panel (PanelLook.HighContrast).
             if (ShownSettings.Append(Settings).Any(settings => PanelThemes.NormalizeId(settings.PanelTheme) == PanelThemes.SystemId)
-                || SystemParameters.HighContrast || Decks.Any(deck => deck.Look.HighContrast))
+                || SystemParameters.HighContrast || Decks.Any(deck => deck.Look.HighContrast)
+                // A theme whose day and night looks follow Windows' mode changes over like the dusk does (PanelThemes.LookAt).
+                || PanelTheme.FollowsWindowsMode(Settings) || Decks.Any(deck => deck is not null && deck.Profile is not null && deck.Look.FollowsWindowsMode(deck.PanelSettings)))
                 ApplyPanelTheme(systemChanged: true);
             // The theme page's "System" card shows the Windows mode whichever theme is chosen.
             else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
@@ -318,7 +320,7 @@ public partial class App : Application
         foreach (var deck in Decks.ToList()) if (changed || own.Contains(deck)) deck.ApplySettings();
         if (changed && !reload) _settingsWindow?.PanelThemeChanged();
     }
-    // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
+    // A theme with a night look changes look at its hours (PanelThemes.LookAt): the timer is set for the next change, and at
     // most ten minutes ahead, so a clock changed by hand or a machine that slept past the hour catches up soon after. The switch
     // carries a preset clock gradient over, as Windows switching "system" between dark and light does.
     private DispatcherTimer? _daylight;
@@ -338,6 +340,8 @@ public partial class App : Application
     }
     // A panel reports display changes (monitors added or removed, the primary changed, a work area or scale changed).
     // Each panel receives the same messages, so they are handled once, after Windows has moved the windows to the new layout.
+    // The divider between the clipboard page's columns was dragged on a panel: an open settings page shows the new widths.
+    internal void ShelfShareChanged() => _settingsWindow?.ShelfShareChanged();
     internal void DisplaysChanged()
     {
         if (_arrangePending || Exiting) return;
@@ -520,7 +524,7 @@ public partial class App : Application
         bool Heat(CompactMonitorItems item, CompactMonitorItems among) => (among & item) != 0 && rows.Any(settings => settings.CompactReadings.FirstOrDefault(reading => reading.Item == item) is { } reading
             && (item == CompactMonitorItems.Storage || reading.ShowValue) && CompactFigures.Shows(reading, CompactFigures.Temperature));
         bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
-        if (Monitor is not null) Monitor.GpuUsage = Settings.MonitorGpuUsage;
+        if (Monitor is not null) { Monitor.GpuUsage = Settings.MonitorGpuUsage; Monitor.TrafficPeriod = Settings.MonitorTrafficPeriod; }
         var pageDemand = PageDemand();
         bool Page(ExpandedDemand what) => page && (pageDemand & what) != 0;
         // The cpu, memory and network are read for what an open page shows and for a collapsed row; with a row, all as before.

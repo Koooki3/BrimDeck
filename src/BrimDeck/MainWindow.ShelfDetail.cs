@@ -78,7 +78,15 @@ public partial class MainWindow
                 Stretch = Stretch.Uniform, Width = 12, Height = 12, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 0, 0), IsHitTestVisible = false });
             // The text starts 28 in (the box's padding 26 and the text box's own 2), where the caret blinks; the hint starts just after
             // it, so the caret does not cross its first letter.
-            var hint = Label(Loc.T("搜索剪贴板与文件", "Search clipboard and files"), 12.5, Look.Tertiary, HorizontalAlignment.Left, left: 30);
+            // It names the columns shown (DeckSettings.ShelfShown), and so does the box.
+            string what = Settings.ShelfShown switch
+            {
+                ShelfShown.Clipboard => Loc.T("搜索剪贴板", "Search clipboard"),
+                ShelfShown.Files => Loc.T("搜索文件", "Search files"),
+                _ => Loc.T("搜索剪贴板与文件", "Search clipboard and files")
+            };
+            AutomationProperties.SetName(box, what);
+            var hint = Label(what, 12.5, Look.Tertiary, HorizontalAlignment.Left, left: 30);
             hint.IsHitTestVisible = false; hint.Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; hint.Tag = "hint";
             host.Children.Add(hint);
             ShelfToolbar.Children.Add(host);
@@ -104,7 +112,6 @@ public partial class MainWindow
     private TextBox NewSearchBox()
     {
         var box = new TextBox { Style = (Style)FindResource("ShelfTextBox") };
-        AutomationProperties.SetName(box, Loc.T("搜索剪贴板与文件", "Search clipboard and files"));
         TakeKeyboardOnClick(box);
         box.TextChanged += (_, _) =>
         {
@@ -142,6 +149,7 @@ public partial class MainWindow
     // opening only when one of them was ended: a page closed as it was built opens as it is.
     private void ResetShelf()
     {
+        StopDeckHover();
         bool ended = _shelfEdit is not null || _shelfDetail is not null || _shelfSearching || _shelfQuery.Length > 0 || _picked.Count > 0;
         if (_shelfEdit is not null || _shelfSearching) EndTyping();
         _shelfEdit = null; _shelfDetail = null; _shelfSearching = false; _shelfQuery = ""; _picked.Clear();
@@ -484,6 +492,7 @@ public partial class MainWindow
     private void DeleteClips(IReadOnlyList<ClipEntry> clips)
     {
         if (_shelfDetail is { Side: ShelfSide.Clipboard } detail && clips.Any(c => c.Id == detail.Id)) _shelfDetail = null;
+        foreach (var clip in clips) _picked.Remove(clip.Id);
         _app.Shelf.Remove(clips);
     }
     private void RemoveFiles(IReadOnlyList<TransferFile> files)
@@ -543,8 +552,10 @@ public partial class MainWindow
         if (icon is not null) Lead(MenuGlyph(icon, danger ? color : Look.Secondary));
         if (star) { var mark = StarGlyph(10, Look.Secondary, filled: false); mark.Margin = new Thickness(0, 0, 7, 0); mark.VerticalAlignment = VerticalAlignment.Center; Lead(mark); }
         if (dot is not null) Lead(new Ellipse { Width = 7, Height = 7, Fill = UI.Brush(dot), Margin = new Thickness(1, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center });
-        header.Children.Add(new TextBlock { Text = label, Foreground = UI.Brush(color), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
-        var item = new MenuItem { Style = (Style)FindResource("ShelfMenuItem"), Header = header, InputGestureText = hint ?? "", IsEnabled = enabled };
+        var text = new TextBlock { Text = label, Foreground = UI.Brush(color), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        header.Children.Add(text);
+        var item = new MenuItem { Style = (Style)FindResource("ShelfMenuItem"), Header = header, InputGestureText = hint ?? "", IsEnabled = enabled, ToolTip = label };
+        item.ToolTipOpening += (_, e) => { if (!UI.IsCut(text)) e.Handled = true; };
         AutomationProperties.SetName(item, label);
         if (check == true) AutomationProperties.SetItemStatus(item, Loc.T("已选中", "Selected"));
         item.Click += (_, e) => { e.Handled = true; CloseMenu(); act(); };
@@ -600,6 +611,8 @@ public partial class MainWindow
 
     private ContextMenu ClipMenu(ClipEntry clip)
     {
+        // On one of several chosen entries, the menu acts on all of them (MainWindow.ShelfSelect.cs).
+        if (_picked.Contains(clip.Id) && ShelfData.Clips.Where(c => _picked.Contains(c.Id)).ToList() is { Count: > 1 } chosen) return ClipsMenu(chosen);
         var menu = NewMenu();
         bool textual = clip.Kind != ClipKind.Image;
         menu.Items.Add(Item(Loc.T("粘贴", "Paste"), () => PasteClip(clip), MenuIcons.Paste));
@@ -680,15 +693,16 @@ public partial class MainWindow
         return menu;
     }
     // The user's categories, with their counts, when they do not fit beside "全部" and "常用".
-    private ContextMenu CategoryListMenu(ShelfSide side)
+    private ContextMenu CategoryListMenu(ShelfSide side, bool all = false)
     {
         var menu = NewMenu();
         var selected = side == ShelfSide.Clipboard ? _clipTab : _fileTab;
         string Number(Guid id) => (side == ShelfSide.Clipboard ? ShelfData.Clips.Count(c => c.Categories.Contains(id)) : ShelfData.Files.Count(f => f.Categories.Contains(id))).ToString(CultureInfo.InvariantCulture);
-        void Choose(Guid id) { if (side == ShelfSide.Clipboard) _clipTab = id; else { _fileTab = id; _picked.Clear(); } RenderShelf(); }
+        void Choose(Guid? id) { if (side == ShelfSide.Clipboard) _clipTab = id; else _fileTab = id; _picked.Clear(); RenderShelf(); }
         // The check column only when one of them is the one shown, so the menu has no empty column at its left.
         var own = ShelfData.OwnCategories(side).ToList();
-        bool chosen = own.Any(category => category.Id == selected);
+        bool chosen = all || own.Any(category => category.Id == selected);
+        if (all) menu.Items.Add(Item(Loc.T("全部", "All"), () => Choose(null), check: selected is null));
         foreach (var category in own)
             menu.Items.Add(Item(category.Name, () => Choose(category.Id), hint: Number(category.Id), check: chosen ? selected == category.Id : null, dot: category.Color));
         return menu;

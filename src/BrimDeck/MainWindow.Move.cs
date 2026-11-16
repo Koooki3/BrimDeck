@@ -72,7 +72,7 @@ public partial class MainWindow
         if (!_moveArmed) return;
         _moveArmed = false; _movePressed = false; _moveAway = 0;
         _movePresses?.Dispose(); _movePresses = null;
-        _escapeDismissal?.SetEnabled(_expanded && !_preview);
+        _escapeDismissal?.SetEnabled(HoldsEscape);
         if (_grips.IsMouseCaptured) _grips.ReleaseMouseCapture();
         _grips.Cursor = null;
         _dragHold = true; _cursorInCompact = false;

@@ -103,7 +103,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly Dictionary<string, ClaudeKept> _claudeKept = new(StringComparer.OrdinalIgnoreCase);
     // Organizations are read side by side, so the table of what is kept for them is guarded.
     private ClaudeKept Kept(string organization) { lock (_claudeKept) return _claudeKept.TryGetValue(organization, out var kept) ? kept : _claudeKept[organization] = new(); }
-    private ClaudeQuotaSnapshot? ClaudeRetained(string account, string organization)
+    // primary: the organization Claude Code uses, the first one read, which the file of an earlier version (it names none) belongs to.
+    private ClaudeQuotaSnapshot? ClaudeRetained(string account, string organization, bool primary)
     {
         var kept = Kept(organization);
         var hash = ClaudeQuotaCache.AccountHash(account);
@@ -112,12 +113,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (kept.Retained is null && !kept.CacheRead && quotaCache is not null && hash.Length > 0)
         {
             kept.CacheRead = true;
-            kept.Retained = ClaudeQuotaCache.Load(quotaCache, _clock(), account, organization);
+            kept.Retained = ClaudeQuotaCache.Load(quotaCache, _clock(), account, organization, earlierReading: primary);
             kept.Account = hash;
         }
         return kept.Retained;
     }
-    private void KeepOnline(ClaudeQuotaSnapshot snapshot, ClaudeCredential credential, string organization, ClaudePlanOrigin planFrom)
+    private void KeepOnline(ClaudeQuotaSnapshot snapshot, ClaudeCredential credential, string organization, ClaudePlanOrigin planFrom, bool primary)
     {
         var kept = Kept(organization);
         kept.Retained = snapshot; kept.Account = ClaudeQuotaCache.AccountHash(credential.Account); kept.CacheRead = true;
@@ -125,12 +126,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var key = string.Join("|", kept.Account, snapshot.Plan, planFrom, credential.SignIn, string.Join(";", snapshot.Quotas));
         if (key == kept.Saved && snapshot.Time - kept.SavedTime < ClaudeQuotaCache.RewriteAfter) return;
         kept.Saved = key; kept.SavedTime = snapshot.Time;
-        ClaudeQuotaCache.Save(quotaCache, snapshot, credential.Account, credential.SignIn, planFrom, organization);
+        ClaudeQuotaCache.Save(quotaCache, snapshot, credential.Account, credential.SignIn, planFrom, organization, primary);
     }
     // A sign-in that is gone or rejected keeps no quota, on disk either. A sign-in that could not be read just now only drops
     // the reading of this run; the file is read again the next time a reading is needed, so once the sign-in can be read and
     // the API is still rate limited, the kept quotas show again. organization null means every organization.
-    private void ForgetClaude(string? organization, bool signedOut = true)
+    private void ForgetClaude(string? organization, bool signedOut = true, bool primary = false)
     {
         if (organization is null) { lock (_claudeKept) _claudeKept.Clear(); }
         else
@@ -139,7 +140,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             kept.Retained = null; kept.Account = ""; kept.Saved = "";
             kept.CacheRead = signedOut;
         }
-        if (signedOut && quotaCache is not null) ClaudeQuotaCache.Delete(quotaCache, organization);
+        if (signedOut && quotaCache is not null) ClaudeQuotaCache.Delete(quotaCache, organization, primary);
     }
     // The pause after a 429 from the Claude quota API, for each token (with its sign-in and account): a new sign-in starts without
     // one, and the several tokens of one Desktop account, tried in turn, do not replace each other's. Only used while _gate is held.
@@ -520,7 +521,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         // The first part's readings are kept under Claude Code's organization, or else the one of the desktop app's first sign-in.
         var firstKey = codeCredential is not null || code.Organization.Length > 0 ? code.Organization : Desktop().Credentials.FirstOrDefault()?.Organization ?? "";
-        var units = new List<ClaudeUnit> { await ReadClaudeUnitAsync(snapshot, First(), firstKey, attempted, now, ct) };
+        var units = new List<ClaudeUnit> { await ReadClaudeUnitAsync(snapshot, First(), firstKey, primary: true, attempted, now, ct) };
         // The others are read only once the first organization is known; otherwise one of them could be the first again.
         var first = units[0];
         if (first.Organization.Length > 0)
@@ -537,7 +538,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     // Claude Code's local account record describes its own organization, not this one.
                     var part = pristine.Copy();
                     part.Plan = ""; part.PlanSource = "";
-                    return await ReadClaudeUnitAsync(part, group, group.Key, attempted, now, ct);
+                    return await ReadClaudeUnitAsync(part, group, group.Key, primary: false, attempted, now, ct);
                 }
                 finally { slots.Release(); }
             })));
@@ -557,7 +558,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
 
     // Reads one organization into snapshot with the first of candidates that works. key is the organization the readings are
     // kept under. When every sign-in fails, the reading kept for the organization stands in, or else the unit carries the failure.
-    private async Task<ClaudeUnit> ReadClaudeUnitAsync(ProviderSnapshot snapshot, IEnumerable<ClaudeCredential> candidates, string key,
+    private async Task<ClaudeUnit> ReadClaudeUnitAsync(ProviderSnapshot snapshot, IEnumerable<ClaudeCredential> candidates, string key, bool primary,
         HashSet<string> attempted, DateTimeOffset now, CancellationToken ct)
     {
         Exception? failure = null;
@@ -602,7 +603,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 snapshot.PlanSource = ClaudeSources.Plan(planFrom, credential.SignIn);
                 Connected(snapshot, ClaudeSources.Quota(credential.SignIn), now);
                 snapshot.UsageNote += ClaudeUsageNote;
-                KeepOnline(new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList()), credential, key, planFrom);
+                KeepOnline(new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList()), credential, key, planFrom, primary);
                 return true;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is
@@ -633,9 +634,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         ClaudeUnit Unit(Exception? left) => new(snapshot, organization,
             snapshot.Plan.Length > 0 ? snapshot.Plan : info.Plan.Length > 0 ? info.Plan : login?.Plan ?? "", info.Name, left, login is not null);
         if (read || failure is null) return Unit(null);
-        if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) ForgetClaude(key);
+        if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) ForgetClaude(key, primary: primary);
         // The reading shown in place of the failed one must belong to the account of the sign-in that was asked.
-        else if (Freshest(now, login?.Account ?? "", key) is { } local)
+        else if (Freshest(now, login?.Account ?? "", key, primary) is { } local)
         {
             // The plan stays known while the quota interface is unavailable (rate limited, for one): it is asked from the
             // account endpoint, which a rate-limited quota request does not block, and otherwise taken from the local records.
@@ -716,9 +717,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     // The desktop application samples the same account about every fifteen minutes. A newer local
     // sample replaces the last interface reading; reset times are carried over while they still lie ahead.
     // Null when neither an earlier reading nor a usable sample exists.
-    private ClaudeQuotaSnapshot? Freshest(DateTimeOffset now, string account, string organization)
+    private ClaudeQuotaSnapshot? Freshest(DateTimeOffset now, string account, string organization, bool primary)
     {
-        var kept = ClaudeRetained(account, organization);
+        var kept = ClaudeRetained(account, organization, primary);
         var sample = ClaudeUsageHistory.Latest(_locations, organization);
         if (sample is not null && sample.Time <= now.AddMinutes(5) && (kept is null || sample.Time > kept.Time))
         {

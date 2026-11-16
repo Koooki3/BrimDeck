@@ -43,6 +43,15 @@ public partial class App
         QueueSave();
     }
 
+    // A page chosen on one panel is the page of every panel that shows the same settings: they remember one page between them
+    // (LastPage), and the panel of another display otherwise kept the page it had until it was restarted. A panel that shows
+    // another profile keeps its own page, as it keeps its own settings.
+    internal void PageChosen(MainWindow from, DeckPage page)
+    {
+        foreach (var deck in Decks.ToList())
+            if (deck != from && ReferenceEquals(deck.PanelSettings, from.PanelSettings)) deck.FollowPage(page);
+    }
+
     // The panel that shows the profile in use, for the settings window's previews (the settings window changes the profile in use):
     // the main panel when none does.
     internal MainWindow PreviewDeck => Decks.FirstOrDefault(deck => (deck.Profile ?? Settings.CurrentProfile) == Settings.CurrentProfile) ?? Deck;

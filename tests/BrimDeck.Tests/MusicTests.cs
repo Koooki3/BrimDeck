@@ -44,6 +44,10 @@ internal static class MusicTests
         var gap = Lyrics.Parse("[00:02]长句\n[00:14]\n[00:20]下一句", null, 40, "网易云音乐");
         check("Only timestamped blank lines start an instrumental gap", gap.At(13.999).Current == "长句" && gap.At(14).Current == "♪" && gap.At(19.999).Current == "♪" && gap.At(20).Current == "下一句");
         check("Seeking backwards from an explicit gap restores the lyric", gap.At(16).Current == "♪" && gap.At(8).Current == "长句");
+        var pauses = Lyrics.Parse("[00:02]一句\n[00:05.59]\n[00:06.20]二句\n[00:10]\n[00:15]三句\n[00:18]\n[00:18.50]\n[00:19]四句\n[00:22]", null, 30, "QueMusic");
+        check("Blank lines shorter than the gap keep the line before them shown",
+            pauses.Lines.Select(l => l.Text).SequenceEqual(["一句", "二句", "", "三句", "四句", ""])
+            && pauses.At(5.8).Current == "一句" && pauses.At(12).Current == "♪" && pauses.At(18.7).Current == "三句" && pauses.At(25).Current == "♪");
         check("Timestamped lyrics require a real playback position to synchronize", lrc.CanSynchronize(track) && !lrc.CanSynchronize(track with { PositionKnown = false }) && !lrc.CanSynchronize(track with { End = TimeSpan.Zero }));
         var plain = Lyrics.Parse(null, "甲\n乙", 100, "test");
         check("Plain lyrics retain text without fabricating timestamps", !plain.Synced && plain.Lines.Select(l => l.Text).SequenceEqual(["甲", "乙"]) && plain.Lines.All(l => l.Seconds == 0));
@@ -61,6 +65,14 @@ internal static class MusicTests
             && song.Around(5.5, 1, 2) is { Current: "五", Before: ["四"], After: [] }
             && song.Around(0, 2, 1) is { Current: "♪", Before: [], After: ["一"] }
             && song.At(3.5) == ("二", "三", "四") && song.At(0) == ("", "♪", "一") && plain.Around(0, 2, 2) == LyricWindow.Empty);
+        var hold = new LyricHold();
+        check("A small step back of the position keeps the line just started (issue 263)",
+            song.At(3.1, hold).Current == "三" && song.At(2.9, hold).Current == "三" && song.Around(2.2, 1, 1, hold).Current == "三" && song.At(3.2, hold).Current == "三");
+        check("A step back of LyricHold.StepBack or more is a seek and shows the earlier line",
+            song.At(1.4, hold).Current == "一" && song.At(4.2, hold).Current == "四" && song.At(1, hold).Current == "一");
+        var fresh = Lyrics.Parse("[00:01]一\n[00:02]二\n[00:03]三\n[00:04]四\n[00:05]五", null, 10, "test");
+        check("New lyrics start afresh, and the hold never moves a line forward", song.At(4.5, hold).Current == "四" && fresh.At(2.5, hold).Current == "二"
+            && fresh.At(3.5, hold).Current == "三");
         using var handler = new LyricsHandler(); using var http = new HttpClient(handler); using var service = new LyricsService(http);
         check("Lyrics disabled sends no request", (await service.FindAsync(track, false, default)).Lines.Count == 0 && handler.Calls == 0);
         var result = await service.FindAsync(track, true, default);

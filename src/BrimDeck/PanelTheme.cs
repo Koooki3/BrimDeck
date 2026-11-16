@@ -91,7 +91,8 @@ internal static class PanelTheme
     public static PanelPalette Current => Main.Current;
     public static PanelThemeInfo ShownTheme => Main.ShownTheme;
     public static bool KeptLastGood => Main.KeptLastGood;
-    public static bool Night => Main.Night;
+    public static DaylightLook Look => Main.Look;
+    public static bool FollowsWindowsMode(DeckSettings settings) => Main.FollowsWindowsMode(settings);
     public static bool HighContrast => Main.HighContrast;
     public static DateTime? NextDaylightChange(DeckSettings settings) => Main.NextDaylightChange(settings);
     public static int Generation => Main.Generation;
@@ -141,13 +142,23 @@ internal sealed class PanelLook
     // The theme on screen. While the chosen theme file has an error, this is still its last good version (see Use).
     public PanelThemeInfo ShownTheme { get; private set; } = PanelThemes.BuiltIn(PanelThemes.Dark)!;
     public bool KeptLastGood { get; private set; }
-    // Whether the theme on screen shows its night look (PanelThemeFile.Night).
-    public bool Night { get; private set; }
+    // Which look the theme on screen shows (PanelThemeFile.Night, PanelThemeFile.Dusk).
+    public DaylightLook Look { get; private set; }
     // Whether Windows' high contrast is shown: the system's colors on the whole panel, whatever theme is chosen
     // (PanelThemes.HighContrast).
     public bool HighContrast { get; private set; }
-    // When the theme on screen changes between its day and night looks next, or null for a theme without a night look.
+    // When the theme on screen changes look by the clock next, or null for a theme without a night look or one that follows
+    // Windows' dark and light mode.
     public DateTime? NextDaylightChange(DeckSettings settings) => PanelThemes.NextDaylightChange(ShownTheme.File, DateTime.Now, settings.ThemeDaylight);
+    // Whether the theme on screen changes look when Windows switches between dark and light mode.
+    public bool FollowsWindowsMode(DeckSettings settings)
+        => ShownTheme.File.Night is not null && PanelThemes.DaylightModeOf(ShownTheme.File, settings.ThemeDaylight) == DaylightMode.System;
+    // The look due now. Windows' app mode is read only when the theme follows it.
+    private static DaylightLook LookOf(PanelThemeFile file, DeckSettings settings)
+    {
+        bool appsLight = file.Night is null || PanelThemes.DaylightModeOf(file, settings.ThemeDaylight) != DaylightMode.System || !SettingsPalette.IsDark(SettingsTheme.System);
+        return PanelThemes.LookAt(file, DateTime.Now, appsLight, settings.ThemeDaylight);
+    }
     public int Generation { get; private set; }
     // Whether the panel's surface lets what lies behind show through (DeckSettings.SurfaceTransparency).
     public bool Translucent { get; private set; }
@@ -177,7 +188,7 @@ internal sealed class PanelLook
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
         // The hour reaching the other look, or new hours for it, counts as a change too.
         bool high = SystemParameters.HighContrast;
-        if (!reload && !systemChanged && PanelTheme.Loaded && _signature.Length > 0 && chosen == _chosen && PanelThemes.IsNight(ShownTheme.File, DateTime.Now, settings.ThemeDaylight) == Night && high == HighContrast) return false;
+        if (!reload && !systemChanged && PanelTheme.Loaded && _signature.Length > 0 && chosen == _chosen && LookOf(ShownTheme.File, settings) == Look && high == HighContrast) return false;
         if (reload || !PanelTheme.Loaded) PanelTheme.Reload();
         _chosen = chosen;
         var theme = PanelTheme.Find(chosen);
@@ -187,17 +198,18 @@ internal sealed class PanelLook
             && PanelTheme.UserThemes.Any(t => !t.Usable && string.Equals(t.Path, ShownTheme.Path, StringComparison.OrdinalIgnoreCase));
         KeptLastGood = keepLastGood;
         if (keepLastGood) return false;
-        // A theme with a night look shows it by the local clock (PanelThemes.IsNight).
-        bool night = PanelThemes.IsNight(theme.File, DateTime.Now, settings.ThemeDaylight);
+        // A theme with a night look shows it by the local clock or by Windows' mode (PanelThemes.LookAt).
+        var look = LookOf(theme.File, settings);
         // The same theme and look as now (the common case for "system") needs no new palette.
         // Under high contrast the system's colors may have changed with the same theme chosen, so its palette is always made anew.
-        if (!reload && !high && !HighContrast && ReferenceEquals(theme, ShownTheme) && night == Night && _signature.Length > 0) return false;
-        ShownTheme = theme; Night = night; HighContrast = high;
-        var palette = high ? SystemPalette() : PanelThemes.Resolve(theme, night);
+        if (!reload && !high && !HighContrast && ReferenceEquals(theme, ShownTheme) && look == Look && _signature.Length > 0) return false;
+        ShownTheme = theme; Look = look; HighContrast = high;
+        var palette = high ? SystemPalette() : PanelThemes.Resolve(theme, look);
         var signature = Signature(theme, palette);
         if (signature == _signature) return false;
         // Panels on screen take a picture of their old look now, before any brush changes (MainWindow.ThemeFade).
-        Changing?.Invoke(Current.Id == palette.Id && Current.IsNight != palette.IsNight);
+        // Moving into or out of dusk fades as slowly as the night does.
+        Changing?.Invoke(Current.Id == palette.Id && Current.Look != palette.Look);
         _signature = signature; Current = palette; Generation = PanelTheme.NextGeneration();
         _hex = Hexes(palette); _appColors.Clear(); _warningColor = _criticalColor = null;
         _readable.Clear(); _readableColors.Clear();
@@ -218,7 +230,7 @@ internal sealed class PanelLook
     {
         var e = palette.Effects;
         var clock = palette.Clock;
-        return string.Join("|", theme.Id, palette.IsNight, string.Join(",", palette.Colors.Values), string.Join(",", palette.Apps.Select(pair => pair.Key + pair.Value)),
+        return string.Join("|", theme.Id, palette.Look, string.Join(",", palette.Colors.Values), string.Join(",", palette.Apps.Select(pair => pair.Key + pair.Value)),
             string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}") + DecorKey(e.Decor),
             $"{clock?.Style}/{clock?.Color}/{clock?.Custom}/{string.Join(",", clock?.Gradient ?? [])}",
             string.Join(",", ClockColors.Swatches.Select(palette.ClockPreset)), string.Join(";", palette.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops))),

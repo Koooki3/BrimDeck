@@ -147,7 +147,7 @@ internal sealed class MonitorView : Grid
                 graphs.Children.Add(_cpuGraph);
                 if (pair)
                 {
-                    _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu);
+                    _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu, layout.Caption);
                     _gpuBlock.Clicked += () => mainChanged(MonitorMain.Gpu);
                     SetColumn(_gpuBlock, 2); graphs.Children.Add(_gpuBlock);
                 }
@@ -365,8 +365,12 @@ internal sealed class MonitorView : Grid
             string kind = several && !cpuMain ? GpuChoice.KindName(gpu.Kind) : "";
             string heatText = temperature.Length > 0 && gpu.TemperatureKind is { } from2 ? from2 + " " + temperature : temperature;
             string detail = kind.Length > 0 && heatText.Length > 0 ? kind + " · " + heatText : kind + heatText;
+            // The memory in use, in the large gauge's line after the temperature (the small one's room is kept for the temperature; its
+            // block carries the memory), in its own level's color as in the collapsed row, not the temperature's.
+            var memoryShare = !cpuMain && !idle ? gpu.DedicatedFraction : null;
+            string memoryText = memoryShare is { } m ? Loc.T("显存 ", "VRAM ") + MonitorFormat.Percent(m) + "%" : "";
             _gpuGauge.Set(idle ? null : gpu.Usage, idle ? "—" : MonitorFormat.Percent(gpu.Usage), idle ? "" : "%", detail, switchTo.Length > 0 ? tip + "\n" + switchTo : tip, motion,
-                heat is { } c ? Hot(Temperatures.OfGpu(c)) : null);
+                heat is { } c ? Hot(Temperatures.OfGpu(c)) : null, memoryText, memoryShare is { } level ? Hot(ReadingLevels.OfShare(level)) : null);
             _gpuBlock?.Set(idle ? null : gpu.Usage, idle ? null : gpu.DedicatedFraction, tip, motion);
             _gpuGraph?.Set(gpu.Engines.Select(engine => new GraphColumn(engine.Usage, null, _colors.Gpu, 0,
                 GpuEngines.Label(engine.Kind) + " · " + MonitorFormat.Percent(engine.Usage) + "%", GpuEngines.Short(engine.Kind))).ToList(), motion);
@@ -398,7 +402,7 @@ internal sealed class MonitorView : Grid
         }
     }
 
-    // A temperature's color: the text's while normal, the collapsed readings' warning or critical color above.
+    // A temperature's or the graphics memory share's color: the text's while normal, the collapsed readings' warning or critical color above.
     private string? Hot(MemoryLevel level) => level == MemoryLevel.Normal ? null : _colors.Level(level, Look.Tertiary);
 
     // The processor's temperature with where it was read: its own sensors (with each core's range, or each CCD's), a hardware

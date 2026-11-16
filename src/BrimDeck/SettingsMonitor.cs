@@ -64,7 +64,13 @@ public sealed partial class SettingsWindow
                 [(CoreDisplay.Auto, Loc.T("自动", "Auto")), (CoreDisplay.Columns, Loc.T("柱状", "Columns")), (CoreDisplay.Matrix, Loc.T("点阵", "Dot matrix"))],
                 v => Change(s => s.CoreDisplay = v), keepPreview: true,
                 help: Loc.T("自动：核心较少时用柱状，柱子多到看不清时用点阵。",
-                    "Auto: columns while there are few cores, the dot matrix when there are too many columns to read.")));
+                    "Auto: columns while there are few cores, the dot matrix when there are too many columns to read.")),
+            MusicChoice(Loc.T("流量统计时长", "Traffic period"), S.MonitorTrafficPeriod,
+                [(TrafficPeriod.Today, TrafficPeriods.Name(TrafficPeriod.Today)), (TrafficPeriod.Day, TrafficPeriods.Name(TrafficPeriod.Day)),
+                    (TrafficPeriod.Week, TrafficPeriods.Name(TrafficPeriod.Week)), (TrafficPeriod.Month, TrafficPeriods.Name(TrafficPeriod.Month))],
+                v => Change(s => s.MonitorTrafficPeriod = v),
+                help: Loc.T("与 Windows 流量统计一致，最近的流量稍后计入。当天从 0 点算起。",
+                    "Matches Windows' data usage; recent traffic is counted a little later. Today counts from midnight.")));
         CompactMonitorOptions();
         SectionTitle(Loc.T("展开时", "When expanded"));
         // What the page shows (chips, the temperatures among them, and a sketch of the page whose blocks are dragged to order it), then
@@ -391,6 +397,7 @@ public sealed partial class SettingsWindow
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
+        CompactMonitorItems.DownloadTotal => Loc.T("累计下载", "Downloaded"), CompactMonitorItems.UploadTotal => Loc.T("累计上传", "Uploaded"),
         CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), CompactMonitorItems.Power => Loc.T("整机功耗", "System power"),
         CompactMonitorItems.Charge => Loc.T("本机电池", "This PC's battery"), CompactMonitorItems.Frames => Loc.T("帧率", "Frame rate"),
         CompactMonitorItems.Battery => Loc.T("设备电量", "Device batteries"), _ => "CPU"
@@ -435,7 +442,7 @@ public sealed partial class SettingsWindow
         // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
         bool choice = CompactMonitor.HasValueChoice(item);
         var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Storage or CompactMonitorItems.Power or CompactMonitorItems.Charge or CompactMonitorItems.Battery or CompactMonitorItems.Frames };
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.DownloadTotal or CompactMonitorItems.UploadTotal or CompactMonitorItems.Storage or CompactMonitorItems.Power or CompactMonitorItems.Charge or CompactMonitorItems.Battery or CompactMonitorItems.Frames };
         AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
         if (!choice)
         {
@@ -448,6 +455,7 @@ public sealed partial class SettingsWindow
                 CompactMonitorItems.Battery => Loc.T("在“设置 › 设备”中选择显示哪些设备、是否显示数字和顺序。", "Choose which devices show, with or without figures, and their order under Settings › Devices."),
                 CompactMonitorItems.Frames => Loc.T("前台程序每秒绘制的帧数；前台程序不在绘制时，显示最近一个在绘制的程序。首次开启时需要授权，未授权时不显示。",
                     "The frames the program in front draws each second; while it draws nothing, the last program that did. Needs permission the first time; hidden until then."),
+                CompactMonitorItems.DownloadTotal or CompactMonitorItems.UploadTotal => Loc.T("统计时长在“通用”中设置。", "Set the period under General."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);
@@ -502,7 +510,7 @@ public sealed partial class SettingsWindow
         ToolTipService.SetShowOnDisabled(select, true);
         AutomationProperties.SetName(select, role);
 
-        static string FigureName(string figure) => figure == CompactFigures.Usage ? Loc.T("占用", "Usage") : Loc.T("温度", "Temperature");
+        static string FigureName(string figure) => figure == CompactFigures.Usage ? Loc.T("占用", "Usage") : figure == CompactFigures.Vram ? Loc.T("显存", "VRAM") : Loc.T("温度", "Temperature");
         refresh.Add(() =>
         {
             var reading = Reading(S, item);
@@ -569,12 +577,14 @@ public sealed partial class SettingsWindow
             var reading = Reading(S, item);
             var figures = CompactFigures.Of(reading);
             Header(Loc.T("数值", "Figures"));
-            foreach (var figure in new[] { CompactFigures.Usage, CompactFigures.Temperature })
+            foreach (var figure in CompactFigures.Offered(item))
             {
                 bool on = figures.Contains(figure);
                 string? help = figure == CompactFigures.Temperature
                     ? drives ? Loc.T("固态硬盘的温度，显示在已用空间下方；机械硬盘不显示。", "A solid-state drive's temperature, under its space in use; not shown for hard disks.")
                         : Loc.T("显示在占用下方；读不到温度的电脑上不显示。", "Shown under the usage; not shown on a PC whose temperature cannot be read.")
+                    : figure == CompactFigures.Vram
+                        ? Loc.T("专用显存已用的比例，与其他数值排在同一行；读不到显存的显卡上不显示。", "The share of dedicated video memory in use, on the same line as the other figures; not shown for a GPU whose memory cannot be read.")
                     : null;
                 Entry(FigureName(figure), on, on && figures.Count == 1, help, () =>
                 {
@@ -584,10 +594,13 @@ public sealed partial class SettingsWindow
                 });
             }
             Header(Loc.T("排列", "Layout"));
-            string? single = figures.Count < 2 ? Loc.T("同时选择占用和温度时可用。", "Available when both usage and temperature are chosen.") : null;
+            string? single = figures.Contains(CompactFigures.Vram) ? Loc.T("选择显存时，数值始终排在同一行。", "With VRAM chosen, the figures always sit on one line.")
+                : figures.Count < 2 ? Loc.T("同时选择占用和温度时可用。", "Available when both usage and temperature are chosen.") : null;
             foreach (var inLine in new[] { false, true })
             {
-                bool on = reading.FiguresInLine == inLine;
+                // The arrangement that holds is ticked: with VRAM chosen the figures sit on one line whatever was saved (the saved choice
+                // comes back when VRAM is unchosen).
+                bool on = (reading.FiguresInLine || figures.Contains(CompactFigures.Vram)) == inLine;
                 Entry(inLine ? Loc.T("同一行", "One line") : Loc.T("分两行", "Two lines"), on, false, null,
                     () => edit(s => Reading(s, item).FiguresInLine = inLine), single);
             }

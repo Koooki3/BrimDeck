@@ -18,7 +18,9 @@ namespace BrimDeck.Core;
 //   read back 03 50 00 0B 02 01 <state> ...: the percent in the low 7 bits of [6], bit 7 charging. A state of 0 is the
 //   dongle answering for a sleeping mouse (a real 0 % does not exist; the mouse switches off first). From vigil-watt's
 //   EweadnMouseCodec and its notes (MIT; from EWEADN's web HUB, its answer 03 50 00 0B 02 01 49 ..: 73 %, reported by a
-//   contributor).
+//   contributor). The same frame goes to the S7 and S9 series' other beiyin receivers, 1027, 1029, 103D, 105E, 106E, 107B,
+//   107C, 108A and 108D, which EWEADN's web driver (its beiying SDK) speaks to the same way; not measured by us. The SDK's
+//   keyboards on 372E (ES98, X98, Alpha 87) need a per-model key first and are not read.
 [BrandFamilies]
 public static class EweadnMice
 {
@@ -50,7 +52,9 @@ public static class EweadnMice
     }
     public static BatteryRead? Beiyin(byte[] r)
     {
-        if (r.Length < 7 || r[0] != 0x03 || r[1] != 0x50 || r[2] != 0x00) return null;
+        // 0B 02 01 after the command's echo: the BASICS answer (MCHOSE's driver checks the 02; another command's answer, such as
+        // the wireless-online one another program asks, is not this).
+        if (r.Length < 7 || r[0] != 0x03 || r[1] != 0x50 || r[2] != 0x00 || r[3] != 0x0B || r[4] != 0x02 || r[5] != 0x01) return null;
         int level = r[6] & 0x7F;
         if (r[6] == 0) return new(null, Asleep: true);
         return level is > 0 and <= 100 ? new(level, (r[6] & 0x80) != 0) : null;
@@ -59,8 +63,10 @@ public static class EweadnMice
     private static bool Hub(HidShape shape) => shape.Vendor == ReceiverVendor && shape.Product == Receiver || shape.Vendor == CableVendor && shape.Product == Cable;
     private static bool InfoCollection(HidShape shape) => MouseShapes.Collection(shape, 0xFF01, 0x10) && shape.OutputLength >= 33 && shape.InputLength >= 16;
     private static bool IdentifyCollection(HidShape shape) => MouseShapes.Collection(shape, 0xFF02, 0x00) && shape.OutputLength == 33 && shape.InputLength == 33;
-    private static bool BeiyinCollection(HidShape shape) => shape.Vendor == BeiyinVendor && shape.Product == BeiyinReceiver
-        && MouseShapes.Collection(shape, 0xFF00, 0x01) && shape.FeatureLength >= 64;
+    public static readonly IReadOnlySet<int> BeiyinReceivers = new HashSet<int> { BeiyinReceiver, 0x1027, 0x1029, 0x103D, 0x105E, 0x106E, 0x107B, 0x107C, 0x108A, 0x108D };
+    // The beiyin read's collection: usage page 0xFF00, usage 1, with the 63-byte feature report 3.
+    public static bool BeiyinShape(HidShape shape) => MouseShapes.Collection(shape, 0xFF00, 0x01) && shape.FeatureLength >= 64;
+    private static bool BeiyinCollection(HidShape shape) => shape.Vendor == BeiyinVendor && BeiyinReceivers.Contains(shape.Product) && BeiyinShape(shape);
 
     public static bool Takes(HidShape shape) => Hub(shape) && (InfoCollection(shape) || IdentifyCollection(shape)) || BeiyinCollection(shape);
 

@@ -163,7 +163,7 @@ static class DeviceProtocolTests
             Dongles.MchoseReads(0x100B, "2.4G Receiver", 0xFF01, 1, 65, 65).SequenceEqual([Dongles.MchoseRead.Realtek, Dongles.MchoseRead.Frame4D, Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
             && Dongles.MchoseReads(0x100B, "MCHOSE A7 V2 Ultra Mouse", 0xFF01, 1, 65, 65).SequenceEqual([Dongles.MchoseRead.Realtek, Dongles.MchoseRead.Frame4D, Dongles.MchoseRead.Status])
             && Dongles.MchoseReads(0x4245, "Mouse", 0xFF01, 0x10, 0, 65).SequenceEqual([Dongles.MchoseRead.Gmouse, Dongles.MchoseRead.Status])
-            && Dongles.MchoseReads(0x3033, "MCHOSE K99 V3 Keyboard", 0xFF70, 0x71, 0, 64).SequenceEqual([Dongles.MchoseRead.Status])
+            && Dongles.MchoseReads(0x4011, "MCHOSE K99 Keyboard", 0xFF70, 0x71, 0, 64).SequenceEqual([Dongles.MchoseRead.Status])
             && Dongles.MchoseReads(0x1015, "", 0xFF01, 1, 65, 65).SequenceEqual([Dongles.MchoseRead.Status])
             && Dongles.MchoseReads(0x6008, "V9 Turbo", 0xFF00, 1, 0, 64).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
             && Dongles.MchoseReads(0x6045, "X9", 0xFF90, 1, 0, 64).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
@@ -176,6 +176,27 @@ static class DeviceProtocolTests
             && Dongles.MchoseReads(0x4245, "Mouse", 0xFF01, 0x10, 0, 65, new HashSet<byte> { 0x00 }, new HashSet<byte>()).SequenceEqual([Dongles.MchoseRead.Gmouse])
             && Dongles.MchoseReads(0x1014, "", 0xFF01, 1, 65, 64, new HashSet<byte> { 0x06 }, new HashSet<byte> { 0x06 }).Count == 0
             && Dongles.MchoseReads(0x1014, "", 0xFF01, 1, 65, 64, new HashSet<byte>(), new HashSet<byte>()).Count == 0);
+        // The K87S's answers as measured (#291): 53 % on battery and charging, profiles 0 and 1.
+        var k87sBattery = Bytes("AA 05 00 88 38 00 00 00 50 00 AA BB 01 01 00 E1 0E 50 00 00 00 00 B6 4D 4D 00 00 00 FF 00 00 00 00 0A 00 01 01 FF 00 00 35 00 02 0A 00 01 01 00 FF FF FF 00 10 10 10 10 10 10 10 10 10 10 10 10");
+        var k87sCharging = Bytes("AA 05 00 08 38 00 00 00 50 00 AA BB 01 01 00 E1 0E 50 00 00 00 00 B6 4D 4D 00 00 00 FF 00 00 00 00 0A 00 01 01 FF 00 00 B5 00 02 0A 00 01 01 00 FF FF FF 00 10 10 10 10 10 10 10 10 10 10 10 10");
+        var k87sProfile1 = Bytes("AA 05 00 08 38 40 00 00 50 00 AA BB 01 01 00 01 06 64 00 00 01 00 FF 00 00 00 00 00 FF 00 00 00 03 64 00 01 01 FF 00 00 35 00 01 06 00 01 01 00 FF FF FF 00 11 11 11 11 11 11 11 11 11 11 11 11");
+        check("MCHOSE 3033 keyboards: the configuration read as the web driver sends it, only to the receiver's usage 1:0 collection",
+            Dongles.MchoseConfigRequest().SequenceEqual(Bytes("00 55 05 00 38 38 00 00 00").Concat(new byte[56]))
+            && Dongles.MchoseReads(0x3033, "MCHOSE K87S 2.4G", 0x0001, 0x0000, 0, 65, new HashSet<byte> { 0x00 }, new HashSet<byte>()).SequenceEqual([Dongles.MchoseRead.Config])
+            && Dongles.Find(0x3837, 0x3033, 0x0001, "MCHOSE G87 V2 2.4G", 0, -1, 0x0000, 65, 65) == Dongles.Protocol.Mchose
+            && Dongles.MchoseReads(0x3033, "MCHOSE K87S 2.4G", 0x0001, 0x0006, 0, 65).Count == 0
+            && Dongles.MchoseReads(0x3033, "MCHOSE K87S 2.4G", 0x0001, 0x0000, 0, 9).Count == 0
+            && Dongles.MchoseReads(0x3003, "MCHOSE Ace 68", 0x0001, 0x0000, 0, 65).Count == 0);
+        check("MCHOSE 3033 keyboards: the level and charging at 40 (profile 1 holds the same), the sum checked; profile 1's answer (not the request sent), the base read, the request read back or a level of 0 no reading",
+            Dongles.MchoseConfig(k87sBattery) == new BatteryRead(53) && Dongles.MchoseConfig(k87sCharging) == new BatteryRead(53, true)
+            && k87sProfile1[40] == k87sBattery[40] && Dongles.MchoseConfig(k87sProfile1) is null
+            // At 66 % with profile 1 active (the base read's first data byte 01): profile 0's answer still holds the level.
+            && Dongles.MchoseConfig(Bytes("AA 05 00 95 38 00 00 00 50 00 AA BB 01 01 00 E1 0E 50 00 00 00 00 B6 4D 4D 00 00 00 FF 00 00 00 00 0A 00 01 01 FF 00 00 42 00 02 0A 00 01 01 00 FF FF FF 00 10 10 10 10 10 10 10 10 10 10 10 10")) == new BatteryRead(66)
+            && Dongles.MchoseConfig(Bytes("AA 05 00 15 38 00 00 00 50 00 AA BB 01 01 00 E1 0E 50 00 00 00 00 B6 4D 4D 00 00 00 FF 00 00 00 00 0A 00 01 01 FF 00 00 C2 00 02 0A 00 01 01 00 FF FF FF 00 10 10 10 10 10 10 10 10 10 10 10 10")) == new BatteryRead(66, true)
+            && Dongles.MchoseConfig([.. k87sBattery[..3], 0x89, .. k87sBattery[4..]]) is null
+            && Dongles.MchoseConfig(Bytes("AA 04 00 06 38 00 00 00 00 03 00 01 02 03 AA BB A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2 A2")) is null
+            && Dongles.MchoseConfig(Dongles.MchoseConfigRequest()[1..]) is null
+            && Dongles.MchoseConfig([.. k87sBattery[..3], 0x53, .. k87sBattery[4..40], 0x00, .. k87sBattery[41..]]) is null);
         check("MCHOSE: the A5 V2 Ultra on its cable (41E4:1101) takes the RealTek exchange on 0xFF01 only, and its reply's vendor is accepted",
             Dongles.Find(0x41E4, 0x1101, 0xFF01, "", 21) == Dongles.Protocol.MchoseRealtek && Dongles.Find(0x41E4, 0x1101, 0xFF02, "", 21, -1, 1, 20, 20) is null
             && Dongles.MchoseRealtekBattery(Inverted(0x11, [0xE4, 0x41, 0x11, 0x01, 1, 0, 0, 0, 0x08, 64, 0])) == (new BatteryRead(64), 0x0111));
@@ -403,7 +424,7 @@ static class DeviceProtocolTests
         check("ATK keyboards: the Z87 Pro's dongle read with VGN's frame, its model name given over the dongle's",
             Dongles.VgnBattery(atk) == new BatteryRead(92) && Dongles.Find(0x373B, 0x1012, 0xFF1C, "ATK Z87 Dongle", 0, 1, 0x0092, 64, 64) == Dongles.Protocol.Vgn
             && Dongles.Find(0x373B, 0x1012, 0xFF1B, "ATK Z87 Dongle", 0, 1, 0x0092, 64, 64) is null
-            && Dongles.AtkKeyboard(0x1012) == "ATK Z87 Pro" && Dongles.AtkKeyboard(0x1013) is null);
+            && Dongles.AtkKeyboard(0x1012) == "ATK Z87 Pro" && Dongles.AtkKeyboard(0x1013) == "ATK Z87 Pro" && Dongles.AtkKeyboard(0x1014) is null);
         var endgame = new byte[32]; endgame[0] = 0xA1; endgame[1] = 0x01; endgame[16] = 77;
         check("Endgame Gear: the request and a reply; a busy one is none", Dongles.EndgameRequest(32)[..2].SequenceEqual(new byte[] { 0xA1, 0xB4 }) && Dongles.EndgameBattery(endgame) == new BatteryRead(77)
             && Dongles.EndgameBattery([0xA1, 0x03, .. new byte[30]]) is null);

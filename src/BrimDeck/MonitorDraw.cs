@@ -13,7 +13,7 @@ namespace BrimDeck;
 // see ThirdPartyNotices.txt). The page and the collapsed strip lead their figures alike: CPU, memory and GPU with a dial
 // carrying the reading's letter (Dial), the rates with an arrow, the temperatures with a thermometer and the drives with a drive
 // (Arrow).
-internal enum MonitorGlyph { Down, Up, Thermometer, Drive, Screen }
+internal enum MonitorGlyph { Down, Up, Thermometer, Drive, Screen, DownTotal, UpTotal }
 // What is drawn of a dial (MonitorDraw.Dial): its track and letter, the arc of its share, or both.
 [Flags] internal enum DialParts { Face = 1, Share = 2, All = Face | Share }
 
@@ -29,6 +29,10 @@ internal static class MonitorDraw
         [MonitorGlyph.Drive] = Frozen("M3.5,4.5 H12.5 A1.5,1.5 0 0 1 14,6 V10 A1.5,1.5 0 0 1 12.5,11.5 H3.5 A1.5,1.5 0 0 1 2,10 V6 A1.5,1.5 0 0 1 3.5,4.5 Z M10.6,8 H11.6"),
         // A monitor on its stand, for the frame rate.
         [MonitorGlyph.Screen] = Frozen("M3.5,2.5 H12.5 A1.5,1.5 0 0 1 14,4 V10 A1.5,1.5 0 0 1 12.5,11.5 H3.5 A1.5,1.5 0 0 1 2,10 V4 A1.5,1.5 0 0 1 3.5,2.5 Z M8,11.5 V14 M5.5,14 H10.5"),
+        // Two chevrons down and up (Lucide's chevrons-down and chevrons-up, scaled from 24 to 16), for the traffic over a period: the
+        // pair spans 4 to 12 about the box's centre.
+        [MonitorGlyph.DownTotal] = Frozen("M4.67,4 L8,7.33 L11.33,4 M4.67,8.67 L8,12 L11.33,8.67"),
+        [MonitorGlyph.UpTotal] = Frozen("M4.67,12 L8,8.67 L11.33,12 M4.67,7.33 L8,4 L11.33,7.33"),
     };
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
 

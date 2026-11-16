@@ -14,6 +14,24 @@ internal static class ProfileTests
 
     internal static void Run(Action<string, bool> check)
     {
+        // Without a settings file, and with one that cannot be read, the settings start with one current profile: the start keeps
+        // the settings in it at once (Profiles.Keep), which failed on an empty list and left the app running without a panel.
+        var folder = Path.Combine(Path.GetTempPath(), "BrimDeck-Profiles-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (var (name, broken) in new[] { ("no settings file", false), ("an unreadable settings file", true) })
+            {
+                var firstStore = new SettingsStore(folder);
+                if (broken) { Directory.CreateDirectory(folder); File.WriteAllText(firstStore.FilePath, "{ not json"); }
+                var first = firstStore.Load();
+                bool keptValues;
+                try { Profiles.Keep(first); keptValues = true; } catch (ArgumentOutOfRangeException) { keptValues = false; }
+                check($"With {name} the settings have one current profile", firstStore.IsFirstStart && first.Profiles.Count == 1 && first.Profiles[0].Id == first.CurrentProfile);
+                check($"With {name} the start keeps the settings in the current profile", keptValues && first.Profiles[0].Values is not null);
+            }
+        }
+        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+
         var settings = new DeckSettings();
         settings.Normalize();
         check("Settings without profiles get one current profile, named as the first, holding them",

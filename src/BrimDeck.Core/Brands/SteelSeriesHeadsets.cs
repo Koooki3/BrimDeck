@@ -31,7 +31,9 @@ public static class SteelSeriesHeadsets
         0x12B3 or 0x12B6 or 0x12D7 or 0x12D5 => Exchange.Arctis1,
         0x220E or 0x2212 or 0x2216 or 0x2236 => Exchange.Arctis7Plus,
         0x2269 or 0x226D or 0x2232 or 0x2253 => Exchange.Nova5,
-        0x230A => Exchange.GameBuds,
+        // The GameBuds X (2317) on the GameBuds' exchange: HaloBattery's steelseries.py (MIT), checked against GG on its user's
+        // receiver; not measured by us.
+        0x230A or 0x2317 => Exchange.GameBuds,
         0x2244 => Exchange.Elite,
         0x2290 => Exchange.Omni,
         _ => null

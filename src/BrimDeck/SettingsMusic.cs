@@ -32,13 +32,19 @@ public sealed partial class SettingsWindow
     {
         if (_styleOptions is not { } host) return;
         var incoming = Collect(() => { StyleOptions(style); CollapsedSizeOptions(style); });
+        SwapOptions(host, incoming, previous is { } from && from != style ? (style > from ? 1 : -1) : 0);
+    }
+    // Shows `incoming` in a host in place of what it shows: at once (direction 0, nothing shown yet, or without animations), or
+    // with the old options leaving to one side as the new come in from the other (1: the new from the right; -1: from the left).
+    // The options of a choice among cards (the collapsed style, the clipboard page's arrangement) are shown this way.
+    private static void SwapOptions(Grid host, FrameworkElement incoming, int direction)
+    {
         var outgoing = host.Children.OfType<FrameworkElement>().LastOrDefault();
         double width = host.ActualWidth;
-        if (outgoing is null || previous is not { } from || from == style || width <= 0 || !Soft.Enabled)
+        if (outgoing is null || direction == 0 || width <= 0 || !Soft.Enabled)
         { host.Children.Clear(); host.Children.Add(incoming); return; }
         // A panel still leaving from an earlier choice is dropped; the one arriving becomes the one leaving.
         foreach (var leaving in host.Children.OfType<FrameworkElement>().Where(child => child != outgoing).ToList()) host.Children.Remove(leaving);
-        double direction = style > from ? 1 : -1;
         host.ClipToBounds = true; outgoing.IsHitTestVisible = false; host.Children.Add(incoming);
         var leave = outgoing.RenderTransform as TranslateTransform ?? new TranslateTransform(); outgoing.RenderTransform = leave;
         var enter = new TranslateTransform(direction * width, 0); incoming.RenderTransform = enter;

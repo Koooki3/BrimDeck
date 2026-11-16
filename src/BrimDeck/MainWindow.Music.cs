@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using BrimDeck.Core;
@@ -49,6 +50,8 @@ public partial class MainWindow
     private bool _musicStarted, _seeking, _updatingSeek, _commandBusy;
     private MediaTrack? _seekTrack;
     private readonly MediaSeekPreview _seekPreview = new();
+    // The collapsed lyric and the page's lines share one hold, so they never show different lines (LyricHold).
+    private readonly LyricHold _lyricHold = new();
     // Keeps the progress bar's room while the player moves to its next song; the timer lays the page out again when it ends.
     private readonly MusicTimelineHold _timelineHold = new();
     private DispatcherTimer? _timelineHoldEnd;
@@ -116,7 +119,7 @@ public partial class MainWindow
     {
         // A page hotkey opens on its page and remembers it, as choosing it on the page switch does (MainWindow.Hotkeys.cs).
         // Opened from the file transfer's count on the island, the panel opens on the clipboard and file transfer page.
-        var wanted = _hotkeyPage ?? (DeckPages.Shown(Settings, DeckPage.Clipboard) && PointerOnTransfer() ? DeckPage.Clipboard : (DeckPage?)null) ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
+        var wanted = _hotkeyPage ?? (DeckPages.Shown(Settings, DeckPage.Clipboard) && OpensOnTransfer() ? DeckPage.Clipboard : (DeckPage?)null) ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
         if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: _hotkeyPage is not null);
         // The clipboard page builds nothing while the panel is closed (RenderShelf), the page switch just above included: it is
         // built now, as the panel opens on it.
@@ -134,7 +137,7 @@ public partial class MainWindow
             // Start before resizing: the shrinking surface can immediately fire MouseLeave.
             _hover.Stop(); _leave.Stop(); _pageSwitchHold.Stop(); _pageSwitchHold.Start();
         }
-        if (remember) { Settings.LastPage = page; _app.PanelSettingsEdited(this); }
+        if (remember) { Settings.LastPage = page; _app.PanelSettingsEdited(this); _app.PageChosen(this, page); }
         bool animate = changed && _expanded && !_preview && Animates;
         var before = CurrentPage;
         var from = PageContent(before);
@@ -144,6 +147,8 @@ public partial class MainWindow
         bool back = Settings.PageOrder.IndexOf(page) < Settings.PageOrder.IndexOf(before);
         _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward);
     }
+    // The page chosen on another display's panel (App.PageChosen).
+    internal void FollowPage(DeckPage page) { if (CurrentPage != page) SelectPage(page, remember: false); }
     private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Clipboard => ShelfContent, DeckPage.Devices => DevicesContent, _ => UsageContent };
     private void ShowPage(DeckPage page, bool animatePage)
     {
@@ -181,7 +186,15 @@ public partial class MainWindow
 
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
     private void MonitorPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Monitor);
-    private void ShelfPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Clipboard);
+    private void ShelfPage_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsShelfPage && Settings.ShelfStacked() && _shelfDetail is null && _shelfEdit is null && !_dropping)
+        {
+            BringForward(ShelfFront == ShelfSide.Clipboard ? ShelfSide.Files : ShelfSide.Clipboard);
+            return;
+        }
+        SelectPage(DeckPage.Clipboard);
+    }
     private void DevicesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Devices);
     // Where the usage page's application tabs start: after the page switch, which holds one 28 DIP button per shown page.
     private double ApplicationPagesLeft(double side) { int pages = DeckPages.Visible(Settings).Count; return side + (pages <= 1 ? 36 : 72 + 29 * (pages - 2)); }
@@ -225,6 +238,7 @@ public partial class MainWindow
             button.Foreground = UI.Brush(current ? Look.Primary : Look.Secondary);
         }
         PlacePageCapsule();
+        UpdateShelfPageButton();
         ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(_header.Side), 0, 0, 0);
         // With the entry switched on the source menu has one more row. Without a source that row stands alone in the button.
         bool entry = FullControlEntryShown, alone = entry && _mediaTrack is null;
@@ -992,8 +1006,10 @@ public partial class MainWindow
                 // A new line scrolls again, also a line that comes back later in the song.
                 _compactTitleRested = null;
                 // A lyric that follows its line builds the row again, which asks for the line's width (RenderCompactMusic).
+                // The surface takes the new width at once, in the same pass: queued after the row was built, it left a frame of the
+                // new line in the old width before the move began (FitCompactToContent; the row then slides, SlideCompactRow).
                 if (_compactMarquee is not null && !TextFollowsLength) _compactMarquee.Text = CompactLyricText(track, line.Current);
-                else RenderCompact();
+                else { RenderCompact(); if (TextFollowsLength) FitCompactToContent(); }
             }
         }
         MusicIndicator.Visibility = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && track.State != MediaState.Stopped && track.HasTimeline ? Visibility.Visible : Visibility.Collapsed;
@@ -1008,7 +1024,7 @@ public partial class MainWindow
     {
         if (!NeedsLyrics || track.State == MediaState.Stopped) return ("", "", "");
         if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return ("", track.CurrentLyric ?? "", "");
-        return _lyrics.At(track, DateTimeOffset.UtcNow);
+        return _lyrics.At(track, DateTimeOffset.UtcNow, _lyricHold);
     }
     // The collapsed middle text's room follows the length of what it shows: the lyric's with MusicLyricAutoWidth, the title's with
     // MusicTitleAutoWidth, each only while it is the chosen middle text. Only with auto width, and not for a notch on a side edge,
@@ -1040,7 +1056,7 @@ public partial class MainWindow
     {
         if (!NeedsLyrics || track.State == MediaState.Stopped) return LyricWindow.Empty;
         if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return LyricWindow.Only(track.CurrentLyric ?? "");
-        return _lyrics.Around(track, DateTimeOffset.UtcNow, before, after);
+        return _lyrics.Around(track, DateTimeOffset.UtcNow, before, after, _lyricHold);
     }
     // The color taken from the playing song's cover; null without one, or when the cover gave no color.
     internal Color? CoverColor => _mediaCover is not null && _mediaTrack is { State: not MediaState.Stopped } ? _coverAccent : null;
@@ -1221,6 +1237,33 @@ public partial class MainWindow
         CompactRings.Children.Add(grid); UpdateMusicTimer();
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
+    }
+    // The surface moves to a new width for its middle text's length (SetExpanded, a content resize). The row is built at once for the
+    // new width and centred in the surface, so the cover and the parts at the ends stood at their new places from the first frame and
+    // the moving edges only uncovered or covered them. Instead each part starts where it was and travels with its end of the surface:
+    // the parts before the text and the text itself with the left end, the parts after it with the right end, on the surface's own
+    // curve; the text's room opens with them, so a longer line never runs under the parts after it. delta: the surface's change of width.
+    private void SlideCompactRow(double delta, int duration, Track track, IEasingFunction easing)
+    {
+        if (duration <= 0 || !double.IsFinite(delta) || Math.Abs(delta) < .5 || _compactMarquee is not { } title
+            || CompactRings.Children.Count == 0 || CompactRings.Children[0] is not Grid grid) return;
+        int at = grid.Children.IndexOf(title);
+        if (at < 0) return;
+        double half = delta / 2;
+        for (int i = 0; i < grid.Children.Count; i++)
+        {
+            var part = grid.Children[i];
+            var shift = new TranslateTransform(i <= at ? half : -half, 0);
+            var own = part.RenderTransform;
+            part.RenderTransform = own is null || own.Value.IsIdentity ? shift : new TransformGroup { Children = { own, shift } };
+            shift.BeginAnimation(TranslateTransform.XProperty, Timed(new DoubleAnimation { To = 0, EasingFunction = easing }, duration, track));
+        }
+        if (delta <= 0 || !double.IsFinite(title.Width) || !double.IsFinite(title.Height)) return;
+        var room = new RectangleGeometry(new Rect(0, 0, Math.Max(0, title.Width - delta), title.Height));
+        title.Clip = room;
+        var open = Timed(new RectAnimation { To = new Rect(0, 0, title.Width, title.Height), EasingFunction = easing }, duration, track);
+        open.Completed += (_, _) => { if (ReferenceEquals(title.Clip, room)) title.Clip = null; };
+        room.BeginAnimation(RectangleGeometry.RectProperty, open);
     }
     // One ring per application (QuotaRing.For), in the chosen style with the application's chosen quotas, every quota in the
     // tooltip, and the application's letter inside when the setting asks for it, so the rings are told apart by more than their color.

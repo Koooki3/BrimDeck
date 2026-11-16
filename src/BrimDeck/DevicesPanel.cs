@@ -52,8 +52,16 @@ public partial class MainWindow
         // The collapsed part is read for while it is chosen, before it shows: it joins the row only once a device reports.
         bool strip = !_expanded && Settings.ShowsDevices(EffectiveStyle) && seen && _alert is null;
         _app.PresentDevices(this, page, strip);
-        // Opened again, the page shows the readings as they are now, not as it left them.
-        if (page && !_devicesShowing) { _devicesView?.Update(ShownDevices, DevicesSettled, motion: false); _app.Devices?.Refresh(); }
+        // Opened again, the page shows the readings as they are now, not as it left them. Devices that came or went while it was
+        // closed (DevicesChanged skips the page then) can need another layout step: one device's layout puts every device in the
+        // same place, so a second one found while the panel was closed was drawn over the first. The page is built again for the
+        // new step, at once, with no crossfade from the old.
+        if (page && !_devicesShowing && _devicesView is not null)
+        {
+            if (DevicesKey() != _devicesKey) RenderDevices(handover: false);
+            else _devicesView.Update(ShownDevices, DevicesSettled, motion: false);
+            _app.Devices?.Refresh();
+        }
         _devicesShowing = page;
     }
 
@@ -108,9 +116,10 @@ public partial class MainWindow
     private string DevicesKey() => string.Join("|", CurrentDevicesLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "",
         Inks.Key, Loc.Language, Look.Generation, SystemParameters.HighContrast);
 
-    private void RenderDevices()
+    // handover: a page on screen crossfades into the new build; false replaces it at once.
+    private void RenderDevices(bool handover = true)
     {
-        bool shown = DevicesContent.Visibility == Visibility.Visible && _devicesView is not null && DevicesContent.Children.Contains(_devicesView);
+        bool shown = handover && DevicesContent.Visibility == Visibility.Visible && _devicesView is not null && DevicesContent.Children.Contains(_devicesView);
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed;
         DevicesContent.Visibility = Visibility.Visible;

@@ -36,6 +36,7 @@ try
     RingLetterTests.Run(root, Check);
     QuotaRingTests.Run(root, Check);
     PanelThemeTests.Run(root, Check);
+    DaylightTests.Run(root, Check);
     PanelThemeEditorTests.Run(root, Check);
     PixelBlocksTests.Run(root, Check);
     ThemeCoverageTests.Run(Check, Environment.GetEnvironmentVariable("BRIMDECK_THEME_REPORT") == "1");
@@ -52,9 +53,11 @@ try
     SystemMonitorTests.Run(Check);
     ExpandedMonitorTests.Run(Check);
     MonitorSpeechTests.Run(Check);
+    TrafficTotalTests.Run(Check);
     CompactReadingTests.Run(Check);
     CoreMatrixTests.Run(Check);
     TemperatureTests.Run(Check);
+    VramFigureTests.Run(Check);
     StorageTests.Run(Check);
     SensorStopTests.Run(Check);
     MonitorStartupTests.Run(Check);
@@ -70,6 +73,7 @@ try
     BrandsMouseTests.Run(Check);
     BrandsGapTests.Run(Check);
     BrandsMoreTests.Run(Check);
+    OfficialDriverTests.Run(Check);
     PowerTests.Run(Check);
     DevicesPageTests.Run(Check);
     FrameRateTests.Run(Check);
@@ -109,6 +113,7 @@ try
     await DshUsageTests.Run(root, Check);
     await KimiUsageTests.Run(root, Check);
     await ClaudeRateLimitTests.Run(root, Check);
+    await ClaudeUpgradeCacheTests.Run(root, Check);
     await UsageStartupTests.Run(root, Check);
     UsageLastSeenTests.Run(root, Check);
     await OpenCodeUsageTests.Run(root, Check);
@@ -674,6 +679,26 @@ try
     Check("Grok Bot usage without a percent is skipped", QuotaParser.SandUsage(Json("""{"nextResetTimestampUtc":"2026-10-18T07:21:38.721Z"}""")) is null);
     Check("Antigravity missing fraction is unknown", QuotaParser.Antigravity(Json("""{"userStatus":{"cascadeModelConfigData":{"clientModelConfigs":[{"label":"A","quotaInfo":{}}]}}}""")).Count == 0);
     Check("Antigravity zero fraction means depleted", QuotaParser.Antigravity(Json("""{"groups":[{"buckets":[{"bucketId":"gemini-5h","remainingFraction":0}]}]}""")).Single().Remaining == 0);
+    var antigravityQuotas = QuotaParser.Antigravity(Json("""
+        {"response":{"groups":[
+          {"displayName":"Gemini Models","buckets":[
+            {"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.75},
+            {"bucketId":"gemini-5h","window":"5h","remainingFraction":1},
+            {"bucketId":"gemini-4-argon-weekly","window":"weekly","remainingFraction":0.5}]},
+          {"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-weekly","window":"weekly","remainingFraction":1}]},
+          {"displayName":"Preview Models","buckets":[
+            {"bucketId":"preview-weekly","window":"weekly","remainingFraction":1},
+            {"bucketId":"preview-burst","displayName":"Burst Limit","remainingFraction":1},
+            {"bucketId":"preview-off","window":"5h","remainingFraction":1,"disabled":true}]}]}}
+        """));
+    Check("Antigravity quota summary keeps the known groups and periods",
+        antigravityQuotas.Take(2).Select(q => (q.Label, q.Minutes)).SequenceEqual([("Gemini · 每周", (int?)10080), ("Gemini · 5 小时", 300)]) &&
+        antigravityQuotas[3] is { Label: "Claude · 每周", Minutes: 10080 });
+    Check("Antigravity weekly Argon quota gets its own group and a weekly window", antigravityQuotas[2] is { Label: "Argon · 每周", Minutes: 10080, UsedPercent: 50 });
+    Check("Antigravity unknown buckets use the service's group name, window and bucket name",
+        antigravityQuotas.Skip(4).Select(q => (q.Label, q.Minutes)).SequenceEqual([("Preview Models · 每周", (int?)10080), ("Preview Models · Burst Limit", null)]));
+    Check("Antigravity bucket ids without a window still give the period",
+        QuotaParser.Antigravity(Json("""{"groups":[{"buckets":[{"bucketId":"argon-weekly","remainingFraction":1}]}]}""")).Single() is { Label: "Argon · 每周", Minutes: 10080 });
     Check("Cursor free membership is displayed as a real plan", PlanParser.Cursor(Json("""{"membershipType":"free"}""")) == "free");
     Check("Cursor quota alone does not imply a paid plan", PlanParser.Cursor(Json("""{"planUsage":{"totalPercentUsed":0}}""")) == "");
     Check("Antigravity uses the named user tier before its service plan", PlanParser.Antigravity(Json("""{"userStatus":{"userTier":{"name":"Example Tier"},"planStatus":{"planInfo":{"planName":"Pro"}}}}""")) == "Example Tier");
