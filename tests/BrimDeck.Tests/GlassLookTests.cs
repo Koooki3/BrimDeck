@@ -90,6 +90,17 @@ internal static class GlassLookTests
             check($"Automatic liquid glass holds its look over a flashing video ({(appDark ? "dark" : "light")} app mode: {turns} turns a minute; {plainTurns} without the video detected)",
                 turns == 0 && video.Video && plainTurns <= 12);
         }
+        var sampled = new GlassAppearance(true, true, videoGap: 1000);
+        for (long now = 0; now <= 2000; now += 500)
+        {
+            sampled.Changed(.9, now);
+            sampled.Feed(.5, now);
+        }
+        bool movingAtProbeCadence = sampled.Video;
+        sampled.Feed(.5, 3100);
+        check("The glass detects motion at the 500 ms capture cadence and expires after a gap",
+            movingAtProbeCadence && !sampled.Video);
+
         // A video that becomes bright for good turns the look once it has stayed past the threshold for VideoEscape; the video
         // stopping ends the video state after VideoGap.
         var escape = new GlassAppearance(true, true);

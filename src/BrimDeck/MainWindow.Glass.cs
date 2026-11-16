@@ -4,11 +4,14 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using BrimDeck.Core;
 using BrimDeck.LiquidGlass;
+using BrimDeck.Native;
 
 namespace BrimDeck;
 
 public partial class MainWindow
 {
+    private const int GlassProbeInterval = 500;
+    private AcrylicProbe _acrylicProbe = new();
     private GlassSurface? _glassSurface;
     private GlassAppearance? _glassAppearance;
     private PanelLook? _glassAppearanceLook;
@@ -31,7 +34,7 @@ public partial class MainWindow
         if (enabled == (_glassSurface is not null)) { QueueGlass(); return; }
         if (!enabled) { CloseGlass(); return; }
         _glassSurface = new GlassSurface();
-        _glassProbe = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, SampleGlass, Dispatcher);
+        _glassProbe = new DispatcherTimer(TimeSpan.FromMilliseconds(GlassProbeInterval), DispatcherPriority.Background, SampleGlass, Dispatcher);
         _glassProbe.Stop();
         LayoutUpdated += GlassLayout;
         LocationChanged += GlassLayout;
@@ -132,20 +135,22 @@ public partial class MainWindow
 
     private async void SampleGlass(object? sender, EventArgs e)
     {
-        if (!_glassActive || _glassReading || _glassDark is not { } dark) return;
+        if (!_glassActive || _glassReading || _glassDark is not { } dark
+            || WindowsHost.MonitorScreen(MonitorHandle) is not { Bounds: var monitor }) return;
         _glassReading = true;
         long generation = _glassGeneration;
         var bounds = _glassBounds;
         var sourceLook = Look;
-        var region = new RECT(bounds.X, bounds.Y, bounds.X + bounds.Width, bounds.Y + bounds.Height);
+        var screen = new Int32Rect((int)monitor.X, (int)monitor.Y, (int)monitor.Width, (int)monitor.Height);
+        var probe = _acrylicProbe;
         try
         {
             double scale = VisualTreeHelper.GetDpi(Island).DpiScaleX;
-            var reading = await Task.Run(() => AcrylicProbe.Read(region, (int)(24 * scale), (int)(40 * scale)));
+            var reading = await Task.Run(() => probe.Read(bounds, screen, (int)(24 * scale), (int)(40 * scale)));
             if (!_glassActive || generation != _glassGeneration || !ReferenceEquals(sourceLook, Look) || _glassBounds != bounds || reading is not { } sample) return;
             double openness = _expanded ? 1 : 0;
             long now = Environment.TickCount64;
-            if (UpdateAutomaticGlass(sample.Median, now)) return;
+            if (UpdateAutomaticGlass(sample, now)) return;
             double wanted = GlassEffect.LuminosityFor(dark, sample.BrightFor(openness), sample.DarkFor(openness));
             if (_glassFirstSample)
             {
@@ -173,17 +178,18 @@ public partial class MainWindow
         finally { _glassReading = false; }
     }
 
-    private bool UpdateAutomaticGlass(double luma, long now)
+    private bool UpdateAutomaticGlass(AcrylicProbe.Reading sample, long now)
     {
         if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto || Look.IsMain && this != _app.Deck) return false;
         bool appDark = SettingsPalette.IsDark(SettingsTheme.System);
         if (_glassAppearance is null || !ReferenceEquals(_glassAppearanceLook, Look))
         {
             _glassAppearanceLook = Look;
-            _glassAppearance = new GlassAppearance(Look.Current.IsDark, appDark);
+            _glassAppearance = new GlassAppearance(Look.Current.IsDark, appDark, videoGap: 2 * GlassProbeInterval);
         }
         _glassAppearance.Prior(appDark);
-        if (!_glassAppearance.Feed(luma, now, held: _expanded)) return false;
+        _glassAppearance.Changed(sample.Changed, now);
+        if (!_glassAppearance.Feed(sample.Median, now, held: _expanded)) return false;
         Look.AutomaticGlassDark = _glassAppearance.Dark;
         _app.ApplyPanelTheme();
         return true;
@@ -195,6 +201,7 @@ public partial class MainWindow
         _glassSurface?.Hide();
         if (!_glassActive) return;
         _glassActive = false;
+        _acrylicProbe = new AcrylicProbe();
         _glassDark = null;
         _glassGeneration++;
         ApplySurface();

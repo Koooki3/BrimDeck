@@ -21,7 +21,7 @@ namespace BrimDeck.Core;
 //   never runs over the panel's or the press's own motion; the measure goes on, and once released the look may turn after
 //   Settle.
 // Times are milliseconds on any steady clock.
-public sealed class GlassAppearance(bool dark, bool appDark)
+public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = GlassAppearance.VideoGap)
 {
     public const double DarkModeToLight = .72, DarkModeToDark = .55, LightModeToDark = .28, LightModeToLight = .45;
     public const double LowQuantile = .2, HighQuantile = .8;
@@ -85,7 +85,7 @@ public sealed class GlassAppearance(bool dark, bool appDark)
         if (double.IsNaN(_log)) _log = log;
         else _log += (1 - Math.Exp(-Math.Max(0, now - _fedAt) / Tau)) * (log - _log);
         _fedAt = now;
-        if (_movingSince >= 0 && now - _movedAt > VideoGap) _movingSince = -1;
+        if (_movingSince >= 0 && now - _movedAt > videoGap) _movingSince = -1;
         if (_held && !held) _calmUntil = now + Settle;
         _held = held;
         double smoothed = Math.Exp(_log);
@@ -103,7 +103,7 @@ public sealed class GlassAppearance(bool dark, bool appDark)
     public void Changed(double share, long now)
     {
         if (!(share > VideoShare)) return;
-        if (_movingSince < 0 || now - _movedAt > VideoGap) _movingSince = now;
+        if (_movingSince < 0 || now - _movedAt > videoGap) _movingSince = now;
         _movedAt = now;
     }
 
