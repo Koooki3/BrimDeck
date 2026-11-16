@@ -48,6 +48,8 @@ internal sealed class DeviceBatteries : IDisposable
         _linger = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = MemoryPlan.For(MemoryMode.Balanced).ReadingsLinger };
         _linger.Tick += (_, _) => { _linger.Stop(); Run(_demand); };
         _apple = new AppleBatteries(dispatcher, Report);
+        // Phone Link first: it is the primary reading for a phone, and the Bluetooth source stands in only without it.
+        _sources.Add(new PhoneLinkBatteries(dispatcher, Report));
         _sources.Add(new BluetoothBatteries(dispatcher, Report));
         _sources.Add(new HidBatteries(dispatcher, Report));
         _sources.Add(new GamingBatteries(dispatcher, Report));
