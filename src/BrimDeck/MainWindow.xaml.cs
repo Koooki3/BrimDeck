@@ -796,10 +796,16 @@ public partial class MainWindow : Window
     // partial: a first-round list that holds only the sources read so far; the ones still being read keep their waiting look.
     public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots, bool partial = false)
     {
+        ApplySnapshots(snapshots, partial);
+        RenderUsage();
+    }
+
+    private void ApplySnapshots(IReadOnlyList<ProviderSnapshot> snapshots, bool partial)
+    {
         Snapshots = snapshots; _updatedAt = DateTimeOffset.Now;
         if (!partial) FirstReadEnded();
         DetectThresholds();
-        RenderCompact(); RenderUsage();
+        RenderCompact();
     }
 
     // The collapsed row is built at once; a quota alert coming, changing or ending swaps it with the one before on the compact
@@ -1407,7 +1413,8 @@ public partial class MainWindow : Window
             whole = true;
             // The whole result replaces what the previous run showed, source by source or not at all.
             _app.RestoredUsage = [];
-            foreach (var deck in _app.Decks) deck.SetSnapshots(result);
+            // The finally block renders the page once after clearing the refresh state.
+            foreach (var deck in _app.Decks) deck.ApplySnapshots(result, partial: false);
             _app.SnapshotsChanged();
             KeepLastSeen(result);
         }
