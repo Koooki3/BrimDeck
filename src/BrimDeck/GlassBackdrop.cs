@@ -139,7 +139,8 @@ internal sealed class GlassBackdrop : IDisposable
     // light rim drawn over it (the rim visuals below), no capture. The refraction renderer of rounds 5 to 15 (DesktopSource,
     // LiquidRenderer) stays reachable for comparison behind BRIMDECK_LIQUID_REFRACT=1.
     internal static bool Refraction { get; set; } = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID_REFRACT") == "1";
-    private bool AcrylicBody => LiquidTint is not null && !LiquidOff && !Refraction && LiquidTheme.Renders;
+    internal static bool AcrylicSettingsApply => !LiquidOff && !Refraction;
+    private bool AcrylicBody => LiquidTint is not null && AcrylicSettingsApply && LiquidTheme.Renders;
     // Round 16, step 9 (experimental, BRIMDECK_LIQUID_RIM=1): the rim lens over the acrylic body - the refraction renderer's
     // slab, its bevel only (LiquidFrame.Rim), concentrated at the contour and gone before the flat top. Shown only while the
     // island holds still (fading in over RimLensInMs once a few frames saw the same shape, out at once when it moves), so the
