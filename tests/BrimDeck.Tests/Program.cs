@@ -84,6 +84,10 @@ try
     FontTests.Run(root, Check);
     SurfaceTransparencyTests.Run(Check);
     GlassMaterialTests.Run(Check);
+    GlassLookTests.Run(Check);
+    Check("Automatic liquid glass resolves to a built-in variant with the supplied system mode",
+        PanelThemes.Find(PanelThemes.GlassAuto, true, []).Id == PanelThemes.GlassDark
+        && PanelThemes.Find(PanelThemes.GlassAuto, false, []).Id == PanelThemes.GlassLight);
     ExpandSnapTests.Run(Check);
     MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);

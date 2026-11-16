@@ -295,7 +295,7 @@ public partial class App : Application
         {
             if (Exiting) return;
             // High contrast turned on or off, or its scheme changed, shows the system's colors on the panel (PanelLook.HighContrast).
-            if (ShownSettings.Append(Settings).Any(settings => PanelThemes.NormalizeId(settings.PanelTheme) == PanelThemes.SystemId)
+            if (ShownSettings.Append(Settings).Any(settings => PanelThemes.NormalizeId(settings.PanelTheme) is PanelThemes.SystemId or PanelThemes.GlassAuto)
                 || SystemParameters.HighContrast || Decks.Any(deck => deck.Look.HighContrast)
                 // A theme whose day and night looks follow Windows' mode changes over like the dusk does (PanelThemes.LookAt).
                 || PanelTheme.FollowsWindowsMode(Settings) || Decks.Any(deck => deck is not null && deck.Profile is not null && deck.Look.FollowsWindowsMode(deck.PanelSettings)))

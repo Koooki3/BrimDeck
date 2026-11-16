@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
@@ -13,6 +14,10 @@ namespace BrimDeck;
 // the settings window and anything not on a panel; a panel's code asks its own look.
 internal static class PanelTheme
 {
+    internal static bool GlassAvailable => !SystemParameters.HighContrast && GetSystemMetrics(0x1000) == 0
+        && Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "EnableTransparency", 1) is not 0;
+    [DllImport("user32")] private static extern int GetSystemMetrics(int index);
+
     public static string Folder { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "themes");
     // Every look's Generation is drawn from this one count, so a cache keyed on a generation never mistakes one look for another.
     // Declared before Main, which takes the first.
@@ -42,7 +47,7 @@ internal static class PanelTheme
     }
 
     // The theme an id stands for now, "system" following the Windows app theme.
-    public static PanelThemeInfo Find(string id) => PanelThemes.Find(id, PanelThemes.NormalizeId(id) == PanelThemes.SystemId && SettingsPalette.IsDark(SettingsTheme.System), UserThemes);
+    public static PanelThemeInfo Find(string id) => PanelThemes.Find(id, PanelThemes.NormalizeId(id) is (PanelThemes.SystemId or PanelThemes.GlassAuto) && SettingsPalette.IsDark(SettingsTheme.System), UserThemes);
 
     // Another interface font (Fonts.Use) makes everything built from the old one out of date, as another palette does: every page and
     // cache that compares Generation is built again, with no fade, since no color changes.
@@ -168,6 +173,8 @@ internal sealed class PanelLook
 
     private string _signature = "";
     private string? _chosen;
+    internal bool? AutomaticGlassDark { get; set; }
+
     // Every token's text form and the default app colors as drawn, made once per theme: they are read hundreds of times per render.
     private Dictionary<string, string> _hex;
     private readonly Dictionary<ProviderId, string> _appColors = [];
@@ -186,12 +193,15 @@ internal sealed class PanelLook
         bool translucent = settings.SurfaceTransparency > 0;
         if (translucent != Translucent) { Translucent = translucent; Outdate(); }
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
+        bool automaticGlass = chosen == PanelThemes.GlassAuto;
+        if (!automaticGlass || !PanelTheme.GlassAvailable) AutomaticGlassDark = null;
+        string? glassVariant = automaticGlass ? ((AutomaticGlassDark ?? SettingsPalette.IsDark(SettingsTheme.System)) ? PanelThemes.GlassDark : PanelThemes.GlassLight) : null;
         // The hour reaching the other look, or new hours for it, counts as a change too.
         bool high = SystemParameters.HighContrast;
-        if (!reload && !systemChanged && PanelTheme.Loaded && _signature.Length > 0 && chosen == _chosen && LookOf(ShownTheme.File, settings) == Look && high == HighContrast) return false;
+        if (!reload && !systemChanged && PanelTheme.Loaded && _signature.Length > 0 && chosen == _chosen && (glassVariant is null || ShownTheme.Id == glassVariant) && LookOf(ShownTheme.File, settings) == Look && high == HighContrast) return false;
         if (reload || !PanelTheme.Loaded) PanelTheme.Reload();
         _chosen = chosen;
-        var theme = PanelTheme.Find(chosen);
+        var theme = PanelTheme.Find(glassVariant ?? chosen);
         // A theme file that is being saved can be locked or half written for a moment. While the chosen file theme is listed
         // but unusable, the last good version stays on screen instead of the dark fallback; the settings page shows the error.
         bool keepLastGood = theme.Id != chosen && !ShownTheme.BuiltIn && ShownTheme.Id == chosen

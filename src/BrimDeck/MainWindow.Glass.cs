@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -11,6 +10,8 @@ namespace BrimDeck;
 public partial class MainWindow
 {
     private GlassSurface? _glassSurface;
+    private GlassAppearance? _glassAppearance;
+    private PanelLook? _glassAppearanceLook;
     private DispatcherTimer? _glassProbe;
     private bool _glassActive, _glassQueued, _glassReading;
     private long _glassGeneration, _glassDarkSince = -1;
@@ -21,11 +22,11 @@ public partial class MainWindow
     private (Size Size, double Shoulder, CornerRadius Corners, Point Origin, Point Along, Point Depth)? _glassOutline;
     private GlassSurface.PixelPoint[]? _glassContour;
 
-    internal static bool GlassAvailable => !SystemParameters.HighContrast && GetSystemMetrics(0x1000) == 0
-        && Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "EnableTransparency", 1) is not 0;
+    internal static bool GlassAvailable => PanelTheme.GlassAvailable;
 
     internal void UpdateGlassTheme()
     {
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) _glassAppearance = null;
         bool enabled = Look.Current.Effects.Glass is not null && !Look.HighContrast && GlassAvailable && !_retiring;
         if (enabled == (_glassSurface is not null)) { QueueGlass(); return; }
         if (!enabled) { CloseGlass(); return; }
@@ -135,15 +136,17 @@ public partial class MainWindow
         _glassReading = true;
         long generation = _glassGeneration;
         var bounds = _glassBounds;
+        var sourceLook = Look;
         var region = new RECT(bounds.X, bounds.Y, bounds.X + bounds.Width, bounds.Y + bounds.Height);
         try
         {
             double scale = VisualTreeHelper.GetDpi(Island).DpiScaleX;
             var reading = await Task.Run(() => AcrylicProbe.Read(region, (int)(24 * scale), (int)(40 * scale)));
-            if (!_glassActive || generation != _glassGeneration || _glassBounds != bounds || reading is not { } sample) return;
+            if (!_glassActive || generation != _glassGeneration || !ReferenceEquals(sourceLook, Look) || _glassBounds != bounds || reading is not { } sample) return;
             double openness = _expanded ? 1 : 0;
-            double wanted = GlassEffect.LuminosityFor(dark, sample.BrightFor(openness), sample.DarkFor(openness));
             long now = Environment.TickCount64;
+            if (UpdateAutomaticGlass(sample.Median, now)) return;
+            double wanted = GlassEffect.LuminosityFor(dark, sample.BrightFor(openness), sample.DarkFor(openness));
             if (_glassFirstSample)
             {
                 _glassRequired = wanted;
@@ -168,6 +171,22 @@ public partial class MainWindow
             QueueGlass();
         }
         finally { _glassReading = false; }
+    }
+
+    private bool UpdateAutomaticGlass(double luma, long now)
+    {
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto || Look.IsMain && this != _app.Deck) return false;
+        bool appDark = SettingsPalette.IsDark(SettingsTheme.System);
+        if (_glassAppearance is null || !ReferenceEquals(_glassAppearanceLook, Look))
+        {
+            _glassAppearanceLook = Look;
+            _glassAppearance = new GlassAppearance(Look.Current.IsDark, appDark);
+        }
+        _glassAppearance.Prior(appDark);
+        if (!_glassAppearance.Feed(luma, now, held: _expanded)) return false;
+        Look.AutomaticGlassDark = _glassAppearance.Dark;
+        _app.ApplyPanelTheme();
+        return true;
     }
 
     private void HideGlass()
@@ -196,9 +215,9 @@ public partial class MainWindow
         _glassSurface.Dispose();
         _glassSurface = null;
         _glassProbe = null;
+        _glassAppearance = null;
+        _glassAppearanceLook = null;
         _glassOutline = null;
         _glassContour = null;
     }
-
-    [DllImport("user32")] private static extern int GetSystemMetrics(int index);
 }

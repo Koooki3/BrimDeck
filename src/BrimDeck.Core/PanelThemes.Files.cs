@@ -44,7 +44,7 @@ public static partial class PanelThemes
         }
         // A usable file takes its id; a file named after its id claims it before any other, so a copy made in Explorer
         // ("my-theme - Copy.json") never takes the id from the original. A later file with the same id is refused.
-        var taken = BuiltInIndex.Select(entry => entry.Id).Append(SystemId).ToHashSet(StringComparer.Ordinal);
+        var taken = BuiltInIndex.Select(entry => entry.Id).Append(SystemId).Append(GlassAuto).ToHashSet(StringComparer.Ordinal);
         // A file named after its id keeps that id while it cannot be used (being saved, say), so a copy does not take its place.
         foreach (var entry in read) if (entry.Error is not null && entry.Name == entry.Id && entry.Id.Length > 0) taken.Add(entry.Id);
         var owner = new bool[read.Count];

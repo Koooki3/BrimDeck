@@ -32,6 +32,7 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 // hue, just far enough to reach it (PanelThemes.Build.cs).
 public static partial class PanelThemes
 {
+    public const string GlassAuto = "liquid-glass";
     public const string SystemId = "system", Dark = "dark", Light = "light", GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", Demo = "cyberpunk-edgerunners", PixelBlocks = "pixel-blocks";
     public const string IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2";
     public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2, ThumbContrast = 2;
@@ -168,6 +169,7 @@ public static partial class PanelThemes
     {
         id = NormalizeId(id);
         if (id == SystemId) id = systemDark ? Dark : Light;
+        if (id == GlassAuto) id = systemDark ? GlassDark : GlassLight;
         return BuiltIn(id) ?? user.FirstOrDefault(theme => theme.Usable && theme.Id == id) ?? BuiltIn(Dark)!;
     }
 }
