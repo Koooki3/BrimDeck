@@ -155,13 +155,18 @@ The panel's own opening and closing (its length is the animation length in Setti
 
 ### Day, dusk and night looks (night, dusk, daylight)
 
-A theme can carry a night look: `night` holds the `colors`, `apps`, `effects`, `motion` and `clock` that change at night, laid over the day look. A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night` ("New from current theme" copies it, with its `dusk` and `daylight`).
+A theme can carry a night look: `night` holds the `colors`, `apps`, `effects`, `motion` and `clock` that change at night, laid over the day look by the local clock, or while Windows apps use dark mode (`daylight.mode`); whatever it leaves out stays as by day. An optional `dusk` look, written the same way, is laid over the day look for the last `duskMinutes` before the night begins. `daylight`'s `day` and `night` are when the day and the night begin (`HH:mm`, 06:30 and 18:30 by default; the day may run past midnight, as 20:00 to 08:00 does). The user can move them in half hours in Settings › Current theme › Daytime; choosing the theme's own hours again saves no setting. Both looks are held to the readability rules below.
 
 ```jsonc
 "daylight": { "mode": "clock", "day": "06:30", "night": "18:30", "duskMinutes": 60 },
-"night": { "colors": { "surface": "#0B1622" } },
+"night": {
+  "colors": { "surface": "#0A1A2C", "textPrimary": "#EEF7F8" },
+  "effects": { "shadowDepth": 0 }
+},
 "dusk": { "colors": { "surface": "#2A1A2E" } }
 ```
+
+A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night`. "New from current theme", and saving an edit as a new theme, start the new file from the day look and carry the source theme's `night`, `dusk` and `daylight` along.
 
 | Key | What it does | Values |
 |---|---|---|

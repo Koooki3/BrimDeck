@@ -10,6 +10,7 @@ public static partial class PanelThemes
     // A theme with a night look resolves to two palettes, or three with a dusk look, kept side by side.
     private static readonly Dictionary<(string, DaylightLook), PanelPalette> ResolvedBuiltIns = [];
     private static readonly ConditionalWeakTable<PanelThemeInfo, PanelPalette> ResolvedFiles = new(), ResolvedDusks = new(), ResolvedNights = new();
+    // The day look. The one-argument form stays so the method group still fits a Select (themes.Select(PanelThemes.Resolve)).
     public static PanelPalette Resolve(PanelThemeInfo theme) => Resolve(theme, DaylightLook.Day);
     public static PanelPalette Resolve(PanelThemeInfo theme, bool night) => Resolve(theme, night ? DaylightLook.Night : DaylightLook.Day);
     public static PanelPalette Resolve(PanelThemeInfo theme, DaylightLook look)

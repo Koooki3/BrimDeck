@@ -155,13 +155,18 @@ Windows 支持时，玻璃下面的桌面是模糊的：BrimDeck 在岛的正下
 
 ### 日夜外观（night、dusk、daylight）
 
-主题可以带一个夜间外观：`night` 里写出夜间要改的 `colors`、`apps`、`effects`、`motion` 和 `clock`，它叠在白天外观上。夜间外观只属于写出它的文件，不随 `base` 继承：以海岛假日为基础的主题若也要日夜切换，需在自己的文件里写出 `night`（“以当前主题新建”会自动带上，连同 `dusk` 和 `daylight`）。
+主题可以带一个夜间外观：`night` 里写出夜间要改的 `colors`、`apps`、`effects`、`motion` 和 `clock`，它按本地时间，或在 Windows 应用为深色模式时（`daylight.mode`），叠在白天外观上；没写的项沿用白天外观。可选的 `dusk` 黄昏外观写法相同，在夜晚开始前的 `duskMinutes` 分钟内叠在白天外观上。`daylight` 的 `day` 和 `night` 是白天开始和夜晚开始的时间（`HH:mm`，默认 06:30 和 18:30，可以跨过午夜，如 20:00 到 08:00）；用户可以在设置的“当前主题 › 白天时段”中按半小时改动，改回主题自己的时段时不再保存设置。白天和夜间两种外观都要通过下面的可读性规则。
 
 ```jsonc
 "daylight": { "mode": "clock", "day": "06:30", "night": "18:30", "duskMinutes": 60 },
-"night": { "colors": { "surface": "#0B1622" } },
+"night": {
+  "colors": { "surface": "#0A1A2C", "textPrimary": "#EEF7F8" },
+  "effects": { "shadowDepth": 0 }
+},
 "dusk": { "colors": { "surface": "#2A1A2E" } }
 ```
+
+夜间外观只属于写出它的文件，不随 `base` 继承：以海岛假日为基础的主题若也要日夜切换，需在自己的文件里写出 `night`；在设置中“以当前主题新建”或把编辑另存为新主题时，新文件从白天外观起步，并带上原主题的 `night`、`dusk` 与 `daylight`。
 
 | 键 | 作用 | 取值 |
 |---|---|---|

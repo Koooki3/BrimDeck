@@ -103,6 +103,19 @@ internal static class DaylightTests
             PanelThemes.Template.Contains("mode: clock", StringComparison.Ordinal) && PanelThemes.Template.Contains("\"dusk\"", StringComparison.Ordinal)
             && PanelThemes.Template.Contains("duskMinutes", StringComparison.Ordinal));
 
+        // A change of clock for daylight saving moves the wall clock, not the rule: the look is decided by the time on the clock.
+        var spring = new DateTime(2026, 3, 8, 1, 59, 0);
+        check("A daylight saving day goes by the wall clock", PanelThemes.LookAt(clock, spring, true) == DaylightLook.Night
+            && PanelThemes.LookAt(clock, spring.Date.AddHours(17).AddMinutes(30), true) == DaylightLook.Dusk
+            && PanelThemes.NextDaylightChange(clock, spring, null) == spring.Date.AddHours(6.5));
+        // Old theme files keep their behavior: no mode, no dusk.
+        var old = Theme(withDusk: false); old.Daylight = new PanelThemeDaylight { Day = "06:30", Night = "18:30" };
+        check("A theme file without a mode or dusk behaves as before", PanelThemes.DaylightModeOf(old) == DaylightMode.Clock
+            && At(old, 12, 0, appsLight: false) == DaylightLook.Day && At(old, 18, 0) == DaylightLook.Day && At(old, 18, 30) == DaylightLook.Night && PanelThemes.DuskLength(old) == TimeSpan.Zero);
+        File.WriteAllText(Path.Combine(folder, "text-minutes.json"), $$"""{ "id": "text-minutes", "daylight": { "duskMinutes": "sixty" }, {{night}} }""");
+        check("A duskMinutes that is not a number is a file error",
+            PanelThemes.LoadFolder(folder).Single(theme => theme.Path!.EndsWith("text-minutes.json", StringComparison.Ordinal)) is { Usable: false });
+
         // The settings keep "system", hours, or nothing.
         check("The daylight setting keeps \"system\" and valid hours, and drops anything else",
             PanelThemes.NormalizeDaylightSetting("System") == "system" && PanelThemes.NormalizeDaylightSetting(" 7:00-19:30") == "07:00-19:30"
@@ -110,5 +123,9 @@ internal static class DaylightTests
         var settings = new DeckSettings { ThemeDaylight = "SYSTEM" };
         settings.Normalize();
         check("Saved settings keep the system daylight mode", settings.ThemeDaylight == "system");
+        var again = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>(System.Text.Json.JsonSerializer.Serialize(settings))!;
+        again.Normalize();
+        check("The daylight mode survives a save and load, and the default stays the theme's own choice",
+            again.ThemeDaylight == "system" && new DeckSettings().ThemeDaylight == "" && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{}")!.ThemeDaylight == "");
     }
 }

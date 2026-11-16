@@ -360,7 +360,10 @@ public partial class App : Application
             // A theme whose day and night looks follow Windows' mode changes over like the dusk does (PanelThemes.LookAt).
             // High contrast turned on or off, or its scheme changed, shows the system's colors on the panel (PanelLook.HighContrast).
             if (ShownSettings.Append(Settings).Any(settings => PanelThemes.NormalizeId(settings.PanelTheme) == PanelThemes.SystemId || PanelTheme.FollowsWindowsMode(settings))
-                || SystemParameters.HighContrast || Decks.Any(deck => deck.Look.HighContrast)) ApplyPanelTheme(systemChanged: true);
+                || SystemParameters.HighContrast || Decks.Any(deck => deck.Look.HighContrast)
+                // A theme whose day and night looks follow Windows' mode changes over like the dusk does (PanelThemes.LookAt).
+                || Decks.Any(deck => deck is not null && deck.Profile is not null && deck.Look.FollowsWindowsMode(deck.PanelSettings)))
+                ApplyPanelTheme(systemChanged: true);
             // Automatic liquid glass with nothing to measure follows the Windows app theme too. Otherwise the theme page's
             // "System" card shows the Windows mode whichever theme is chosen.
             else if (!FollowWindowsGlass()) _settingsWindow?.PanelThemeChanged(onlyThemePage: true);

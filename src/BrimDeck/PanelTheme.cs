@@ -215,15 +215,15 @@ internal sealed class PanelLook
         if (keepLastGood) return false;
         // A theme with a night look shows it by the local clock or by Windows' mode (PanelThemes.LookAt).
         var look = LookOf(theme.File, settings);
-        // The same theme as now (the common case for "system") needs no new palette.
+        // The same theme and look as now (the common case for "system") needs no new palette.
         // Under high contrast the system's colors may have changed with the same theme chosen, so its palette is always made anew.
         if (!reload && !high && !HighContrast && ReferenceEquals(theme, ShownTheme) && look == Look && _signature.Length > 0) return false;
         ShownTheme = theme; Look = look; HighContrast = high;
         var palette = high ? SystemPalette() : PanelThemes.Resolve(theme, look);
         var signature = Signature(theme, palette);
         if (signature == _signature) return false;
-        // Panels on screen take a picture of their old look now, before any brush changes (MainWindow.ThemeFade). Moving into or
-        // out of dusk fades as slowly as the night does.
+        // Panels on screen take a picture of their old look now, before any brush changes (MainWindow.ThemeFade).
+        // Moving into or out of dusk fades as slowly as the night does.
         Changing?.Invoke(Current.Id == palette.Id && Current.Look != palette.Look);
         _signature = signature; Current = palette; Generation = PanelTheme.NextGeneration();
         _hex = Hexes(palette); _appColors.Clear(); _warningColor = _criticalColor = null;
