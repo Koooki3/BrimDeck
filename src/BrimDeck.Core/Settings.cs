@@ -574,6 +574,7 @@ public sealed class DeckSettings
     // surface and its theme layers are see-through; text, icons and the rim are drawn as before.
     public int SurfaceTransparency { get; set; }
     public const int MaxSurfaceTransparency = 90;
+    public int GlassTransparency { get; set; } = GlassMaterial.DefaultTransparency;
     public int OpenDelay { get; set; } = 0;
     // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
     public bool ClickToExpand { get; set; }
@@ -912,6 +913,7 @@ public sealed class DeckSettings
         ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);
         SurfaceTransparency = Math.Clamp(SurfaceTransparency, 0, MaxSurfaceTransparency);
+        GlassTransparency = GlassMaterial.NormalizeTransparency(GlassTransparency);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
         MonitorCustomColors.Normalize();
