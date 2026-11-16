@@ -30,6 +30,7 @@ internal static class Program
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
             // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
             // says something about the machine, not the code. Without the flag every check runs.
+            if (args is ["--only", "rightdrag"]) { RightDragChecks.Run(Check); return Finish(); }
             bool hosted = args is ["--hosted"];
             Console.WriteLine($"Windows native smoke tests{(hosted ? " (hosted subset)" : "")}: {Environment.OSVersion.Version}");
             CheckWindowChrome();
@@ -38,6 +39,7 @@ internal static class Program
             CheckSettledClip();
             CheckPageToolTips();
             LayoutRetryTests.Run(Check);
+            RightDragChecks.Run(Check);
             DrawnAutomationTests.Run(Check);
             RingLetterChecks.Run(Check);
             SettingsFocusTests.Run(Check);

@@ -118,11 +118,16 @@ public partial class SettingsWindow
     private void TransferSettings()
     {
         WatchShelf();
-        Group(MusicChoice(Loc.T("拖出文件", "Drag files out"), S.TransferDragOut,
+        Group(MusicChoice(Loc.T("左键拖出文件", "Left-button drag"), S.TransferDragOut,
             [(TransferDragOut.Copy, Loc.T("复制", "Copy")), (TransferDragOut.Move, Loc.T("移动", "Move"))],
             value => Change(s => s.TransferDragOut = value), width: 216,
             help: Loc.T("选择“移动”时，文件移到新位置后从列表中移除。聊天软件、浏览器等只接受复制的地方仍会复制。",
                 "With Move, files moved to a new place leave the list. Chat apps, browsers and other places that only take copies still get copies.")));
+        Group(MusicChoice(Loc.T("右键拖出文件", "Right-button drag"), S.TransferRightDragOut,
+            [(TransferDragOut.Copy, Loc.T("复制", "Copy")), (TransferDragOut.Move, Loc.T("移动", "Move"))],
+            value => Change(s => s.TransferRightDragOut = value), width: 216));
+        Group(Toggle(Loc.T("移动到不支持移动的目标后，从中转站移除", "Remove from transfer after a move to a copy-only target"),
+            S.TransferRemoveAfterCopyDrop, value => Change(s => s.TransferRemoveAfterCopyDrop = value)));
         SectionTitle(Loc.T("分类", "Categories"), help: () => Loc.T("一个文件可以放进多个分类。单击筛选按钮设置自动放入的规则。拖动调整顺序。原文件不受影响。",
             "A file can be in several categories. The filter button sets what goes in by itself. Drag to reorder. The original files are not touched."));
         CategoryList(ShelfSide.Files);

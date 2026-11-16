@@ -66,3 +66,9 @@ The file transfer holds files you will need shortly. It keeps only where each fi
 ## Where the data is stored
 
 The clipboard history, the file transfer's list and the categories are stored in `%LOCALAPPDATA%\BrimDeck\shelf.dat`, and copied pictures and formatting in `%LOCALAPPDATA%\BrimDeck\shelf\`. Both are not encrypted, used only on this PC and never uploaded. See [Data and privacy](privacy.md).
+
+### Left and right file drags
+
+File transfer settings configure each button independently: left defaults to Copy and right to Move. Right drags use ordinary drag delivery to avoid shell drop menus. A right click without dragging still opens the entry menu.
+
+The optional remove-after-copy/link setting defaults off. When enabled, a move-configured drag successfully accepted as Copy or Link by an external application removes its transfer entries without deleting the original files. Canceled or rejected drops, Explorer, internal drops and Ctrl-copy gestures retain entries. Success means the target reported accepting the drop, not that an attachment finished uploading. Other file managers reporting Copy are also subject to this option.
