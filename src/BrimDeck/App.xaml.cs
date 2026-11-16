@@ -302,6 +302,7 @@ public partial class App : Application
                 ApplyPanelTheme(systemChanged: true);
             // The theme page's "System" card shows the Windows mode whichever theme is chosen.
             else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
+            foreach (var deck in Decks.ToList()) deck.UpdateGlassTheme();
         });
     }
     // Makes the chosen panel theme current (reading the theme folder again when asked) and repaints every panel if it changed.

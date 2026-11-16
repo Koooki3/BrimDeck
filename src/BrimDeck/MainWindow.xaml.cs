@@ -241,7 +241,7 @@ public partial class MainWindow : Window
             else if (message == SideWheel) { int delta = unchecked((short)((long)wParam >> 16)); handled = MusicWheelSwipe(delta) || ShelfSideWheel(delta); }
             return IntPtr.Zero;
         });
-        Closed += (_, _) => DisposeMusic();
+        Closed += (_, _) => { CloseGlass(); DisposeMusic(); };
     }
 
     private readonly TaskbarMirror _taskbarMirror;
@@ -370,6 +370,7 @@ public partial class MainWindow : Window
         ApplyLanguage();
         ApplyTheme();
         ApplySurface();
+        UpdateGlassTheme();
         // A panel holding the keyboard stays one that can be active, whatever the setting (PanelKeyboard).
         WindowsHost.SetCapturable(this, Settings.WindowCapture || PanelKeys.Holding);
         // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one; so does an ordinary panel
@@ -657,7 +658,7 @@ public partial class MainWindow : Window
     // shadow is cast by an opaque copy of the surface that would show through it, so a see-through surface casts none.
     private void ApplySurface()
     {
-        double opacity = 1 - Settings.SurfaceTransparency / 100d;
+        double opacity = _glassActive ? 0 : 1 - Settings.SurfaceTransparency / 100d;
         bool clear = opacity < 1;
         Island.SurfaceOpacity = opacity;
         if (Look.Current.Effects.Pixel <= 0)

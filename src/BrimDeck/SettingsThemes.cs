@@ -132,6 +132,15 @@ public sealed partial class SettingsWindow
         rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
+        if (theme.BuiltIn && PanelThemes.Resolve(theme).Effects.Glass is not null)
+        {
+            var glass = SliderRow(Loc.T("玻璃透明度", "Glass transparency"), S.GlassTransparency, 0, 100, 1, "%",
+                value => Change(settings => settings.GlassTransparency = (int)value),
+                help: Loc.T("数值越高，玻璃越清透。为保持文字清晰，某些背景上的变化可能不明显。",
+                    "Higher values make the glass clearer. The backdrop may limit the visible change to keep text readable."));
+            glass.IsEnabled = MainWindow.GlassAvailable;
+            rows.Add(glass);
+        }
         if (theme.File.Night is not null) rows.AddRange(DaylightRows(theme.File));
         // A file that carries the chosen id (or is named after it) but cannot be used is there, with its error listed below.
         bool broken = missing && users.Any(t => !t.Usable && (PanelThemes.NormalizeId(t.File.Id) == chosen || t.Path is { } file && PanelThemes.NormalizeId(PanelThemes.FileName(file)) == chosen));
