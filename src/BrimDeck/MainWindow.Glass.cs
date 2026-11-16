@@ -109,9 +109,15 @@ public partial class MainWindow
         double openness = _expanded ? 1 : 0;
         look = look with { LuminosityOpacity = GlassMaterial.LuminosityOpacity(_glassRequired, openness, Settings.GlassTransparency) };
         var owner = new WindowInteropHelper(this).Handle;
-        if (_glassContour is null || !_glassSurface.Show(owner, _glassBounds, 0, HoverZone.Opacity * Island.MaterialOpacity, look, _glassContour))
+        if (_glassContour is null)
         {
             HideGlass();
+            return;
+        }
+        if (!_glassSurface.Show(owner, _glassBounds, 0, HoverZone.Opacity * Island.MaterialOpacity, look, _glassContour))
+        {
+            // Retry on a later settings or environment update instead of every layout pass.
+            CloseGlass();
             return;
         }
         if (!_glassActive) { _glassActive = true; ApplySurface(); }
