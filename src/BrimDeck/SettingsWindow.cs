@@ -691,7 +691,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;s.NeteaseAutoFullControl=defaults.NeteaseAutoFullControl;s.AppleMusicFullControl=defaults.AppleMusicFullControl;break;
                 // The default theme, with its own colors and suggested clock, the clock reset as the collapsed page resets it; the
                 // other themes keep what was saved for them.
-                case ThemePage:{ChooseTheme(s,defaults.PanelTheme);var palette=PanelThemes.Resolve(PanelTheme.Find(defaults.PanelTheme));
+                case ThemePage:{s.GlassTransparency=defaults.GlassTransparency;ChooseTheme(s,defaults.PanelTheme);var palette=PanelThemes.Resolve(PanelTheme.Find(defaults.PanelTheme));
                     s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. palette.ClockGradients[0].Stops];
                     PanelThemes.ApplyMatching(palette,s);break;}
                 // The switch itself, the chosen sources, the rules per application and where notices are kept stay as they are.

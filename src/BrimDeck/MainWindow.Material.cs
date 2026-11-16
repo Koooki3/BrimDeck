@@ -6,6 +6,8 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using static BrimDeck.Tracks;
 
+using BrimDeck.Core;
+
 namespace BrimDeck;
 
 // What a theme's material asks of the island beyond its colors (PanelTheme.Dress): glass lets the desktop through, blurred where
@@ -236,15 +238,13 @@ public partial class MainWindow
             // Over a held blur the tint thins with it, frame by frame. Liquid glass draws its own tint: the island's surface
             // steps aside under it altogether (GlassBackdrop.SurfaceAside), whatever the blur's tint would be.
             _glass.Held += held => ApplyHeld(_glass.SurfaceAside, held);
-            // The panel opening takes the island out of a press at once: a squash or spring left on the open panel would hold
-            // it off the screen's top edge.
-            Island.SizeChanged += (_, _) => { if (_expanded) ResetJelly(); };
             _glass.LiquidTint = () => _surface.Color.A / 255d;
             // Automatic liquid glass takes its look from what lies behind the island (App.BackdropMeasured).
             _glass.AutoLook = () => _app.AutoLookFrom(this);
             _glass.Look += (dark, instant) => _app.TurnGlass(this, dark, instant);
             _glass.Crossed += () => _app.GlassCrossed(this);
             _glass.Openness = GlassOpenness;
+            _glass.AcrylicTransparency = () => Settings.GlassTransparency;
             _glass.Measured += ShadowBackdrop;
             _glass.ContentArea = GlassContentArea;
             _glass.TextRegions = GlassTextRegions;
@@ -270,8 +270,8 @@ public partial class MainWindow
         else { Island.LayoutUpdated -= CutShadow; ShadowHost.Clip = null; _shadowCutKey = null; }
     }
 
-    // The press of liquid-glass-web's glass (xiaofangstudio, MIT): pressed, it squashes to scale(1 + k, 1 - .45 k) about its
-    // middle, going down as every press in BrimDeck does (Soft.Pressed: Soft.Press on the monitor's curve); released, it springs
+    // The press of liquid-glass-web's glass (xiaofangstudio, MIT): pressed, it squashes to scale(1 + k, 1 - .45 k) about the
+    // attachment edge for the notch and about the middle otherwise. It takes Soft.Press to go down; released, it springs
     // back over JellyBackMs on the source's 1 - e^(-5t) cos 9t (SpringEase, which lands exactly on 1). k is the source's .1 for
     // a glass as wide as its buttons (JellyWidth), less on a wider island. Only the collapsed island (a press in the open panel
     // is a press of one of its controls), only over liquid glass, and not with animations off. The glass follows the island's
@@ -310,10 +310,12 @@ public partial class MainWindow
             _jelly = new ScaleTransform();
             group.Children.Insert(0, _jelly);
         }
-        // About the middle: the group's origin is the bottom middle (the dot's floor).
-        _jelly.CenterY = -Island.ActualHeight / 2;
         if (down)
         {
+            // Stage maps the logical top to the docked edge. The group's origin is at the dot's floor, so the notch's
+            // attached edge is one island height above it. Keep the same pivot through the release.
+            double height = Island.ActualHeight;
+            _jelly.CenterY = Collapsed.Style == CompactStyle.Notch ? -height : -height / 2;
             double k = JellyK * Math.Min(1, JellyWidth / Math.Max(1, Island.ActualWidth));
             Soft.Glide(_jelly, ScaleTransform.ScaleXProperty, 1 + k, true, Soft.Press);
             Soft.Glide(_jelly, ScaleTransform.ScaleYProperty, 1 - .45 * k, true, Soft.Press);
@@ -358,7 +360,7 @@ public partial class MainWindow
         // The acrylic body's noise (AcrylicNoise), drawn by the island in its own outline while its surface is aside for the
         // glass; the theme's pattern back with the blur.
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        if (shown && !GlassBackdrop.Refraction) Island.Pattern = LiquidGlass.AcrylicNoise.Brush(dpi);
+        if (shown && !GlassBackdrop.Refraction) Island.Pattern = LiquidGlass.AcrylicNoise.Brush(dpi, GlassMaterial.GrainStrength(Settings.GlassTransparency));
         else if (LiquidGlass.AcrylicNoise.Is(Island.Pattern)) Island.Pattern = PanelTheme.Texture(dpiScale: dpi) ?? PanelTheme.Scanlines(dpiScale: dpi);
         if (shown)
         {

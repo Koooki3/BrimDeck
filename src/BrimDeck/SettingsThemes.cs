@@ -158,6 +158,17 @@ public sealed partial class SettingsWindow
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
         if (theme.File.Night is not null) rows.AddRange(DaylightRows(theme.File));
         GlassAutoDetails(chosen, name, rows);
+        if (theme.BuiltIn && PanelThemes.IsLiquid(PanelThemes.Resolve(theme)) && GlassBackdrop.AcrylicSettingsApply)
+        {
+            var clarity = SliderRow(Loc.T("玻璃透明度", "Glass transparency"), S.GlassTransparency, 0, 100, 1, "%",
+                value => Change(s => s.GlassTransparency = (int)value));
+            clarity.IsEnabled = GlassBackdrop.Available;
+            rows.Add(clarity);
+            if (clarity.IsEnabled)
+                rows.Add(Row(Loc.T("透明度说明", "About transparency"),
+                    Wrapped(Loc.T("数值越高，玻璃越清透。玻璃会按背景自动保留足够的文字衬底，例如浅色玻璃遇到深色背景时，调高后也可能看不出变化。",
+                        "Higher values make the glass clearer. Glass keeps enough tint for readable text, so raising the setting may look the same, especially with light glass over a dark background."), false)));
+        }
         // Glass needs Windows' transparency effects; without them it is drawn opaque, and the page says why.
         if (PanelThemes.Resolve(theme).IsGlass && (!MotionEnvironment.Transparency || SystemParameters.HighContrast))
             rows.Add(Row(Loc.T("提示", "Note"), Wrapped(SystemParameters.HighContrast

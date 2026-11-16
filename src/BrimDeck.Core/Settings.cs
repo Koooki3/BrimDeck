@@ -591,6 +591,7 @@ public sealed class DeckSettings
     public int PanelScale { get; set; } = PanelScales.Default;
     // How much of what lies behind shows through the panel's surface, collapsed and expanded, in percent: 0 is opaque. Only the
     // surface and its theme layers are see-through; text, icons and the rim are drawn as before.
+    public int GlassTransparency { get; set; } = GlassMaterial.DefaultTransparency;
     public int SurfaceTransparency { get; set; }
     public const int MaxSurfaceTransparency = 90;
     public int OpenDelay { get; set; } = 0;
@@ -990,6 +991,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(ClipboardKeepFor)) ClipboardKeepFor = HistoryLength.Month;
         ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);
+        GlassTransparency = GlassMaterial.NormalizeTransparency(GlassTransparency);
         SurfaceTransparency = Math.Clamp(SurfaceTransparency, 0, MaxSurfaceTransparency);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();

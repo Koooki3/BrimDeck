@@ -123,6 +123,7 @@ try
     CurvesTests.Run(Check);
     ExpandBounceTests.Run(Check);
     GlassFeedbackTests.Run(Check);
+    GlassMaterialTests.Run(Check);
     SurfaceTransparencyTests.Run(Check);
     ExpandSnapTests.Run(Check);
     IdleCostTests.Run(Check);

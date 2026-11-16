@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -75,6 +75,7 @@ internal sealed class GlassBackdrop : IDisposable
     // How much of the held blur lies under the island's material now (0 to 1): the tint thins to PanelTheme.HeldOpacity by as much.
     // While the surface is aside (SurfaceAside), how much of the island is liquid glass (its material), which the surface leaves
     // to the glass (SurfaceOpacity).
+    public Func<int>? AcrylicTransparency { get; set; }
     public event Action<double>? Held;
 
     // The island as drawn, in device pixels from the panel window's corner: its bounds, corners and shoulder at that size, its
@@ -138,7 +139,8 @@ internal sealed class GlassBackdrop : IDisposable
     // light rim drawn over it (the rim visuals below), no capture. The refraction renderer of rounds 5 to 15 (DesktopSource,
     // LiquidRenderer) stays reachable for comparison behind BRIMDECK_LIQUID_REFRACT=1.
     internal static bool Refraction { get; set; } = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID_REFRACT") == "1";
-    private bool AcrylicBody => LiquidTint is not null && !LiquidOff && !Refraction && LiquidTheme.Renders;
+    internal static bool AcrylicSettingsApply => !LiquidOff && !Refraction;
+    private bool AcrylicBody => LiquidTint is not null && AcrylicSettingsApply && LiquidTheme.Renders;
     // Round 16, step 9 (experimental, BRIMDECK_LIQUID_RIM=1): the rim lens over the acrylic body - the refraction renderer's
     // slab, its bevel only (LiquidFrame.Rim), concentrated at the contour and gone before the flat top. Shown only while the
     // island holds still (fading in over RimLensInMs once a few frames saw the same shape, out at once when it moves), so the
@@ -247,6 +249,12 @@ internal sealed class GlassBackdrop : IDisposable
     // the session is local, and composition started.
     public static bool Available => PanelTheme.GlassShown && !MotionEnvironment.BatterySaver && GetSystemMetrics(RemoteSession) == 0 && Composition.Ready;
 
+    private int _acrylicTransparencyShown = GlassMaterial.DefaultTransparency;
+    private int RequestedAcrylicTransparency => AcrylicTransparency?.Invoke() ?? GlassMaterial.DefaultTransparency;
+    private double AcrylicLuminosity() => GlassMaterial.LuminosityOpacity(_luminosity, Openness?.Invoke() ?? 0, RequestedAcrylicTransparency);
+    private bool AcrylicAppearanceChanged => AcrylicBody &&
+        (_acrylicTransparencyShown != RequestedAcrylicTransparency || AcrylicLuminosity() != _luminosityShown);
+
     // After anything that can change the island's shape, place or look; cheap when nothing changed.
     public void Update()
     {
@@ -257,7 +265,9 @@ internal sealed class GlassBackdrop : IDisposable
         // An island not shown (hidden, collapsed to nothing) has nothing to follow: following it would stop on its first frame,
         // and every layout pass (a scrolling title redraws many a second) would start it again.
         if (Measure() is not { } now) { Hide(); return; }
-        if (now == _last && Equals(_brushFor, PanelTheme.Current.Effects.Glass)) return;
+        // A transparency setting can change the acrylic brush while the island stays still.
+        if (now == _last && Equals(_brushFor, PanelTheme.Current.Effects.Glass)
+            && !AcrylicAppearanceChanged) return;
         Follow(0);
     }
 
@@ -323,7 +333,7 @@ internal sealed class GlassBackdrop : IDisposable
         _steps++;
         if (_disposed) { Stop(); return; }
         if (!Available || !_owner.IsVisible || Measure() is not { } frame) { Hide(); Stop(); return; }
-        bool changed = frame != _last || !Equals(_brushFor, PanelTheme.Current.Effects.Glass);
+        bool changed = frame != _last || !Equals(_brushFor, PanelTheme.Current.Effects.Glass) || AcrylicAppearanceChanged;
         bool easing = EaseLiquid();
         if (!changed && !easing && _moving == 0 && ++_still >= StillFrames && Environment.TickCount64 >= _followUntil) { Stop(); return; }
         if (changed) _still = 0;
@@ -474,7 +484,8 @@ internal sealed class GlassBackdrop : IDisposable
             // lies along that outline.
             if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
             // The luminosity layer for the text (the probe's) and the thickness for the island's size (GlassEffect.Shown).
-            double shownLuminosity = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0, PanelTheme.Current.IsDark);
+            _acrylicTransparencyShown = RequestedAcrylicTransparency;
+            double shownLuminosity = AcrylicLuminosity();
             if (shownLuminosity != _luminosityShown) { _luminosityShown = shownLuminosity; _brushFor = null; }
             Dress();
             // The body's sides (the shoulders are not the body: a rectangle as wide as the flare would stand out past the sides);
@@ -1038,7 +1049,7 @@ internal sealed class GlassBackdrop : IDisposable
         bool dark = PanelTheme.Current.IsDark;
         _glowCentre.Color = Windows.UI.Color.FromArgb((byte)(dark ? 34 : 70), 255, 255, 255);
         _glowBrush.EllipseCenter = new Vector2((float)(shown.Left + x), (float)(shown.Top + y));
-        _glowBrush.EllipseRadius = new Vector2((float)(90 * scale));
+        _glowBrush.EllipseRadius = new Vector2((float)((90 + 12 * press) * scale));
         _glow.Opacity = (float)(strength * opacity);
         _glow.IsVisible = true;
     }
@@ -1049,7 +1060,7 @@ internal sealed class GlassBackdrop : IDisposable
         if (_rim is null || _rimHair is null || _rimLight is null || _hairShape is null || _lightShape is null) return;
         bool dark = PanelTheme.Current.IsDark;
         // The rim grows with the island's presence, behind its body (round 15's condensation): faint while it fades in.
-        _rim.Opacity = (float)(opacity * opacity);
+        _rim.Opacity = (float)Math.Min(1, opacity * opacity * GlassMaterial.RimStrength(_acrylicTransparencyShown, Openness?.Invoke() ?? 0));
         _rim.IsVisible = true;
         if (_rimFor == (left, top, right, bottom, radius, VisualTreeHelper.GetDpi(_island).DpiScaleX, dark)) return;
         double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
@@ -1161,7 +1172,7 @@ internal sealed class GlassBackdrop : IDisposable
 
         void Redress()
         {
-            double shown = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0, PanelTheme.Current.IsDark);
+            double shown = AcrylicLuminosity();
             if (shown == _luminosityShown) return;
             _luminosityShown = shown; _brushFor = null; Dress();
         }

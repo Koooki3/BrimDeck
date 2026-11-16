@@ -975,6 +975,7 @@ public partial class MainWindow : Window
         // host's own state, as a new screen context closes the panel without passing here.
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
+        if (expanded && !wasExpanded) ResetJelly();
         // The coordinator hears of it after this call: it may start a waiting alert, which lays the island out again. A notice
         // that arrives before it does already waits for the closing (DeckLeaving).
         if (wasExpanded && !expanded && !_preview) _app.Notices?.DeckLeaving(this, true);
