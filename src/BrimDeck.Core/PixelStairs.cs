@@ -27,16 +27,19 @@ public static class PixelStairs
         step *= Math.Max(1, Math.Round(curve / (4 * step), MidpointRounding.AwayFromZero));
         double middle = (left + right) / 2;
         // Column edges: inward from the left and from the right; whatever is left in the middle is one column.
-        var cuts = new SortedSet<double> { left, right };
-        for (double x = left + step; x < middle; x += step) cuts.Add(x);
-        for (double x = right - step; x > middle; x -= step) cuts.Add(x);
-        var columns = cuts.ToList();
+        var columns = new List<double> { left };
+        for (double x = left + step; x < middle; x += step) columns.Add(x);
+        int rightStart = columns.Count;
+        columns.Add(right);
+        for (double x = right - step; x > middle; x -= step) columns.Add(x);
+        columns.Reverse(rightStart, columns.Count - rightStart);
         var tops = new double[columns.Count - 1]; var bottoms = new double[columns.Count - 1];
         for (int i = 0; i + 1 < columns.Count; i++)
         {
             double xc = (columns[i] + columns[i + 1]) / 2, lo = double.PositiveInfinity, hi = double.NegativeInfinity;
-            foreach (var (a, b) in edges)
+            for (int edge = 0; edge < edges.Count; edge++)
             {
+                var (a, b) = edges[edge];
                 if (a.X <= xc == b.X <= xc) continue;
                 double y = a.Y + (b.Y - a.Y) * (xc - a.X) / (b.X - a.X);
                 lo = Math.Min(lo, y); hi = Math.Max(hi, y);

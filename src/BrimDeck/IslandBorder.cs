@@ -307,20 +307,33 @@ public sealed class IslandBorder : Border
     // running right faces up, one running down faces right, and so on.
     internal static (Geometry Light, Geometry Shade) Bevel(IReadOnlyList<Point> points, double thickness)
     {
-        var light = new GeometryGroup(); var shade = new GeometryGroup();
-        for (int i = 0; i < points.Count; i++)
+        var light = new StreamGeometry { FillRule = FillRule.EvenOdd };
+        var shade = new StreamGeometry { FillRule = FillRule.EvenOdd };
+        using (var lit = light.Open())
+        using (var shaded = shade.Open())
         {
-            Point a = points[i], b = points[(i + 1) % points.Count];
-            if (Math.Abs(a.Y - b.Y) < 1e-9)
+            for (int i = 0; i < points.Count; i++)
             {
-                if (a.X < b.X) light.Children.Add(new RectangleGeometry(new Rect(a.X, a.Y, b.X - a.X, thickness)));
-                else shade.Children.Add(new RectangleGeometry(new Rect(b.X, a.Y - thickness, a.X - b.X, thickness)));
+                Point a = points[i], b = points[(i + 1) % points.Count];
+                if (Math.Abs(a.Y - b.Y) < 1e-9)
+                {
+                    if (a.X < b.X) Rectangle(lit, a.X, a.Y, b.X, a.Y + thickness);
+                    else Rectangle(shaded, b.X, a.Y - thickness, a.X, a.Y);
+                }
+                else if (a.Y < b.Y) Rectangle(shaded, a.X - thickness, a.Y, a.X, b.Y);
+                else Rectangle(lit, a.X, b.Y, a.X + thickness, a.Y);
             }
-            else if (a.Y < b.Y) shade.Children.Add(new RectangleGeometry(new Rect(a.X - thickness, a.Y, thickness, b.Y - a.Y)));
-            else light.Children.Add(new RectangleGeometry(new Rect(a.X, b.Y, thickness, a.Y - b.Y)));
         }
         light.Freeze(); shade.Freeze();
         return (light, shade);
+
+        static void Rectangle(StreamGeometryContext context, double left, double top, double right, double bottom)
+        {
+            context.BeginFigure(new Point(left, top), isFilled: true, isClosed: true);
+            context.LineTo(new Point(right, top), isStroked: false, isSmoothJoin: false);
+            context.LineTo(new Point(right, bottom), isStroked: false, isSmoothJoin: false);
+            context.LineTo(new Point(left, bottom), isStroked: false, isSmoothJoin: false);
+        }
     }
 
     // The cut outline: the island's shape with every curve replaced by a straight line. A corner of radius r is cut off by a 45-degree
