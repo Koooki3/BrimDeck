@@ -248,6 +248,9 @@ internal sealed class GlassBackdrop : IDisposable
     // the session is local, and composition started.
     public static bool Available => PanelTheme.GlassShown && !MotionEnvironment.BatterySaver && GetSystemMetrics(RemoteSession) == 0 && Composition.Ready;
 
+    private double AcrylicLuminosity() => GlassMaterial.LuminosityOpacity(_luminosity, Openness?.Invoke() ?? 0,
+        AcrylicTransparency?.Invoke() ?? GlassMaterial.DefaultTransparency);
+
     // After anything that can change the island's shape, place or look; cheap when nothing changed.
     public void Update()
     {
@@ -258,7 +261,9 @@ internal sealed class GlassBackdrop : IDisposable
         // An island not shown (hidden, collapsed to nothing) has nothing to follow: following it would stop on its first frame,
         // and every layout pass (a scrolling title redraws many a second) would start it again.
         if (Measure() is not { } now) { Hide(); return; }
-        if (now == _last && Equals(_brushFor, PanelTheme.Current.Effects.Glass)) return;
+        // A transparency setting can change the acrylic brush while the island stays still.
+        if (now == _last && Equals(_brushFor, PanelTheme.Current.Effects.Glass)
+            && (!AcrylicBody || AcrylicLuminosity() == _luminosityShown)) return;
         Follow(0);
     }
 
@@ -475,7 +480,7 @@ internal sealed class GlassBackdrop : IDisposable
             // lies along that outline.
             if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
             // The luminosity layer for the text (the probe's) and the thickness for the island's size (GlassEffect.Shown).
-            double shownLuminosity = GlassMaterial.LuminosityOpacity(_luminosity, Openness?.Invoke() ?? 0, AcrylicTransparency?.Invoke() ?? GlassMaterial.DefaultTransparency);
+            double shownLuminosity = AcrylicLuminosity();
             if (shownLuminosity != _luminosityShown) { _luminosityShown = shownLuminosity; _brushFor = null; }
             Dress();
             // The body's sides (the shoulders are not the body: a rectangle as wide as the flare would stand out past the sides);
@@ -1162,7 +1167,7 @@ internal sealed class GlassBackdrop : IDisposable
 
         void Redress()
         {
-            double shown = GlassMaterial.LuminosityOpacity(_luminosity, Openness?.Invoke() ?? 0, AcrylicTransparency?.Invoke() ?? GlassMaterial.DefaultTransparency);
+            double shown = AcrylicLuminosity();
             if (shown == _luminosityShown) return;
             _luminosityShown = shown; _brushFor = null; Dress();
         }
