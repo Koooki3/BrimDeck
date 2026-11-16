@@ -249,8 +249,11 @@ internal sealed class GlassBackdrop : IDisposable
     // the session is local, and composition started.
     public static bool Available => PanelTheme.GlassShown && !MotionEnvironment.BatterySaver && GetSystemMetrics(RemoteSession) == 0 && Composition.Ready;
 
-    private double AcrylicLuminosity() => GlassMaterial.LuminosityOpacity(_luminosity, Openness?.Invoke() ?? 0,
-        AcrylicTransparency?.Invoke() ?? GlassMaterial.DefaultTransparency);
+    private int _acrylicTransparencyShown = GlassMaterial.DefaultTransparency;
+    private int RequestedAcrylicTransparency => AcrylicTransparency?.Invoke() ?? GlassMaterial.DefaultTransparency;
+    private double AcrylicLuminosity() => GlassMaterial.LuminosityOpacity(_luminosity, Openness?.Invoke() ?? 0, RequestedAcrylicTransparency);
+    private bool AcrylicAppearanceChanged => AcrylicBody &&
+        (_acrylicTransparencyShown != RequestedAcrylicTransparency || AcrylicLuminosity() != _luminosityShown);
 
     // After anything that can change the island's shape, place or look; cheap when nothing changed.
     public void Update()
@@ -264,7 +267,7 @@ internal sealed class GlassBackdrop : IDisposable
         if (Measure() is not { } now) { Hide(); return; }
         // A transparency setting can change the acrylic brush while the island stays still.
         if (now == _last && Equals(_brushFor, PanelTheme.Current.Effects.Glass)
-            && (!AcrylicBody || AcrylicLuminosity() == _luminosityShown)) return;
+            && !AcrylicAppearanceChanged) return;
         Follow(0);
     }
 
@@ -330,7 +333,7 @@ internal sealed class GlassBackdrop : IDisposable
         _steps++;
         if (_disposed) { Stop(); return; }
         if (!Available || !_owner.IsVisible || Measure() is not { } frame) { Hide(); Stop(); return; }
-        bool changed = frame != _last || !Equals(_brushFor, PanelTheme.Current.Effects.Glass);
+        bool changed = frame != _last || !Equals(_brushFor, PanelTheme.Current.Effects.Glass) || AcrylicAppearanceChanged;
         bool easing = EaseLiquid();
         if (!changed && !easing && _moving == 0 && ++_still >= StillFrames && Environment.TickCount64 >= _followUntil) { Stop(); return; }
         if (changed) _still = 0;
@@ -481,6 +484,7 @@ internal sealed class GlassBackdrop : IDisposable
             // lies along that outline.
             if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
             // The luminosity layer for the text (the probe's) and the thickness for the island's size (GlassEffect.Shown).
+            _acrylicTransparencyShown = RequestedAcrylicTransparency;
             double shownLuminosity = AcrylicLuminosity();
             if (shownLuminosity != _luminosityShown) { _luminosityShown = shownLuminosity; _brushFor = null; }
             Dress();
@@ -1045,7 +1049,7 @@ internal sealed class GlassBackdrop : IDisposable
         bool dark = PanelTheme.Current.IsDark;
         _glowCentre.Color = Windows.UI.Color.FromArgb((byte)(dark ? 34 : 70), 255, 255, 255);
         _glowBrush.EllipseCenter = new Vector2((float)(shown.Left + x), (float)(shown.Top + y));
-        _glowBrush.EllipseRadius = new Vector2((float)(90 * scale));
+        _glowBrush.EllipseRadius = new Vector2((float)((90 + 12 * press) * scale));
         _glow.Opacity = (float)(strength * opacity);
         _glow.IsVisible = true;
     }
@@ -1056,7 +1060,7 @@ internal sealed class GlassBackdrop : IDisposable
         if (_rim is null || _rimHair is null || _rimLight is null || _hairShape is null || _lightShape is null) return;
         bool dark = PanelTheme.Current.IsDark;
         // The rim grows with the island's presence, behind its body (round 15's condensation): faint while it fades in.
-        _rim.Opacity = (float)(opacity * opacity);
+        _rim.Opacity = (float)Math.Min(1, opacity * opacity * GlassMaterial.RimStrength(_acrylicTransparencyShown, Openness?.Invoke() ?? 0));
         _rim.IsVisible = true;
         if (_rimFor == (left, top, right, bottom, radius, VisualTreeHelper.GetDpi(_island).DpiScaleX, dark)) return;
         double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;

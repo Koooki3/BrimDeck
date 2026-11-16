@@ -10,6 +10,20 @@ public static class GlassMaterial
 
     public static int NormalizeTransparency(int percent) => Math.Clamp(percent, 0, 100);
 
+    // Quantize the grain so a whole slider drag uses a small set of frozen WPF brushes.
+    public static double GrainStrength(int transparency)
+    {
+        double amount = NormalizeTransparency(transparency) / 100d;
+        return Math.Round((1 + (.5 - amount)) * 10) / 10;
+    }
+
+    public static double RimStrength(int transparency, double openness)
+    {
+        double amount = NormalizeTransparency(transparency) / 100d;
+        return (.85 + .30 * amount) * (1 - .20 * Math.Clamp(openness, 0, 1));
+    }
+
+
     public static double LuminosityOpacity(double required, double openness, int transparency)
     {
         double amount = NormalizeTransparency(transparency) / 100d;

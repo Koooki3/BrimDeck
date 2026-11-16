@@ -14,6 +14,12 @@ internal static class GlassMaterialTests
         check("Glass transparency: the veil never thickens as the slider moves toward clear",
             Enumerable.Range(0, 100).All(level => GlassMaterial.LuminosityOpacity(.25, .35, level + 1)
                 <= GlassMaterial.LuminosityOpacity(.25, .35, level)));
+        check("Glass transparency: clearer glass softens the grain and retains the rim",
+            GlassMaterial.GrainStrength(0) == 1.5 && GlassMaterial.GrainStrength(50) == 1
+            && GlassMaterial.GrainStrength(100) == .5 && GlassMaterial.RimStrength(100, 0) > 1);
+        check("Glass transparency: the rim softens through expansion and stays visible",
+            GlassMaterial.RimStrength(50, 0) == 1 && GlassMaterial.RimStrength(50, 1) == .8
+            && GlassMaterial.RimStrength(0, 1) > 0);
         var settings = JsonSerializer.Deserialize<DeckSettings>("{}")!;
         check("Glass transparency: older settings use the current look", settings.GlassTransparency == 50);
         settings.GlassTransparency = 101;

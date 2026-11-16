@@ -360,7 +360,7 @@ public partial class MainWindow
         // The acrylic body's noise (AcrylicNoise), drawn by the island in its own outline while its surface is aside for the
         // glass; the theme's pattern back with the blur.
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        if (shown && !GlassBackdrop.Refraction) Island.Pattern = LiquidGlass.AcrylicNoise.Brush(dpi);
+        if (shown && !GlassBackdrop.Refraction) Island.Pattern = LiquidGlass.AcrylicNoise.Brush(dpi, GlassMaterial.GrainStrength(Settings.GlassTransparency));
         else if (LiquidGlass.AcrylicNoise.Is(Island.Pattern)) Island.Pattern = PanelTheme.Texture(dpiScale: dpi) ?? PanelTheme.Scanlines(dpiScale: dpi);
         if (shown)
         {
