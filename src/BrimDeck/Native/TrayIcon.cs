@@ -5,6 +5,7 @@ using BrimDeck.Core;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
+using System.Windows.Threading;
 
 namespace BrimDeck.Native;
 
@@ -29,8 +30,25 @@ public sealed class TrayIcon : IDisposable
         _source = HwndSource.FromHwnd(hwnd); _source.AddHook(Hook);
         _data = new NOTIFYICONDATA { Size = Marshal.SizeOf<NOTIFYICONDATA>(), Window = hwnd, Id = 1, Flags = 1 | 2 | 4, CallbackMessage = Callback,
             Icon = LoadTrayIcon(out _ownsIcon), Tip = "BrimDeck", Info = "", InfoTitle = "" };
-        Shell_NotifyIcon(0, ref _data);
+        _retry.Tick += (_, _) => Add();
+        Add();
     }
+    // Adding fails while the shell is not ready for it: the notification area not made yet, or explorer too busy to answer in
+    // time, as it can be while Windows starts. TaskbarCreated only follows a taskbar made later, so a failed add is tried again,
+    // with pauses that double up to a minute, until the shell has the icon. A modify that succeeds says the icon is there: an
+    // add that timed out may have gone through, and adding it twice fails.
+    private readonly DispatcherTimer _retry = new();
+    private static readonly TimeSpan FirstRetry = TimeSpan.FromSeconds(1), LongestRetry = TimeSpan.FromSeconds(60);
+    private TimeSpan _pause = FirstRetry;
+    private void Add()
+    {
+        _retry.Stop();
+        if (_disposed) return;
+        if (Shell_NotifyIcon(0, ref _data) || Shell_NotifyIcon(1 /* NIM_MODIFY */, ref _data)) { _pause = FirstRetry; return; }
+        _retry.Interval = _pause; _retry.Start();
+        _pause = _pause + _pause < LongestRetry ? _pause + _pause : LongestRetry;
+    }
+    private bool _disposed;
     private bool _ownsIcon;
     private long _dpi;
     // An extra entry above Settings while dynamic notices are on: pausing or resuming them.
@@ -58,7 +76,7 @@ public sealed class TrayIcon : IDisposable
     }
     private IntPtr Hook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if ((uint)message == _taskbarCreated) Shell_NotifyIcon(0, ref _data);
+        if ((uint)message == _taskbarCreated) { _pause = FirstRetry; Add(); }
         // WM_DPICHANGED carries the new DPI in its low word; it can arrive without a change, which needs no new icon.
         if (message == 0x02E0 /* WM_DPICHANGED */ && (wParam.ToInt64() & 0xFFFF) is var dpi && dpi != _dpi) { _dpi = dpi; ReloadIcon(); }
         if (message == 0x007E /* WM_DISPLAYCHANGE */) ReloadIcon();
@@ -130,7 +148,7 @@ public sealed class TrayIcon : IDisposable
         var quit = new MenuItem { Header = Loc.T("退出", "Exit") }; quit.Click += (_, _) => exit(); menu.Items.Add(quit);
         return menu;
     }
-    public void Dispose() { Shell_NotifyIcon(2, ref _data); _source.RemoveHook(Hook); if (_ownsIcon) DestroyIcon(_data.Icon); }
+    public void Dispose() { _disposed = true; _retry.Stop(); Shell_NotifyIcon(2, ref _data); _source.RemoveHook(Hook); if (_ownsIcon) DestroyIcon(_data.Icon); }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct NOTIFYICONDATA
     {
         public int Size; public IntPtr Window; public uint Id, Flags, CallbackMessage; public IntPtr Icon;

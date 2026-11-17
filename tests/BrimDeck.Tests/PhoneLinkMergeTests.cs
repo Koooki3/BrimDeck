@@ -74,5 +74,54 @@ static class PhoneLinkMergeTests
             && !Devices.SamePhone("Galaxy S23", "Galaxy S23 Ultra"));
         check("Phone Link: its source is named and has no read switch",
             Devices.SourceName(DeviceSource.PhoneLink).Length > 0 && !DeviceLists.ReadSwitchable(DeviceSource.PhoneLink));
+
+        roster.Set(DeviceSource.PhoneLink, [linked]);
+        roster.Clear();
+        roster.Set(DeviceSource.PhoneLink, [linked]);
+        check("Phone Link: stopping and restarting readers retains the known address",
+            roster.All is { Count: 1 } resumed && resumed[0].Key == bluetooth.Key);
+
+        // Settings survive a new process even when only Wi-Fi is available and the card adds a model suffix.
+        var choices = new List<DeviceChoice>
+        {
+            new() { Key = bluetooth.Key, Name = bluetooth.Name, Kind = DeviceKind.Phone, Label = "My phone",
+                Expanded = false, Collapsed = false, Color = "#123456", ChargeColor = "#654321" }
+        };
+        var saved = System.Text.Json.JsonSerializer.Serialize(choices);
+        choices = System.Text.Json.JsonSerializer.Deserialize<List<DeviceChoice>>(saved)!;
+        var restarted = new DeviceRoster();
+        restarted.Set(DeviceSource.PhoneLink, [Link(70, "Xiaomi 13 Ultra 5G")]);
+        choices = DeviceLists.Adopt(restarted.All, choices) ?? choices;
+        check("Phone Link: persisted choices follow a Wi-Fi phone after restart",
+            choices.Count == 1 && choices[0].Key == restarted.All[0].Key && choices[0].Label == "My phone"
+            && choices[0].Color == "#123456" && choices[0].ChargeColor == "#654321"
+            && DeviceLists.Expanded(restarted.All, choices).Count == 0 && DeviceLists.Collapsed(restarted.All, choices).Count == 0);
+        restarted.Set(DeviceSource.Bluetooth, [bluetooth]);
+        choices = DeviceLists.Adopt(restarted.All, choices) ?? choices;
+        check("Phone Link: reconnecting Bluetooth preserves the restored choices",
+            choices.Count == 1 && choices[0].Key == bluetooth.Key && !choices[0].Expanded && choices[0].Label == "My phone");
+
+        var twin = Bt("112233445566", bluetooth.Name, 23);
+        var ambiguous = new DeviceRoster();
+        ambiguous.Set(DeviceSource.Bluetooth, [bluetooth]);
+        ambiguous.Set(DeviceSource.PhoneLink, [linked]);
+        ambiguous.Set(DeviceSource.Bluetooth, [bluetooth, twin]);
+        check("Phone Link: two same-name addresses keep their own readings and discard the earlier association",
+            ambiguous.All.Count == 3 && ambiguous.All.Any(d => d.Key == bluetooth.Key && d.Percent == 80)
+            && ambiguous.All.Any(d => d.Key == twin.Key && d.Percent == 23)
+            && ambiguous.All.Any(d => d.Key == linked.Key && d.Percent == 87));
+        ambiguous.Set(DeviceSource.Bluetooth, []);
+        check("Phone Link: an ambiguous address is not reused after Bluetooth disappears",
+            ambiguous.All is { Count: 1 } unbound && unbound[0].Key == linked.Key);
+        check("Phone Link: duplicate endpoints at one address still merge",
+            DeviceRoster.Merge([linked, bluetooth, bluetooth with { Percent = 79 }]) is { Count: 1 } endpoints
+            && endpoints[0].Key == bluetooth.Key && endpoints[0].Percent == 87);
+        var offlineTwins = new List<DeviceChoice>
+        {
+            new() { Key = bluetooth.Key, Name = bluetooth.Name, Kind = DeviceKind.Phone, Expanded = false },
+            new() { Key = twin.Key, Name = twin.Name, Kind = DeviceKind.Phone, Expanded = true }
+        };
+        check("Phone Link: ambiguous saved phones do not donate their settings",
+            DeviceLists.Adopt([Link(70, "Xiaomi 13 Ultra 5G")], offlineTwins) is null);
     }
 }

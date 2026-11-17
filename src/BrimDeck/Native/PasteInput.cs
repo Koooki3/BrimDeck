@@ -17,6 +17,49 @@ internal static class PasteInput
         return pid != 0 && pid != Environment.ProcessId;
     }
 
+    // Whether the window's program runs with more rights than this one: as administrator, when BrimDeck does not. Windows
+    // drops the keys sent to such a window, and SendInput does not say that it did, so this is asked after a paste was tried.
+    public static bool HasMoreRights(IntPtr window)
+    {
+        if (window == IntPtr.Zero || !IsWindow(window)) return false;
+        GetWindowThreadProcessId(window, out uint pid);
+        return pid != 0 && pid != Environment.ProcessId && HasMoreRights(pid);
+    }
+    internal static bool HasMoreRights(uint pid)
+    {
+        int own = IntegrityLevel(GetCurrentProcess(), out _);
+        IntPtr process = OpenProcess(0x1000, false, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+        // A process that may not even be asked about has more rights than this one.
+        if (process == IntPtr.Zero) return Marshal.GetLastWin32Error() == 5;
+        try
+        {
+            int level = IntegrityLevel(process, out bool denied);
+            return level < 0 ? denied : own >= 0 && level > own;
+        }
+        finally { CloseHandle(process); }
+    }
+    // The process's integrity level (0x2000 for an ordinary program, 0x3000 for one run as administrator), or -1.
+    internal static int IntegrityLevel(IntPtr process, out bool denied)
+    {
+        denied = false;
+        if (!OpenProcessToken(process, 0x0008, out IntPtr token)) { denied = Marshal.GetLastWin32Error() == 5; return -1; } // TOKEN_QUERY
+        try
+        {
+            GetTokenInformation(token, 25, IntPtr.Zero, 0, out int size); // TokenIntegrityLevel
+            if (size <= 0) return -1;
+            IntPtr label = Marshal.AllocHGlobal(size);
+            try
+            {
+                if (!GetTokenInformation(token, 25, label, size, out _)) return -1;
+                IntPtr sid = Marshal.ReadIntPtr(label);
+                int parts = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+                return parts > 0 ? Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(parts - 1))) : -1;
+            }
+            finally { Marshal.FreeHGlobal(label); }
+        }
+        finally { CloseHandle(token); }
+    }
+
     public static bool Activate(IntPtr window) => window != IntPtr.Zero && IsWindow(window) && (GetForegroundWindow() == window || SetForegroundWindow(window));
 
     // Ctrl, Shift, Alt or a Windows key still held from the click would turn Ctrl+V into another shortcut.
@@ -42,5 +85,12 @@ internal static class PasteInput
     [DllImport("user32")] private static extern bool IsWindow(IntPtr window);
     [DllImport("user32")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("user32")] private static extern short GetAsyncKeyState(int key);
+    [DllImport("kernel32")] private static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32")] private static extern bool CloseHandle(IntPtr handle);
+    [DllImport("advapi32", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32", SetLastError = true)] private static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr information, int length, out int needed);
+    [DllImport("advapi32")] private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+    [DllImport("advapi32")] private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
     [DllImport("user32", SetLastError = true)] private static extern uint SendInput(uint count, INPUT[] inputs, int size);
 }
