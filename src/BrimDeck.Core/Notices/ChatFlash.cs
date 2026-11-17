@@ -2,8 +2,9 @@ namespace BrimDeck.Core.Notices;
 
 // A chat application that tells the user about a new message only by flashing its taskbar button (desktop WeChat 4.x sends no
 // Windows notification). Executables are matched by file name, case-insensitively; a row that is not Enabled is known but
-// never reported, so another application is added by one row and one switch here.
-public sealed record ChatFlashApp(string Id, string NameZh, string NameEn, IReadOnlyList<string> Executables, bool Enabled)
+// never reported, so another application is added by one row and one switch here. RestoreUri, when set, is the address the
+// application's own URL scheme brings its window forward with (ChatRestore); only WeChat has one.
+public sealed record ChatFlashApp(string Id, string NameZh, string NameEn, IReadOnlyList<string> Executables, bool Enabled, string? RestoreUri = null)
 {
     public string Name => Loc.T(NameZh, NameEn);
 }
@@ -13,7 +14,7 @@ public static class ChatFlashApps
     // Only WeChat is on. The others are rows waiting to be verified on a real machine (their executable names are not checked).
     public static readonly IReadOnlyList<ChatFlashApp> All =
     [
-        new("wechat", "微信", "WeChat", ["Weixin.exe", "WeChat.exe"], true),
+        new("wechat", "微信", "WeChat", ["Weixin.exe", "WeChat.exe"], true, ChatRestore.WeChatUri),
         new("wecom", "企业微信", "WeCom", ["WXWork.exe"], false),
         new("qq", "QQ", "QQ", ["QQ.exe"], false),
         new("feishu", "飞书", "Feishu", ["Feishu.exe", "Lark.exe"], false),

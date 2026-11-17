@@ -261,7 +261,7 @@ internal sealed class IslandNotice : Window
     private async void Activate(bool byKey)
     {
         var notice = Notice;
-        if (notice is null || _opening || NoticeClick.Decide(notice, Settings.NoticeClick) != NoticeClickAction.OpenApp) { OpenPage(byKey); return; }
+        if (notice is null || _opening || NoticeClick.Decide(notice, Settings.NoticeClick) != NoticeClickAction.OpenApp && !Center.ClicksRestore(notice)) { OpenPage(byKey); return; }
         _opening = true;
         bool opened = false;
         try { opened = await Center.OpenAsync(notice); }
@@ -275,7 +275,7 @@ internal sealed class IslandNotice : Window
     // The screen reader's name for the click area says what a click does.
     private void NameHit()
     {
-        bool app = NoticeClick.Decide(Notice, Settings.NoticeClick) == NoticeClickAction.OpenApp;
+        bool app = NoticeClick.Decide(Notice, Settings.NoticeClick) == NoticeClickAction.OpenApp || Center.ClicksRestore(Notice);
         AutomationProperties.SetName(_hit, app ? Loc.T("灵动提示，点击打开来源应用", "Live notice, click to open the source app") : Loc.T("灵动提示", "Live notice"));
     }
 
@@ -294,7 +294,7 @@ internal sealed class IslandNotice : Window
         // A notice that arrives under a resting pointer does not open the panel by itself: the pointer leaves and comes back, or clicks.
         // With the panel set to open on a click (ClickToExpand), resting on the notice does not open it either; nor when a click on the
         // notice opens its application (NoticeClick), or the page would open under the pointer before the click could.
-        if (_arrivedUnderPointer || Settings.ClickToExpand || Settings.NoticeClick == NoticeClickTarget.SourceApp) return;
+        if (_arrivedUnderPointer || Settings.ClickToExpand || Settings.NoticeClick == NoticeClickTarget.SourceApp || Center.ClicksRestore(Notice)) return;
         _hoverOpen.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay));
         _hoverOpen.Start();
     }
@@ -608,12 +608,13 @@ internal sealed class IslandNotice : Window
 
     private NoticePrivacy Privacy(Notice notice) => Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
 
-    private (string Title, string Summary) Texts()
+    // spoken: the words for a screen reader, in which a verification code is not dots but a note that it is hidden.
+    private (string Title, string Summary) Texts(bool spoken = false)
     {
         if (_item is { Kind: AttentionKind.Summary, Payload: int count })
             return (NoticeText.Count(count), Loc.T("在 BrimDeck 安静期间收到", "Arrived while BrimDeck kept quiet"));
         if (Notice is not { } notice) return ("", "");
-        var (title, summary) = NoticeText.Presented(notice, Privacy(notice));
+        var (title, summary) = NoticeText.Presented(notice, Privacy(notice), !Settings.NoticeCodes ? CodeMask.Off : spoken ? CodeMask.Spoken : CodeMask.Dots);
         if (NoticeClock.Live(notice.Timing, DateTimeOffset.UtcNow, TimeZoneInfo.Local) is { } live) summary = live;
         if (title.Length == 0) title = notice.AppName;
         if (_item is { Count: > 1 } item) summary = (summary.Length > 0 ? summary + " · " : "") + NoticeText.Count(item.Count);
@@ -639,7 +640,8 @@ internal sealed class IslandNotice : Window
         line.Inlines.Add(new Run(title) { FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary) });
         if (summary.Length > 0) line.Inlines.Add(new Run("  " + summary) { Foreground = UI.Brush(_look.Secondary), FontSize = 12 * scale });
         Directed(line, title + summary);
-        string spoken = (Notice?.AppName is { Length: > 0 } app ? app + ": " : "") + (summary.Length > 0 ? title + ", " + summary : title);
+        var (said, saidSummary) = Settings.NoticeCodes ? Texts(spoken: true) : (title, summary);
+        string spoken = (Notice?.AppName is { Length: > 0 } app ? app + ": " : "") + (saidSummary.Length > 0 ? said + ", " + saidSummary : said);
         AutomationProperties.SetName(line, spoken);
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
         _announced = line;

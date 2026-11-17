@@ -33,6 +33,63 @@ public static class CommandCodeUsage
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
     }
 
+    // The prices Command Code lists for its models, by model id and alias, matched without regard to case as Command Code matches
+    // them. Command Code keeps its model catalog in cache\model-catalog\v1\catalog-<endpoint>.json and works out the costUsd of
+    // each reply from it: {"fetchedAt","body":{"data":[{"id","aliases","pricing":{"inputCost","outputCost","cacheReadCost",
+    // "cacheWriteCost","cacheWrite1hCost","contextTiers":[{"maxContext","rates":{…}}]}}]}}, in US dollars per million tokens.
+    // A tier applies while a request's input, cache included, is at most its maxContext; the last tier has none. A missing
+    // one-hour cache write costs the five-minute one. Of several catalogs, the one fetched last is read; empty when there is none.
+    public static IReadOnlyDictionary<string, ModelPrice> ReadPrices(string home)
+    {
+        var prices = new Dictionary<string, ModelPrice>(StringComparer.OrdinalIgnoreCase);
+        var folder = Path.Combine(home, "cache", "model-catalog", "v1");
+        JsonDocument? latest = null;
+        try
+        {
+            if (!Directory.Exists(folder)) return prices;
+            double newest = double.MinValue;
+            foreach (var file in Directory.EnumerateFiles(folder, "catalog-*.json"))
+            {
+                JsonDocument? doc;
+                try { doc = SharedFile.ReadJson(file); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { continue; }
+                if (doc is null) continue;
+                var fetched = doc.RootElement.Get("fetchedAt").Number() ?? doc.RootElement.Get("renderedAt").Number() ?? 0;
+                if (latest is null || fetched > newest) { latest?.Dispose(); latest = doc; newest = fetched; }
+                else doc.Dispose();
+            }
+            if (latest is null) return prices;
+            static decimal? Rate(JsonElement rates, string name) => rates.Get(name).Number() is >= 0 and < 1e9 and var value ? (decimal)value / 1_000_000m : null;
+            static TokenPrices? Rates(JsonElement rates)
+            {
+                if (Rate(rates, "inputCost") is not { } input || Rate(rates, "outputCost") is not { } output) return null;
+                var write = Rate(rates, "cacheWriteCost");
+                return new(input, output, Rate(rates, "cacheReadCost"), write, Rate(rates, "cacheWrite1hCost") ?? write);
+            }
+            foreach (var model in latest.RootElement.Get("body").Get("data").Items())
+            {
+                var id = model.Get("id").Text();
+                var pricing = model.Get("pricing");
+                if (id.Length == 0 || Rates(pricing) is not { } listed) continue;
+                var tiers = new List<PriceTier>();
+                long start = 0;
+                foreach (var tier in pricing.Get("contextTiers").Items())
+                {
+                    if (Rates(tier.Get("rates")) is not { } rates) { tiers.Clear(); break; }
+                    tiers.Add(new(start, rates));
+                    if (tier.Get("maxContext").Number() is not (> 0 and var max)) break;
+                    start = (long)max + 1;
+                }
+                var price = new ModelPrice(id, listed, tiers);
+                foreach (var name in model.Get("aliases").Items().Select(alias => alias.Text()).Prepend(id))
+                    if (name.Length > 0) prices.TryAdd(name, price);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        finally { latest?.Dispose(); }
+        return prices;
+    }
+
     // get sends GET to Api + path with the key and returns the status and body. The credits are required; the plan and what the
     // period spent only add to them, so a failure there leaves those parts out.
     public static async Task<Reading> ReadAsync(Func<string, Task<(int Status, string Body)>> get)

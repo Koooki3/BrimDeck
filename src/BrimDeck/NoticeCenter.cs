@@ -457,13 +457,23 @@ internal sealed class NoticeCenter : IDisposable
         if (NoticeProtocol.ToAgent(NoticeTypes.Dismissed, notice.InstanceKey) is { } message) _wsl.Send(distro, message);
     }
 
-    public bool CanOpen(Notice notice) => notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
+    // A notice of the taskbar flash source whose click may ask the chat application to come forward (the switch is on and the
+    // application has such an address); whether Windows has the scheme registered is read when the click happens.
+    public bool ClicksRestore(Notice? notice) => ChatRestore.Decide(notice, Settings.NoticeChatFlashRestore, true).Kind == ChatRestoreKind.Restore;
+
+    public bool CanOpen(Notice notice) => ClicksRestore(notice) || notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
         || notice.Actions.Any(action => action.Key == "default") && (notice.Capabilities & NoticeCapabilities.Actions) != 0;
 
     // Opens the application the notice came from. False when that did not work; the caller keeps the details open and says so.
     public async Task<bool> OpenAsync(Notice notice)
     {
         Hub.MarkViewed(notice.Id);
+        if (ClicksRestore(notice))
+        {
+            // The one fixed address, handed to the program Windows has registered for it; the window is not touched here.
+            var setting = Settings.NoticeChatFlashRestore;
+            if (await Task.Run(() => ChatRestore.TryRestore(notice, setting, new ProtocolRegistry(), new ProtocolLauncher()))) return true;
+        }
         if (notice.Origin == NoticeOrigin.Windows)
         {
             if (notice.AppId.Length == 0) return false;
@@ -852,7 +862,8 @@ internal sealed class NoticeCenter : IDisposable
         if (_history is not { } history || !CanSave) return;
         if (_saving) { _savePending = true; return; }
         _saving = true;
-        var notices = Hub.Notices.Select(n => n.Copy()).ToList();
+        bool codes = Settings.NoticeCodes;
+        var notices = Hub.Notices.Select(n => NoticeCodes.ForHistory(n, codes).Copy()).ToList();
         var apps = Hub.KnownApps.ToList();
         long order = history.NextOrder();
         bool written = false;
@@ -879,7 +890,7 @@ internal sealed class NoticeCenter : IDisposable
         if (!_saveTimer.IsEnabled && !_savePending && !_saving) return;
         _saveTimer.Stop(); _savePending = false;
         if (_history is not { } history || !CanSave) return;
-        try { if (history.Save(Hub.Notices, Hub.KnownApps)) Retire(history); }
+        try { if (history.Save(Hub.Notices.Select(n => NoticeCodes.ForHistory(n, Settings.NoticeCodes)).ToList(), Hub.KnownApps)) Retire(history); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) { }
     }
 

@@ -26,6 +26,7 @@ static class CommandCodeUsageTests
     {
         Catalog(root, check);
         Records(root, check);
+        Prices(root, check);
         Quota(check);
         await Service(root, check);
         await KeyEnteredByHand(check);
@@ -90,6 +91,40 @@ static class CommandCodeUsageTests
             data.Entries.All(e => e.Model == "deepseek/deepseek-v4.1-flash"));
     }
 
+    // The catalog follows the one Command Code 1.88 cached on 2026-11-13, trimmed to the models the checks need.
+    private static void Prices(string root, Action<string, bool> check)
+    {
+        var home = Path.Combine(root, "commandcode-prices");
+        check("Without a cached catalog Command Code lists no prices", CommandCodeUsage.ReadPrices(home).Count == 0);
+        var folder = Path.Combine(home, "cache", "model-catalog", "v1"); Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "catalog-a813c4ec6551f9c3.json"), """
+            {"cacheVersion":3,"scope":{"endpointHash":"a813","schemaVersion":1},"fetchedAt":1794571510081,"renderedAt":1794498763127,"body":{"data":[
+             {"id":"deepseek/deepseek-v4.1-flash","aliases":[],"pricing":{"cacheReadCost":0.003,"inputCost":0.15,"outputCost":0.6}},
+             {"id":"claude-sonnet-4-6","aliases":["claude-sonnet-4-20250514"],"pricing":{"cacheReadCost":0.3,"cacheWrite1hCost":6,"cacheWriteCost":3.75,"inputCost":3,"outputCost":15}},
+             {"id":"Qwen/Qwen3.7-Flash","aliases":[],"pricing":{"cacheReadCost":0.006,"cacheWriteCost":0.038,"inputCost":0.03,"outputCost":0.13,"contextTiers":[
+               {"maxContext":32000,"rates":{"cacheReadCost":0.006,"cacheWriteCost":0.038,"inputCost":0.03,"outputCost":0.13}},
+               {"maxContext":256000,"rates":{"cacheReadCost":0.02,"cacheWriteCost":0.125,"inputCost":0.1,"outputCost":0.4}},
+               {"rates":{"cacheReadCost":0.04,"cacheWriteCost":0.25,"inputCost":0.2,"outputCost":0.8}}]}},
+             {"id":"minimax/minimax-m3-free","aliases":[]}]}}
+            """);
+        File.WriteAllText(Path.Combine(folder, "catalog-0000000000000000.json"), """
+            {"fetchedAt":1700000000000,"body":{"data":[{"id":"deepseek/deepseek-v4.1-flash","aliases":[],"pricing":{"cacheReadCost":1,"inputCost":1,"outputCost":1}}]}}
+            """);
+        File.WriteAllText(Path.Combine(folder, "catalog-ffffffffffffffff.json"), "{bad");
+        var prices = CommandCodeUsage.ReadPrices(home);
+        var flash = prices.GetValueOrDefault("deepseek/deepseek-v4.1-flash");
+        check("Command Code's prices come from the catalog it fetched last, per token", flash is { Tiers.Count: 0 } &&
+            flash.Prices == new TokenPrices(0.15m / 1_000_000, 0.6m / 1_000_000, 0.003m / 1_000_000, null, null));
+        check("The listed prices reproduce the cost Command Code recorded for a reply",
+            (18097 - 6528) * flash!.Prices.Input + 6528 * flash.Prices.CacheRead!.Value + 10 * flash.Prices.Output == 0.001760934m);
+        check("A model is also found by its aliases and without regard to case", ReferenceEquals(prices.GetValueOrDefault("claude-sonnet-4-20250514"), prices.GetValueOrDefault("CLAUDE-SONNET-4-6")) &&
+            prices["claude-sonnet-4-6"].Prices is { CacheWrite: 3.75m / 1_000_000, CacheWriteHour: 6m / 1_000_000 });
+        var qwen = prices.GetValueOrDefault("Qwen/Qwen3.7-Flash");
+        check("Context tiers start just above the previous tier's largest input", qwen is not null && qwen.Tiers.Select(t => t.MinimumPromptTokens).SequenceEqual([0L, 32001L, 256001L]) &&
+            qwen.Tiers[2].Prices is { Input: 0.2m / 1_000_000, Output: 0.8m / 1_000_000, CacheWriteHour: 0.25m / 1_000_000 });
+        check("A model without prices is not listed", !prices.ContainsKey("minimax/minimax-m3-free") && prices.Count == 4);
+    }
+
     private static void Quota(Action<string, bool> check)
     {
         var reading = CommandCodeUsage.Parse(Json(CreditsJson), Json(SubscriptionJson), Json(SummaryJson));
@@ -132,8 +167,13 @@ static class CommandCodeUsageTests
         }
         var (snapshot, handler) = await Refresh(new Api("user_fixture"));
         check("Without a Command Code sign-in nothing is sent", handler.Paths.Count == 0 && !snapshot.LiveQuota && snapshot.StatusLabel == Loc.T("未连接", "Not connected"));
+        check("Without a cached catalog the snapshot lists no prices", snapshot.ListedPrices is null);
         File.WriteAllText(Path.Combine(home, "auth.json"), """{"apiKey":"user_fixture"}""");
+        Directory.CreateDirectory(Path.Combine(home, "cache", "model-catalog", "v1"));
+        File.WriteAllText(Path.Combine(home, "cache", "model-catalog", "v1", "catalog-a813c4ec6551f9c3.json"),
+            """{"fetchedAt":1794571510081,"body":{"data":[{"id":"z-ai/glm-5.3-flash","aliases":[],"pricing":{"cacheReadCost":0.03,"inputCost":0.15,"outputCost":0.5}}]}}""");
         (snapshot, handler) = await Refresh(new Api("user_fixture"));
+        check("The snapshot carries the prices Command Code lists for its models", snapshot.ListedPrices?.ContainsKey("z-ai/glm-5.3-flash") == true);
         check("Command Code reads its account endpoints with the signed-in key as a bearer token, asking for the period's spending since it began",
             handler.Paths.Take(1).SequenceEqual(["/alpha/whoami"]) && handler.Paths.Count == 4 && handler.Paths.Last() == "/alpha/usage/summary?since=2026-11-13T08%3A47%3A14.000Z" &&
             handler.Hosts.All(host => host == "api.commandcode.ai") && handler.Keys.All(key => key == "Bearer user_fixture"));

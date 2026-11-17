@@ -11,8 +11,8 @@ using BrimDeck.Native;
 namespace BrimDeck;
 
 // The clipboard and file transfer's settings, in their own group ("中转站"). The page's size is set with the other pages under
-// "展开外观". "剪贴板": whether the clipboard is recorded (the history stays on this computer, encrypted for the current Windows
-// user, until BrimDeck exits), its categories and the phrases; "文件中转": its categories. The panel only uses the categories and
+// "展开外观". "剪贴板": whether the clipboard is recorded (the history stays on this computer until BrimDeck exits or, when kept
+// past an exit, for the length chosen), its categories and the phrases; "文件中转": its categories. The panel only uses the categories and
 // phrases; they are made and changed here, each category with what goes in by itself (SettingsShelfRules) and, on the clipboard,
 // whether what is in it is kept. "文件中转" also sets whether files dragged out are copied or moved.
 public partial class SettingsWindow
@@ -42,15 +42,31 @@ public partial class SettingsWindow
     {
         WatchShelf();
         var record = Toggle(Loc.T("记录剪贴板", "Record the clipboard"), S.ClipboardRecord, value => { Change(s => s.ClipboardRecord = value); ShowPage(_page); },
-            help: Loc.T("记录复制的文字和图片，保存在本机并加密存放，退出 BrimDeck 时清除。放进“常用”或设为一直保留的分类的内容不会清除。",
-                "Keeps the text and pictures you copy, encrypted on this computer, until BrimDeck exits. What is in Favorites or in a category set to keep stays."));
-        Group(record, _excludedHost = new Border { Child = ExcludedAppsContent() });
-        SectionTitle(Loc.T("分类", "Categories"), help: () => Loc.T("一条内容可以放进多个分类。关闭“一直保留”的分类，其中的内容在退出 BrimDeck 时清除。单击筛选按钮设置自动放入的规则。拖动调整顺序。",
-            "An entry can be in several categories. What is in a category with Keep off is cleared when BrimDeck exits. The filter button sets what goes in by itself. Drag to reorder."));
+            help: Loc.T("记录复制的文字和图片，只保存在本机。", "Keeps the text and pictures you copy, only on this computer."));
+        // Whether the history outlives BrimDeck, and for how long; the categories set to keep are not affected (KeepSwitch).
+        var keep = Toggle(Loc.T("退出后保留历史", "Keep history after exit"), S.ClipboardKeepHistory, value => { Change(s => s.ClipboardKeepHistory = value); ShowPage(_page); },
+            help: Loc.T("开启后，退出时不清除历史，超过保存时长的自动删除。记录越多，占用的内存越多。",
+                "On, the history stays after exit and entries older than the chosen length are deleted. More entries use more memory."));
+        var length = MusicChoice(Loc.T("保存时长", "Keep for"), S.ClipboardKeepFor, [.. Enum.GetValues<HistoryLength>().Select(value => (value, LengthName(value)))],
+            value => { Change(s => s.ClipboardKeepFor = value); ShowPage(_page); }, enabled: S.ClipboardKeepHistory, width: 216,
+            help: Loc.T("从最后一次复制起计算。", "Counted from the last copy."));
+        Group(record, _excludedHost = new Border { Child = ExcludedAppsContent() }, keep, length);
+        SectionTitle(Loc.T("分类", "Categories"), help: () => Loc.T("一条内容可以放进多个分类。关闭“一直保留”的分类，其中的内容与普通历史一样清除。单击筛选按钮设置自动放入的规则。拖动调整顺序。",
+            "An entry can be in several categories. What is in a category with Keep off is cleared with the rest of the history. The filter button sets what goes in by itself. Drag to reorder."));
         CategoryList(ShelfSide.Clipboard);
         SectionTitle(Loc.T("常用", "Favorites"));
         FavoritesList();
     }
+
+    private static string LengthName(HistoryLength length) => length switch
+    {
+        HistoryLength.Day => Loc.T("1 天", "1 day"), HistoryLength.Week => Loc.T("7 天", "7 days"), _ => Loc.T("30 天", "30 days")
+    };
+    // What happens to the history, and so to what is in a category not set to keep: said in that category's label (KeepSwitch).
+    private string HistoryFate() => !S.ClipboardKeepHistory ? Loc.T("退出时清除", "Cleared on exit") : S.ClipboardKeepFor switch
+    {
+        HistoryLength.Day => Loc.T("保留 1 天", "Kept 1 day"), HistoryLength.Week => Loc.T("保留 7 天", "Kept 7 days"), _ => Loc.T("保留 30 天", "Kept 30 days")
+    };
 
     // Whether the apps not recorded are shown under their row, and the row itself, rebuilt alone when an app is added or removed.
     private bool _excludedOpen;
@@ -102,11 +118,16 @@ public partial class SettingsWindow
     private void TransferSettings()
     {
         WatchShelf();
+        // One choice for both buttons: the right button always does what the left does not.
         Group(MusicChoice(Loc.T("拖出文件", "Drag files out"), S.TransferDragOut,
-            [(TransferDragOut.Copy, Loc.T("复制", "Copy")), (TransferDragOut.Move, Loc.T("移动", "Move"))],
-            value => Change(s => s.TransferDragOut = value), width: 216,
-            help: Loc.T("选择“移动”时，文件移到新位置后从列表中移除。聊天软件、浏览器等只接受复制的地方仍会复制。",
-                "With Move, files moved to a new place leave the list. Chat apps, browsers and other places that only take copies still get copies.")));
+                [(TransferDragOut.Copy, Loc.T("左键复制，右键移动", "Left copies, right moves")), (TransferDragOut.Move, Loc.T("左键移动，右键复制", "Left moves, right copies"))],
+                value => Change(s => s.TransferDragOut = value), width: Loc.IsEnglish ? 344 : 292,
+                // The last Chinese sentence is two characters wider than the description's width and would leave them alone on a
+                // line, so it breaks at its comma.
+                help: Loc.T("复制：原文件不动，复制一份到新位置，中转站里同样保留。\n移动：原文件移到新位置，并从中转站里移除。\n聊天软件、浏览器不支持移动，\n拖到这些地方时一律按复制处理。",
+                    "Copy: the original stays where it is, a copy goes to the new place, and the file stays in the file transfer.\nMove: the original goes to the new place and leaves the file transfer.\nChat apps and browsers cannot take a move; files dragged there are always copied.")),
+            Toggle(Loc.T("移动到不支持移动的目标后，从中转站移除", "Remove from transfer after a move to a copy-only target"),
+                S.TransferRemoveAfterCopyDrop, value => Change(s => s.TransferRemoveAfterCopyDrop = value)));
         SectionTitle(Loc.T("分类", "Categories"), help: () => Loc.T("一个文件可以放进多个分类。单击筛选按钮设置自动放入的规则。拖动调整顺序。原文件不受影响。",
             "A file can be in several categories. The filter button sets what goes in by itself. Drag to reorder. The original files are not touched."));
         CategoryList(ShelfSide.Files);
@@ -248,7 +269,7 @@ public partial class SettingsWindow
             bool Alone(List<Guid> ids) => ids.Count == 1 && ids[0] == category.Id;
             int alone = side == ShelfSide.Clipboard ? ShelfData.Clips.Count(clip => Alone(clip.Categories)) : ShelfData.Files.Count(file => Alone(file.Categories));
             string what = side == ShelfSide.Clipboard
-                ? Loc.T($"将删除分类“{category.Name}”。只在这个分类中的 {alone} 条内容回到“全部”，退出 BrimDeck 时清除。", $"This deletes {category.Name}. The {alone} entries only in it go back to All and are cleared when BrimDeck exits.")
+                ? Loc.T($"将删除分类“{category.Name}”。只在这个分类中的 {alone} 条内容回到“全部”，与普通历史一样清除。", $"This deletes {category.Name}. The {alone} entries only in it go back to All and are cleared with the rest of the history.")
                 : Loc.T($"将删除分类“{category.Name}”。只在这个分类中的 {alone} 个文件回到“全部”，原文件不受影响。", $"This deletes {category.Name}. The {alone} files only in it go back to All; the original files are not touched.");
             if (alone > 0 && !Confirm(Loc.T("删除分类", "Delete category"), what, Loc.T("删除", "Delete"))) return;
             Shelf.DeleteCategory(ShelfData, side, category.Id);
@@ -368,7 +389,7 @@ public partial class SettingsWindow
             if (text.Trim().Length > 0)
             {
                 if (phrase is null) Shelf.AddPhrase(ShelfData, text, DateTimeOffset.Now);
-                else { phrase.Text = text; phrase.Kind = Shelf.Classify(text); phrase.Html = ""; phrase.Rtf = ""; }
+                else { phrase.Text = text; phrase.Kind = Shelf.Classify(text); _app.Shelf.DropRich(phrase.Id); }
                 ShelfEdited();
             }
             Close();

@@ -5,7 +5,7 @@ The Notch, Capsule and Indicator, the quota notice, the expanded panel and its p
 | Kind | Themes |
 | --- | --- |
 | Basics | System, Dark (the default: the original pure black look), Light |
-| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Island Holiday 2, Pixel Blocks, Cyberpunk: Edgerunners (the demo) |
+| More themes | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Island Holiday 2, Pixel Blocks, Cyberpunk: Edgerunners (the demo) |
 | Custom | The theme files in the themes folder, which can be created, edited and deleted in settings |
 
 Each theme remembers the theme, warning and critical colors of the app columns and the clock's style and color you change while using it: they are saved when you switch to another theme and come back when you return. A theme chosen for the first time uses its own colors and suggested clock. Restoring defaults in "Quotas and usage" or "Collapsed view" restores the current theme's defaults.
@@ -75,7 +75,7 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 
 ### App colors (apps)
 
-The default colors of the quota columns, bars and rings: `claude`, `codex`, `antigravity`, `cursor`, `zcode`, `dsh`, `grokBot`, `kimi`, `opencode`, `codeagent`, `commandcode`, `manual` (every source entered by hand), `other`, and `warning` and `critical` (these two are also text, so 4.5:1). A color chosen for a column in "Quotas and usage" takes precedence.
+The default colors of the quota columns, bars and rings: `claude`, `codex`, `antigravity`, `cursor`, `zcode`, `dsh`, `grokBot`, `kimi`, `opencode`, `codeagent`, `commandcode`, `workbuddy`, `manual` (every source entered by hand), `other`, and `warning` and `critical` (these two are also text, so 4.5:1). A color chosen for a column in "Quotas and usage" takes precedence.
 
 ### Clock
 
@@ -104,19 +104,29 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain. Its lightest and darkest squares are checked for contrast like gradient stops; without `pixel` it has no effect | 0–0.12 |
 | `decor` | Quiet pictures drawn into the surface under the content, each value inherited on its own (a night look that names only `sea` keeps the day's `at` and `line`): `horizon` a sea (`sea`) below `at` of the height (0.62 when not set) with a line of light (`line`, any opacity, checked like the rest) along it; `caustics` a net of soft light lines below the horizon (over the whole surface without one); `palm` a palm frond's shadow in the open panel's top-right corner, above the horizon. A fully transparent color turns a part off, e.g. in a night look; a transparent `sea` removes the whole horizon, so the caustics then cover the surface. Nothing is drawn on the small collapsed island, so the horizon never crosses the clock; the motifs fade in as the panel opens. Text is held to its minimums over the sea (at the horizon and at its deepest), the line and the motifs, each over what it is drawn on | `at` 0.3–0.9, caustics alpha ≤ 0.2, palm alpha ≤ 0.12 |
 
-### Day and night looks (night, daylight)
+### Day, dusk and night looks (night, dusk, daylight)
 
-A theme can carry a night look: `night` holds the `colors`, `apps`, `effects` and `clock` that change at night, laid over the day look by the local clock; whatever it leaves out stays as by day. `daylight`'s `day` and `night` are when the day and the night begin (`HH:mm`, 06:30 and 18:30 by default; the day may run past midnight, as 20:00 to 08:00 does). The user can move them in half hours in Settings › Current theme › Daytime; choosing the theme's own hours again saves no setting. At the hour the island's old material fades out over 1.6 seconds, like dusk; with animations off it switches at once. Both looks are held to the readability rules below.
+A theme can carry a night look: `night` holds the `colors`, `apps`, `effects` and `clock` that change at night, laid over the day look by the local clock, or while Windows apps use dark mode (`daylight.mode`); whatever it leaves out stays as by day. An optional `dusk` look, written the same way, is laid over the day look for the last `duskMinutes` before the night begins. `daylight`'s `day` and `night` are when the day and the night begin (`HH:mm`, 06:30 and 18:30 by default; the day may run past midnight, as 20:00 to 08:00 does). The user can move them in half hours in Settings › Current theme › Daytime; choosing the theme's own hours again saves no setting. Both looks are held to the readability rules below.
 
 ```jsonc
-"daylight": { "day": "06:30", "night": "18:30" },
+"daylight": { "mode": "clock", "day": "06:30", "night": "18:30", "duskMinutes": 60 },
 "night": {
   "colors": { "surface": "#0A1A2C", "textPrimary": "#EEF7F8" },
   "effects": { "shadowDepth": 0 }
-}
+},
+"dusk": { "colors": { "surface": "#2A1A2E" } }
 ```
 
-A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night`. "New from current theme", and saving an edit as a new theme, start the new file from the day look and carry the source theme's `night` and `daylight` along.
+A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night`. "New from current theme", and saving an edit as a new theme, start the new file from the day look and carry the source theme's `night`, `dusk` and `daylight` along.
+
+| Key | What it does | Values |
+|---|---|---|
+| `daylight.mode` | What switches the looks. `clock`: the day look from `day` to `night` and the night look the rest of the time. `system`: the night look while Windows apps use dark mode and the day look in light mode, with no dusk | `clock` (default), `system` |
+| `daylight.day`, `daylight.night` | When the day and the night begin, by the clock; a day may run past midnight | `HH:mm`, 06:30 and 18:30 by default |
+| `daylight.duskMinutes` | How long the dusk look shows before the night begins (clock mode only) | 15–180, 60 by default |
+| `dusk` | An optional dusk look, written like `night` and laid over the day look; it needs a `night` look beside it | |
+
+An unknown `mode`, a `duskMinutes` outside 15–180, a dusk look without a night look, or a bad color in either look makes the file unusable. The user can choose "Follow Windows" or move the hours in Settings › Current theme; the hours cannot be changed while the theme follows Windows. At each change (day to dusk, dusk to night, night to day, or Windows switching between light and dark) the island's old look fades out over 1.6 seconds; with animations off it switches at once. Every look is held to the readability rules below.
 
 ## Readability
 

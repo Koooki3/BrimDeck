@@ -101,6 +101,97 @@ static class DevicesPageTests
         check("Device lists: remembering keeps every device and every one not connected, in the new order, with their current names",
             remembered.Select(c => c.Key).SequenceEqual(["d", "a", "c", "b", "gone"]) && remembered[3] is { Name: "B", Label: "Mine", Collapsed: false }
             && remembered[4] is { Name: "Gone", Expanded: false } && remembered[2].Kind == DeviceKind.Pen && !ReferenceEquals(remembered[3], choices[1]));
+        Adoption(check);
+    }
+
+    private static void Adoption(Action<string, bool> check)
+    {
+        // 1. A Bluetooth mouse re-recognized under a new address keeps its label, colors, switches and order, without leaving the old entry offline.
+        IReadOnlyList<DeviceBattery> btNew =
+        [
+            new("bt:OTHER", "Keyboard", DeviceKind.Keyboard, DeviceSource.Bluetooth, 90),
+            new("bt:AA12", "HUAWEI Mouse WYN", DeviceKind.Mouse, DeviceSource.Gatt, 80) { Address = "AA12" }
+        ];
+        List<DeviceChoice> btChoices =
+        [
+            new()
+            {
+                Key = "bt:AA11", Name = "HUAWEI Mouse WYN", Kind = DeviceKind.Mouse, Label = "Work Mouse",
+                Collapsed = false, Expanded = false, Color = "#112233", ChargeColor = "#00FF00", WarningColor = "#FFAA00", CriticalColor = "#FF0000"
+            },
+            new() { Key = "bt:OTHER", Name = "Keyboard", Kind = DeviceKind.Keyboard }
+        ];
+        var btAdopted = DeviceLists.Adopt(btNew, btChoices);
+        check("Device adoption: a Bluetooth mouse under a new address keeps its choices and position",
+            btAdopted is { Count: 2 }
+            && btAdopted[0] is { Key: "bt:AA12", Name: "HUAWEI Mouse WYN", Kind: DeviceKind.Mouse, Label: "Work Mouse", Collapsed: false, Expanded: false, Color: "#112233", ChargeColor: "#00FF00", WarningColor: "#FFAA00", CriticalColor: "#FF0000" }
+            && DeviceLists.Ordered(btNew, btChoices).Select(d => d.Name).SequenceEqual(["Work Mouse", "Keyboard"])
+            && DeviceLists.Collapsed(btNew, btChoices).Select(d => d.Key).SequenceEqual(["bt:OTHER"])
+            && DeviceLists.Expanded(btNew, btChoices).Select(d => d.Key).SequenceEqual(["bt:OTHER"])
+            && DeviceLists.Remember(btNew, btChoices).Select(c => c.Key).SequenceEqual(["bt:AA12", "bt:OTHER"]));
+
+        // Also check Collapsed = true stays true when re-recognized.
+        List<DeviceChoice> btShownChoices = [new() { Key = "bt:AA11", Name = "HUAWEI Mouse WYN", Kind = DeviceKind.Mouse, Label = "Desk", Collapsed = true, Expanded = true, Color = "#224466" }];
+        check("Device adoption: a Bluetooth mouse with Collapsed on stays shown under its label",
+            DeviceLists.Collapsed(btNew, btShownChoices).Single(d => d.Key == "bt:AA12").Name == "Desk"
+            && DeviceLists.Adopt(btNew, btShownChoices)?[0] is { Key: "bt:AA12", Collapsed: true, Color: "#224466" });
+
+        // 2. Switching between 2.4 GHz dongle, USB cable, and Bluetooth keeps choices across all links.
+        IReadOnlyList<DeviceBattery> dongle = [new("razer:1532:00C1", "Razer Viper V3 Pro", DeviceKind.Mouse, DeviceSource.Razer, 75) { Hardware = "1532:00C1" }];
+        IReadOnlyList<DeviceBattery> cable = [new("razer:1532:00C0", "Razer Viper V3 Pro", DeviceKind.Mouse, DeviceSource.Razer, 78) { Hardware = "1532:00C0", Charging = true }];
+        IReadOnlyList<DeviceBattery> bluetooth = [new("bt:CCDD", "Razer Viper V3 Pro", DeviceKind.Mouse, DeviceSource.Bluetooth, 76) { Address = "CCDD" }];
+        List<DeviceChoice> triChoices = [new() { Key = "razer:1532:00C1", Name = "Razer Viper V3 Pro", Kind = DeviceKind.Mouse, Hardware = "1532:00C1", Label = "Viper", Color = "#00FF88", Collapsed = false }];
+        var onCable = DeviceLists.Adopt(cable, triChoices);
+        var onBt = DeviceLists.Adopt(bluetooth, onCable ?? []);
+        var backOnDongle = DeviceLists.Adopt(dongle, onBt ?? []);
+        check("Device adoption: switching between dongle, cable and Bluetooth keeps choices and updates Hardware",
+            onCable?.Single() is { Key: "razer:1532:00C0", Hardware: "1532:00C0", Label: "Viper", Color: "#00FF88", Collapsed: false }
+            && onBt?.Single() is { Key: "bt:CCDD", Hardware: null, Read: true, Label: "Viper", Color: "#00FF88", Collapsed: false }
+            && backOnDongle?.Single() is { Key: "razer:1532:00C1", Hardware: "1532:00C1", Label: "Viper", Color: "#00FF88", Collapsed: false });
+
+        // 3. An unread USB device ("hid:VVVV:PPPP") later answering under its brand reader adopts by Hardware even when name and kind were upgraded.
+        IReadOnlyList<DeviceBattery> mchose = [new("mchose:3837:1015", "MCHOSE G75 Pro", DeviceKind.Keyboard, DeviceSource.Hid, 64) { Hardware = "3837:1015" }];
+        List<DeviceChoice> unreadChoices = [new() { Key = "hid:3837:1015", Name = "3837:1015", Kind = DeviceKind.Other, Hardware = "3837:1015", Label = "G75", Color = "#AABBCC", Collapsed = false }];
+        check("Device adoption: an unread USB entry upgrades its Key, Name and Kind by Hardware",
+            DeviceLists.Adopt(mchose, unreadChoices)?.Single() is { Key: "mchose:3837:1015", Name: "MCHOSE G75 Pro", Kind: DeviceKind.Keyboard, Hardware: "3837:1015", Label: "G75", Color: "#AABBCC", Collapsed: false });
+
+        // 4a. Non-adoption guard: two controllers of one model connected at once or two offline choices of one model are never guessed.
+        IReadOnlyList<DeviceBattery> twoPads =
+        [
+            new("ps:1", "DualSense", DeviceKind.Controller, DeviceSource.Sony, 40) { Hardware = "054C:0CE6" },
+            new("ps:2", "DualSense", DeviceKind.Controller, DeviceSource.Sony, 90) { Hardware = "054C:0CE6" }
+        ];
+        List<DeviceChoice> oneOfflinePad = [new() { Key = "ps:old", Name = "DualSense", Kind = DeviceKind.Controller, Hardware = "054C:0CE6", Label = "P1" }];
+        IReadOnlyList<DeviceBattery> onePad = [new("ps:3", "DualSense", DeviceKind.Controller, DeviceSource.Sony, 55) { Hardware = "054C:0CE6" }];
+        List<DeviceChoice> twoOfflinePads =
+        [
+            new() { Key = "ps:old1", Name = "DualSense", Kind = DeviceKind.Controller, Hardware = "054C:0CE6", Label = "P1" },
+            new() { Key = "ps:old2", Name = "DualSense", Kind = DeviceKind.Controller, Hardware = "054C:0CE6", Label = "P2" }
+        ];
+        check("Device adoption: ambiguous identical models are never guessed",
+            DeviceLists.Adopt(twoPads, oneOfflinePad) is null && DeviceLists.Adopt(onePad, twoOfflinePads) is null);
+
+        // 4b. Non-adoption guard: an already-connected choice is never stolen by a second connected device of the same name.
+        IReadOnlyList<DeviceBattery> secondPad =
+        [
+            new("ps:1", "DualSense", DeviceKind.Controller, DeviceSource.Sony, 40) { Hardware = "054C:0CE6" },
+            new("ps:2", "DualSense", DeviceKind.Controller, DeviceSource.Sony, 90) { Hardware = "054C:0CE6" }
+        ];
+        List<DeviceChoice> activePlusOffline =
+        [
+            new() { Key = "ps:1", Name = "DualSense", Kind = DeviceKind.Controller, Hardware = "054C:0CE6", Label = "Mine" },
+            new() { Key = "ps:old", Name = "DualSense", Kind = DeviceKind.Controller, Hardware = "054C:0CE6", Label = "Spare" }
+        ];
+        check("Device adoption: a second connected device of the same model does not steal an offline choice",
+            DeviceLists.Adopt(secondPad, activePlusOffline) is null);
+
+        // 4c. Non-adoption guard: Read = false on USB Hardware is not erased by Bluetooth, while USB with the same Hardware keeps Read = false.
+        IReadOnlyList<DeviceBattery> btSameName = [new("bt:1122", "MCHOSE G75 Pro", DeviceKind.Keyboard, DeviceSource.Bluetooth, 70) { Address = "1122" }];
+        IReadOnlyList<DeviceBattery> usbSameHw = [new("mchose:3837:1015", "MCHOSE G75 Pro", DeviceKind.Keyboard, DeviceSource.Hid, null) { Hardware = "3837:1015" }];
+        List<DeviceChoice> readOffChoice = [new() { Key = "hid:3837:1015", Name = "MCHOSE G75 Pro", Kind = DeviceKind.Keyboard, Hardware = "3837:1015", Read = false, Label = "KB" }];
+        check("Device adoption: Read = false on USB hardware is kept for USB and not erased by Bluetooth",
+            DeviceLists.Adopt(btSameName, readOffChoice) is null
+            && DeviceLists.Adopt(usbSameHw, readOffChoice)?.Single() is { Key: "mchose:3837:1015", Hardware: "3837:1015", Read: false, Label: "KB" });
     }
 
     private static void Strip(Action<string, bool> check)

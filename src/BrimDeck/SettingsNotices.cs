@@ -15,7 +15,7 @@ namespace BrimDeck;
 // their lines follow NoticeCenter.Changed without rebuilding the page.
 public sealed partial class SettingsWindow
 {
-    private const int NoticesSettingsPage = 16;
+    private const int NoticesSettingsPage = 19;
     private readonly List<Action> _noticeStatusLines = [];
 
     private void NoticesPage()
@@ -72,6 +72,9 @@ public sealed partial class SettingsWindow
                 "Desktop WeChat sends no Windows notification; it only flashes its taskbar button. When this is on, BrimDeck receives only Windows' event \"a window is flashing on the taskbar\", reads the file name of the flashing window's program (only WeChat for now: Weixin.exe, WeChat.exe) and shows one \"WeChat New message\" notice.\n\nWhat is read: which window flashed and its program's file name. Not read: message text, sender or chats; nothing in WeChat's memory, files or interface is read or changed (no UI Automation), and nothing goes to the network. Nothing shows while WeChat is in front; flashes within about 3 minutes make up one notice.\n\nIt works only when an event arrives, with no timer or polling; switching it off deregisters the listener and destroys its window at once. Off by default. Whether WeChat flashes while parked in the tray or for do-not-disturb chats is up to WeChat and may differ between versions.")),
             status);
         Note(Loc.T("只读取“哪个窗口闪烁、它的程序文件名”，不读取消息内容和发送人。", "Reads only which window flashed and its program's file name, never message text or sender."));
+        Group(Toggle(Loc.T("点击微信新消息提示时带出微信主窗口", "Clicking the WeChat notice brings WeChat forward"), S.NoticeChatFlashRestore, value => Change(s => s.NoticeChatFlashRestore = value),
+            help: Loc.T("点击微信新消息提示时，通过微信自己的 weixin:// 入口把主窗口带到前台；微信在托盘时的表现取决于微信版本。\n\nBrimDeck 只把固定的 weixin:// 交给 Windows 里注册的微信，不带任何其他内容，并读取注册表中该协议的一个值（HKEY_CLASSES_ROOT\\weixin 的 URL Protocol），确认已注册才调用；不直接操作微信的窗口。没有注册或启动失败时，点击照常打开通知页。微信没有运行时，Windows 可能启动微信。默认关闭。",
+                "On clicking the WeChat new-message notice, WeChat's own weixin:// address brings its main window forward; what happens while WeChat is in the tray depends on its version.\n\nBrimDeck hands only the fixed weixin:// to the WeChat Windows has registered, nothing else, and reads one registry value (the URL Protocol value of HKEY_CLASSES_ROOT\\weixin) to check it is registered before doing so; WeChat's windows are not touched. Without a registration, or if the start fails, a click opens the notices page as usual. If WeChat is not running, Windows may start it. Off by default.")));
     }
 
     private (string Text, bool Problem) BannerStatus(NoticeCenter center)
@@ -284,6 +287,9 @@ public sealed partial class SettingsWindow
             Toggle(Loc.T("聊天应用也使用上面的设置", "Chat apps follow this setting too"), S.ChatAppsFollowGlobal, value => { Change(s => s.NoticeChatAppsFollowGlobal = value); ShowPage(NoticesSettingsPage); },
                 help: Loc.T("关闭时，微信、QQ、企业微信、飞书、钉钉、Telegram、Discord、WhatsApp、Signal、Slack、LINE、KakaoTalk 等聊天应用到达时只显示应用名和“有新消息”，不显示发送者和内容，因为聊天内容常含私人信息；其他应用按上面的设置。单个应用可在下方单独设置，优先于此开关。升级前已把上面改为“标题和摘要”以外选项的用户保持原样；其余用户升级后默认关闭此开关。",
                     "When off, chat apps such as WeChat, QQ, WeCom, Feishu, DingTalk, Telegram, Discord, WhatsApp, Signal, Slack, LINE and KakaoTalk show only the app name and \"New message\" on arrival, without the sender or text, because chat often holds private details; other apps follow the setting above. Each app can be set below, which takes precedence over this switch. Users who had already chosen something other than \"Title and summary\" above before this existed keep their behavior; for everyone else the switch starts off.")),
+            Toggle(Loc.T("识别验证码并遮罩，提供复制按钮", "Hide verification codes and offer a copy button"), S.NoticeCodes, value => Change(s => s.NoticeCodes = value),
+                help: Loc.T("在本机识别通知里的验证码（不联网，不写日志），在灵动提示和通知页里用圆点遮住，即使显示摘要也一样，并在通知页给出“复制验证码”按钮。只有点按钮时才写入剪贴板，并要求 Windows 不把它收入剪贴板历史、不同步到云端；60 秒后如果剪贴板里仍是这个验证码，就清空。通知历史里保存的也是遮住的文字，所以重启后无法再复制。",
+                    "Recognizes a verification code in a notice on this PC (nothing goes online or into a log) and hides it with dots on the island and the notices page, even where summaries show; the notices page gets a \"Copy code\" button. The clipboard is written only when you click it, marked so that Windows keeps it out of the clipboard history and cloud sync; after 60 seconds it is emptied if it still holds that code. The notice history keeps the hidden text, so a code cannot be copied after a restart.")),
             Toggle(Loc.T("打开应用时直达通知对应的会话（回放通知的启动参数）", "Open the notice's own conversation when opening the app (replay the notice's launch parameters)"), S.NoticeOpenReplay, value => Change(s => s.NoticeOpenReplay = value),
                 help: Loc.T("仅在你点击“打开应用”的那一刻，只读地读取这一条通知的启动参数（来自 Windows 的通知数据库），不会在后台扫描；用于 Telegram、Discord 等直达对应会话。只打开 http(s) 与应用自己的链接，从不打开 file:、javascript:、ms-* 等；读不到或不支持时只打开应用。启动参数不保存、不写日志。",
                     "Only at the moment you click \"open app\", the launch parameters of that one notice are read (read-only, from Windows' notification database); nothing is scanned in the background. Used by Telegram, Discord and similar to open the exact conversation. Only http(s) and the application's own links are opened, never file:, javascript:, ms-* and the like; if it cannot be read or is not supported, the application is just opened. The parameters are not saved or logged.")),

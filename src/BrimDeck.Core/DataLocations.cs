@@ -16,6 +16,11 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     // Command Code keeps its sign-in (auth.json) and session records (projects) in %USERPROFILE%\.commandcode, shared by its CLI and
     // desktop app; neither offers a variable that moves it.
     public string CommandCodeHome { get; init; } = "";
+    // WorkBuddy (China edition) keeps its session records under projects in %USERPROFILE%\.workbuddy; the desktop app sets this
+    // folder itself and offers no variable that moves it.
+    public string WorkBuddyHome { get; init; } = "";
+    // WorkBuddy AI (international edition) keeps them in %USERPROFILE%\.workbuddy-ai the same way.
+    public string WorkBuddyAiHome { get; init; } = "";
     // The environment variables that change which Kimi Code service is used (KIMI_CODE_BASE_URL, KIMI_CODE_OAUTH_HOST and
     // the others in KimiEnvironment); all null when unset.
     public KimiEnvironment KimiEnvironment { get; init; } = new();
@@ -25,6 +30,9 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     // (OPENCODE_DB, otherwise opencode.db there); its CLI and desktop app share both.
     public string OpenCodeData { get; init; } = "";
     public string OpenCodeDatabase { get; init; } = "";
+    // MiMo Code, a fork of OpenCode, keeps its database in $XDG_DATA_HOME\mimocode, otherwise %USERPROFILE%\.local\share\mimocode
+    // (mimocode.db); Xiaomi MiMo Desktop runs MiMo Code as its engine and writes the same database.
+    public string MiMoDatabase { get; init; } = "";
 
     public static DataLocations Detect() => (Resolve(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -42,7 +50,7 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     public DataLocations WithOpenCode(string home, string? xdgData, string? database)
     {
         var data = OpenCodeUsage.DataFolder(home, xdgData);
-        return this with { OpenCodeData = data, OpenCodeDatabase = OpenCodeUsage.Database(data, database) };
+        return this with { OpenCodeData = data, OpenCodeDatabase = OpenCodeUsage.Database(data, database), MiMoDatabase = MiMoUsage.Database(home, xdgData) };
     }
 
     public static DataLocations Resolve(string home, string roaming, string local, string? claudeOverride, string? codexOverride, string? zcodeOverride = null, string? dshOverride = null, string? kimiOverride = null, string? piOverride = null, string? piSessionOverride = null, string? codeAgentOverride = null) => new(
@@ -50,7 +58,7 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         ConfigDirectory(codexOverride, Path.Combine(home, ".codex")),
         Path.Combine(roaming, "Cursor", "User", "globalStorage", "state.vscdb"), roaming, local)
     { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home),
-      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), CommandCodeHome = Path.Combine(home, ".commandcode"), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null) };
+      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), CommandCodeHome = Path.Combine(home, ".commandcode"), WorkBuddyHome = Path.Combine(home, ".workbuddy"), WorkBuddyAiHome = Path.Combine(home, ".workbuddy-ai"), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null), MiMoDatabase = MiMoUsage.Database(home, null) };
 
     private static string ConfigDirectory(string? value, string fallback) =>
         !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value) ? Path.GetFullPath(value) : fallback;

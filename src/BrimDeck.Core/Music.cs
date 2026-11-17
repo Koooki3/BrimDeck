@@ -18,6 +18,7 @@ public sealed record MediaTrack
     public bool IsQqMusic => Source == "QQ 音乐" || SongId.StartsWith("qq:", StringComparison.Ordinal) || SongId.StartsWith("qqid:", StringComparison.Ordinal);
     public bool IsAppleMusic => Source == "Apple Music";
     public bool IsKugou => Source == "酷狗音乐" || SongId.StartsWith("kugou:", StringComparison.Ordinal);
+    public bool IsQueMusic => Source == LyricsService.QueMusicSource;
     public MediaState State { get; init; }
     public bool IsNeteaseLog { get; init; }
     public bool PreviousRestricted { get; init; }
@@ -175,21 +176,22 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // The middle text's room when it follows its length (DeckSettings.MusicLyricAutoWidth for the lyric, MusicTitleAutoWidth for
     // the title), at scale 1. It is never shorter than FollowSlotMin, so a short line or the pause between lines does not shrink
-    // the surface to a sliver, and never longer than FollowSlotMax; longer text scrolls in it. FollowScreenShare is the largest
-    // share of the screen (the work area for the capsule) a surface may take because of the text; content that needs more
-    // without it keeps its own width.
-    public const double FollowSlotMin = 48, FollowSlotMax = 400, FollowScreenShare = .5;
+    // the surface to a sliver. The room itself has no longest: only the screen ends it (FollowWidth's limit), and text longer
+    // than the room the screen leaves scrolls in it. (It stopped at 400 DIP and at half the screen until 1.3.1: a surface
+    // already wider than that for its other parts kept the fixed slot, and a long line scrolled far from the screen's ends.)
+    public const double FollowSlotMin = 48;
     // The room for text textWidth DIPs wide (its drawn width), at this scale, in whole DIPs: one DIP is added so rounding never
     // makes fitting text scroll.
     public static double FollowSlot(double textWidth, double scale)
     {
         double s = SafeScale(scale), wanted = double.IsFinite(textWidth) && textWidth > 0 ? Math.Ceiling(textWidth - 1e-9) + 1 : 0;
-        return Math.Clamp(wanted, Whole(FollowSlotMin * s), Whole(FollowSlotMax * s));
+        return Math.Max(wanted, Whole(FollowSlotMin * s));
     }
     // The content width an auto-width surface takes with the middle text following its length: natural, the width with the
-    // text's room (NaturalWidth with FollowSlot); steady, the width with the fixed slot (TextSlot); limit, the content width that
-    // keeps the surface within FollowScreenShare of the screen. Text that would pass the limit stops there, unless the content
-    // needs more with the fixed slot, whose width it then keeps; a non-finite limit leaves the natural width.
+    // text's room (NaturalWidth with FollowSlot); steady, the width with the fixed slot (TextSlot); limit, the content width of
+    // the widest surface the style may be on its monitor (the screen for the notch, the work area for the capsule). Text that
+    // would pass the limit stops there, unless the content needs more with the fixed slot, whose width it then keeps; a
+    // non-finite limit leaves the natural width.
     public static double FollowWidth(double natural, double steady, double limit)
     {
         if (!double.IsFinite(limit) || natural <= limit) return natural;

@@ -43,7 +43,7 @@ public sealed partial class SettingsWindow
         ThemeSection(Loc.T("基础", "Basics"));
         ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
             .. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)], chosen);
-        ThemeSection(Loc.T("主题扩展", "Theme extensions"));
+        ThemeSection(Loc.T("更多主题", "More themes"));
         ThemeCards([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Extension).Select(Card)], chosen);
         CustomSection(users, chosen);
         _themeDetails = Collect(() => ThemeDetails(chosen, users)); _content.Children.Add(_themeDetails);
@@ -66,7 +66,7 @@ public sealed partial class SettingsWindow
         note.TextWrapping = TextWrapping.Wrap; note.Margin = margin; _content.Children.Add(note);
     }
 
-    // Three cards to a row, each the collapsed capsule in that theme. A user's own theme can be renamed by clicking its name and
+    // Three cards to a row, each the collapsed capsule and a corner of the open panel in that theme. A user's own theme can be renamed by clicking its name and
     // carries a delete button on its preview (OwnThemeCard), and the custom section ends with the new-theme card (tile).
     private void ThemeCards(IReadOnlyList<(string Id, string Name, PanelThemeInfo Theme)> themes, string chosen, FrameworkElement? tile = null)
     {
@@ -84,7 +84,7 @@ public sealed partial class SettingsWindow
             {
                 if (PanelThemes.NormalizeId(S.PanelTheme) == id) return;
                 Change(s => ChooseTheme(s, id));
-                _preview = true; _app.Deck.Preview(true);
+                _preview = true; _app.PreviewDeck.Preview(true);
                 // The cards stay as they are, the radio group moving the check; only the details change. A choice that did not
                 // take (the settings could not be updated) rebuilds the page to show what is saved.
                 if (PanelThemes.NormalizeId(S.PanelTheme) != id || _themeDetails is null || !_content.Children.Contains(_themeDetails)) { _themesFresh = true; ShowPage(ThemePage); return; }
@@ -115,7 +115,7 @@ public sealed partial class SettingsWindow
             if (kept.Preview.Parent is ContentControl previous) previous.Content = null;
             return kept.Preview;
         }
-        // The collapsed capsule with its quota rings and clock, at its real size, in this theme's colors.
+        // The collapsed capsule with its quota rings and clock, at its real size, and a corner of the open panel, in this theme's colors.
         var preview = CompactStylePreview.Theme(palette);
         _themePreviews[key] = (palette, preview);
         return preview;
@@ -132,7 +132,7 @@ public sealed partial class SettingsWindow
         rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
-        if (theme.File.Night is not null) rows.Add(DaylightRow(theme.File));
+        if (theme.File.Night is not null) rows.AddRange(DaylightRows(theme.File));
         // A file that carries the chosen id (or is named after it) but cannot be used is there, with its error listed below.
         bool broken = missing && users.Any(t => !t.Usable && (PanelThemes.NormalizeId(t.File.Id) == chosen || t.Path is { } file && PanelThemes.NormalizeId(PanelThemes.FileName(file)) == chosen));
         if (missing)
@@ -162,12 +162,14 @@ public sealed partial class SettingsWindow
         if (!missing && !kept) ThemeEditor(theme);
     }
 
-    // A theme with a night look: when its day begins and ends, in half hours. The theme's own hours are saved as no setting,
-    // so a later change to the theme's hours still reaches those who never moved them. A time between the half hours (a theme
-    // file's 06:45) is listed as it is, so moving the other box does not round it.
-    private FrameworkElement DaylightRow(PanelThemeFile file)
+    // A theme with a night look: whether it follows Windows' dark and light mode, and otherwise when its day begins and ends, in
+    // half hours. The theme's own choice is saved as no setting, so a later change to the theme's mode or hours still reaches
+    // those who never moved them. A time between the half hours (a theme file's 06:45) is listed as it is, so moving the other
+    // box does not round it. While the theme follows Windows the hours stay listed but cannot be changed.
+    private IEnumerable<FrameworkElement> DaylightRows(PanelThemeFile file)
     {
         var (day, night) = PanelThemes.DaylightHours(file, S.ThemeDaylight);
+        bool ownSystem = PanelThemes.DaylightModeOf(file) == DaylightMode.System;
         var steps = Enumerable.Range(0, 48).Select(i => TimeSpan.FromMinutes(30 * i)).ToList();
         (ComboBox Box, List<TimeSpan> Times) Pick(TimeSpan value, string name)
         {
@@ -197,14 +199,24 @@ public sealed partial class SettingsWindow
                 return;
             }
             shownFrom = from.SelectedIndex; shownTo = to.SelectedIndex;
-            Change(s => s.ThemeDaylight = (d, n) == PanelThemes.DaylightHours(file) ? "" : PanelThemes.FormatDaylight(d, n));
+            // The theme's own hours are no setting only while the theme itself goes by the clock.
+            Change(s => s.ThemeDaylight = !ownSystem && (d, n) == PanelThemes.DaylightHours(file) ? "" : PanelThemes.FormatDaylight(d, n));
         }
         from.SelectionChanged += (_, _) => Save(from); to.SelectionChanged += (_, _) => Save(to);
         var dash = TextLine("–", 12, TextSecondary);
         dash.Margin = new Thickness(8, 0, 8, 0); dash.VerticalAlignment = VerticalAlignment.Center;
-        var pair = new StackPanel { Orientation = Orientation.Horizontal };
+        var pair = new StackPanel { Orientation = Orientation.Horizontal, IsEnabled = PanelThemes.DaylightModeOf(file, S.ThemeDaylight) == DaylightMode.Clock };
         pair.Children.Add(from); pair.Children.Add(dash); pair.Children.Add(to);
-        return Row(Loc.T("白天时段", "Daytime"), pair, help: () => Loc.T("在这段时间内使用白天外观，其余时间使用夜间外观；到点时自动渐变切换。",
+        // Turning it off goes back to the hours shown.
+        yield return Toggle(Loc.T("跟随系统深浅", "Follow Windows"), !pair.IsEnabled, follow =>
+        {
+            pair.IsEnabled = !follow;
+            var (d, n) = (fromTimes[Math.Max(0, from.SelectedIndex)], toTimes[Math.Max(0, to.SelectedIndex)]);
+            Change(s => s.ThemeDaylight = follow ? (ownSystem ? "" : PanelThemes.SystemDaylight)
+                : !ownSystem && (d, n) == PanelThemes.DaylightHours(file) ? "" : PanelThemes.FormatDaylight(d, n));
+        }, help: Loc.T("Windows 使用深色模式时显示夜间外观，浅色模式时显示白天外观；切换时自动渐变。",
+            "The night look is shown while Windows uses dark mode and the day look in light mode; it changes over with a slow fade."));
+        yield return Row(Loc.T("白天时段", "Daytime"), pair, help: () => Loc.T("在这段时间内使用白天外观，其余时间使用夜间外观；到点时自动渐变切换。",
             "The day look is shown between these times and the night look the rest of the day; it changes over by itself, with a slow fade."));
     }
 

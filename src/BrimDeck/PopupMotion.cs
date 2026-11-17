@@ -65,15 +65,13 @@ internal static class PopupMotion
         Close(placed);
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
-            if (!Soft.Enabled || placed.Ghost is not null || content() is not FrameworkElement element || anchor() is not { } source || Window.GetWindow(source) is not { } window) return;
+            if (placed.Ghost is not null || content() is not FrameworkElement element || anchor() is not { } source || Window.GetWindow(source) is not { } window || !Soft.At(window)) return;
             var root = VisualTreeHelper.GetParent(element) as Visual ?? element;
             if (PresentationSource.FromVisual(root) is not HwndSource real || PresentationSource.FromVisual(window) is null) return;
             var offset = root == element ? new Vector() : VisualTreeHelper.GetOffset(element);
-            var at = window.PointFromScreen(root.PointToScreen(new Point(offset.X, offset.Y)));
             var picture = new Image { Stretch = Stretch.Fill, IsHitTestVisible = false };
             placed.Picture = picture; placed.Window = window;
-            var ghost = placed.Ghost = new Popup { PlacementTarget = window, Placement = PlacementMode.Relative, HorizontalOffset = at.X, VerticalOffset = at.Y,
-                AllowsTransparency = true, StaysOpen = true, IsHitTestVisible = false, Focusable = false, Child = picture, IsOpen = true };
+            var ghost = placed.Ghost = OpenGhost(window, root.PointToScreen(new Point(offset.X, offset.Y)), picture);
             if (PresentationSource.FromVisual(picture) is HwndSource own) Native.WindowsHost.PlaceBelow(own.Handle, real.Handle);
             // First once the content has entered, then again only after something that can change it. After a change it is taken
             // again once a hover's fade (Soft.Hover, Feedback) has had time to settle.
@@ -124,6 +122,26 @@ internal static class PopupMotion
         });
     }
 
+    // The picture's pop-up, opened with its top-left corner at a place on screen in physical pixels. It is placed by the screen,
+    // not against the window: when Windows opens menus right-aligned (SystemParameters.MenuDropAlignment, the left-handed pen
+    // setting), a pop-up placed relative to a window hangs from that place by its right edge, and the picture lay one list's
+    // width to the left of the list, which showed twice side by side. An absolute place is not turned round that way.
+    internal static Popup OpenGhost(Window window, Point screen, UIElement picture)
+    {
+        var ghost = new Popup { PlacementTarget = window, Placement = PlacementMode.Absolute,
+            AllowsTransparency = true, StaysOpen = true, IsHitTestVisible = false, Focusable = false, Child = picture, IsOpen = true };
+        // Absolute offsets are converted back to pixels by the popup's own composition target. Its DPI can differ from
+        // the owner's when the window straddles monitors, so wait until the popup has a source and use that same target.
+        if (PresentationSource.FromVisual(picture)?.CompositionTarget is { } target)
+        {
+            var at = target.TransformFromDevice.Transform(screen);
+            ghost.HorizontalOffset = at.X;
+            ghost.VerticalOffset = at.Y;
+        }
+        else ghost.IsOpen = false;
+        return ghost;
+    }
+
     // The content as it is drawn now (PageHandover.Snapshot).
     private static void Take(FrameworkElement content, Image image)
     {
@@ -150,7 +168,7 @@ internal static class PopupMotion
         placed.Ghost = null; placed.Picture = null; placed.Window = null; placed.Refresh = null; placed.Unhook = null;
         if (ghost is null || image is null) return;
         // A pop-up closed with its window (the settings window closed or hidden) goes with it, without a picture left behind.
-        if (!Soft.Enabled || content is null || window is not { IsVisible: true } || PresentationSource.FromVisual(image) is null) { ghost.IsOpen = false; return; }
+        if (!Soft.At(window) || content is null || window is not { IsVisible: true } || PresentationSource.FromVisual(image) is null) { ghost.IsOpen = false; return; }
         // The picture taken while it was open is the one beneath it already: taken now, the hovered option has lost its mark.
         // Closed before it had entered, it has none yet and is taken now.
         if (image.Source is null) Take(content, image);

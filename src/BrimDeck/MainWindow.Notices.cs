@@ -448,8 +448,11 @@ public partial class MainWindow
         var who = new StackPanel { Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(who, 1); hero.Children.Add(who);
         who.Children.Add(UI.Fixed(notice.AppName + " · " + NoticeText.Relative(notice.ReceivedAt, now), 12, 17, UI.Secondary));
-        var title = IslandNotice.Directed(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 19, 25, UI.Primary, FontWeights.SemiBold));
+        // A verification code is hidden wherever the notice shows its words, and a screen reader is told so instead of hearing dots.
+        var shown = NoticeCodes.Words(notice, Settings.NoticeCodes);
+        var title = IslandNotice.Directed(UI.Fixed(shown.Title.Length > 0 ? shown.Title : notice.AppName, 19, 25, UI.Primary, FontWeights.SemiBold));
         title.TextTrimming = TextTrimming.CharacterEllipsis; title.Margin = new Thickness(0, 2, 0, 0);
+        if (shown.HasCode && notice.Title.Length > 0) AutomationProperties.SetName(title, shown.SpokenTitle);
         who.Children.Add(title);
         string context = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? NoticeText.CategoryName(notice.Category) : Loc.T("来源已关闭这条通知", "Closed at the source");
         if (context.Length > 0) { var ctx = UI.Fixed(context, 12, 17, UI.Tertiary); ctx.TextTrimming = TextTrimming.CharacterEllipsis; ctx.Margin = new Thickness(0, 2, 0, 0); who.Children.Add(ctx); }
@@ -464,7 +467,8 @@ public partial class MainWindow
         var privacy = Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
         if (notice.Body.Length > 0 && privacy == NoticePrivacy.Full)
         {
-            var body = IslandNotice.Directed(new TextBlock { Text = notice.Body, FontFamily = UI.PanelFont, FontSize = group.Count > 1 ? 14 : 13, LineHeight = group.Count > 1 ? 22 : 21, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.Wrap, Opacity = .9 });
+            var body = IslandNotice.Directed(new TextBlock { Text = shown.Body, FontFamily = UI.PanelFont, FontSize = group.Count > 1 ? 14 : 13, LineHeight = group.Count > 1 ? 22 : 21, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.Wrap, Opacity = .9 });
+            if (shown.HasCode) AutomationProperties.SetName(body, shown.SpokenBody);
             words.Children.Add(body);
         }
         if (notice.Progress is { } progress) words.Children.Add(ProgressTrack(progress, accent));
@@ -477,7 +481,9 @@ public partial class MainWindow
                 var line = new DockPanel { Height = 22 };
                 var when = UI.Fixed(NoticeText.Relative(other.ReceivedAt, now), 11, 22, UI.Tertiary); DockPanel.SetDock(when, System.Windows.Controls.Dock.Right); when.Margin = new Thickness(8, 0, 0, 0);
                 line.Children.Add(when);
-                var text = UI.Fixed(privacy == NoticePrivacy.Full ? NoticeText.Summary(other.Body) : other.AppName, 12, 22, UI.Secondary); text.TextTrimming = TextTrimming.CharacterEllipsis;
+                var otherWords = NoticeCodes.Words(other, Settings.NoticeCodes);
+                var text = UI.Fixed(privacy == NoticePrivacy.Full ? NoticeText.Summary(otherWords.Body) : other.AppName, 12, 22, UI.Secondary); text.TextTrimming = TextTrimming.CharacterEllipsis;
+                if (otherWords.HasCode && privacy == NoticePrivacy.Full) AutomationProperties.SetName(text, NoticeText.Summary(otherWords.SpokenBody));
                 line.Children.Add(IslandNotice.Directed(text));
                 others.Children.Add(line);
             }
@@ -533,6 +539,14 @@ public partial class MainWindow
                 flow.Add(PillButton(action.Label, action.Label, () => { center.Invoke(notice, action.Key); RenderNotices(); }));
         foreach (var action in center.TimeActions(notice).Take(2))
             flow.Add(PillButton(action.Label, action.Label, () => { center.TimeAction(notice, action.Key); RenderNotices(); }));
+        // Only a click puts the code on the clipboard; the name says what the button does, never the code.
+        if (NoticeCodes.Words(notice, Settings.NoticeCodes).Hit is { } code)
+        {
+            string copyLabel = Loc.T("复制验证码", "Copy code");
+            Button? copy = null;
+            copy = PillButton(copyLabel, copyLabel, () => CopyCode(copy!, code.CopyText, copyLabel));
+            flow.Add(copy);
+        }
         if (center.CanOpen(notice))
         {
             string open = notice.Call ? Loc.T($"打开 {notice.AppName} 接听", $"Answer in {notice.AppName}") : Loc.T("打开应用", "Open app");
@@ -541,6 +555,18 @@ public partial class MainWindow
             flow.Add(main);
         }
         return row;
+    }
+
+    // Copies the code on the user's click and says so on the button, for the eye and for a screen reader, then goes back to its name.
+    private static void CopyCode(Button button, string text, string label)
+    {
+        bool done = NoticeCodeClipboard.Copy(text);
+        string said = done ? Loc.T($"已复制，{CodeClipboardGuard.ClearAfter.TotalSeconds:0} 秒后清除", $"Copied; cleared in {CodeClipboardGuard.ClearAfter.TotalSeconds:0} s") : Loc.T("复制失败，请再点一次", "Copy failed; click again");
+        void Say(string words) { if (((Border)button.Content).Child is TextBlock block) block.Text = words; AutomationProperties.SetName(button, words); }
+        Say(said);
+        var back = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+        back.Tick += (_, _) => { back.Stop(); Say(label); };
+        back.Start();
     }
 
     // A button of the page in its states: paint(over, down) is called as the pointer enters, leaves, presses and releases, so that
@@ -724,13 +750,15 @@ public partial class MainWindow
         // The title, the time and a line of preview; the time moves under a title it would leave too short (NoticeRowTexts).
         var texts = new NoticeRowTexts { Opacity = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? 1 : .78 };
         Grid.SetColumn(texts, 1); grid.Children.Add(texts);
-        var title = IslandNotice.Directed(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, NoticeLines.RowTitleLine, UI.Primary, FontWeights.SemiBold));
+        var codeWords = NoticeCodes.Words(notice, Settings.NoticeCodes);
+        var title = IslandNotice.Directed(UI.Fixed(codeWords.Title.Length > 0 ? codeWords.Title : notice.AppName, 12.5, NoticeLines.RowTitleLine, UI.Primary, FontWeights.SemiBold));
         title.TextTrimming = TextTrimming.CharacterEllipsis;
+        if (codeWords.HasCode && notice.Title.Length > 0) AutomationProperties.SetName(title, codeWords.SpokenTitle);
         texts.Children.Add(title);
         var when = UI.Fixed(NoticeText.Relative(notice.ReceivedAt, now), 11, NoticeLines.RowTitleLine, UI.Tertiary);
         texts.Children.Add(when);
         var privacy = Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
-        string preview = privacy == NoticePrivacy.Full && notice.Body.Length > 0 ? NoticeText.Summary(notice.Body) : notice.AppName;
+        string preview = privacy == NoticePrivacy.Full && notice.Body.Length > 0 ? NoticeText.Summary(codeWords.Body) : notice.AppName;
         var second = new TextBlock { FontFamily = UI.PanelFont, FontSize = 12, LineHeight = NoticeLines.RowPreviewLine, Foreground = UI.Brush(UI.Secondary), TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
         var (status, color) = notice.Call ? (Loc.T("来电", "Call"), CallColor) : notice.Category == NoticeCategory.Error ? (NoticeText.CategoryName(notice.Category), PanelTheme.Hex("danger"))
             : notice.Category == NoticeCategory.Warning ? (NoticeText.CategoryName(notice.Category), WaitColor) : ("", "");
@@ -738,6 +766,7 @@ public partial class MainWindow
         if (NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local) is { } live) second.Inlines.Add(new System.Windows.Documents.Run(live + " · ") { Foreground = UI.Brush(UI.Accent) });
         second.Inlines.Add(new System.Windows.Documents.Run(preview));
         IslandNotice.Directed(second);
+        if (codeWords.HasCode && privacy == NoticePrivacy.Full && notice.Body.Length > 0) AutomationProperties.SetName(second, (status.Length > 0 ? status + ", " : "") + NoticeText.Summary(codeWords.SpokenBody));
         texts.Children.Add(second);
         // The row's states: the chosen one has the selected fill, one under the pointer the hover fill, one being pressed the pressed
         // fill. Its time is drawn in the secondary text on any of them (the tertiary text is not held to 4.5:1 on those fills).
@@ -763,7 +792,7 @@ public partial class MainWindow
             if (e.Key is not (Key.Enter or Key.Space) || e.OriginalSource != row) return;
             _noticeFocus = notice.Id; RenderNotices(); e.Handled = true;
         };
-        AutomationProperties.SetName(row, notice.AppName + ", " + notice.Title + ", " + NoticeText.Relative(notice.ReceivedAt, now));
+        AutomationProperties.SetName(row, notice.AppName + ", " + codeWords.SpokenTitle + ", " + NoticeText.Relative(notice.ReceivedAt, now));
         return row;
     }
 
@@ -776,7 +805,7 @@ public partial class MainWindow
 
     // Everything a row shows.
     private string RowKey(Notice notice, DateTimeOffset now)
-        => string.Join('\u0001', notice.Title, notice.Body, notice.AppName, notice.IconRef, notice.Picture, notice.SourcePresent, notice.Category, notice.Call,
+        => string.Join('\u0001', Settings.NoticeCodes, notice.Title, notice.Body, notice.AppName, notice.IconRef, notice.Picture, notice.SourcePresent, notice.Category, notice.Call,
             NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local), NoticeText.Relative(notice.ReceivedAt, now), _freshNotices.Contains(notice.Id));
 
     // The notice whose row last had the keyboard focus, to keep it there when the page is built again.

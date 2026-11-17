@@ -474,13 +474,17 @@ internal sealed class WindowsNoticeSource : IDisposable
             or InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or TimeoutException or System.Security.SecurityException) { return false; }
     }
 
-    // Starts or brings forward the application a notice came from. True when Windows accepted the request.
+    // Starts or brings forward the application a notice came from. True when Windows accepted the request. In order: the toast's
+    // own action when replay asks for it; an application that already has an ordinary window open is brought forward by that window
+    // (NoticeAppWindows; with no replay this runs before the first await, so it still runs inside the click that asked); then the
+    // launch below. No window, a tray-only app or a refusal leaves it to the next step.
     public async Task<bool> LaunchAsync(string appId, Replay? replay = null)
     {
         Windows.ApplicationModel.AppInfo? app;
         lock (_apps) _apps.TryGetValue(appId, out app);
         string? family = app is null ? null : Safe(() => app.PackageFamilyName);
         if (replay is { } toast && await ReplayAsync(appId, toast, !string.IsNullOrEmpty(family))) return true;
+        if (FocusOpenWindow(appId, app)) return true;
         if (!string.IsNullOrEmpty(family))
         {
             try
@@ -505,6 +509,16 @@ internal sealed class WindowsNoticeSource : IDisposable
             return shell is not null;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return false; }
+    }
+
+    private static bool FocusOpenWindow(string appId, Windows.ApplicationModel.AppInfo? app)
+    {
+        try
+        {
+            string? folder = app is null ? null : Safe(() => app.Package?.InstalledLocation?.Path);
+            return NoticeAppWindows.TryFocus(NoticeAppWindows.Hint(appId, folder), new AppWindowSystem(), Environment.ProcessId);
+        }
+        catch (Exception ex) when (ex is COMException or System.ComponentModel.Win32Exception or InvalidOperationException or UnauthorizedAccessException or ArgumentException or System.IO.IOException) { return false; }
     }
 
     // A loop reports only while its run is current: after Stop the state stays Off.

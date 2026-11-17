@@ -2,6 +2,17 @@
 
 The "Clipboard and file transfer" page of the open panel has two columns: the clipboard history on the left and the file transfer on the right. Their settings are under Settings › Clipboard and Settings › File transfer; the page's switch and size are under Settings › Expanded view.
 
+Under Settings › Page layout › Show the page can show only the clipboard or only the file transfer, which then fills the page. While only the clipboard shows, files dragged onto the panel are not added to the file transfer, and the collapsed view does not show their number. The arrangements below apply only while both columns show.
+
+Drag the divider between the columns to change their widths; double-click it to go back to 60% for the clipboard and 40% for the file transfer. Under Settings › Page layout the columns can also be stacked as two cards, the one behind showing only a side strip with its icon, name and number of entries. Click that strip, the title of the card in front, or the page's button once more to switch cards. Three more ways of switching can be turned on under Settings › Page layout: hovering the pointer over the strip, a middle click (on by default), and a two-finger sideways swipe or Shift + wheel.
+
+Each column can show its entries in several ways, chosen for each under Settings › Page layout and combined freely. By default the clipboard shows one line an entry and the file transfer two:
+
+- Clipboard: one line; three lines (each entry three lines high, with up to three lines of its text at the left and, at the right, when it was copied, its characters or a picture's size, and the application it came from); blocks (in as many columns as the width holds, a picture filling its block).
+- File transfer: one line; two lines (a large icon at the left, the size and the date changed under the name); grid (large icons over the names, in as many columns as the width holds); row (a single row, scrolled sideways with the wheel); column (a single column, suited to a narrow file transfer).
+
+In the grid, the row, the column and on two lines, picture files show a thumbnail. With the pointer on a file, four buttons appear: open, show in folder, remove, and details.
+
 ## Clipboard
 
 BrimDeck keeps the text and pictures you copy, newest first.
@@ -14,9 +25,11 @@ BrimDeck keeps the text and pictures you copy, newest first.
 
 ### How long entries are kept
 
-- The history is stored on this PC, encrypted by Windows.
-- Ordinary entries are cleared when BrimDeck exits.
-- What is in Favorites, or in a category set to "Kept", stays until you delete it.
+- The history is stored only on this PC, not encrypted.
+- Ordinary entries are cleared when BrimDeck exits by default.
+- With "Keep history after exit" on in Settings › Clipboard, ordinary entries stay after BrimDeck exits, and entries older than "Keep for" (1 day, 7 days or 30 days; 30 days by default) are deleted. The time counts from the last copy.
+- What is in Favorites, or in a category set to "Kept", stays until you delete it, whatever the two settings above.
+- The entries' text is held in memory, to show and search it; the formatting copied from web pages, Word and other apps, and pictures, are kept on disk and read only to paste or show them. With common content, 9,000 entries use about 30 MB of memory.
 - One entry holds up to 1,000,000 characters; longer copies are not recorded.
 
 ### What is not recorded
@@ -39,7 +52,7 @@ The file transfer holds files you will need shortly. It keeps only where each fi
 - **Click**: pastes the file into the current window. It becomes an attachment in a chat window, and a copy in the current folder in File Explorer.
 - **Select several**: hold Ctrl or Shift and click to select several files, then paste, drag out or remove them together.
 - **Right-click**: Paste, Open, Show in folder, Copy path, Details, Add to category, Remove from the file transfer, Delete the original.
-- **Drag out**: drag a file to where you need it; a button in the column's title row drags out all files at once. Files are copied by default; with "Move" chosen under Settings › File transfer › Drag files out, files moved to a new place leave the list, while chat apps, browsers and other places that only take copies still get copies.
+- **Drag out**: drag a file to where you need it; a button in the column's title row drags out all files at once. By default the left button copies and the right button moves; Settings › File transfer › Drag files out swaps them. While you drag, a word beside the pointer says whether letting go there copies or moves.
 - A file whose original has been moved or deleted is marked "Missing".
 - The notch and capsule can show how many files the file transfer holds.
 
@@ -47,9 +60,19 @@ The file transfer holds files you will need shortly. It keeps only where each fi
 
 - The clipboard and the file transfer each have their own categories, made, renamed, reordered and deleted under Settings › Clipboard and Settings › File transfer. An entry or a file can be in several categories.
 - Each category can have a rule for what goes in by itself. The clipboard's conditions cover the kind of content, the text (contains, starts with, ends with, a built-in format or a regular expression), a link's domain and the app it was copied from; the file transfer's cover the file type, extension, file name and folder. Several conditions can require any or all of them.
-- A clipboard category can be set to "Kept" or "Cleared on exit".
+- A clipboard category can be set to "Kept"; otherwise what is in it is cleared with the rest of the history, and its label shows "Cleared on exit" or the length kept.
 - The search button at the top right of the page searches the clipboard and the file transfer together.
 
 ## Where the data is stored
 
-The clipboard history, the file transfer's list and the categories are stored in `%LOCALAPPDATA%\BrimDeck\shelf.dat`, and copied pictures in `%LOCALAPPDATA%\BrimDeck\shelf\`. Both are encrypted for the current Windows user, used only on this PC and never uploaded. See [Data and privacy](privacy.md).
+The clipboard history, the file transfer's list and the categories are stored in `%LOCALAPPDATA%\BrimDeck\shelf.dat`, and copied pictures and formatting in `%LOCALAPPDATA%\BrimDeck\shelf\`. Both are not encrypted, used only on this PC and never uploaded. See [Data and privacy](privacy.md).
+
+### Left and right file drags
+
+- Copy: the original stays where it is, a copy goes to the new place, and the file stays in the file transfer.
+- Move: the original goes to the new place and leaves the file transfer.
+- Chat apps and browsers cannot take a move; files dragged there are always copied, and the word beside the pointer then says "Copy".
+
+Settings › File transfer › Drag files out has two choices: "Left copies, right moves" (the default) and "Left moves, right copies". A right drag does its action directly, without the shell's drop menu. A right click without dragging still opens the entry menu.
+
+The optional remove-after-copy/link setting defaults off. When enabled, a moving drag successfully accepted as Copy or Link by an external application removes its transfer entries without deleting the original files. Canceled or rejected drops, Explorer, internal drops and Ctrl-copy gestures retain entries. Success means the target reported accepting the drop, not that an attachment finished uploading. Other file managers reporting Copy are also subject to this option.

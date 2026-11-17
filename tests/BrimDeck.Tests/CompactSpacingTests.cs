@@ -160,5 +160,19 @@ internal static class CompactSpacingTests
             && CollapsedGeometry.SurfaceWidth(CompactStyle.Notch, 32, 100) == 160 && CollapsedGeometry.SurfaceWidth(CompactStyle.Notch, 24, 100) == 156
             && CollapsedGeometry.SurfaceWidth(CompactStyle.Line, 4, 100) == 0 && CollapsedGeometry.SurfaceWidth(CompactStyle.Capsule, 32, 0) == 0
             && CollapsedGeometry.SurfaceWidth(CompactStyle.Capsule, 32, double.NaN) == 0);
+        // At 150 % the shoulders and corners are 42 DIP, wider than the 33.75 DIP inset of a 24 DIP notch drawn at that scale.
+        check("Compact required: the notch's shoulders and corners follow the scale", CollapsedGeometry.SurfaceWidth(CompactStyle.Notch, 36, 100, 1.5) == 184
+            && CollapsedGeometry.SurfaceWidth(CompactStyle.Notch, 36, 100) == 167.5);
+        // The content area the window measures from the shape (MainWindow.CompactContentWidth) holds what the content asked for, so an
+        // auto-length column on a side edge does not glide by the difference.
+        bool holds = true;
+        foreach (double scale in new[] { 1, 1.5 })
+            foreach (double height in new[] { 24d, 27, 28, 32, 45 })
+            {
+                var shape = CollapsedGeometry.Resolve(new DeckSettings { NotchHeight = height, NotchAutoWidth = true }, CompactStyle.Notch,
+                    new DipRect(0, 0, 1152, 2048), new DipRect(0, 0, 1152, 2048), 1, 300, 0, scale, 60);
+                holds &= Math.Min(shape.ContentWidth, shape.Surface.Width - 2 * (shape.Shoulder + shape.BottomRadius)) >= 300 - 1e-9;
+            }
+        check("Compact required: an auto-width notch's content area holds the content at every scale and height", holds);
     }
 }

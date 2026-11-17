@@ -98,12 +98,12 @@ public static partial class PanelThemes
         new("bubbleBorder", "进度时间气泡描边", "Seek time bubble border"),
     ];
     // Applications keyed by the names the "apps" object uses. Sources entered by hand share "manual".
-    public static readonly IReadOnlyList<string> AppKeys = ["claude", "codex", "antigravity", "cursor", "zcode", "dsh", "grokBot", "kimi", "opencode", "codeagent", "commandcode", "manual", "other", "warning", "critical"];
+    public static readonly IReadOnlyList<string> AppKeys = ["claude", "codex", "antigravity", "cursor", "zcode", "dsh", "grokBot", "kimi", "opencode", "codeagent", "commandcode", "workbuddy", "mimo", "manual", "other", "warning", "critical"];
     public static string AppKey(ProviderId id) => id switch
     {
         ProviderId.Claude => "claude", ProviderId.Codex => "codex", ProviderId.Antigravity => "antigravity", ProviderId.Cursor => "cursor",
-        ProviderId.ZCode => "zcode", ProviderId.Dsh => "dsh", ProviderId.GrokBot => "grokBot", ProviderId.Kimi => "kimi", ProviderId.OpenCode => "opencode", ProviderId.CodeAgent => "codeagent", ProviderId.CommandCode => "commandcode",
-        ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.OpenCodeGo or ProviderId.CommandCodeApi or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => "manual",
+        ProviderId.ZCode => "zcode", ProviderId.Dsh => "dsh", ProviderId.GrokBot => "grokBot", ProviderId.Kimi => "kimi", ProviderId.OpenCode => "opencode", ProviderId.CodeAgent => "codeagent", ProviderId.CommandCode => "commandcode", ProviderId.WorkBuddy or ProviderId.WorkBuddyAi => "workbuddy", ProviderId.MiMo or ProviderId.MiMoLinked => "mimo",
+        ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.MiMoApi or ProviderId.MiMoTokenPlan or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.KimiPlatform or ProviderId.OpenCodeGo or ProviderId.CommandCodeApi or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => "manual",
         _ => "other"
     };
 
@@ -123,7 +123,7 @@ public static partial class PanelThemes
         static bool AnyNull(PanelThemeFile file) => HasNull(file.Colors?.Values) || HasNull(file.Apps?.Values) || HasNull(file.Swatches)
             || HasNull(file.Effects?.SurfaceGradient) || HasNull(file.Effects?.RimGradient)
             || HasNull(file.Clock?.Gradient) || HasNull(file.Clock?.Palette?.Values) || file.Clock?.Gradients?.Any(gradient => gradient is null || HasNull(gradient.Stops)) == true;
-        if (AnyNull(file) || file.Night is { } night && AnyNull(night))
+        if (AnyNull(file) || file.Night is { } night && AnyNull(night) || file.Dusk is { } dusk && AnyNull(dusk))
             throw new JsonException(Loc.T("颜色值不能为 null", "A color cannot be null"));
         return file;
     }
