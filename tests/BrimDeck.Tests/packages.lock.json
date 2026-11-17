@@ -7,6 +7,11 @@
         "resolved": "1.7.0",
         "contentHash": "a2I4O4qkuAdB0oSaGz6/k0n/bXxMbGcLBra5dNTTVSLmTwM7uORA8ebpOrNMmDfFWOMwvuaRL6gPprRV4HTV0w=="
       },
+      "BouncyCastle.Cryptography": {
+        "type": "Transitive",
+        "resolved": "2.7.0",
+        "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
+      },
       "Jint": {
         "type": "Transitive",
         "resolved": "4.16.3",
@@ -23,6 +28,7 @@
       "brimdeck.core": {
         "type": "Project",
         "dependencies": {
+          "BouncyCastle.Cryptography": "[2.7.0, )",
           "BrimDeck.Protocol": "[1.0.0, )",
           "Jint": "[4.16.3, )",
           "ZstdSharp.Port": "[0.8.8, )"
