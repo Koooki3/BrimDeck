@@ -358,13 +358,20 @@ public partial class MainWindow
                 var (hex, rgb, hsl) = Shelf.ColorForms(c);
                 foreach (var (name, value) in new[] { ("HEX", hex), ("RGB", rgb), ("HSL", hsl) })
                 {
-                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2), Cursor = Cursors.Hand, Background = Brushes.Transparent, ToolTip = Loc.T("单击粘贴这种写法", "Click to paste this form") };
+                    bool copyOnly = Settings.ClipboardClickCopyOnly;
+                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2), Cursor = Cursors.Hand, Background = Brushes.Transparent,
+                        ToolTip = copyOnly ? Loc.T("单击复制这种写法", "Click to copy this form") : Loc.T("单击粘贴这种写法", "Click to paste this form") };
                     row.Children.Add(new TextBlock { Text = name, Width = 40, FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(Look.Tertiary), VerticalAlignment = VerticalAlignment.Center });
                     var text = new TextBlock { Text = value, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = size - 1, Foreground = UI.Brush(Look.Primary), VerticalAlignment = VerticalAlignment.Center };
                     row.Children.Add(text);
                     row.MouseEnter += (_, _) => text.Foreground = UI.Brush(Look.Accent);
                     row.MouseLeave += (_, _) => text.Foreground = UI.Brush(Look.Primary);
-                    row.MouseLeftButtonUp += (_, e) => { e.Handled = true; _app.Shelf.Paste(ShelfService.TextData(value), result => text.Text = value + "  " + PasteWord(result)); };
+                    row.MouseLeftButtonUp += (_, e) =>
+                    {
+                        e.Handled = true;
+                        if (!copyOnly) _app.Shelf.Paste(ShelfService.TextData(value), result => text.Text = value + "  " + PasteWord(result));
+                        else if (_app.Shelf.Put(ShelfService.TextData(value))) text.Text = value + "  " + Loc.T("已复制", "Copied");
+                    };
                     forms.Children.Add(row);
                 }
                 panel.Children.Add(forms);

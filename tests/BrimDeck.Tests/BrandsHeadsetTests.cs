@@ -89,10 +89,10 @@ static class BrandsHeadsetTests
         check("Razer headsets: the 2020 request, and HaloBattery's measured answers on battery (80), charged (100) and charging (no level), the Nari's capture (30, 3552 mV)",
             statusWay.Request.Length == 64 && statusWay.Request.AsSpan(0, 9).SequenceEqual(Hex("FF 0A 00 FD 04 12 F1 02 05")) && statusWay.GapMs >= 100
             && statusWay.Attempts == 2
-            && RazerHeadsets.StatusBattery(Hex("FF 0F 05 FE 12 04 1F 08 05 03 05 01 0E C0 50", 64)) == new BatteryRead(80, Coarse: true)
-            && RazerHeadsets.StatusBattery(Hex("FF 0F 05 FE 12 04 1F 08 05 06 05 06 10 88 64", 64)) == new BatteryRead(100, Coarse: true)
+            && RazerHeadsets.StatusBattery(Hex("FF 0F 05 FE 12 04 1F 08 05 03 05 01 0E C0 50", 64)) == new BatteryRead(80, Accuracy: BatteryAccuracy.Steps)
+            && RazerHeadsets.StatusBattery(Hex("FF 0F 05 FE 12 04 1F 08 05 06 05 06 10 88 64", 64)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps)
             && RazerHeadsets.StatusBattery(Hex("FF 0F 05 FE 12 04 1F 08 05 05 03 09 10 80 50", 64)) == new BatteryRead(null, Charging: true)
-            && RazerHeadsets.StatusBattery(Hex("FF 0F 05 FE 12 04 1F 08 05 03 05 02 0D E0 1E 6C", 64)) == new BatteryRead(30, Coarse: true));
+            && RazerHeadsets.StatusBattery(Hex("FF 0F 05 FE 12 04 1F 08 05 03 05 02 0D E0 1E 6C", 64)) == new BatteryRead(30, Accuracy: BatteryAccuracy.Steps));
         check("Razer headsets: the receiver's stale copy (FF 01 00 ...) and the request read back are no reading; 0 mV is the headset off",
             RazerHeadsets.StatusBattery(Hex("FF 01 00 FE 12 04 1F 08 05 05 03 09 10 88 50", 64)) is null
             && RazerHeadsets.StatusBattery(RazerHeadsets.StatusRequest()) is null
@@ -104,7 +104,7 @@ static class BrandsHeadsetTests
         var late = RazerHeadsets.StatusReads();
         check("Razer headsets: the stale copy at the first try is no reading (the answer may not be there yet), at the second the headset off; a fresh answer at the second try is the reading",
             reads(off) is null && reads(off) == new BatteryRead(null, Asleep: true)
-            && late(off) is null && late(Hex("FF 0F 05 FE 12 04 1F 08 05 03 05 01 0E C0 50", 64)) == new BatteryRead(80, Coarse: true)
+            && late(off) is null && late(Hex("FF 0F 05 FE 12 04 1F 08 05 03 05 01 0E C0 50", 64)) == new BatteryRead(80, Accuracy: BatteryAccuracy.Steps)
             && RazerHeadsets.StatusReads()(RazerHeadsets.StatusRequest()) is null);
 
         var pa = BrandFamilies.Find(Shape(0x1532, 0x0555, 0xFF00, 1, 3, outputIds: [0x02]))!.Value.Ways[0];
@@ -270,9 +270,9 @@ static class BrandsHeadsetTests
         }
         check("ASUS Strix Go 2.4: the request; the reporter's 3831 mV (75 %) and 3743 mV (50 %) on battery, 3897 mV charging (lift taken off: 50 %), the cable always charging",
             BrandFamilies.Find(dongle)!.Value.Ways[0].Request.AsSpan(0, 10).SequenceEqual(Hex("FF 08 00 FD 04 12 F1 03 52 01"))
-            && Parse(dongle, Reply(3831, 0x03)) == new BatteryRead(75, Coarse: true) && Parse(dongle, Reply(3743, 0x03)) == new BatteryRead(50, Coarse: true)
-            && Parse(dongle, Reply(3897, 0x0A)) == new BatteryRead(50, true, Coarse: true) && Parse(dongle, Reply(4150, 0x03)) == new BatteryRead(100, Coarse: true)
-            && Parse(cable, Reply(4077, 0x03)) == new BatteryRead(75, true, Coarse: true));
+            && Parse(dongle, Reply(3831, 0x03)) == new BatteryRead(75, Accuracy: BatteryAccuracy.Voltage) && Parse(dongle, Reply(3743, 0x03)) == new BatteryRead(50, Accuracy: BatteryAccuracy.Voltage)
+            && Parse(dongle, Reply(3897, 0x0A)) == new BatteryRead(50, true, Accuracy: BatteryAccuracy.Voltage) && Parse(dongle, Reply(4150, 0x03)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Voltage)
+            && Parse(cable, Reply(4077, 0x03)) == new BatteryRead(75, true, Accuracy: BatteryAccuracy.Voltage));
         check("ASUS Strix Go 2.4: bytes 1 to 3 zero (off or asleep, HaloBattery) asleep; the unknown-packet answer (FF AA), a frame without the live header and the request read back are none",
             Parse(dongle, Hex("FF", 64)) == new BatteryRead(null, Asleep: true)
             && Parse(dongle, Hex("FF FF AA", 64)) is null && Parse(dongle, Reply(3831, 0x03).Select((b, i) => i == 1 ? (byte)0x1A : b).ToArray()) is null
@@ -378,7 +378,7 @@ static class BrandsHeadsetTests
             && BrandFamilies.Find(elite)!.Value.Ways[0].Request.SequenceEqual(Hex("01 B0", 64)));
         check("SteelSeries headsets: the documented answers of each layout, HaloBattery's measured Elite answer (31 %), the headset off",
             Parse(arctis1, Hex("06 12 00 50", 8)) == new BatteryRead(80) && Parse(arctis1, Hex("06 12 01 50", 8)) == new BatteryRead(null, Asleep: true)
-            && Parse(plus, Hex("B0 00 03 01", 64)) == new BatteryRead(75, true, Coarse: true) && Parse(plus, Hex("B0 01 03 00", 64)) == new BatteryRead(null, Asleep: true)
+            && Parse(plus, Hex("B0 00 03 01", 64)) == new BatteryRead(75, true, Accuracy: BatteryAccuracy.Steps) && Parse(plus, Hex("B0 01 03 00", 64)) == new BatteryRead(null, Asleep: true)
             && Parse(nova5, Hex("B0 03 00 40 01", 64)) == new BatteryRead(64, true) && Parse(nova5, Hex("B0 02 00 40 00", 64)) == new BatteryRead(null, Asleep: true)
             && Parse(buds, Hex("B0 00 00 03 03 50 46", 64)) == new BatteryRead(70) && Parse(buds, Hex("B0 00 00 03 02 50 00", 64)) == new BatteryRead(80)
             && Parse(elite, Hex("01 B0 00 00 01 00 1F 64", 64)) == new BatteryRead(31) && Parse(elite, Hex("01 B0 00 00 01 00 1F 64 00 00 00 00 00 00 01", 64)) == new BatteryRead(null, Asleep: true)

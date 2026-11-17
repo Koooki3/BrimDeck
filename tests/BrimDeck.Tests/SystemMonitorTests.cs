@@ -68,7 +68,12 @@ static class SystemMonitorTests
         check("Monitor memory level normal", memory.Level == MemoryLevel.Normal && memory.UsedFraction == .5);
         check("Monitor memory level elevated by use or commit", (memory with { Used = 85 }).Level == MemoryLevel.Elevated && (memory with { CommitUsed = 82 }).Level == MemoryLevel.Elevated);
         check("Monitor memory level critical", (memory with { Used = 95 }).Level == MemoryLevel.Critical && (memory with { CommitUsed = 95 }).Level == MemoryLevel.Critical);
-        check("Monitor memory without a total reads zero shares", new MemorySample(0, 0, 0, 0) is { UsedFraction: 0, CommitFraction: 0 });
+        check("Monitor memory without a total reads zero shares", new MemorySample(0, 0, 0, 0) is { UsedFraction: 0, CommitFraction: 0, FreeFraction: 0, Free: 0 });
+        check("Monitor memory free is what is not in use, shown when chosen", new MemorySample(100, 70, 0, 0) is { Free: 30 } free
+            && Math.Abs(free.FreeFraction - .3) < 1e-9 && Math.Abs(free.Shown(true) - .3) < 1e-9 && free.Shown(false) == .7);
+        var row = new StorageRow("C:", 400, 300, null, MemoryLevel.Normal, [], false);
+        check("Monitor drive entry shows its space in use or free", row.Shown(false) == 300 && row.Shown(true) == 100
+            && row.ShownFraction(false) == .75 && row.ShownFraction(true) == .25 && new StorageRow("C:", 0, 0, null, MemoryLevel.Normal, [], false).ShownFraction(true) == 0);
         var core = new CoreSample(0, 0, CoreTier.Performance, 1, .5, 2000d, 4000);
         check("Monitor frequency fraction", core.FrequencyFraction == .5 && (core with { FrequencyMhz = Reading<double>.Unavailable("x") }).FrequencyFraction is null
             && (core with { MaxFrequencyMhz = 0 }).FrequencyFraction is null && (core with { FrequencyMhz = 9000d }).FrequencyFraction == 1);

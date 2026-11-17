@@ -168,7 +168,7 @@ static class OfficialDriverTests
             && AtkOfficial.BytechRequest(0x09, 0x09) is { Length: 64 } r9 && r9[0] == 0x09 && r9[63] == 0x6E
             && BrandFamilies.Find(bytech) is { } found && found.Ways.Single().Name == "bytech.battery" && found.Ways.Single().Request[63] == 0x6E
             && Family(bytech with { Product = 0x2A03, OutputIds = new HashSet<byte> { 0x00 } }) is null
-            && Family(bytech with { Product = 0x200B }) is null
+            && Family(bytech with { Product = 0x200B }) == "Bytech keyboard" && Family(bytech with { Product = 0x200D }) is null
             && AtkOfficial.BytechBattery(Padded(64, "00 87 00 00 01 00 02 3C 10")) == new BatteryRead(60, true)
             && AtkOfficial.BytechBattery(Padded(64, "00 87 00 00 01 00 02 3C 01")) == new BatteryRead(60)
             && AtkOfficial.BytechBattery(request0) is null);

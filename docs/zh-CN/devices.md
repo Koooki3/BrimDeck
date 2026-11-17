@@ -26,7 +26,7 @@ BrimDeck 只读取电量：不配对、不断开，也不改动任何设备与 W
 | --- | --- |
 | 罗技、迈从（MCHOSE）、ATK、Endgame Gear、VAXEE、雷柏（Rapoo）、Keychron、Finalmouse | 整个品牌 |
 | 雷蛇、华硕 ROG、赛睿（SteelSeries）、海盗船（Corsair）、HyperX | 已知的无线型号 |
-| VXE、VGN、Pulsar、LAMZU、G-Wolves、WLmouse、Ninjutso、LINGBAO、NZXT、HECATE、达尔优（Dareu）、英菲克（Inphic）、黑爵（AJAZZ）、Attack Shark、多彩（DELUX）、Glorious、Darmoshark、前行者（EWEADN）、狼蛛（AULA）、雷神 ML903、玄派 玄熊猫 P1、Scyrox、Cougar、红龙（Redragon）、Hitscan、iRocks、Vancer、Incott、Ryunix、京东京造 JZM5、RIDLAG、摩豹（Motospeed）X6 | 已知型号 |
+| VXE、VGN、Pulsar、LAMZU、G-Wolves、WLmouse、Ninjutso、LINGBAO、NZXT、HECATE、达尔优（Dareu）、英菲克（Inphic）、黑爵（AJAZZ）、Attack Shark、多彩（DELUX）、Glorious、Darmoshark、前行者（EWEADN）、狼蛛（AULA）、雷神 ML903、玄派 玄熊猫 P1、Scyrox、Cougar、红龙（Redragon）、Hitscan、iRocks、Vancer、Incott、Ryunix、京东京造 JZM5、RIDLAG、摩豹（Motospeed）X6、重力星球（GravaStar，含 Mercury 系列与 S1 Pro、R1） | 已知型号 |
 
 **键盘**
 
@@ -34,14 +34,14 @@ BrimDeck 只读取电量：不配对、不断开，也不改动任何设备与 W
 | --- | --- |
 | 罗技（经接收器或数据线连接） | 整个品牌 |
 | 雷蛇、华硕 ROG | 已知的无线型号 |
-| 迈从（含 K87S、G87 V2、K99 V3、G75 V2、G98 V3、K87 V3）、狼蛛（含 F87、F87 Pro、F99、F99 Pro、F75、F108 Pro）、凌豹 K98、珂芝（含 K75、I75、I98、Z75）、VGN（含 V108、V98 Pro V3、V87 V2、N75 V2、N87、Neon75）、ATK（含 Z87 Pro、S87、S99、TV88、TV99、TV108、V100、A87 Pro、A98 Pro、A87 Ultra、YOGO 75）、CHERRY PIXIU75、海盗船（K65 PLUS、K57）、Alienware Pro、URX Core75、Lofree Flow Lite84、MonsGeek、Akko、Epomaker（含部分 TH 系列与 G84 PRO）、黑爵 AK870、CAROTMAS Mars68、GANSS、前行者 X87、Teevolution、RK R98Pro V2，以及与 MonsGeek 采用同一平台的其他品牌接收器 | 已知型号 |
+| 迈从（含 K87S、G87 V2、K99 V3、G75 V2、G98 V3、K87 V3）、狼蛛（含 F87、F87 Pro、F99、F99 Pro、F75、F108 Pro）、凌豹 K98、珂芝（含 K75、I75、I98、Z75）、VGN（含 V108、V98 Pro V3、V87 V2、N75 V2 的有线与 2.4G，V98Pro V4、V87Pro V2、V108Pro，以及 N87、Neon75）、VXE V87pro、重力星球（含 Mercury K98 Pro、K1 系列、V75 Ultra）、WOBKEY（Rainy75 V2、Rainy98）、ATK（含 Z87 Pro、S87、S99、TV88、TV99、TV108、V100、A87 Pro、A98 Pro、A87 Ultra、YOGO 75）、CHERRY PIXIU75、海盗船（K65 PLUS、K57）、Alienware Pro、URX Core75、Lofree Flow Lite84、MonsGeek、Akko、Epomaker（含部分 TH 系列与 G84 PRO）、黑爵 AK870、CAROTMAS Mars68、GANSS、前行者 X87、Teevolution、RK R98Pro V2，以及与 MonsGeek 采用同一平台的其他品牌接收器、与重力星球 K1 采用同一方案的其他品牌键盘 | 已知型号 |
 
 **耳机**
 
 | 品牌 | 范围 |
 | --- | --- |
 | Jabra、FIFINE、西伯利亚 | 整个品牌 |
-| 罗技（含 G PRO X 2）、赛睿（含 GameBuds X）、HyperX、海盗船（含 Virtuoso、HS80、Void 系列）、雷蛇、索尼 INZONE 与 PULSE Explore、华硕 ROG、ASTRO A50、Audeze Maxwell、Skullcandy PLYR、AKG N9、迈从（含 V9 PRO、G9 PRO）、狼蛛（G9、A9）、JBL Quantum 910、PULSE 3D、ATK（N9 Pro、N9 Ultra、N9 V2 系列）、联想、寸渊影弑、漫步者 Halo Space | 已知型号 |
+| 罗技（含 G PRO X 2）、赛睿（含 GameBuds X）、HyperX、海盗船（含 Virtuoso、HS80、Void 系列）、雷蛇、索尼 INZONE 与 PULSE Explore、华硕 ROG、ASTRO A50、Audeze Maxwell、Skullcandy PLYR、AKG N9、迈从（含 V9 PRO、G9 PRO）、狼蛛（G9、A9）、JBL Quantum 910、PULSE 3D、ATK（N9 Pro、N9 Ultra、N9 V2 系列）、联想、寸渊影弑、漫步者 Halo Space、竹林鸟（烛龙 ZG4、朱雀 ZG3） | 已知型号 |
 
 **手柄**
 

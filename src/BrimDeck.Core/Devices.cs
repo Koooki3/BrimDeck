@@ -18,13 +18,13 @@ public readonly record struct PartBattery(BatteryPart Part, int? Percent, bool C
 
 // One device's reading. Key is the device's own: "bt:<address>" for anything Bluetooth (12 hex digits, upper case), so the
 // several Bluetooth sources meet on one entry; other sources key by what identifies the device on its link. Percent is null
-// while the device is connected but reports no battery ("not available"); Coarse marks a level the device reports in a few
-// steps (a voltage or a four-step level), shown as such. Address is the Bluetooth address when the source knows it, which
+// while the device is connected but reports no battery ("not available"); Accuracy says whether the level is the device's
+// own figure, one of a few steps, or worked out from the voltage, shown as such. Address is the Bluetooth address when the source knows it, which
 // lets a vendor source's entry replace the plain Bluetooth one.
 public sealed record DeviceBattery(string Key, string Name, DeviceKind Kind, DeviceSource Source, int? Percent)
 {
     public bool Charging { get; init; }
-    public bool Coarse { get; init; }
+    public BatteryAccuracy Accuracy { get; init; }
     // The wireless mouse is asleep / out of range while the receiver still reports the last battery: show that percent, never 0 %.
     public bool Asleep { get; init; }
     public string? Address { get; init; }
@@ -35,7 +35,7 @@ public sealed record DeviceBattery(string Key, string Name, DeviceKind Kind, Dev
     // The lowest of the parts with a reading (the earbuds, not the case), or the device's own.
     public int? Lowest => Parts.Where(part => part.Part != BatteryPart.Case && part.Percent is not null).Select(part => part.Percent).Min() ?? Percent;
     public bool Same(DeviceBattery other) => Key == other.Key && Name == other.Name && Kind == other.Kind && Source == other.Source && Percent == other.Percent
-        && Charging == other.Charging && Coarse == other.Coarse && Asleep == other.Asleep && Parts.SequenceEqual(other.Parts);
+        && Charging == other.Charging && Accuracy == other.Accuracy && Asleep == other.Asleep && Parts.SequenceEqual(other.Parts);
 }
 
 // A device's own choices (DeckSettings.DeviceChoices): a name of the user's (Label, null for the device's own), and whether it
@@ -320,18 +320,6 @@ public static class Devices
 
     // The figure as shown: "85%", or "—" for a device that reports no battery.
     public static string Figure(int? percent) => percent is { } p ? Clamp(p).ToString(System.Globalization.CultureInfo.InvariantCulture) + "%" : "—";
-
-    // A line for the tooltip and the settings: "左 80% · 右 75% · 盒 60% · 充电中 · 蓝牙".
-    public static string Describe(DeviceBattery device)
-    {
-        var parts = new List<string>();
-        if (device.Parts.Count > 0) parts.AddRange(device.Parts.Select(part => PartName(part.Part) + " " + Figure(part.Percent) + (part.Charging ? Loc.T("（充电）", " (charging)") : "")));
-        else parts.Add(device.Percent is null ? Loc.T("未报告电量", "No battery reported") : Figure(device.Percent) + (device.Coarse ? Loc.T("（约）", " (approx.)") : ""));
-        if (device.Asleep) parts.Add(Loc.T("休眠", "Sleeping"));
-        if (device.Charging) parts.Add(Loc.T("充电中", "Charging"));
-        parts.Add(SourceName(device.Source));
-        return device.Name + "\n" + string.Join(" · ", parts);
-    }
 
     // The steady order: by kind, then by name, then by key.
     public static IComparer<DeviceBattery> Order { get; } = Comparer<DeviceBattery>.Create((a, b) =>

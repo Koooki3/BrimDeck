@@ -30,7 +30,7 @@ public static class SonyPulse
         bool linked = (r[39] & 0x01) != 0, left = linked && (r[56] & 0x10) != 0, right = linked && (r[56] & 0x20) != 0;
         if (!left && !right) return new(null, Asleep: true);
         int low = Math.Min(left ? Percent(r[55] & 0x0F) : 100, right ? Percent(r[55] >> 4) : 100);
-        return low > 0 ? new(low, Coarse: true) : null;
+        return low > 0 ? new(low, Accuracy: BatteryAccuracy.Steps) : null;
     }
 
     public static BatteryRead? Usb(byte[] r)
@@ -39,7 +39,7 @@ public static class SonyPulse
         bool left = (r[56] & 0x10) != 0, right = (r[56] & 0x20) != 0;
         if (!left && !right) return new(null, Asleep: true);
         int low = Math.Min(left ? Percent(r[55] & 0x0F) : 100, right ? Percent(r[55] >> 4) : 100);
-        return low > 0 ? new(low, Charging: low < 100, Coarse: true) : null;
+        return low > 0 ? new(low, Charging: low < 100, Accuracy: BatteryAccuracy.Steps) : null;
     }
 
     private static bool Takes(HidShape s) => s.Vendor == Vendor && s.FeatureLength == Length && s.InputLength == Length && s.Product switch

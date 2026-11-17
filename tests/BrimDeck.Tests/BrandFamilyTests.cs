@@ -12,6 +12,30 @@ static class BrandFamilyTests
         Rules(check);
         Betop(check);
         VgnV108(check);
+        VgnV98ProV3(check);
+    }
+
+    // The V98Pro V3's cable: 520-byte feature report 9, the query echoed, the level at 8 and the charging nibble at 9.
+    private static void VgnV98ProV3(Action<string, bool> check)
+    {
+        var request = Bytech916.Request(0x09);
+        check("VGN V98Pro V3 wired: the 520-byte feature query, the measured 100 % charging answer, a battery one, and a zero level, a bad echo and a short answer are none",
+            request.Length == 520 && request[..8].SequenceEqual(Bytes("09 87 00 00 01 00 02 00")) && request[8..].All(value => value == 0)
+            && Bytech916.Battery(0x09, Bytes("09 87 00 00 01 00 02 00 64 11")) == new BatteryRead(100, true)
+            && Bytech916.Battery(0x09, Bytes("09 87 00 00 01 00 02 00 64 01")) == new BatteryRead(100)
+            && Bytech916.Battery(0x09, Bytes("09 87 00 00 01 00 02 00 00 11")) is null
+            && Bytech916.Battery(0x09, Bytes("09 87 00 00 01 00 02 00 65 11")) is null
+            && Bytech916.Battery(0x09, Bytes("09 86 00 00 01 00 02 00 64 11")) is null
+            && Bytech916.Battery(0x09, Bytes("09 87 00 00 01 00 02 00 64")) is null
+            && Bytech916.Battery(0x09, request) is null);
+        check("VGN V98Pro V3 wired: 258A:024E's 520-byte feature 9 collection, its page either way; the 2.4G receivers and other report shapes are not taken",
+            BrandFamilies.Find(Shape(0x258A, 0x024E, 0xFF02, 0x0001, 1, feature: 520, featureIds: [0x09])) is { Family.Brand: "VGN keyboard", Ways.Count: 1 }
+            && BrandFamilies.Find(Shape(0x258A, 0x024E, 0x02FF, 0x0100, 1, feature: 520, featureIds: [0x09])) is { Family.Brand: "VGN keyboard" }
+            && BrandFamilies.Find(Shape(0x258A, 0x024E, 0xFF02, 0x0001, 1, feature: 519, featureIds: [0x09])) is null
+            && BrandFamilies.Find(Shape(0x258A, 0x024E, 0xFF02, 0x0001, 1, feature: 520, featureIds: [0x05])) is null
+            && BrandFamilies.Find(Shape(0x258A, 0x024E, 0x0001, 0x0001, 1, feature: 520, featureIds: [0x09])) is null
+            && BrandFamilies.Find(Shape(0x258A, 0x024F, 0xFF02, 0x0001, 1, feature: 520, featureIds: [0x09])) is not { Family.Brand: "VGN keyboard" }
+            && BrandFamilies.Find(Shape(0x258A, 0x024E, 0xFF02, 0x0002, 1, input: 20, output: 20, outputIds: [0x13])) is not { Family.Brand: "VGN keyboard" });
     }
 
     // Pull request #278's capture: 100 % on the receiver (byte 6 = 01: full, off the cable).

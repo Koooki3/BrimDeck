@@ -50,17 +50,19 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly bool[] _letterUsage, _letterHeat;
     // Whether the frame rate shows its program's icon in place of the glyph (CompactFrames).
     private readonly bool _framesIcon;
+    // Memory and the drives show what is free in place of what is in use; their level still follows the share in use.
+    private readonly bool _free;
 
     // unavailable: readings left out (StripAdmission.Hidden): the drives until their first figures, and for good on a machine
     // without them, so the row never shows a dash for them. admission: which temperatures and letters have given their first
     // figures (StripAdmission.Shows); without it every chosen one shows.
     // parts: what the drive reading draws. The collapsed column (MainWindow.CompactColumn.cs) gives each drive a line without the
-    // glyph, its letter shown even when it is the only one.
+    // glyph, its letter shown even when it is the only one. free: memory and the drives show what is free (DeckSettings.MonitorShowFree).
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi,
         CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null, DriveParts parts = DriveParts.All,
-        CoreDisplay coreDisplay = CoreDisplay.Auto)
+        CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false)
     {
-        _driveParts = parts; _coreDisplay = coreDisplay;
+        _driveParts = parts; _coreDisplay = coreDisplay; _free = free;
         AddVisualChild(_moving);
         _easing = new PromptTimer(Dispatcher, EaseStep);
         _presence = presence; _dpi = dpi; _colors = colors; _centered = centered; _powerStyle = PowerStyle.For(colors.Palette);
@@ -238,7 +240,7 @@ internal sealed class MonitorStrip : FrameworkElement
             for (int i = 0; i < count; i++) moving |= _cores[i].Set(cpu!.Cores[i].Usage, motion, now);
         }
         if ((Shown & CompactMonitorItems.Cpu) != 0) moving |= _cpu.Set(cpu?.Usage, motion, now);
-        if ((Shown & CompactMonitorItems.Memory) != 0) moving |= _memory.Set(s?.Memory.OrDefault?.UsedFraction, motion, now);
+        if ((Shown & CompactMonitorItems.Memory) != 0) moving |= _memory.Set(s?.Memory.OrDefault?.Shown(_free), motion, now);
         if ((Shown & CompactMonitorItems.Gpu) != 0) moving |= _gpu.Set(s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, motion, now);
         if (moving && !_easing.IsEnabled) _easing.Start();
         InvalidateVisual();
@@ -338,7 +340,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Cpu: Gauge(drawing, dial, left, center, item, _cpu.At(now), s?.Cpu.OrDefault?.Usage, color, level, "C", s, ppd); break;
                 case CompactMonitorItems.Memory:
                     var memory = s?.Memory.OrDefault;
-                    Gauge(drawing, dial, left, center, item, _memory.At(now), memory?.UsedFraction, memory is null ? Look.Tertiary : color, level, "M", s, ppd); break;
+                    Gauge(drawing, dial, left, center, item, _memory.At(now), memory?.Shown(_free), memory is null ? Look.Tertiary : color, level, "M", s, ppd); break;
                 case CompactMonitorItems.Gpu: Gauge(drawing, dial, left, center, item, _gpu.At(now), s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, color, level, "G", s, ppd); break;
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, RateFigure(s?.Network.OrDefault?.DownBytesPerSecond), color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, RateFigure(s?.Network.OrDefault?.UpBytesPerSecond), color, level, ppd); break;
@@ -495,7 +497,7 @@ internal sealed class MonitorStrip : FrameworkElement
         bool any = false;
         for (int i = 0; i < _letters.Length; i++)
         {
-            if (_letterUsage[i] && CompactSources.Share(_letters[i], s) is { } share) { any = true; if (share.Level > level) level = share.Level; }
+            if (_letterUsage[i] && CompactSources.Share(_letters[i], s, _free) is { } share) { any = true; if (share.Level > level) level = share.Level; }
             if (_letterHeat[i] && CompactSources.Heat(_letters[i], s) is { } heat) { any = true; if (heat.Level > level) level = heat.Level; }
         }
         double size = Glyph, baseline = Math.Round(center + _font * .36);
@@ -510,7 +512,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(_tags[i], _font, Look.Tertiary, ppd), at, baseline);
                 at += FigureWidth(_tags[i]) + TagGap;
             }
-            var share = _letterUsage[i] ? CompactSources.Share(_letters[i], s) : null;
+            var share = _letterUsage[i] ? CompactSources.Share(_letters[i], s, _free) : null;
             var heat = _letterHeat[i] ? CompactSources.Heat(_letters[i], s) : null;
             Figures(drawing, at, center, item, _letterUsage[i] ? (share?.Share, share?.Level ?? MemoryLevel.Normal) : null, _letterHeat[i], heat, ppd);
             // Each letter keeps the room of the widest figures it can show.
@@ -580,7 +582,8 @@ internal sealed class MonitorStrip : FrameworkElement
             switch (item)
             {
                 case CompactMonitorItems.Cpu when s?.Cpu.OrDefault is { } cpu: parts.Add("CPU " + MonitorFormat.Percent(cpu.Usage) + "%"); break;
-                case CompactMonitorItems.Memory when s?.Memory.OrDefault is { } memory: parts.Add(Loc.T("内存 ", "Memory ") + MonitorFormat.Percent(memory.UsedFraction) + "%"); break;
+                case CompactMonitorItems.Memory when s?.Memory.OrDefault is { } memory: parts.Add(_free ? Loc.T("内存剩余 ", "Memory free ") + MonitorFormat.Percent(memory.FreeFraction) + "%"
+                    : Loc.T("内存 ", "Memory ") + MonitorFormat.Percent(memory.UsedFraction) + "%"); break;
                 case CompactMonitorItems.Gpu when s?.Gpu.OrDefault is { NoReadings: false } gpu:
                     parts.Add(MonitorSpeech.StripGpu(gpu.Usage, (_values & item) != 0 && (_vram & item) != 0 ? CompactFigures.Memory(item, s)?.Share : null)); break;
                 case CompactMonitorItems.Download when s?.Network.OrDefault is { } down: parts.Add(Loc.T("下载 ", "Download ") + MonitorFormat.Rate(down.DownBytesPerSecond).Text); break;

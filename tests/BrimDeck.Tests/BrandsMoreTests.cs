@@ -127,14 +127,14 @@ static class BrandsMoreTests
             return r;
         }
         check("Sony PULSE: both buds in use (levels DD) read 87 % in steps; one bud in the case reads the other (DF/AD the right 87, DF/5F the left 100); closed in the case (link 0) asleep",
-            SonyPulse.Wireless(B0(0x00, 0xDD, 0xFF, 1)) == new BatteryRead(87, Coarse: true)
-            && SonyPulse.Wireless(B0(0x00, 0xDF, 0xAD, 1)) == new BatteryRead(87, Coarse: true)
-            && SonyPulse.Wireless(B0(0x00, 0xDF, 0x5F, 1)) == new BatteryRead(100, Coarse: true)
+            SonyPulse.Wireless(B0(0x00, 0xDD, 0xFF, 1)) == new BatteryRead(87, Accuracy: BatteryAccuracy.Steps)
+            && SonyPulse.Wireless(B0(0x00, 0xDF, 0xAD, 1)) == new BatteryRead(87, Accuracy: BatteryAccuracy.Steps)
+            && SonyPulse.Wireless(B0(0x00, 0xDF, 0x5F, 1)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps)
             && SonyPulse.Wireless(B0(0x00, 0xDE, 0x0F, 0)) == new BatteryRead(null, Asleep: true)
-            && SonyPulse.Wireless(B0(0x00, 0x3D, 0xFF, 1)) == new BatteryRead(20, Coarse: true));
+            && SonyPulse.Wireless(B0(0x00, 0x3D, 0xFF, 1)) == new BatteryRead(20, Accuracy: BatteryAccuracy.Steps));
         check("Sony PULSE: on USB, the buds in the case (0F/1F the left full; BF/3F the right at 73 % charging), none in the case asleep",
-            SonyPulse.Usb(B0(0x01, 0x0F, 0x1F, 0)) == new BatteryRead(100, Coarse: true)
-            && SonyPulse.Usb(B0(0x01, 0xBF, 0x3F, 0)) == new BatteryRead(73, Charging: true, Coarse: true)
+            SonyPulse.Usb(B0(0x01, 0x0F, 0x1F, 0)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps)
+            && SonyPulse.Usb(B0(0x01, 0xBF, 0x3F, 0)) == new BatteryRead(73, Charging: true, Accuracy: BatteryAccuracy.Steps)
             && SonyPulse.Usb(B0(0x01, 0xBF, 0x0F, 0)) == new BatteryRead(null, Asleep: true));
         var elite = B0(0x00, 0xDD, 0xFF, 1); elite[29] = 0x12;
         var other = B0(0x00, 0xDD, 0xFF, 1); other[1] = 0x51;

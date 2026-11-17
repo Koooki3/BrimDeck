@@ -6,9 +6,9 @@ using System.Windows.Media;
 namespace BrimDeck;
 
 // A label followed by its info icon. The label is centered in the height the panel is given, and the icon's center goes on
-// the middle of the label's glyphs. The settings window draws text in Display mode, which snaps the baseline to device
-// pixels, so the glyphs sit at a different height in the label's box at each display scale and a fixed offset cannot
-// follow them: at 150% a 1 DIP nudge measured at another scale left the icon 1.5 pixels low.
+// the middle of the label's glyphs. The glyphs sit at a different height in the label's box at each display scale (more so
+// in Display mode, which snaps the baseline to device pixels), and a fixed offset cannot follow them: at 150% a 1 DIP nudge
+// measured at another scale left the icon 1.5 pixels low. The baseline is measured in the label's own formatting mode.
 internal sealed class HelpHeading : Panel
 {
     // The middle of a capital letter and of an ideograph above the baseline, the same for Segoe UI Variable and

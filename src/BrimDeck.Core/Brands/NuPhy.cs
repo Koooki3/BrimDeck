@@ -1,6 +1,6 @@
 namespace BrimDeck.Core;
 
-// NuPhy 2.4 GHz receivers and NuPhyIO wireless keyboards (VID 0x19F5, dedicated to NuPhy; from drive.nuphy.io and
+// NuPhy 2.4 GHz receivers and NuPhyIO wireless keyboards (VID 0x19F5, which GravaStar's G-COME devices share; from drive.nuphy.io and
 // documented protocol facts): matches any 65-byte configuration collection on 0x0001:0x0000 with report id 0, excluding
 // known wired-only keyboards and all bootloader/upgrader PIDs (0x07xx, 0x1020, 0x6Fxx, 0x8A04, 0xAF0F, 0xFE00) or names.
 // Frame 55 05 00 <sum> 01 <off lo> <off hi> 00 reads 1 byte from the profile function table (profile 1 at 0x0060, profile 0
@@ -60,7 +60,8 @@ public static class NuPhy
         [0xA011] = "NuPhy WH80",
     };
 
-    public static bool IsExcluded(int product, string? name = "") => WiredOnly.Contains(product)
+    // 19F5 is not NuPhy's alone: GravaStar's G-COME devices are on it too (GravaStar.OnGcomeVendor), and are not read here.
+    public static bool IsExcluded(int product, string? name = "") => WiredOnly.Contains(product) || GravaStar.OnGcomeVendor.Contains(product)
         || product is (>= 0x0700 and <= 0x07FF) or 0x1020 or (>= 0x6F00 and <= 0x6FFF) or 0x8A04 or 0xAF0F or 0xFE00
         || (!string.IsNullOrEmpty(name) && (name.Contains("Upgrader", StringComparison.OrdinalIgnoreCase)
             || name.Contains("Boot", StringComparison.OrdinalIgnoreCase)

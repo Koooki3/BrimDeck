@@ -325,8 +325,8 @@ static class BrandsMouseTests
             FinalmouseMice.Percent(4400) == 100 && FinalmouseMice.Percent(4380) == 100 && FinalmouseMice.Percent(3880) == 50 && FinalmouseMice.Percent(3810) == 38
             && FinalmouseMice.Percent(2900) == 0 && FinalmouseMice.Percent(0) is null && FinalmouseMice.Percent(0xFFFF) is null);
         check("Finalmouse: HaloBattery's measured answers 0x1064 (78 %) and 0x10B4 (88 %) read coarse; status 80 % reads; FF, 0 V, another command and report 4 are none",
-            FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x64, 0x10)) == new BatteryRead(78, Coarse: true)
-            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x85, 0x02, 0xB4, 0x10)) == new BatteryRead(88, Coarse: true)
+            FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x64, 0x10)) == new BatteryRead(78, Accuracy: BatteryAccuracy.Voltage)
+            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x85, 0x02, 0xB4, 0x10)) == new BatteryRead(88, Accuracy: BatteryAccuracy.Voltage)
             && FinalmouseMice.Status(Pad(64, 0x05, 0x05, 0x26, 0x03, 0x50, 0x2C, 0x10)) == new BatteryRead(80)
             && FinalmouseMice.Status(Pad(64, 0x05, 0x05, 0x26, 0x03, 0xFF, 0x00, 0x00)) is null && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x00, 0x00)) is null
             && FinalmouseMice.Voltage(Pad(64, 0x05, 0x03, 0x12, 0x01, 0x01)) is null && FinalmouseMice.Voltage(Pad(64, 0x04, 0x02, 0x85, 0x00)) is null
@@ -334,7 +334,7 @@ static class BrandsMouseTests
         check("Finalmouse: a frame whose length does not match its payload, and millivolts outside 2500 to 4600 (4700, 2400), are none",
             FinalmouseMice.Voltage(Pad(64, 0x05, 0x05, 0x05, 0x02, 0x64, 0x10)) is null && FinalmouseMice.Status(Pad(64, 0x05, 0x04, 0x26, 0x03, 0x50, 0x2C, 0x10)) is null
             && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x5C, 0x12)) is null && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x60, 0x09)) is null
-            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0xF8, 0x11)) == new BatteryRead(100, Coarse: true));
+            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0xF8, 0x11)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Voltage));
     }
 
     private static void Incott(Action<string, bool> check)

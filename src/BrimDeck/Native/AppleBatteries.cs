@@ -141,13 +141,13 @@ internal sealed class AppleBatteries(Dispatcher dispatcher, Action<DeviceSource,
         // A single-unit model shows its one level, without parts.
         if (last.Single is { } single)
         {
-            report(DeviceSource.Apple, [target with { Source = DeviceSource.Apple, Percent = single.Percent, Parts = [], Coarse = true, Charging = single.Charging }]);
+            report(DeviceSource.Apple, [target with { Source = DeviceSource.Apple, Percent = single.Percent, Parts = [], Accuracy = BatteryAccuracy.Steps, Charging = single.Charging }]);
             return;
         }
         var buds = last.Parts.Where(part => part.Part != BatteryPart.Case && part.Percent is not null).ToList();
         report(DeviceSource.Apple, [target with
         {
-            Source = DeviceSource.Apple, Percent = buds.Count > 0 ? buds.Min(part => part.Percent) : target.Percent, Parts = last.Parts, Coarse = true,
+            Source = DeviceSource.Apple, Percent = buds.Count > 0 ? buds.Min(part => part.Percent) : target.Percent, Parts = last.Parts, Accuracy = BatteryAccuracy.Steps,
             Charging = buds.Count > 0 && buds.All(part => part.Charging)
         }]);
     }

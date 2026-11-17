@@ -183,12 +183,12 @@ static class BrandsKeyboardTests
         var foundR98Rx = BrandFamilies.Find(r98Rx);
         var foundR98Cab = BrandFamilies.Find(r98Cable);
         check("WOB BE: Rainy75 V2 (3071/3075) and Rainy98 (3091/3098) take wob.be on 257-byte 0xFF60:0x61; bootloaders, RT and wrong sizes are not taken",
-            foundRx is { Family.Brand: "WOBKEY" } rx && Names(foundRx).SequenceEqual(["wob.be"])
+            foundRx is { Family.Brand: "WOBKEY" } rx && Names(foundRx).SequenceEqual(["wob.be", "wob.be-push"])
             && rx.Family.Kind(receiver) == DeviceKind.Keyboard && rx.Family.DisplayName(receiver) == "WOBKEY Rainy75 V2"
             && rx.Family.StandAsideFor.Contains("WOBHub.exe")
             && rx.Ways[0] is { StripZero: true, Gate: { } gate, Gated: not null } && gate.Length == 257 && gate[..5].SequenceEqual(Hex("00 BE 65 04 ED"))
             && foundCable is { Family.Brand: "WOBKEY" } cab && Names(foundCable).SequenceEqual(["wob.be"]) && cab.Ways[0].Gate is null
-            && foundR98Rx is { Family.Brand: "WOBKEY" } r98 && Names(foundR98Rx).SequenceEqual(["wob.be"])
+            && foundR98Rx is { Family.Brand: "WOBKEY" } r98 && Names(foundR98Rx).SequenceEqual(["wob.be", "wob.be-push"])
             && r98.Family.DisplayName(r98Rx) == "WOBKEY Rainy98" && r98.Ways[0].Gate is not null
             && foundR98Cab is { Family.Brand: "WOBKEY" } r98c && r98c.Family.DisplayName(r98Cable) == "WOBKEY Rainy98" && r98c.Ways[0].Gate is null
             && BrandFamilies.Find(receiver with { UsagePage = 0x60FF }) is { Family.Brand: "WOBKEY" }
@@ -196,7 +196,16 @@ static class BrandsKeyboardTests
                 .All(pid => BrandFamilies.Find(receiver with { Product = pid }) is null)
             && BrandFamilies.Find(receiver with { InputLength = 33, OutputLength = 33 }) is null
             && BrandFamilies.Find(Shape(0x36B0, 0x3071, 0x0001, 0x0006, 0, outputIds: [0x00])) is null
-            && BrandFamilies.Find(receiver with { OutputIds = new HashSet<byte> { 0x01 } }) is { Ways.Count: 0 });
+            && BrandFamilies.Find(receiver with { OutputIds = new HashSet<byte> { 0x01 } }) is { } noZero && Names(noZero).SequenceEqual(["wob.be-push"])
+            && BrandFamilies.Find(cable with { OutputIds = new HashSet<byte> { 0x01 } }) is { Ways.Count: 0 });
+        // A user's measurement on a Rainy75 V2 receiver: the query is answered only inside a 2.4 GHz session (BE 93 05 01 ED),
+        // which the read opens before and closes (BE 93 05 00 ED) after; the cable has none. The push needs nothing sent.
+        check("WOB BE: a receiver's read opens the 2.4 GHz session first and closes it after, 300 ms apart; the cable's does not; the push read only listens",
+            foundRx!.Value.Ways[0] is { GapMs: 300 } withSession && withSession.Before.Count == 1 && withSession.Before[0].Length == 257
+            && withSession.Before[0][..6].SequenceEqual(Hex("00 BE 93 05 01 ED")) && withSession.After.Count == 1 && withSession.After[0][..6].SequenceEqual(Hex("00 BE 93 05 00 ED"))
+            && foundRx.Value.Ways[1] is { Transport: WayTransport.Listen, Gate: null, StripZero: true, TimeoutMs: > 5000 and < 6000, Attempts: 1 }
+            && foundCable!.Value.Ways[0].Before.Count == 0 && foundCable.Value.Ways[0].After.Count == 0
+            && BrimDeck.Core.WobRainy.Battery(BrimDeck.Core.WobRainy.BeginWireless()) is null && BrimDeck.Core.WobRainy.Battery(Padded(257, "00 BE BB 06 53 00 ED")) == new BatteryRead(83));
         var request = BrimDeck.Core.WobRainy.Request();
         check("WOB BE: BE BB 04 ED request and BE 65 05 online gate replies",
             request.Length == 257 && request[..5].SequenceEqual(Hex("00 BE BB 04 ED")) && request.Skip(5).All(b => b == 0)

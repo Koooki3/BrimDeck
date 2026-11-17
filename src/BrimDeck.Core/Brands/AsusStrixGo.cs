@@ -27,7 +27,7 @@ public static class AsusStrixGo
         bool charging = cable || r[9] == 0x0A;
         if (r[9] == 0x0A && millivolts < 4100) millivolts -= 160;
         int level = millivolts >= 4096 ? 100 : millivolts >= 3800 ? 75 : millivolts >= 3700 ? 50 : millivolts >= 3500 ? 25 : 10;
-        return new(level, charging, Coarse: true);
+        return new(level, charging, Accuracy: BatteryAccuracy.Voltage);
     };
 
     private static bool Takes(HidShape s) => s.Vendor == Vendor && s.Product is Dongle or Cable && HeadsetPages.Vendor(s) && s.FeatureLength >= 64;

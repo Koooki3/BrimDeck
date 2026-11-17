@@ -286,6 +286,10 @@ internal static class ShelfTests
             settings.ClipboardPage && settings.ClipboardRecord && DeckPages.Order.Contains(DeckPage.Clipboard));
         check("Shelf settings: a settings file that turned recording off keeps it off",
             !System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"ClipboardRecord\":false}")!.ClipboardRecord);
+        check("Shelf settings: a click pastes unless copying only is chosen, also in an older file; the choice is every profile's",
+            !settings.ClipboardClickCopyOnly && !System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{}")!.ClipboardClickCopyOnly
+            && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"ClipboardClickCopyOnly\":true}")!.ClipboardClickCopyOnly
+            && !Profiles.IsProfileKey(nameof(DeckSettings.ClipboardClickCopyOnly)));
         var dragOut = new DeckSettings { TransferDragOut = (TransferDragOut)7 };
         dragOut.Normalize();
         check("Shelf settings: files dragged out are copied unless moving is chosen; an older file copies; an unknown choice copies",

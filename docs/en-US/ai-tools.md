@@ -45,6 +45,8 @@ When a record carries its own amount (Cursor, OpenCode and Command Code, for exa
 
 A price in that list usually comes from the cheapest provider and can differ from the model maker's list price. For example, GLM-5.3 is listed at 0.07 and 1.4 USD per million input and output tokens, while Z.AI charges 1.4 and 4.4. So for each model your records use, BrimDeck looks up the model maker's own endpoint on OpenRouter and uses its prices instead; a model whose maker has no endpoint there keeps the list price. Each model's endpoint prices are looked up once a day and saved on this PC; when a lookup fails, the prices saved before are used. Prices added by hand take precedence.
 
+DeepSeek records (`deepseek-flash`, `deepseek-v4.1-flash`, `deepseek-v4-flash` and `deepseek-v4-pro`, including those through a MaaS gateway) are costed at DeepSeek's own US dollar prices, peak or off-peak by the time of each record: 9:00–12:00 and 14:00–18:00 Beijing time on weekdays are peak hours, and every other hour is off-peak at half the price. Chinese public holidays are not known here, so a holiday on a weekday is costed at the peak price during those hours.
+
 ## Quota rings and off-peak time
 
 Expand an app's row under Settings › Quotas and usage › Apps to set:
