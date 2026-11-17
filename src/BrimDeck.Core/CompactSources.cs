@@ -105,9 +105,11 @@ public static class CompactSources
     // The letter before a volume's figures when the reading shows more than one: "D".
     public static string Tag(string letter) => letter[..1];
 
-    // A volume's share in use and its level, and the temperature of the drive holding it and its level; null while there is none.
-    public static (double Share, MemoryLevel Level)? Share(string letter, MonitorSnapshot? snapshot) =>
-        snapshot is not null && Storage.Find(snapshot.Storage, letter) is { } found ? (found.Volume.UsedFraction, ReadingLevels.OfShare(found.Volume.UsedFraction)) : null;
+    // A volume's share in use (or free, DeckSettings.MonitorShowFree) and its level, which follows the share in use either way, and
+    // the temperature of the drive holding it and its level; null while there is none.
+    public static (double Share, MemoryLevel Level)? Share(string letter, MonitorSnapshot? snapshot, bool free = false) =>
+        snapshot is not null && Storage.Find(snapshot.Storage, letter) is { } found
+            ? (free ? found.Volume.FreeFraction : found.Volume.UsedFraction, ReadingLevels.OfShare(found.Volume.UsedFraction)) : null;
     public static (double Celsius, MemoryLevel Level)? Heat(string letter, MonitorSnapshot? snapshot) =>
         snapshot is not null && Storage.Find(snapshot.Storage, letter)?.Drive.Temperature is { } disk ? (disk.Celsius, Temperatures.OfDisk(disk)) : null;
 

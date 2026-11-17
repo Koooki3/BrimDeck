@@ -179,6 +179,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (scenes.Contains("shelf-notice")) await ShelfNotice();
             // The file transfer's settings, and the word beside the pointer while files are dragged out; for checking.
             if (scenes.Contains("transfer-settings")) { await DragHints(); await SettingsPage("transfer-settings", 14, tips: true); }
+            // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
+            if (scenes.Contains("monitor-free")) { await MonitorFree(); await SettingsPage("monitor-free-settings", 9, 1100, tips: true); }
         }
         finally { Directory.Delete(folder, true); }
     }
@@ -730,6 +732,46 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Settle(); Feed();
         await Save("compact-monitor", scale);
         _settings.NotchMonitor = false; _settings.NotchMusic = true; Refresh();
+        Program.SetProperty(app, "Exiting", false);
+        _settings.Animations = true;
+        await Settle();
+    }
+
+    // As Monitor(), once with memory and the drives showing what is in use and once what is free: the page with room for the drives,
+    // the page so low that memory and the network share a line, and the notch with every reading.
+    private async Task MonitorFree()
+    {
+        const double scale = 2;
+        Program.SetProperty(app, "Exiting", true);
+        _settings.Animations = false;
+        var snapshot = MonitorSample();
+        void Feed() => Program.Call(_deck, "MonitorUpdated", [typeof(MonitorSnapshot)], snapshot);
+        var readings = _settings.CompactReadings;
+        _settings.CompactReadings = CompactMonitor.Readings(CompactMonitorMode.Custom, CompactMonitorItems.Memory | CompactMonitorItems.Storage);
+        _settings.CompactReadings.Single(r => r.Item == CompactMonitorItems.Storage).Sources = ["C:", "D:"];
+        foreach (bool free in new[] { false, true })
+        {
+            string name = free ? "free" : "used";
+            _settings.MonitorShowFree = free;
+            foreach (var (width, height) in new[] { (760.0, 330.0), (560.0, 170.0) })
+            {
+                _settings.MonitorWidth = width; _settings.MonitorHeight = height;
+                SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+                _deck.SetExpanded(true, true);
+                await Settle(); Feed();
+                await Save($"monitor-{name}-{height:0}", scale);
+            }
+            SelectPage(DeckPage.Usage);
+            _settings.NotchMonitor = true; _settings.NotchMusic = false;
+            _deck.SetExpanded(false, true); Refresh();
+            // The drives join the row once their first figures have come (StripAdmission): fed, built again, fed.
+            await Settle(); Feed(); Refresh();
+            await Settle(); Feed();
+            await Save($"compact-monitor-{name}", scale);
+            _settings.NotchMonitor = false; _settings.NotchMusic = true; Refresh();
+        }
+        _settings.MonitorShowFree = false;
+        _settings.CompactReadings = readings;
         Program.SetProperty(app, "Exiting", false);
         _settings.Animations = true;
         await Settle();

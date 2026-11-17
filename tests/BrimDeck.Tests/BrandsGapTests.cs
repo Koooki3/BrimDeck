@@ -151,7 +151,7 @@ static class BrandsGapTests
             && !Hidpp.HeadsetCollection(0x000C, 0x0001, 20, new HashSet<byte> { 0x11 }) && !Hidpp.HeadsetCollection(0xFF00, 0x0002, 20, new HashSet<byte> { 0x11 }));
         check("Logitech G535: register 0x0D asked long, the voltage on its curve and 03 charging; another register is none",
             Hidpp.HeadsetRegisterRequest(0xFF, 0x0D).SequenceEqual(new byte[] { 0x11, 0xFF, 0x05, 0x0D, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 })
-            && Hidpp.G535Battery(Bytes("10 FF 05 0D 10 4F 01"), 0xFF) is { Percent: 100, Charging: false, Coarse: true }
+            && Hidpp.G535Battery(Bytes("10 FF 05 0D 10 4F 01"), 0xFF) is { Percent: 100, Charging: false, Accuracy: BatteryAccuracy.Voltage }
             && Hidpp.G535Battery(Bytes("11 FF 05 0D 0E E9 03 00"), 0xFF) is { Percent: 50, Charging: true }
             && Hidpp.G535Battery(Bytes("10 FF 05 0C 0E E9 01"), 0xFF) is null && Hidpp.G535Battery(Bytes("10 FF 05 0D 00 00 01"), 0xFF) is null
             && Hidpp.G535Battery(Bytes("10 01 05 0D 0E E9 01"), 0xFF) is null);

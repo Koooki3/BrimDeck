@@ -14,7 +14,7 @@ namespace BrimDeck.Core;
 // × 20 (0 to 5) on every model but the Apex 6, where SDL takes it × 10 (0 to 10): SDL_hidapi_flydigi.c (zlib,
 // HandleInfoResponse) decides by the device id (149, 150, 152 are the Apex 6) and HaloBattery's flydigi.py (MIT, checked on
 // a Vader 5 Pro) agrees on × 20 for the rest (OpenFlydigi measured 05 there on an Apex 5 on its dongle). The seven steps
-// (0 to 6) of wutong233/flydigi-battery (MIT) are another channel's, the Space Station service's pipe, not this byte. Coarse
+// (0 to 6) of wutong233/flydigi-battery (MIT) are another channel's, the Space Station service's pipe, not this byte. Steps
 // either way. SDL's acquire command (0x1C) takes the pad over and is never sent; neither is anything else.
 [BrandFamilies]
 public static class Flydigi
@@ -43,7 +43,7 @@ public static class Flydigi
         bool tens = apex6 || Apex6Ids.Contains(r[at + 5]);
         int state = r[at + 11] >> 4, step = r[at + 11] & 0x0F;
         if (state > 2 || step > (tens ? 10 : 5)) return null;
-        return new(state == 2 ? 100 : step * (tens ? 10 : 20), state is 1 or 2, Coarse: true);
+        return new(state == 2 ? 100 : step * (tens ? 10 : 20), state is 1 or 2, Accuracy: BatteryAccuracy.Steps);
     }
 
     // Windows.Gaming.Input's report for a Flydigi pad is the constant remaining = full = 1000 mWh whatever the battery holds

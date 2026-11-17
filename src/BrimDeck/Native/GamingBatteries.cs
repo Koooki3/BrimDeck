@@ -152,7 +152,7 @@ internal sealed class GamingBatteries(Dispatcher dispatcher, Action<DeviceSource
                 if (api.Capabilities(1, slot, 0, out var capabilities) != Success || !XInputBattery.Receiver360Slot(capabilities.ProductId, capabilities.Flags)) continue;
                 if (api.Battery(slot, GamepadBattery, out var information) != Success || XInputBattery.Battery(information.Type, information.Level) is not { } read) continue;
                 yield return new DeviceBattery($"xinput:{hardware}:{slot}", Loc.T("Xbox 360 无线手柄", "Xbox 360 Wireless Controller"), DeviceKind.Controller,
-                    DeviceSource.Gaming, read.Percent) { Charging = read.Charging, Coarse = read.Coarse, Hardware = hardware };
+                    DeviceSource.Gaming, read.Percent) { Charging = read.Charging, Accuracy = read.Accuracy, Hardware = hardware };
             }
         }
     }

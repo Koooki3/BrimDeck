@@ -8,6 +8,7 @@ public sealed record StorageVolume(string Letter, string Label, ulong Total, ulo
 {
     public ulong Used => Total - Math.Min(Free, Total);
     public double UsedFraction => Total > 0 ? Math.Clamp((double)Used / Total, 0, 1) : 0;
+    public double FreeFraction => Total > 0 ? 1 - UsedFraction : 0;
 }
 
 // A physical drive and its lettered volumes, in letter order. Number is the drive's number (\\.\PhysicalDriveN), or -1 for a volume
@@ -32,6 +33,10 @@ public sealed record StorageDisk(string Model, int Bus, bool Removable);
 public sealed record StorageRow(string Label, ulong Total, ulong Used, double? Celsius, MemoryLevel Level, IReadOnlyList<StorageDrive> Drives, bool Others)
 {
     public double UsedFraction => Total > 0 ? Math.Clamp((double)Used / Total, 0, 1) : 0;
+    public ulong Free => Total - Math.Min(Used, Total);
+    // The space shown and its share: in use, or free (DeckSettings.MonitorShowFree).
+    public ulong Shown(bool free) => free ? Free : Used;
+    public double ShownFraction(bool free) => Total > 0 ? free ? 1 - UsedFraction : UsedFraction : 0;
 }
 
 // The drives the system monitor shows: fixed volumes with a letter on internal drives, grouped by physical drive. Removable media

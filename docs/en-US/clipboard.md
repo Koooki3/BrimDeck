@@ -18,7 +18,7 @@ In the grid, the row, the column and on two lines, picture files show a thumbnai
 BrimDeck keeps the text and pictures you copy, newest first.
 
 - **Display**: text shows its first line, with the number of further lines at the end; a link shows its domain and path in two colors, code in a monospaced font, a color value with a swatch, and a picture as a thumbnail with its size.
-- **Click**: pastes the entry into the window you are working in.
+- **Click**: pastes the entry into the window you are working in. With "Click copies only" on under Settings › Clipboard, a click only copies the entry, which moves to the top, and you paste it yourself.
 - **Right-click**: Paste, Paste as plain text, Copy only, Details, Edit (text), Add to category, Add to favorites, Delete.
 - **Details**: the whole panel shows the entry in full, with the app it came from, the time, and its length or size; a link can be opened in the browser.
 - **Drag out**: drag the entry into another app.

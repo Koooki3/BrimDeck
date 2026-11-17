@@ -118,6 +118,7 @@ try
     BrandsMouseTests.Run(Check);
     BrandsGapTests.Run(Check);
     BrandsMoreTests.Run(Check);
+    BrandsZhuaudioGravaStarTests.Run(Check);
     OfficialDriverTests.Run(Check);
     PowerTests.Run(Check);
     DevicesPageTests.Run(Check);
@@ -182,13 +183,36 @@ try
     var priceDirectory = Path.Combine(root, "prices");
     using var pricing = new Pricing(priceDirectory, priceClient, () => priceTime);
     await pricing.RefreshAsync();
-    Check("Live catalog loaded without credentials", pricing.ModelCount == 4 && handler.Calls == 1 && !handler.SawAuthorization);
+    // DeepSeek's own prices are built in beside the catalog's.
+    int builtIn = Pricing.BuiltInModels.Count;
+    Check("Live catalog loaded without credentials", pricing.ModelCount == 4 + builtIn && handler.Calls == 1 && !handler.SawAuthorization);
     await pricing.RefreshAsync();
     Check("Catalog refresh is throttled within 24 hours", handler.Calls == 1);
     Check("Provider-qualified model and Claude version aliases match", pricing.Find("claude-fable-5-1")?.Model == "anthropic/claude-fable-5.1" && pricing.Find("openai/gpt-6-astra") is not null);
+    // DeepSeek's own dollar prices: Wednesday 10:00 Beijing time is peak, 20:00 and a Saturday are off-peak at half the price.
+    var peakEntry = new TokenEntry("dsh:peak", DateTimeOffset.Parse("2026-11-04T02:00:00Z"), "deepseek-flash", 1_000_000, 1_000_000, 0, 0, 1_000_000);
+    Check("DeepSeek Flash takes DeepSeek's own dollar prices at peak hours", pricing.Estimate(peakEntry) == 1.506m);
+    Check("DeepSeek records outside peak hours and on weekends cost half",
+        pricing.Estimate(peakEntry with { Time = DateTimeOffset.Parse("2026-11-04T12:00:00Z") }) == .753m &&
+        pricing.Estimate(peakEntry with { Time = DateTimeOffset.Parse("2026-11-07T02:00:00Z") }) == .753m);
+    Check("A DeepSeek cache write costs the input price, and the retired Flash name costs as Flash",
+        pricing.Estimate(peakEntry with { Input = 0, CacheRead = 0, CacheWrite = 1_000_000, Output = 0 }) == .3m &&
+        pricing.Estimate(peakEntry with { Model = "deepseek-v4-flash" }) == 1.506m);
+    using (var deepSeekHandler = new CatalogHandler("""{"data":[{"id":"deepseek/deepseek-v4-pro","pricing":{"prompt":"0.000002","completion":"0.000004"}}]}"""))
+    using (var deepSeekClient = new HttpClient(deepSeekHandler))
+    using (var deepSeek = new Pricing(Path.Combine(root, "deepseek-prices"), deepSeekClient, () => priceTime))
+    {
+        await deepSeek.RefreshAsync();
+        var pro = peakEntry with { Model = "deepseek-v4-pro", CacheRead = 0 };
+        Check("DeepSeek's bare model ID takes its own price, and the catalog ID keeps the catalog's",
+            deepSeek.Estimate(pro) == 5.28m && deepSeek.Estimate(pro with { Model = "deepseek/deepseek-v4-pro" }) == 6m);
+        Check("A price added by hand for a DeepSeek model replaces its own peak and off-peak prices",
+            deepSeek.TrySetManual("deepseek-v4-pro", new(.000001m, .000001m, 0, 0, 0), true, out _) &&
+            deepSeek.Estimate(pro) == 2m && deepSeek.Estimate(pro with { Time = DateTimeOffset.Parse("2026-11-04T12:00:00Z") }) == 2m);
+    }
     using (var cached = new Pricing(priceDirectory, priceClient, () => priceTime))
     {
-        Check("Downloaded catalog survives restart", cached.ModelCount == 4 && cached.UpdatedAt == pricing.UpdatedAt);
+        Check("Downloaded catalog survives restart", cached.ModelCount == 4 + builtIn && cached.UpdatedAt == pricing.UpdatedAt);
         await cached.RefreshAsync();
         Check("Restart with a fresh cache sends no request", handler.Calls == 1);
     }
@@ -815,10 +839,10 @@ try
     priceTime = priceTime.AddSeconds(1);
     await pricing.RefreshAsync();
     Check("Price changes update without a new build", handler.Calls == 2 && pricing.Find("claude-sonnet-4-5")?.Prices.Input == .000004m);
-    Check("New remote models require no local list update", pricing.ModelCount == 5 && pricing.Find("new-catalog-model") is not null);
+    Check("New remote models require no local list update", pricing.ModelCount == 5 + builtIn && pricing.Find("new-catalog-model") is not null);
     handler.Fail = true;
     await pricing.RefreshAsync(true);
-    Check("Network failure keeps last successful catalog", pricing.ModelCount == 5 && pricing.LastError is not null && pricing.Find("claude-sonnet-4-5")?.Prices.Input == .000004m);
+    Check("Network failure keeps last successful catalog", pricing.ModelCount == 5 + builtIn && pricing.LastError is not null && pricing.Find("claude-sonnet-4-5")?.Prices.Input == .000004m);
     await pricing.RefreshAsync();
     Check("Network failure does not trigger an immediate catalog retry", handler.Calls == 3);
     priceTime = priceTime.AddMinutes(6); handler.Fail = false;
@@ -830,11 +854,12 @@ try
     var cacheBefore = File.ReadAllText(Path.Combine(priceDirectory, "model-prices.json"));
     handler.Json = "{\"data\":[]}";
     await pricing.RefreshAsync(true);
-    Check("Empty remote response cannot erase valid prices", pricing.ModelCount == 5 && File.ReadAllText(Path.Combine(priceDirectory, "model-prices.json")) == cacheBefore);
+    Check("Empty remote response cannot erase valid prices", pricing.ModelCount == 5 + builtIn && File.ReadAllText(Path.Combine(priceDirectory, "model-prices.json")) == cacheBefore);
     using (var missing = new Pricing(Path.Combine(root, "no-cache"), priceClient, () => priceTime))
     {
         await missing.RefreshAsync();
-        Check("Offline first start has no invented prices", missing.ModelCount == 0 && missing.Estimate(entry) is null && missing.LastError is not null);
+        Check("Offline first start has only DeepSeek's built-in prices", missing.ModelCount == builtIn && missing.Estimate(entry) is null &&
+            missing.Estimate(peakEntry) == 1.506m && missing.LastError is not null);
         Check("Reported costs do not depend on catalog availability", missing.Estimate(eventItem!) == .0345131m);
     }
 

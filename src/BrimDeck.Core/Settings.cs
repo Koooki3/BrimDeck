@@ -645,6 +645,8 @@ public sealed class DeckSettings
     public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
     public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
     public bool ClipboardRecord { get; set; } = true;
+    // On, a click on a clipboard entry only puts it on the clipboard, as "只复制，不粘贴" in its menu does; off, it pastes it.
+    public bool ClipboardClickCopyOnly { get; set; }
     public bool WeTypeClipboardSync { get; set; }
     public bool DoubaoClipboardSync { get; set; }
     public bool LanClipboardSync { get; set; }
@@ -691,6 +693,9 @@ public sealed class DeckSettings
     public int MonitorInterval { get; set; } = 1;
     // The span the traffic shown beside the network's rates is summed over, from Windows' own record (TrafficPeriods).
     public TrafficPeriod MonitorTrafficPeriod { get; set; } = TrafficPeriod.Today;
+    // Memory and the drives show what is free in place of what is in use, collapsed and expanded alike: the figures, the dials and
+    // the bars. Their color still follows the share in use (ReadingLevels), so little room left shows as a warning.
+    public bool MonitorShowFree { get; set; }
     public bool MonitorProcesses { get; set; } = true;
     public ProcessSort MonitorSort { get; set; }
     public MonitorMain MonitorMain { get; set; }

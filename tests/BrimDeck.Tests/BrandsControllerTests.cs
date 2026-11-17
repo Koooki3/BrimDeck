@@ -63,12 +63,12 @@ static class BrandsControllerTests
         var apex5Way = apex5!.Value.Ways[0];
         var apex6Way = BrandFamilies.Find(Shape(0x37D7, 0x2502, 0xFFA0, 1, input: 33, outputIds: [0x00]))!.Value.Ways[0];
         check("Flydigi: the battery byte, × 20 on battery and charging, full when charged, coarse",
-            apex5Way.Parse(Info(0x03)) == new BatteryRead(60, Coarse: true) && apex5Way.Parse(Info(0x12, id: 0x00)) == new BatteryRead(40, true, Coarse: true)
-            && apex5Way.Parse(Info(0x20, id: 0x04)) == new BatteryRead(100, true, Coarse: true)
-            && apex5Way.Parse(Info(0x05)[1..]) == new BatteryRead(100, Coarse: true));
+            apex5Way.Parse(Info(0x03)) == new BatteryRead(60, Accuracy: BatteryAccuracy.Steps) && apex5Way.Parse(Info(0x12, id: 0x00)) == new BatteryRead(40, true, Accuracy: BatteryAccuracy.Steps)
+            && apex5Way.Parse(Info(0x20, id: 0x04)) == new BatteryRead(100, true, Accuracy: BatteryAccuracy.Steps)
+            && apex5Way.Parse(Info(0x05)[1..]) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps));
         check("Flydigi: the Apex 6 (by its product or its device id 149, 150, 152) counts its step × 10",
-            apex6Way.Parse(Info(0x07, 149, 0x00)) == new BatteryRead(70, Coarse: true) && apex5Way.Parse(Info(0x07, 150)) == new BatteryRead(70, Coarse: true)
-            && apex6Way.Parse(Info(0x0A, 0x01, 0x00)) == new BatteryRead(100, Coarse: true) && apex5Way.Parse(Info(0x06)) is null);
+            apex6Way.Parse(Info(0x07, 149, 0x00)) == new BatteryRead(70, Accuracy: BatteryAccuracy.Steps) && apex5Way.Parse(Info(0x07, 150)) == new BatteryRead(70, Accuracy: BatteryAccuracy.Steps)
+            && apex6Way.Parse(Info(0x0A, 0x01, 0x00)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps) && apex5Way.Parse(Info(0x06)) is null);
         check("Flydigi: out of range, the request read back, the pad's input stream and zeros are none",
             apex5Way.Parse(Info(0x30)) is null && apex5Way.Parse(Info(0xFF)) is null
             && apex5Way.Parse(BrandFamilies.Frame(33, 0x03, 0x5A, 0xA5, 0x01, 0x02, 0x00)) is null
@@ -178,8 +178,8 @@ static class BrandsControllerTests
             XInputBattery.Receiver360Slot(0, 0x0002) && XInputBattery.Receiver360Slot(0, 0x000F) && !XInputBattery.Receiver360Slot(0, 0x0000)
             && !XInputBattery.Receiver360Slot(0x0B13, 0x0002));
         check("XInput: four levels as SDL takes them, coarse; wired is charging without a level; no level for unknown or out of range; nothing for an empty slot",
-            XInputBattery.Battery(0x02, 0) == new BatteryRead(10, Coarse: true) && XInputBattery.Battery(0x03, 1) == new BatteryRead(40, Coarse: true)
-            && XInputBattery.Battery(0x03, 2) == new BatteryRead(70, Coarse: true) && XInputBattery.Battery(0x02, 3) == new BatteryRead(100, Coarse: true)
+            XInputBattery.Battery(0x02, 0) == new BatteryRead(10, Accuracy: BatteryAccuracy.Steps) && XInputBattery.Battery(0x03, 1) == new BatteryRead(40, Accuracy: BatteryAccuracy.Steps)
+            && XInputBattery.Battery(0x03, 2) == new BatteryRead(70, Accuracy: BatteryAccuracy.Steps) && XInputBattery.Battery(0x02, 3) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps)
             && XInputBattery.Battery(0x01, 3) == new BatteryRead(null, Charging: true) && XInputBattery.Battery(0x01, 0) == new BatteryRead(null, Charging: true)
             && XInputBattery.Battery(0xFF, 1) == new BatteryRead(null)
             && XInputBattery.Battery(0x03, 4) == new BatteryRead(null) && XInputBattery.Battery(0x00, 3) is null);

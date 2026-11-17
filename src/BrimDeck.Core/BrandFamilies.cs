@@ -8,7 +8,8 @@ public readonly record struct HidShape(int Vendor, int Product, int UsagePage, i
 {
     public bool Declares(BrandWay way) => way.Transport switch
     {
-        WayTransport.Output or WayTransport.OutputListen or WayTransport.OutputGetInput => OutputIds.Contains(way.Request.Length > 0 ? way.Request[0] : (byte)0),
+        WayTransport.Output or WayTransport.OutputListen or WayTransport.OutputGetInput or WayTransport.Converse
+            => OutputIds.Contains(way.Request.Length > 0 ? way.Request[0] : (byte)0),
         WayTransport.Feature or WayTransport.FeatureListen or WayTransport.FeatureGet => FeatureIds.Contains(way.Request.Length > 0 ? way.Request[0] : (byte)0),
         WayTransport.Listen => InputLength > 0,
         _ => false
@@ -24,7 +25,20 @@ public readonly record struct HidShape(int Vendor, int Product, int UsagePage, i
 // - OutputGetInput: an output report is written, then input report ReplyId is fetched (HidD_GetInputReport) every GapMs
 //   until it parses or TimeoutMs passes; the report as it was before the request (a stale answer) is never taken.
 // - FeatureGet: nothing is written; feature report Request[0] is fetched (FeatureLength bytes) and parsed.
-public enum WayTransport { Output, Feature, FeatureListen, OutputListen, Listen, OutputGetInput, FeatureGet }
+// - Converse: the read talks to the collection itself (BrandWay.Converse), frame by frame, for a transport that needs more than
+//   one question and its answer (a receiver that splits a request into acknowledged frames). Request is its first frame's
+//   report id and nothing more is sent from it; Parse is not used.
+public enum WayTransport { Output, Feature, FeatureListen, OutputListen, Listen, OutputGetInput, FeatureGet, Converse }
+
+// A collection as a Converse read sees it: output reports written (report id first, padded to the collection's length) and
+// input reports read (report id first, null when none came in the time). Key names the collection for the whole run (its
+// path), for a transport that keeps state from one read to the next.
+public interface IHidExchange
+{
+    string Key { get; }
+    void Write(byte[] report);
+    byte[]? Read(int timeoutMs);
+}
 
 // One of a brand's battery reads. Name: stable across versions (kept in device-reads.json), "brand.read". Before: frames sent
 // first the same way (a session or mode a read needs), After: frames that undo them, sent whatever the answer. Attempts: how
@@ -55,6 +69,8 @@ public sealed record BrandWay(string Name, WayTransport Transport, byte[] Reques
     // as read. Not for Listen (nothing is sent).
     public byte[]? Then { get; init; }
     public Func<byte[], bool?>? Charging { get; init; }
+    // WayTransport.Converse: the whole exchange, its reading or null. It must keep to its own time limit.
+    public Func<IHidExchange, BatteryRead?>? Converse { get; init; }
 
     // The level with the charging question's answer.
     public static BatteryRead WithCharging(BatteryRead level, bool? charging) => charging is true ? level with { Charging = true } : level;

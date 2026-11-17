@@ -51,7 +51,7 @@ public static class SteelSeriesHeadsets
         Exchange.Arctis1 => r => r.Length < 4 || r[0] != 0x06 || r[1] != 0x12 ? null
             : r[2] == 0x01 ? new(null, Asleep: true) : r[3] is > 0 and <= 100 ? new(r[3]) : null,
         Exchange.Arctis7Plus => r => r.Length < 4 || r[0] != 0xB0 ? null
-            : r[1] == 0x01 ? new(null, Asleep: true) : r[2] is > 0 and <= 4 ? new(r[2] * 25, r[3] == 0x01, Coarse: true) : null,
+            : r[1] == 0x01 ? new(null, Asleep: true) : r[2] is > 0 and <= 4 ? new(r[2] * 25, r[3] == 0x01, Accuracy: BatteryAccuracy.Steps) : null,
         Exchange.Nova5 => r => r.Length < 5 || r[0] != 0xB0 ? null
             : r[1] == 0x02 ? new(null, Asleep: true) : r[3] is > 0 and <= 100 ? new(r[3], r[4] == 0x01) : null,
         Exchange.GameBuds => GameBudsBattery,

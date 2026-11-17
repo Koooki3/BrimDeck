@@ -68,7 +68,7 @@ public static class RazerHeadsets
         int millivolts = r[12] << 8 | r[13];
         if (millivolts == 0) return new(null, Asleep: true);
         if (r[11] == 0x09) return new(null, Charging: true);
-        return r[14] is > 0 and <= 100 ? new(r[14], Coarse: true) : null;
+        return r[14] is > 0 and <= 100 ? new(r[14], Accuracy: BatteryAccuracy.Steps) : null;
     }
     // The receiver's stale copy: no new answer from the headset.
     public static bool StatusStale(byte[] r) => r.Length >= 15 && r.AsSpan(0, StalePrefix.Length).SequenceEqual(StalePrefix);

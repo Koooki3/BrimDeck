@@ -43,10 +43,14 @@ namespace BrimDeck.Core;
 //   cable rule, the 3554:FA09 frames), vigil-watt (MIT: Rapoo's collection, the 3554:FA09 model codes), Klegus/mchose-macos
 //   and NaoCoding/ShowMeTheConnection (MIT), G-Helper (GPL, facts only) and wzk112/MchoseHub (no license, ids only).
 
-// One battery reading from a protocol: the percentage (null: the device answered without one), whether it charges, whether
-// the level is coarse (a voltage, or a few steps), and whether the mouse is asleep / not answering (Asleep): the last percent
-// still stands; never invent 0 % for that case.
-public readonly record struct BatteryRead(int? Percent, bool Charging = false, bool Coarse = false, bool Asleep = false);
+// How a percentage was come by: the device's own figure (Exact), a level the device reports in a few steps (Steps), or the
+// battery's voltage put through a discharge curve (Voltage).
+public enum BatteryAccuracy { Exact, Steps, Voltage }
+
+// One battery reading from a protocol: the percentage (null: the device answered without one), whether it charges, how the
+// level was come by, and whether the mouse is asleep / not answering (Asleep): the last percent still stands; never invent
+// 0 % for that case.
+public readonly record struct BatteryRead(int? Percent, bool Charging = false, BatteryAccuracy Accuracy = BatteryAccuracy.Exact, bool Asleep = false);
 
 // Windows reports some vendor pages with their two bytes swapped (a descriptor's 0xFF00 read back as 0x00FF), so a page a
 // source gives without saying it was read on Windows is taken in either order. Vendor: any vendor-defined page (0xFF00 and
@@ -100,7 +104,7 @@ public static class Hidpp
                 percent = (int)Math.Round(lowPercent + (highPercent - lowPercent) * (millivolts - low) / (double)(high - low));
                 break;
             }
-        return new(percent, r[6] == 0x03, Coarse: true);
+        return new(percent, r[6] == 0x03, Accuracy: BatteryAccuracy.Voltage);
     }
 
     // A receiver (Unifying, Bolt, Lightspeed, Nano) holds devices 1 to 6; a device on a cable or its own dongle is 0xFF.
@@ -152,14 +156,14 @@ public static class Hidpp
         int soc = status[0], bits = status[1], state = status[2];
         bool steps = capabilities is { Length: > 1 } && (capabilities[1] & 0x02) == 0;
         if (steps) soc = (bits & 8) != 0 ? 100 : (bits & 4) != 0 ? 50 : (bits & 2) != 0 ? 20 : 5;
-        return new(Devices.Clamp(soc), state is >= 1 and <= 3, steps);
+        return new(Devices.Clamp(soc), state is >= 1 and <= 3, steps ? BatteryAccuracy.Steps : BatteryAccuracy.Exact);
     }
 
     // 0x1000 function 0: the level (0 is no reading), and the status, 1 to 4 charging; 3 full.
     public static BatteryRead Status(byte[] reply) => new(reply[2] == 3 ? 100 : reply[0] > 0 ? Devices.Clamp(reply[0]) : null, reply[2] is >= 1 and <= 4);
 
     // 0x1001 function 0: millivolts big endian, and bit 7 of the flags for external power.
-    public static BatteryRead Voltage(byte[] reply) => new(VoltageToPercent((reply[0] << 8) | reply[1]), (reply[2] & 0x80) != 0, Coarse: true);
+    public static BatteryRead Voltage(byte[] reply) => new(VoltageToPercent((reply[0] << 8) | reply[1]), (reply[2] & 0x80) != 0, Accuracy: BatteryAccuracy.Voltage);
 
     // 0x1F20 (the G headsets) function 0: millivolts big endian and flags, as Solaar reads them: bit 0x01 the measurement is
     // valid (without it the headset is off, which is no reading, not an empty battery), 0x02 charging, 0x07 full. The level
@@ -169,7 +173,7 @@ public static class Hidpp
     {
         int millivolts = (reply[0] << 8) | reply[1], flags = reply[2];
         if ((flags & 0x01) == 0) return null;
-        return new(flags == 0x07 ? 100 : VoltageToPercent(millivolts), (flags & 0x02) != 0, Coarse: true);
+        return new(flags == 0x07 ? 100 : VoltageToPercent(millivolts), (flags & 0x02) != 0, Accuracy: BatteryAccuracy.Voltage);
     }
 
     // HID++ 1.0 register 0x0D (battery mileage): the percentage, and the top two bits of byte 2, 1 charging and 2 full.
@@ -197,7 +201,7 @@ public static class Hidpp
     public static BatteryRead Level(byte[] reply)
     {
         int percent = reply[0] switch { 1 => 5, 2 => 10, 3 => 20, 4 => 35, 5 => 50, 6 => 75, 7 => 100, _ => 0 };
-        return new(reply[1] is 0x22 or 0x26 ? 100 : percent > 0 ? percent : null, reply[1] is 0x21 or 0x22 or 0x24 or 0x25 or 0x26, Coarse: true);
+        return new(reply[1] is 0x22 or 0x26 ? 100 : percent > 0 ? percent : null, reply[1] is 0x21 or 0x22 or 0x24 or 0x25 or 0x26, Accuracy: BatteryAccuracy.Steps);
     }
 
     // 0x0005 function 2: the kind of device.
@@ -427,7 +431,7 @@ public static class Dongles
     // VAXEE's 3057 ids too and asks this same feature report on 0xFF05 (bbb.pulsar.gg). Not measured by us.
     public static readonly int[] PulsarVaxeeProducts = [0x9604, 0x5602, 0x9605];
     public static byte[] VaxeeRequest(int length) { var frame = new byte[Math.Max(5, length)]; frame[0] = 0x0E; frame[1] = 0xA5; frame[2] = 0x0B; frame[3] = 0x01; frame[4] = 0x01; return frame; }
-    public static BatteryRead? VaxeeBattery(byte[] reply) => reply.Length >= 6 && reply[0] == 0x0E && reply[5] <= 20 ? new(reply[5] * 5, Coarse: true) : null;
+    public static BatteryRead? VaxeeBattery(byte[] reply) => reply.Length >= 6 && reply[0] == 0x0E && reply[5] <= 20 ? new(reply[5] * 5, Accuracy: BatteryAccuracy.Steps) : null;
 
     // Nordic's own receivers (VID 0x1915, usage page 0xFFA0, feature 0x05, 32 bytes): 05 15 00 00 01, then the reply read back
     // ~90 ms later: the percentage at 9, charging at 10, full at 11, the mouse online at 12. 0x1915 is the chip maker's id, which
@@ -550,6 +554,10 @@ public static class Dongles
         (0x3554, 0xF545), (0x3554, 0xF566), (0x3554, 0xF546), (0x3554, 0xFB26), (0x3554, 0xFB23), (0x3554, 0xFB25), (0x260D, 0x1108),
         (0x260D, 0x1114), (0x260D, 0x1115), (0x260D, 0x1135), (0x260D, 0x1156), (0x260D, 0x1163), (0x260D, 0x1219), (0x260D, 0x1227),
         (0x260D, 0x1238), (0x260D, 0x1246), (0x260D, 0x1257), (0x260D, 0x1258), (0x260D, 0x1261), (0x260D, 0x1288), (0x260D, 0x1333),
+        // GravaStar (重力星球): GS HUB (support.gravastar.com) opens its Mercury mice on 0xFF02 / 2 with report 8 and this frame,
+        // and sends M1, M2, X, X Air and X Pro to Compx's Control HUB (controlhub.top/gravastar), whose cfg.json lists receivers
+        // F54B, F575, F548, F577 and cables F576, F549 (F577 is the one GS HUB names no model for; the X Air's, unconfirmed).
+        (0x3554, 0xF54B), (0x3554, 0xF575), (0x3554, 0xF548), (0x3554, 0xF577), (0x3554, 0xF576), (0x3554, 0xF549),
     ];
     private static readonly HashSet<(int, int)> CompxOfficialSet = [.. CompxOfficial];
     public static bool IsCompxOfficial(int vendor, int product) => CompxOfficialSet.Contains((vendor, product));
@@ -1444,7 +1452,7 @@ public static class Asus
         }
         return model.Family switch
         {
-            Family.Mouse when model.Steps => raw <= 4 ? new BatteryRead(raw * 25, r[10] != 0, Coarse: true) : Refused,
+            Family.Mouse when model.Steps => raw <= 4 ? new BatteryRead(raw * 25, r[10] != 0, Accuracy: BatteryAccuracy.Steps) : Refused,
             Family.Mouse => raw <= 100 ? new BatteryRead(raw, r[10] != 0) : Refused,
             Family.Keyboard => raw <= 100 ? new BatteryRead(raw, r[9] == 1) : Refused,
             _ => raw <= 100 ? new BatteryRead(raw) : Refused
@@ -1549,7 +1557,7 @@ public static class SteelSeriesMice
         int value = r[m + 1] & 0x7F;
         if (value == 0) return new(null, Asleep: true);
         bool charging = (r[m + 1] & 0x80) != 0;
-        return value > 21 ? new(Math.Min(value, 100), charging) : new((value - 1) * 5, charging, Coarse: true);
+        return value > 21 ? new(Math.Min(value, 100), charging) : new((value - 1) * 5, charging, Accuracy: BatteryAccuracy.Steps);
     }
 }
 
@@ -1629,7 +1637,7 @@ public static class Pushes
         {
             case Kind.Beken when r.Length >= 5 && r[0] == 0x03 && r[2] == 0x40:
                 int level = r[1] == 0x85 && r[4] is > 0 and <= 10 ? r[4] * 10 : r[4];
-                return level <= 100 ? new(level, r[3] is 0x02 or 0x03 or 0x80, Coarse: r[1] == 0x85) : null;
+                return level <= 100 ? new(level, r[3] is 0x02 or 0x03 or 0x80, Accuracy: r[1] == 0x85 ? BatteryAccuracy.Steps : BatteryAccuracy.Exact) : null;
             case Kind.Delux when r.Length >= 5 && r[0] == 0x03 && r[1] == 0x30 && r[2] == 0x40 && r[4] <= 100:
                 return new(r[3] == 0x02 ? 100 : r[4], r[3] == 0x03);
             case Kind.InphicZhen when r.Length >= 5 && r[0] == 0x03 && r[1] == 0x76 && r[2] == 0x41 && r[4] <= 100:
@@ -1652,8 +1660,8 @@ public static class Pushes
                 return last is { } heard ? heard with { Asleep = r[1] == 0 } : null;
             case Kind.Pulse3D when r.Length >= 5 && r[0] == 0xB0:
                 if ((r[4] & 0x08) == 0) return (last ?? new(null)) with { Charging = false, Asleep = true };
-                if (r[3] == 0x80) return (last ?? new(null, Coarse: true)) with { Charging = true, Asleep = false };
-                return r[3] <= 100 ? new(r[3], Coarse: true) : null;
+                if (r[3] == 0x80) return (last ?? new(null, Accuracy: BatteryAccuracy.Steps)) with { Charging = true, Asleep = false };
+                return r[3] <= 100 ? new(r[3], Accuracy: BatteryAccuracy.Steps) : null;
             case Kind.CloudFlight2 when r.Length >= 4 && r[0] == 0xFB && r[1] == 0x13 && r[2] == 0x00 && r[3] <= 100:
                 return (last ?? new(null)) with { Percent = r[3], Asleep = false };
             case Kind.CloudFlight2 when r.Length >= 3 && r[0] == 0xFB && r[1] == 0x09 && r[2] is 0 or 1:
@@ -1870,13 +1878,13 @@ public static class Headsets
         Kind.Arctis7 when r.Length >= 3 && r[0] == 0x06 && r[2] <= 100 => new(r[2]),
         Kind.Arctis9 when r.Length >= 5 && r[3] is >= 0x64 and <= 0x9A => new(Devices.Clamp((int)Math.Round((r[3] - 0x64) * 100.0 / (0x9A - 0x64))), r[4] == 0x01),
         Kind.Nova7Percent when r.Length >= 4 && r[3] != 0 && r[2] <= 100 => new(r[2], r[3] is 0x01 or 0x02),
-        Kind.Nova7Steps when r.Length >= 4 && r[3] != 0 && r[2] <= 4 => new(r[2] * 25, r[3] is 0x01 or 0x02, Coarse: true),
-        Kind.NovaPro when r.Length >= 16 && r[0] == 0x06 && r[15] != 0x01 && r[6] <= 8 => new((int)Math.Round(r[6] * 12.5), r[15] == 0x02, Coarse: true),
+        Kind.Nova7Steps when r.Length >= 4 && r[3] != 0 && r[2] <= 4 => new(r[2] * 25, r[3] is 0x01 or 0x02, Accuracy: BatteryAccuracy.Steps),
+        Kind.NovaPro when r.Length >= 16 && r[0] == 0x06 && r[15] != 0x01 && r[6] <= 8 => new((int)Math.Round(r[6] * 12.5), r[15] == 0x02, Accuracy: BatteryAccuracy.Steps),
         Kind.CloudAlpha when r.Length >= 4 && r[0] == 0x21 && r[1] == 0xBB && r[2] == 0x0B && r[3] <= 100 => new(r[3]),
         Kind.CloudII when r.Length >= 8 && r[0] == 0x06 && r[1] == 0xFF && r[2] == 0xBB && r[3] == 0x02 && r[7] <= 100 => new(r[7]),
         // Millivolts; above 4107 the headset is on its cable. The level is a line between 3648 and 3975 mV.
         Kind.CloudFlight when r.Length >= 5 && r[0] == 0x21 && r[1] == 0xFF && r[2] == 0x05 && ((r[3] << 8) | r[4]) is var mv && mv > 3000
-            => new(mv > 4107 ? null : Devices.Clamp((int)Math.Round((mv - 3648) * 100.0 / (3975 - 3648))), mv > 4107, Coarse: true),
+            => new(mv > 4107 ? null : Devices.Clamp((int)Math.Round((mv - 3648) * 100.0 / (3975 - 3648))), mv > 4107, Accuracy: BatteryAccuracy.Voltage),
         // 66 89 (or its response id 0D): the percent at 4, unless 2 and 3 are both 0 (no reading yet).
         Kind.CloudIII when r.Length >= 5 && r[0] == 0x66 && r[1] is 0x89 or 0x0D && (r[2] != 0 || r[3] != 0) && r[4] <= 100 => new(r[4]),
         // 0C .. .. .. .. 06 <percent> (0xFF: no value), or the headset's own notice 0D with 1 at 4 and the percent at 5.
@@ -2007,7 +2015,7 @@ public static class AppleAdvert
 
     // A single-unit model's one level, and charging (bit 0x01); null for earbuds, another advertisement, or no reading.
     public static BatteryRead? Single(byte[] data)
-        => IsProximity(data) && IsSingle(data) && Level(data[6] & 0x0F) is { } level ? new(level, (data[7] & 0x10) != 0, Coarse: true) : null;
+        => IsProximity(data) && IsSingle(data) && Level(data[6] & 0x0F) is { } level ? new(level, (data[7] & 0x10) != 0, Accuracy: BatteryAccuracy.Steps) : null;
 
     // The parts' levels: left, right and the case; empty for a single-unit model (Single), null when this is not a proximity
     // pairing advertisement.

@@ -4,6 +4,12 @@ namespace BrimDeck.Core;
 // 1. 0xBE .. 0xED 257-byte protocol (wob.be): Rainy75 V2 (3071 rx / 3075 cable) and Rainy98 (3091 rx / 3098 cable) on
 //    0xFF60:0x0061. Bootloaders (3070, 3078, 3079, 3090, 3099), wired RT models (343F, 352F..3531), Rainy S1 (3151:5043)
 //    and GL68 (1CA6:3Dxx) are excluded; Rainy75 V1 (320F:5088) stays with Dongles.Vgn. Never send firmware-entry BE FC.
+//    A receiver drops the battery query BE BB 04 ED unless a 2.4 GHz session is open: WOBHub sends BE 93 05 01 ED
+//    (beginWireless, echoed) before readBattery and BE 93 05 00 ED (endWireless) after, and so does this read, 300 ms
+//    apart as a user's measurement on a Rainy75 V2 receiver (36B0:3071, 2026-11-17: no answer in 4 s without the session,
+//    2 to 9 ms with it; the session lapses within 15 s) waited. The receiver also pushes BE BB 06 <level> <state> ED every
+//    5 s with or without a session (the same measurement), which a second read only listens for. State 0 on battery, 1 full,
+//    2 charging.
 // 2. 0xAA RDR / Zen65 protocol (wob.rdr): PMO Aurora80 (3004), PMO Wave75 (3009), WOBKEY Zen 65 (3025), and the shared
 //    36B0:3002 2.4 GHz receiver (when not named URX, so Urx keeps URX Core75 Wireless untouched). Uses read-only session
 //    wrappers CMD_START_COMM (0x10) / CMD_STOP_COMM (0x11) around CMD_GET_BATTERY_STATUS (0x30) and CMD_GET_DONGLE (0xD0).
@@ -29,6 +35,8 @@ public static class WobRainy
 
     public static byte[] OnlineRequest() => BrandFamilies.Frame(257, 0x00, 0xBE, 0x65, 0x04, 0xED);
     public static byte[] Request() => BrandFamilies.Frame(257, 0x00, 0xBE, 0xBB, 0x04, 0xED);
+    public static byte[] BeginWireless() => BrandFamilies.Frame(257, 0x00, 0xBE, 0x93, 0x05, 0x01, 0xED);
+    public static byte[] EndWireless() => BrandFamilies.Frame(257, 0x00, 0xBE, 0x93, 0x05, 0x00, 0xED);
 
     public static bool? Online(byte[] r)
     {
@@ -86,15 +94,18 @@ public static class WobRainy
 
     public static IEnumerable<BrandFamily> Families =>
     [
-        new("WOBKEY", Takes, shape =>
+        new("WOBKEY", Takes, shape => BeModels[shape.Product].Receiver
+            ?
             [
                 new BrandWay("wob.be", WayTransport.Output, Request(), Battery)
                 {
-                    TimeoutMs = 1000, Attempts = 2, StripZero = true,
-                    Gate = BeModels[shape.Product].Receiver ? OnlineRequest() : null,
-                    Gated = BeModels[shape.Product].Receiver ? Online : null,
-                }
-            ])
+                    TimeoutMs = 1000, Attempts = 2, GapMs = 300, StripZero = true,
+                    Before = [BeginWireless()], After = [EndWireless()],
+                    Gate = OnlineRequest(), Gated = Online,
+                },
+                new BrandWay("wob.be-push", WayTransport.Listen, [], Battery) { TimeoutMs = 5500, Attempts = 1, StripZero = true },
+            ]
+            : [new BrandWay("wob.be", WayTransport.Output, Request(), Battery) { TimeoutMs = 1000, Attempts = 2, StripZero = true }])
         {
             Kind = _ => DeviceKind.Keyboard,
             Prefix = "wob",

@@ -101,6 +101,11 @@ public sealed record MemorySample(ulong Total, ulong Used, ulong CommitUsed, ulo
     public const double ElevatedUsed = ReadingLevels.ElevatedShare, ElevatedCommit = .8, CriticalUsed = ReadingLevels.CriticalShare, CriticalCommit = .9;
     public double CachedFraction => Total > 0 ? Math.Clamp((double)Math.Min(Cached, Total - Math.Min(Used, Total)) / Total, 0, 1) : 0;
     public double UsedFraction => Total > 0 ? Math.Clamp((double)Used / Total, 0, 1) : 0;
+    // The memory available to apps, the file cache with it, as Task Manager's "available".
+    public ulong Free => Total - Math.Min(Used, Total);
+    public double FreeFraction => Total > 0 ? 1 - UsedFraction : 0;
+    // The share shown: in use, or free (DeckSettings.MonitorShowFree).
+    public double Shown(bool free) => free ? FreeFraction : UsedFraction;
     public double CommitFraction => CommitLimit > 0 ? Math.Clamp((double)CommitUsed / CommitLimit, 0, 1) : 0;
     public MemoryLevel Level => UsedFraction >= CriticalUsed || CommitFraction >= CriticalCommit ? MemoryLevel.Critical
         : UsedFraction >= ElevatedUsed || CommitFraction >= ElevatedCommit ? MemoryLevel.Elevated : MemoryLevel.Normal;

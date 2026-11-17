@@ -70,7 +70,11 @@ public sealed partial class SettingsWindow
                     (TrafficPeriod.Week, TrafficPeriods.Name(TrafficPeriod.Week)), (TrafficPeriod.Month, TrafficPeriods.Name(TrafficPeriod.Month))],
                 v => Change(s => s.MonitorTrafficPeriod = v),
                 help: Loc.T("与 Windows 流量统计一致，最近的流量稍后计入。当天从 0 点算起。",
-                    "Matches Windows' data usage; recent traffic is counted a little later. Today counts from midnight.")));
+                    "Matches Windows' data usage; recent traffic is counted a little later. Today counts from midnight.")),
+            MusicChoice(Loc.T("内存与硬盘", "Memory and drives"), S.MonitorShowFree,
+                [(false, Loc.T("已用", "Used")), (true, Loc.T("剩余", "Free"))],
+                v => Change(s => s.MonitorShowFree = v), keepPreview: true,
+                help: Loc.T("收起与展开时都适用。", "Applies collapsed and expanded.")));
         CompactMonitorOptions();
         SectionTitle(Loc.T("展开时", "When expanded"));
         // What the page shows (chips, the temperatures among them, and a sketch of the page whose blocks are dragged to order it), then

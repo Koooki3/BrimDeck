@@ -263,7 +263,8 @@ public partial class MainWindow
     }
 
     // Every record in a row shares one model name and application, so the first record finds the row's prices.
-    // A price table: one column per prompt-size tier, so standard and long-context prices sit side by side.
+    // A price table: one column per prompt-size tier, so standard and long-context prices sit side by side; DeepSeek's own prices
+    // show their peak and off-peak columns the same way.
     // source is the snapshot the row's records came from.
     private FrameworkElement PriceBreakdown(ModelUsageRow record, ProviderSnapshot? source)
     {
@@ -288,17 +289,20 @@ public partial class MainWindow
         var tiers = model?.Tiers.Where(t => t.MinimumPromptTokens > 0).ToArray() ?? [];
         var columns = derived is not null ? [derived] : model is null ? [] : tiers.Select(t => t.Prices).Prepend(model.Tiers.LastOrDefault(t => t.MinimumPromptTokens <= 0)?.Prices ?? model.Prices)
             .Select(prices => _app.Prices.Effective(model, prices)).ToArray();
+        bool peak = derived is null && tiers.Length == 0 && model?.OffPeakPrices is not null;
+        if (peak) columns = [.. columns, _app.Prices.Effective(model!, model!.OffPeakPrices!)];
         for (int i = 0; i <= columns.Length; i++) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         int span = columns.Length + 1, line = 0;
         Cell($"{AppPresets.Name(record.Provider)} · {record.Model}", line++, 0, span: span, margin: new Thickness(0, 0, 0, 3));
-        if (tiers.Length > 0)
-            for (int i = 0; i < columns.Length; i++)
-                Cell(i == 0 ? $"< {UI.Number(tiers[0].MinimumPromptTokens)}" : i < tiers.Length ? $"{UI.Number(tiers[i - 1].MinimumPromptTokens)}–{UI.Number(tiers[i].MinimumPromptTokens)}"
-                    : $"≥ {UI.Number(tiers[i - 1].MinimumPromptTokens)}", line, i + 1, Look.Secondary, true, margin: new Thickness(16, 0, 0, 0));
-        if (tiers.Length > 0) line++;
+        string[] headings = tiers.Length > 0 ? [.. Enumerable.Range(0, columns.Length).Select(i => i == 0 ? $"< {UI.Number(tiers[0].MinimumPromptTokens)}"
+                : i < tiers.Length ? $"{UI.Number(tiers[i - 1].MinimumPromptTokens)}–{UI.Number(tiers[i].MinimumPromptTokens)}" : $"≥ {UI.Number(tiers[i - 1].MinimumPromptTokens)}")]
+            : peak ? [Loc.T("高峰", "Peak"), Loc.T("低峰", "Off-peak")] : [];
+        for (int i = 0; i < headings.Length; i++) Cell(headings[i], line, i + 1, Look.Secondary, true, margin: new Thickness(16, 0, 0, 0));
+        if (headings.Length > 0) line++;
+        // DeepSeek charges no cache write: a token written to the cache costs the input price, so the row would only repeat it.
         (string Label, Func<TokenPrices, decimal?> Price)[] kinds =
         [
-            (Loc.T("输入", "Input"), p => p.Input), (Loc.T("输出", "Output"), p => p.Output), (Loc.T("缓存写入", "Cache write"), p => p.CacheWrite),
+            (Loc.T("输入", "Input"), p => p.Input), (Loc.T("输出", "Output"), p => p.Output), (Loc.T("缓存写入", "Cache write"), p => peak ? null : p.CacheWrite),
             (Loc.T("缓存写入（1 小时）", "Cache write (1 hour)"), p => p.CacheWriteHour == p.CacheWrite ? null : p.CacheWriteHour), (Loc.T("缓存读取", "Cache read"), p => p.CacheRead),
         ];
         foreach (var (label, price) in kinds.Where(kind => columns.Any(prices => kind.Price(prices) is not null)))
@@ -319,9 +323,10 @@ public partial class MainWindow
             { Status: RecoveryStatus.Inconsistent } => Loc.T("各条记录的金额不符合固定单价，无法推算单价", "The amounts of the records do not fit fixed prices, so the prices cannot be worked out"),
             _ => model is null ? Loc.T("未找到该模型的单价", "No unit price was found for this model")
                 : Loc.T("USD / 百万 Token", "USD per million tokens") + (listed is null ? "" : Loc.T($" · {AppPresets.Name(record.Provider)} 标价", $" · {AppPresets.Name(record.Provider)} list prices"))
-                    + (tiers.Length > 0 ? Loc.T(" · 按单次请求的输入量分档", " · tiered by the input of each request") : ""),
+                    + (tiers.Length > 0 ? Loc.T(" · 按单次请求的输入量分档", " · tiered by the input of each request") : peak ? Loc.T(" · DeepSeek 官方价", " · DeepSeek list prices") : ""),
         };
-        Cell(note, line, 0, Look.Secondary, span: span, margin: new Thickness(0, columns.Length == 0 ? 0 : 3, 0, 0));
+        Cell(note, line++, 0, Look.Secondary, span: span, margin: new Thickness(0, columns.Length == 0 ? 0 : 3, 0, 0));
+        if (peak) Cell(Pricing.PeakHours, line, 0, Look.Secondary, span: span);
         return grid;
     }
 

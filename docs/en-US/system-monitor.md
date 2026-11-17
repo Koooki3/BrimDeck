@@ -59,9 +59,15 @@ Choose the period under General › Traffic period:
 
 The traffic comes from Windows' own record, the one the Data usage page in Windows Settings shows, so it includes the time BrimDeck was not running and does not start over when it restarts. Wi-Fi, Ethernet and cellular networks are counted; a VPN or another virtual network is not counted again, as its traffic is already counted on the network it runs over. Windows updates its record a little later, so traffic that has just happened may be counted some time afterwards.
 
+## Used and free
+
+Memory and the drives show what is in use by default. Choose Free under General › Memory and drives, and the collapsed row and the expanded page show what is left instead: the figures, the dials and the bars all show how much remains. The color still follows the share in use, so little room left shows in the warning or critical color.
+
+Free memory matches Task Manager's "Available" and includes the system file cache; on the expanded page's bar the cache is the lighter part.
+
 ## Drives
 
-- Shows the space in use for each drive letter; when the page has no room for them all, the remaining letters share one line.
+- Shows the space in use for each drive letter (or the space free, see the section above); when the page has no room for them all, the remaining letters share one line.
 - Only internal drives are listed, not USB sticks, SD cards, external, network or optical drives.
 
 ## Temperatures
