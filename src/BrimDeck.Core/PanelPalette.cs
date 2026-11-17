@@ -73,7 +73,7 @@ public sealed class PanelPalette
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
         WrittenColors = writtenColors; WrittenApps = writtenApps;
         List<ThemeColor> plain = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. PanelThemes.TextureStops(effects, colors, Surface)];
-        SurfaceStops = [.. plain, .. PanelThemes.DecoratedStops(effects, colors, Surface)];
+        SurfaceStops = [.. plain, .. PanelThemes.DecoratedStops(effects, colors, Surface), .. effects.Glass?.Extremes ?? []];
         // Dark or light by the surface itself, its gradient and its texture; the motifs drawn into it do not change which.
         IsDark = plain.Average(stop => stop.Luminance) < .18;
     }

@@ -189,7 +189,8 @@ public partial class MainWindow
         }
         _glassAppearance.Prior(appDark);
         _glassAppearance.Changed(sample.Changed, now);
-        if (!_glassAppearance.Feed(sample.Median, now, held: _expanded)) return false;
+        bool held = _expanded || _app.Decks.Any(deck => ReferenceEquals(deck.Look, Look) && deck._expanded);
+        if (!_glassAppearance.Feed(sample.MiddleMean, now, held: held)) return false;
         Look.AutomaticGlassDark = _glassAppearance.Dark;
         _app.ApplyPanelTheme();
         return true;

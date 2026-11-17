@@ -27,6 +27,12 @@ internal static class GlassLookTests
         // does not pull it, where the arithmetic mean (.345) would.
         int[] histogram = [0, 70, 0, 0, 0, 0, 0, 0, 0, 30];
         double middle = GlassAppearance.RangeMean(histogram);
+        var split = new double[100];
+        Array.Fill(split, 1d, 49, 51);
+        double splitMean = GlassAppearance.SortedRangeMean(split);
+        check("Automatic liquid glass keeps the Windows dark look with nearly equal black and white coverage",
+            Math.Abs(splitMean - 31d / 60) < 1e-9 && GlassAppearance.FirstLook(splitMean, appDark: true)
+            && GlassAppearance.SortedRangeMean([.5]) == .5 && double.IsNaN(GlassAppearance.SortedRangeMean([])));
         check(FormattableString.Invariant($"Automatic liquid glass measures the mean of the middle of the backdrop's brightness ({middle:0.000})"),
             Math.Abs(middle - (.5 * .15 + .1 * .95) / .6) < 1e-9 && double.IsNaN(GlassAppearance.RangeMean(new int[8])) && Math.Abs(GlassAppearance.RangeMean([0, 0, 5, 0]) - .625) < 1e-9);
         check("Automatic liquid glass's first look leans toward the Windows app mode", GlassAppearance.FirstLook(.7, appDark: true) && !GlassAppearance.FirstLook(.75, appDark: true)
