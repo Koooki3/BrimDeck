@@ -678,8 +678,8 @@ public partial class App : Application
             DeviceReadSwitches.Use(Settings.DeviceChoices);
             QueueSave();
         }
-        if (Devices is { } devices && Settings.DeviceLowNotice && Settings.NoticesEnabled)
-            foreach (var low in _lowBattery.Update(DeviceLists.Noticed(devices.All, Settings.DeviceChoices), Settings.DeviceLowPercent))
+        if (Devices is { } lowDevices && Settings.DeviceLowNotice && Settings.NoticesEnabled)
+            foreach (var low in _lowBattery.Update(DeviceLists.Noticed(lowDevices.All, Settings.DeviceChoices), Settings.DeviceLowPercent))
                 Notices.SendDeviceLow(low);
         DevicesChanged?.Invoke();
     }
