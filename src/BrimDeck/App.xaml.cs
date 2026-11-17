@@ -439,10 +439,12 @@ public partial class App : Application
         LiquidTheme.Dark = dark;
         // The acrylic body (the default): the first look from a glance of GDI at what lies around the island (AcrylicProbe, a
         // few milliseconds on this thread), no capture device.
-        if (LiquidPossible && !GlassBackdrop.Refraction && GlanceRegion() is { } around)
+        if (LiquidPossible && !GlassBackdrop.Refraction && GlanceRegion(out var bounds) is { } around)
         {
             double scale = Deck is null ? 1 : System.Windows.Media.VisualTreeHelper.GetDpi(Deck).DpiScaleX;
-            if (LiquidGlass.AcrylicProbe.Read(around, (int)(24 * scale), (int)(40 * scale)) is { } reading)
+            var display = new Int32Rect((int)bounds.Left, (int)bounds.Top, (int)bounds.Width, (int)bounds.Height);
+            var sample = new Int32Rect(around.Left, around.Top, around.Right - around.Left, around.Bottom - around.Top);
+            if (new LiquidGlass.AcrylicProbe().Read(sample, display, (int)(24 * scale), (int)(40 * scale)) is { } reading)
                 LiquidTheme.Dark = dark = GlassAppearance.FirstLook(reading.MiddleMean, LiquidTheme.AppDark);
             GlanceEnded();
             return dark;
@@ -499,10 +501,14 @@ public partial class App : Application
     private bool LiquidPossible => MotionEnvironment.Transparency && !SystemParameters.HighContrast && !MotionEnvironment.BatterySaver
         && GetSystemMetrics(RemoteSession) == 0 && MainLiquidUsable && Environment.GetEnvironmentVariable("BRIMDECK_LIQUID") != "0";
     // Where the main island will be: the top middle of its monitor (BackdropLook.Region), in device pixels.
-    private LiquidGlass.RECT? GlanceRegion()
+    private LiquidGlass.RECT? GlanceRegion() => GlanceRegion(out _);
+
+    private LiquidGlass.RECT? GlanceRegion(out Rect bounds)
     {
         var plan = DisplayLayout.Arrange(Settings.Display, Settings.DisplayMonitors.Select(d => d.Id).ToList(), Displays.Select(d => (d.Id, d.Primary)).ToList());
+        bounds = Rect.Empty;
         if ((Displays.FirstOrDefault(d => d.Id == plan.Main) ?? Displays.FirstOrDefault()) is not { } display) return null;
+        bounds = display.Bounds;
         var region = LiquidGlass.BackdropLook.Region(display.Bounds, display.Handle);
         return region.IsEmpty ? null : region;
     }

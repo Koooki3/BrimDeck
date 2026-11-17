@@ -44,7 +44,7 @@ internal static class AcrylicEmulation
         ring.Sort();
         double tail = BrimDeck.LiquidGlass.AcrylicProbe.Tail;
         double bright = ring.Count > 0 ? ring[(int)(ring.Count * tail)] : .5, darkest = ring.Count > 0 ? ring[(int)(ring.Count * (1 - tail))] : .5;
-        var reading = new BrimDeck.LiquidGlass.AcrylicProbe.Reading(.5, bright, darkest, 0, ring.Count > 0 ? ring[ring.Count / 2] : .5);
+        var reading = new BrimDeck.LiquidGlass.AcrylicProbe.Reading(.5, bright, darkest, 0, ring.Count > 0 ? ring[ring.Count / 2] : .5, .5);
         Luminosity = GlassEffect.Shown(GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness)), openness, dark);
         var look = (dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = Luminosity };
         var m = GlassEffect.AcrylicMatrix(look);

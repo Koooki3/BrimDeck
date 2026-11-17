@@ -1111,19 +1111,23 @@ internal sealed class GlassBackdrop : IDisposable
         else if (_luminosityLook is { } look && look != PanelTheme.Current.IsDark) ProbeTick();
     }
 
-    // The reading copies three strips of the screen through GDI, which waits for the desktop compositor: 20 to 30 ms each time
+    // The reading copies strips of the panel display through GDI, which waits for the desktop compositor: 20 to 30 ms each time
     // (live check 10-27, twice a second). On the UI thread that held every opening, closing and glide to every other frame, so
     // the copy runs on the thread pool and only what it found is applied here. A tick while one is still out is skipped.
+    private readonly LiquidGlass.AcrylicProbe _acrylicProbe = new();
     private bool _probing;
     private void ProbeTick()
     {
         if (_disposed || !AcrylicBody || _last is not { } frame || _windowRect is not { } window) { _probe?.Stop(); return; }
         if (_probing) { _probeAgain = _luminosityLook != PanelTheme.Current.IsDark; return; }
         double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
-        var island = new LiquidGlass.RECT(window.X + (int)frame.Left, window.Y + (int)frame.Top, window.X + (int)frame.Right, window.Y + (int)frame.Bottom);
+        var bounds = WindowsHost.WindowScreen(_owner).Bounds;
+        var display = new Int32Rect((int)bounds.Left, (int)bounds.Top, (int)bounds.Width, (int)bounds.Height);
+        var island = new Int32Rect(window.X + (int)frame.Left, window.Y + (int)frame.Top,
+            (int)frame.Right - (int)frame.Left, (int)frame.Bottom - (int)frame.Top);
         int gap = (int)(24 * scale), band = (int)(40 * scale);
         _probing = true;
-        Task.Run(() => LiquidGlass.AcrylicProbe.Read(island, gap, band)).ContinueWith(task =>
+        Task.Run(() => _acrylicProbe.Read(island, display, gap, band)).ContinueWith(task =>
         {
             _probing = false;
             if (_disposed || !AcrylicBody) return;
