@@ -1121,7 +1121,7 @@ internal sealed class GlassBackdrop : IDisposable
         if (_disposed || !AcrylicBody || _last is not { } frame || _windowRect is not { } window) { _probe?.Stop(); return; }
         if (_probing) { _probeAgain = _luminosityLook != PanelTheme.Current.IsDark; return; }
         double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
-        var bounds = WindowsHost.WindowScreen(_owner).Bounds;
+        var bounds = Native.WindowsHost.WindowScreen(_owner).Bounds;
         var display = new Int32Rect((int)bounds.Left, (int)bounds.Top, (int)bounds.Width, (int)bounds.Height);
         var island = new Int32Rect(window.X + (int)frame.Left, window.Y + (int)frame.Top,
             (int)frame.Right - (int)frame.Left, (int)frame.Bottom - (int)frame.Top);
