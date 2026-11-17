@@ -76,9 +76,12 @@ internal sealed class ProcessLoopbackCapture : IDisposable
             for (int frames = _capture.GetNextPacketSize(); frames > 0; frames = _capture.GetNextPacketSize())
             {
                 IntPtr data = _capture.GetBuffer(out frames, out var flags);
+                // No packet after all (AUDCLNT_S_BUFFER_EMPTY): the frame count is 0 and no data pointer is given, and a packet
+                // of that size needs no release. Copying from it threw on the meter's thread, which ended BrimDeck.
+                if (frames <= 0) break;
                 int count = frames * Format.Channels;
                 if (_buffer.Length < count) { _buffer = new float[count]; _pcm = new short[count]; }
-                if ((flags & AudioClientBufferFlags.Silent) != 0) Array.Clear(_buffer, 0, count);
+                if ((flags & AudioClientBufferFlags.Silent) != 0 || data == IntPtr.Zero) Array.Clear(_buffer, 0, count);
                 else
                 {
                     // One block copy per packet instead of a marshalled read per sample.
@@ -95,7 +98,9 @@ internal sealed class ProcessLoopbackCapture : IDisposable
             if (now - _analysed >= AnalysisInterval - .005) { _analysed = now; Signal.Advance(now); }
             return true;
         }
-        catch (COMException) { return false; }
+        // Whatever goes wrong with the stream, the caller stops this capture and looks for the audio again; nothing thrown here
+        // may leave the meter's thread, where it would end the process.
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
     }
 
     public void Dispose()

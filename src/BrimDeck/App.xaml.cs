@@ -43,6 +43,7 @@ public partial class App : Application
     internal LyricsService Lyrics { get; private set; } = null!;
     // The clipboard history and the file transfer, shared by every panel (ShelfService).
     internal ShelfService Shelf { get; private set; } = null!;
+    internal ClipboardSyncService ClipboardSync { get; private set; } = null!;
     // A window being dragged by its title bar or edge; the panels do not open on it (see MainWindow.TrackPointer).
     internal WindowDrags WindowDrags { get; private set; } = null!;
     private readonly HashSet<MainWindow> _presentingMedia = [], _presentingSystemAudio = [];
@@ -130,29 +131,42 @@ public partial class App : Application
         LastSeen = new UsageLastSeen(Path.Combine(folder, UsageLastSeen.FileName));
         WindowDrags = new WindowDrags();
         Shelf = new ShelfService(folder, Dispatcher); Shelf.Apply(Settings);
+        ClipboardSync = new ClipboardSyncService(this, folder); ClipboardSync.Apply();
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
-        Deck.Show();
-        InitializeHotkeys();
-        _dataKey = DataKey();
-        ApplyProfileRules();
-        StartBackgroundUpdates();
+        // From here each step is on its own (Step): the app keeps running after an error at the start, and one step failing
+        // used to skip every later one, which left a panel with no tray icon, no saving and no answer to a second start.
+        Step(Deck.Show);
+        Step(InitializeHotkeys);
+        Step(() => _dataKey = DataKey());
+        Step(ApplyProfileRules);
+        Step(StartBackgroundUpdates);
         // Only for a user who has the monitor page with its power line: the rest never open it.
-        if (Settings.MonitorPage && Settings.ShowsExpanded(ExpandedItem.Power)) PowerWarm.Start(Dispatcher);
-        WarmSettingsWriter();
-        ApplyMemoryMode();
-        DisplayPower.Install(Dispatcher);
-        DisplayPower.Changed += UpdateDeviceDemand;
+        Step(() => { if (Settings.MonitorPage && Settings.ShowsExpanded(ExpandedItem.Power)) PowerWarm.Start(Dispatcher); });
+        Step(WarmSettingsWriter);
+        Step(ApplyMemoryMode);
+        Step(() => { DisplayPower.Install(Dispatcher); DisplayPower.Changed += UpdateDeviceDemand; });
         _save.Tick += (_, _) => FlushSettings();
-        ApplyTray();
-        _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
-        _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(ShowFromRelaunch), null, Timeout.Infinite, false);
+        Step(ApplyTray);
+        Step(() =>
+        {
+            _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
+            _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(ShowFromRelaunch), null, Timeout.Infinite, false);
+        });
         if (e.Args.Contains("--settings")) OpenSettings();
         // An update that kept this version says why on the About page.
         else if (Updates.RestartFailed) OpenUpdateSettings();
     }
     // A resident app must not vanish without a trace. Unhandled errors are appended to crash.log in the data folder;
     // errors on the UI thread are logged and the app keeps running, and unobserved task errors are only logged.
+    // Runs one step of a start (OnStartup, a panel's Loaded) so that its failure is recorded like any other error and what
+    // follows it still runs.
+    internal void Step(Action step)
+    {
+        try { step(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _recordCrash?.Invoke(ex); }
+    }
+    private Action<object>? _recordCrash;
     private void RecordCrashes()
     {
         var log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "crash.log");
@@ -167,6 +181,7 @@ public partial class App : Application
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
+        _recordCrash = Write;
         DispatcherUnhandledException += (_, args) => { Write(args.Exception); args.Handled = !Exiting; };
         AppDomain.CurrentDomain.UnhandledException += (_, args) => Write(args.ExceptionObject);
         TaskScheduler.UnobservedTaskException += (_, args) => { Write(args.Exception); args.SetObserved(); };
@@ -274,6 +289,7 @@ public partial class App : Application
         AssignDisplays();
         // What is read for the panels depends on every panel's profile, so it follows the displays.
         Shelf.Apply(ShelfSettings());
+        ClipboardSync.Apply();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
         UpdateMonitorExtras();
         ApplyToDecks(styles);
@@ -296,7 +312,9 @@ public partial class App : Application
             if (Exiting) return;
             // High contrast turned on or off, or its scheme changed, shows the system's colors on the panel (PanelLook.HighContrast).
             if (ShownSettings.Append(Settings).Any(settings => PanelThemes.NormalizeId(settings.PanelTheme) == PanelThemes.SystemId)
-                || SystemParameters.HighContrast || Decks.Any(deck => deck.Look.HighContrast))
+                || SystemParameters.HighContrast || Decks.Any(deck => deck.Look.HighContrast)
+                // A theme whose day and night looks follow Windows' mode changes over like the dusk does (PanelThemes.LookAt).
+                || PanelTheme.FollowsWindowsMode(Settings) || Decks.Any(deck => deck is not null && deck.Profile is not null && deck.Look.FollowsWindowsMode(deck.PanelSettings)))
                 ApplyPanelTheme(systemChanged: true);
             // The theme page's "System" card shows the Windows mode whichever theme is chosen.
             else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
@@ -318,7 +336,7 @@ public partial class App : Application
         foreach (var deck in Decks.ToList()) if (changed || own.Contains(deck)) deck.ApplySettings();
         if (changed && !reload) _settingsWindow?.PanelThemeChanged();
     }
-    // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
+    // A theme with a night look changes look at its hours (PanelThemes.LookAt): the timer is set for the next change, and at
     // most ten minutes ahead, so a clock changed by hand or a machine that slept past the hour catches up soon after. The switch
     // carries a preset clock gradient over, as Windows switching "system" between dark and light does.
     private DispatcherTimer? _daylight;
@@ -338,6 +356,8 @@ public partial class App : Application
     }
     // A panel reports display changes (monitors added or removed, the primary changed, a work area or scale changed).
     // Each panel receives the same messages, so they are handled once, after Windows has moved the windows to the new layout.
+    // The divider between the clipboard page's columns was dragged on a panel: an open settings page shows the new widths.
+    internal void ShelfShareChanged() => _settingsWindow?.ShelfShareChanged();
     internal void DisplaysChanged()
     {
         if (_arrangePending || Exiting) return;
@@ -479,7 +499,17 @@ public partial class App : Application
     // The settings' devices page lists what is connected, so it reads the devices while it is open.
     private bool _deviceSettings;
     internal void WatchDevicesForSettings(bool open) { _deviceSettings = open; UpdateDeviceDemand(); }
-    private void DeviceBatteriesChanged() => DevicesChanged?.Invoke();
+    private void DeviceBatteriesChanged()
+    {
+        if (Devices is { } devices && Settings.DeviceChoices.Count > 0 && DeviceLists.Adopt(devices.All, Settings.DeviceChoices) is { } adopted)
+        {
+            Settings.DeviceChoices = adopted;
+            _profileSettings.Clear();
+            DeviceReadSwitches.Use(Settings.DeviceChoices);
+            QueueSave();
+        }
+        DevicesChanged?.Invoke();
+    }
     // Temperatures and drives are read for an open page with them on; also for a collapsed row showing them: the processor's and
     // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
     // it shows those. The processor's and the adapter's temperatures also while the row is only hidden for now, as long as the sampler
@@ -520,7 +550,7 @@ public partial class App : Application
         bool Heat(CompactMonitorItems item, CompactMonitorItems among) => (among & item) != 0 && rows.Any(settings => settings.CompactReadings.FirstOrDefault(reading => reading.Item == item) is { } reading
             && (item == CompactMonitorItems.Storage || reading.ShowValue) && CompactFigures.Shows(reading, CompactFigures.Temperature));
         bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
-        if (Monitor is not null) Monitor.GpuUsage = Settings.MonitorGpuUsage;
+        if (Monitor is not null) { Monitor.GpuUsage = Settings.MonitorGpuUsage; Monitor.TrafficPeriod = Settings.MonitorTrafficPeriod; }
         var pageDemand = PageDemand();
         bool Page(ExpandedDemand what) => page && (pageDemand & what) != 0;
         // The cpu, memory and network are read for what an open page shows and for a collapsed row; with a row, all as before.
@@ -609,6 +639,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        ClipboardSync?.Dispose();
         if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
         Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); DeviceReadStore.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }

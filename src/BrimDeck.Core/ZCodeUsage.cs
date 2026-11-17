@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -13,21 +14,51 @@ public sealed record ZCodeAccount(string Family, string ApiKey, string Jwt, stri
 // input_tokens includes the cached part: input_tokens + output_tokens equals computed_total_tokens.
 public static class ZCodeUsage
 {
-    private const string Encrypted = "enc:v1:";
+    private const string Encrypted = "enc:v1:", EncryptedV2 = "enc:v2:";
+    // The name ZCode gives its key in the system's credential store.
+    private const string KeyService = "ZCode Credential Encryption";
     public static string Database(string home) => Path.Combine(home, "cli", "db", "db.sqlite");
     public static string Credentials(string home) => Path.Combine(home, "v2", "credentials.json");
 
-    // ZCode stores each credential as enc:v1:<iv>.<tag>.<ciphertext> (base64url, AES-256-GCM) with the key
-    // SHA-256("zcode-credential-fallback:<platform>:<home directory>:<user name>"), unless ZCODE_CREDENTIAL_SECRET is set.
-    public static ZCodeAccount? ReadAccount(string home, string? secret = null)
+    // ZCode stores each credential encrypted (base64url, AES-256-GCM), in one of two forms; a file can hold both.
+    // enc:v1:<iv>.<tag>.<ciphertext>: the key is SHA-256("zcode-credential-fallback:<platform>:<home directory>:<user name>"),
+    // or SHA-256(ZCODE_CREDENTIAL_SECRET) when that is set.
+    // enc:v2:<source>:<first 24 hex digits of SHA-256(key)>:<iv>.<tag>.<ciphertext> (written by ZCode 3.18.2): for the source "os"
+    // the key is 32 random bytes kept as base64url text in the system's credential store, named
+    // "<SHA-256 of the credentials file's full path>.ZCode Credential Encryption"; for "env" it is the SHA-256 of
+    // ZCODE_CREDENTIAL_SECRET, or of the file ZCODE_CREDENTIAL_SECRET_FILE names, or of credential-secret beside the credentials.
+    // systemKey reads the text stored under a name in the system's credential store (null: there is none).
+    public static ZCodeAccount? ReadAccount(string home, string? secret = null, Func<string, string?>? systemKey = null)
     {
         var path = Credentials(home);
         if (!File.Exists(path)) return null;
         using var doc = SharedFile.Parse(path);
         var profile = Environment.GetEnvironmentVariable("USERPROFILE") is { Length: > 0 } userProfile ? userProfile : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        secret ??= Environment.GetEnvironmentVariable("ZCODE_CREDENTIAL_SECRET") is { Length: > 0 } custom ? custom : $"zcode-credential-fallback:win32:{profile}:{Environment.UserName}";
-        var key = SHA256.HashData(Encoding.UTF8.GetBytes(secret));
-        string Value(string name) => doc.RootElement.Get(name).Text() is { Length: > 0 } text ? Decrypt(text, key) : "";
+        var managed = secret ?? (Environment.GetEnvironmentVariable("ZCODE_CREDENTIAL_SECRET") is { Length: > 0 } custom ? custom : null);
+        var key = SHA256.HashData(Encoding.UTF8.GetBytes(managed ?? $"zcode-credential-fallback:win32:{profile}:{Environment.UserName}"));
+        var keys = new Dictionary<string, byte[]?>();
+        byte[]? KeyV2(string source)
+        {
+            if (keys.TryGetValue(source, out var known)) return known;
+            byte[]? found = null;
+            try
+            {
+                if (source == "os")
+                {
+                    var name = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(path)))) + "." + KeyService;
+                    if ((systemKey ?? WindowsCredential.Read)(name) is { Length: 43 } text && Base64Url(text) is { Length: 32 } bytes) found = bytes;
+                }
+                else if (managed is not null) found = SHA256.HashData(Encoding.UTF8.GetBytes(managed));
+                else
+                {
+                    var file = Environment.GetEnvironmentVariable("ZCODE_CREDENTIAL_SECRET_FILE") is { Length: > 0 } named ? named : Path.Combine(Path.GetDirectoryName(path)!, "credential-secret");
+                    if (File.Exists(file)) found = SHA256.HashData(File.ReadAllBytes(file));
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { }
+            return keys[source] = found;
+        }
+        string Value(string name) => doc.RootElement.Get(name).Text() is { Length: > 0 } text ? Decrypt(text, key, KeyV2) : "";
         // ZCode signs in to one region at a time: signing in to bigmodel clears the zai session and vice versa.
         // Plan keys are stored separately and a key from the previous region can remain, so only the active region's key is used.
         var family = Value("oauth:active_provider").Trim();
@@ -52,12 +83,32 @@ public static class ZCodeUsage
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return ""; }
     }
 
-    public static string Decrypt(string value, byte[] key)
+    // key opens the enc:v1 form; keyV2 gives the key of an enc:v2 source ("os" or "env"), or null when it is not available.
+    // A value in any other encrypted form is refused: its text is never returned as if it were the credential.
+    public static string Decrypt(string value, byte[] key, Func<string, byte[]?>? keyV2 = null)
     {
-        if (!value.StartsWith(Encrypted, StringComparison.Ordinal)) return value;
-        var parts = value[Encrypted.Length..].Split('.');
-        if (parts.Length != 3) throw new InvalidDataException(Loc.T("ZCode 凭据格式无法识别。", "The ZCode credential format is not recognized."));
+        if (value.StartsWith(EncryptedV2, StringComparison.Ordinal))
+        {
+            var fields = value[EncryptedV2.Length..].Split(':');
+            if (fields.Length != 3 || fields[0] is not ("os" or "env")) throw Unrecognized();
+            // The fingerprint tells a key that belongs to these credentials from another one, before anything is decrypted.
+            if (keyV2?.Invoke(fields[0]) is not { Length: 32 } stored || Convert.ToHexStringLower(SHA256.HashData(stored))[..24] != fields[1])
+                throw new InvalidDataException(Loc.T("未能取得 ZCode 凭据的密钥。", "The key of the ZCode credentials is not available."));
+            return Open(fields[2], stored);
+        }
+        if (value.StartsWith(Encrypted, StringComparison.Ordinal)) return Open(value[Encrypted.Length..], key);
+        if (value.StartsWith("enc:", StringComparison.Ordinal)) throw Unrecognized();
+        return value;
+    }
+
+    private static InvalidDataException Unrecognized() => new(Loc.T("ZCode 凭据格式无法识别。", "The ZCode credential format is not recognized."));
+
+    private static string Open(string text, byte[] key)
+    {
+        var parts = text.Split('.');
+        if (parts.Length != 3) throw Unrecognized();
         byte[] iv = Base64Url(parts[0]), tag = Base64Url(parts[1]), data = Base64Url(parts[2]), plain = new byte[data.Length];
+        if (iv.Length != 12 || tag.Length != 16) throw Unrecognized();
         using var aes = new AesGcm(key, tag.Length);
         try { aes.Decrypt(iv, data, tag, plain); }
         catch (CryptographicException) { throw new InvalidDataException(Loc.T("ZCode 凭据无法解密。", "The ZCode credentials cannot be decrypted.")); }
@@ -68,7 +119,7 @@ public static class ZCodeUsage
     {
         text = text.Replace('-', '+').Replace('_', '/');
         try { return Convert.FromBase64String(text + new string('=', (4 - text.Length % 4) % 4)); }
-        catch (FormatException) { throw new InvalidDataException(Loc.T("ZCode 凭据格式无法识别。", "The ZCode credential format is not recognized.")); }
+        catch (FormatException) { throw Unrecognized(); }
     }
 
     // ZCode Start Plan (event allowances): data.plans[] name the plans; data.balances[] hold one allowance per entitlement,
@@ -142,6 +193,35 @@ public static class ZCodeUsage
     }
 }
 
+// The text one generic entry of the Windows Credential Manager holds (UTF-16), or null when there is no such entry.
+// Only the entry asked for by its full name is read; nothing is listed or written.
+internal static class WindowsCredential
+{
+    // CREDENTIALW; LastWritten is a FILETIME.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Credential
+    {
+        public uint Flags, Type; public IntPtr TargetName, Comment; public uint LastWrittenLow, LastWrittenHigh;
+        public uint BlobSize; public IntPtr Blob; public uint Persist, AttributeCount; public IntPtr Attributes, TargetAlias, UserName;
+    }
+    private const uint Generic = 1;
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern bool CredReadW(string target, uint type, uint flags, out IntPtr credential);
+    [DllImport("advapi32.dll", ExactSpelling = true)]
+    private static extern void CredFree(IntPtr buffer);
+
+    public static string? Read(string target)
+    {
+        if (!OperatingSystem.IsWindows() || !CredReadW(target, Generic, 0, out var pointer)) return null;
+        try
+        {
+            var credential = Marshal.PtrToStructure<Credential>(pointer);
+            return credential.Blob == IntPtr.Zero || credential.BlobSize < 2 ? null : Marshal.PtrToStringUni(credential.Blob, (int)credential.BlobSize / 2);
+        }
+        finally { CredFree(pointer); }
+    }
+}
+
 // ZCode's own service can take tens of seconds to answer. A refresh waits only while nothing has been read yet;
 // otherwise it uses the last good response at once and the new one loads in the background. A failed, slow or
 // unrecognised response never replaces the last good one, so an allowance does not disappear between refreshes.
@@ -152,13 +232,18 @@ public sealed class LatestResponse
     private Task? _pending;
     private string _account = "";
     private JsonElement? _last;
+    private Exception? _error;
+
+    // Why the request that finished last gave no result (an unrecognised response is an InvalidDataException); null when it gave
+    // one, or when none has finished for this account.
+    public Exception? Error { get { lock (_sync) return _error; } }
 
     public async Task<JsonElement?> GetAsync(string account, Func<CancellationToken, Task<JsonElement>> load, Func<JsonElement, bool> accept, CancellationToken wait)
     {
         Task pending;
         lock (_sync)
         {
-            if (_account != account) { _account = account; _last = null; _pending = null; }
+            if (_account != account) { _account = account; _last = null; _pending = null; _error = null; }
             if (_pending is null || _pending.IsCompleted) _pending = Load(account, load, accept);
             pending = _pending;
             if (_last is { } kept && !pending.IsCompleted) return kept;
@@ -170,12 +255,19 @@ public sealed class LatestResponse
 
     private async Task Load(string account, Func<CancellationToken, Task<JsonElement>> load, Func<JsonElement, bool> accept)
     {
+        JsonElement? result = null; Exception? error = null;
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
             var root = await load(timeout.Token);
-            if (accept(root)) lock (_sync) if (account == _account) _last = root;
+            if (accept(root)) result = root; else error = new InvalidDataException();
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or OperationCanceledException) { }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or OperationCanceledException) { error = ex; }
+        lock (_sync)
+        {
+            if (account != _account) return;
+            if (result is not null) _last = result;
+            _error = error;
+        }
     }
 }

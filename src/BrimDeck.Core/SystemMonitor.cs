@@ -24,12 +24,27 @@ public readonly struct Reading<T>
 // What Windows calls a core, from its efficiency class. A processor with one class has Unknown cores.
 public enum CoreTier { Performance, Efficiency, Unknown }
 
-// One logical processor. Group 0 holds the fastest kind of core, counting up to the slowest; Number is its position within
-// its group, from 1. Usage is the 0..1 busy share of the last interval.
-public sealed record CoreSample(int Id, int Group, CoreTier Tier, int Number, double Usage, Reading<double> FrequencyMhz, double? MaxFrequencyMhz)
+// One logical processor. Group 0 holds the fastest kind of core, counting up to the slowest; Number is its 1-based position
+// within its group (the physical core's for a named tier, the logical processor's for Unknown), and Thread is its 1-based
+// thread on that physical core when a named tier's core has more than one logical processor. Usage is the 0..1 busy share of
+// the last interval.
+public sealed record CoreSample(int Id, int Group, CoreTier Tier, int Number, double Usage, Reading<double> FrequencyMhz, double? MaxFrequencyMhz, int? Thread = null)
 {
     // 0..1 position of the current frequency within the core's range.
     public double? FrequencyFraction => FrequencyMhz.TryGet(out var mhz) && MaxFrequencyMhz is { } top && top > 0 ? Math.Clamp(mhz / top, 0, 1) : null;
+
+    public string Describe()
+    {
+        string kind = Tier switch
+        {
+            CoreTier.Performance => Loc.T("性能核", "Performance core"),
+            CoreTier.Efficiency => Loc.T("能效核", "Efficiency core"),
+            _ => Loc.T("逻辑处理器", "Logical processor")
+        };
+        string thread = Thread is { } t ? Loc.T($" · 线程 {t}", $" · thread {t}") : "";
+        string frequency = FrequencyMhz.TryGet(out var mhz) ? " · " + MonitorFormat.Gigahertz(mhz) + " GHz" : "";
+        return $"{kind} {Number}{thread} · {MonitorFormat.Percent(Usage)}%{frequency}";
+    }
 }
 
 // Where the processor's temperature comes from, the best first: its own sensors through the sensor service (enhanced sensors,
@@ -91,7 +106,14 @@ public sealed record MemorySample(ulong Total, ulong Used, ulong CommitUsed, ulo
         : UsedFraction >= ElevatedUsed || CommitFraction >= ElevatedCommit ? MemoryLevel.Elevated : MemoryLevel.Normal;
 }
 
-public sealed record NetworkSample(double DownBytesPerSecond, double UpBytesPerSecond);
+// DownTotalBytes and UpTotalBytes: the traffic over TotalPeriod as Windows records it (TrafficPeriods); null for a sample that carries
+// none (the record not read yet for the period chosen, or not readable).
+public sealed record NetworkSample(double DownBytesPerSecond, double UpBytesPerSecond)
+{
+    public double? DownTotalBytes { get; init; }
+    public double? UpTotalBytes { get; init; }
+    public TrafficPeriod TotalPeriod { get; init; }
+}
 
 // The level of each reading of the collapsed strip, by one rule per kind of reading: a share (CPU, GPU, each core column,
 // memory in use) against ElevatedShare and CriticalShare, memory also by its commit charge (MemorySample.Level), and a rate

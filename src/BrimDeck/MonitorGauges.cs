@@ -130,7 +130,9 @@ internal sealed class FigureGauge : FrameworkElement
     private Eased _share, _hover = new(0, Eased.Hover);
     private bool _hasShare, _pressed;
     private string _number = "—", _unit = "", _detail = "", _tip = "", _detailColor = PanelTheme.Main.Tertiary;
-    private readonly DrawingCache<(string, string, string, string, double, double, double)> _text = new();
+    // The graphics memory's share after the detail ("显存 26%"), in its own level's color, apart from the temperature's.
+    private string _memory = "", _memoryColor = PanelTheme.Main.Tertiary;
+    private readonly DrawingCache<(string, string, string, string, string, string, string, double, double, double)> _text = new();
     private readonly DrawingCache<(IReadOnlyList<double>, double, double)> _trend = new();
     private IReadOnlyList<double> _history = [];
 
@@ -167,15 +169,18 @@ internal sealed class FigureGauge : FrameworkElement
     {
         string name = _letter switch { "C" => "CPU", "G" => "GPU", _ => _letter };
         string reading = _hasShare ? Loc.T($"{name} 占用 {_number}{_unit}", $"{name} usage {_number}{_unit}") : name + " · " + DrawnPeer.FirstLine(ToolTip);
-        return reading + (_detail.Length > 0 ? " · " + _detail : "") + (_button && !string.IsNullOrEmpty(_buttonName) ? Loc.T("，", ", ") + _buttonName : "");
+        return reading + (_detail.Length > 0 ? " · " + _detail : "") + (_memory.Length > 0 ? " · " + _memory : "") + (_button && !string.IsNullOrEmpty(_buttonName) ? Loc.T("，", ", ") + _buttonName : "");
     }
 
-    // detailColor: the detail's color, the tertiary text color by default (a temperature takes its level's).
-    public void Set(double? share, string number, string unit, string detail, string tip, bool motion, string? detailColor = null)
+    // detailColor: the detail's color, the tertiary text color by default (a temperature takes its level's). memory: the graphics
+    // memory's share after the detail, in memoryColor (the tertiary text color by default, its own level's when high).
+    public void Set(double? share, string number, string unit, string detail, string tip, bool motion, string? detailColor = null,
+        string memory = "", string? memoryColor = null)
     {
-        detailColor ??= Look.Tertiary;
-        bool changed = number != _number || unit != _unit || detail != _detail || detailColor != _detailColor || (share is not null) != _hasShare;
-        _number = number; _unit = unit; _detail = detail; _detailColor = detailColor; _hasShare = share is not null;
+        detailColor ??= Look.Tertiary; memoryColor ??= Look.Tertiary;
+        bool changed = number != _number || unit != _unit || detail != _detail || detailColor != _detailColor || memory != _memory || memoryColor != _memoryColor
+            || (share is not null) != _hasShare;
+        _number = number; _unit = unit; _detail = detail; _detailColor = detailColor; _memory = memory; _memoryColor = memoryColor; _hasShare = share is not null;
         if (tip != _tip) { _tip = tip; ToolTip = tip.Length > 0 ? tip : null; }
         if (share is { } value && _share.Set(value, motion)) Motion.Start(this, Step);
         else if (changed || share is not null) InvalidateVisual();
@@ -197,8 +202,13 @@ internal sealed class FigureGauge : FrameworkElement
         var number = MonitorDraw.Text(_number, _figure, Look.Primary, ppd, display: true);
         var unit = MonitorDraw.Text(_unit, _small, Look.Secondary, ppd);
         var detail = MonitorDraw.Text(_detail, _small, _detailColor, ppd);
-        double width = badge + gap + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0)
-            + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0);
+        // The memory's share follows the detail after a dot in the tertiary color, so the dot takes neither one's level.
+        string joiner = _detail.Length > 0 && _memory.Length > 0 ? " · " : "", tertiary = Look.Tertiary;
+        var join = MonitorDraw.Text(joiner, _small, tertiary, ppd);
+        var memory = MonitorDraw.Text(_memory, _small, _memoryColor, ppd);
+        bool tail = _detail.Length > 0 || _memory.Length > 0;
+        double tailWidth = tail ? gap + detail.WidthIncludingTrailingWhitespace + join.WidthIncludingTrailingWhitespace + memory.WidthIncludingTrailingWhitespace : 0;
+        double width = badge + gap + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0) + tailWidth;
         double x = _right ? Math.Max(0, w - width) : 0, baseline = Math.Round(h / 2 + number.Baseline - number.Height / 2 + _figure * .05);
         var center = new Point(x + badge / 2, h / 2);
         double hover = _button ? PressFeedback.FillShown(Math.Clamp(_hover.At(now), 0, 1), _pressed) : 0;
@@ -215,24 +225,36 @@ internal sealed class FigureGauge : FrameworkElement
         {
             // From after the figures (and any detail) to the right edge, half the line's height, centred on it.
             double end = start + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0)
-                + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0) + gap * 1.5;
+                + tailWidth + gap * 1.5;
             var area = new Rect(end, Math.Round(h * .2), Math.Max(0, w - end - 6), Math.Round(h * .6));
             if (area.Width >= 48)
                 MonitorDraw.Place(drawing, area.TopLeft, _trend.Get((_history, area.Width, area.Height), context =>
                     MonitorDraw.Sparkline(context, new Rect(0, 0, area.Width, area.Height), _history, 1, _color, .14, 1.3)));
         }
-        drawing.DrawDrawing(_text.Get((_number, _unit, _detail, _detailColor, w, h, ppd), context =>
+        drawing.DrawDrawing(_text.Get((_number, _unit, _detail, _detailColor, _memory, _memoryColor, tertiary, w, h, ppd), context =>
         {
             double x = start;
             MonitorDraw.Baseline(context, number, x, baseline); x += number.WidthIncludingTrailingWhitespace;
             if (_unit.Length > 0) { MonitorDraw.Baseline(context, unit, x + 2, baseline); x += 2 + unit.WidthIncludingTrailingWhitespace; }
-            if (_detail.Length > 0)
-            {
-                // A long detail is cut to the room left, with an ellipsis.
-                double room = w - x - gap;
-                if (room > 12) MonitorDraw.Baseline(context, detail.WidthIncludingTrailingWhitespace <= room ? detail : MonitorDraw.Trimmed(_detail, _small, _detailColor, room, ppd), x + gap, baseline);
-            }
+            if (!tail) return;
+            // A long detail is cut to the room left, with an ellipsis; the memory's share after it only where its dot and some of it fit.
+            x += gap;
+            x = Part(context, detail, _detail, _detailColor, x, w, baseline, ppd);
+            if (joiner.Length > 0 && w - x <= join.WidthIncludingTrailingWhitespace + 12) return;
+            x = Part(context, join, joiner, tertiary, x, w, baseline, ppd);
+            Part(context, memory, _memory, _memoryColor, x, w, baseline, ppd);
         }));
+    }
+
+    // A piece of the detail at x, whole or cut with an ellipsis to the room before end; where it ends (end once cut, x when empty
+    // or with no room left).
+    private double Part(DrawingContext context, FormattedText text, string words, string color, double x, double end, double baseline, double ppd)
+    {
+        double room = end - x;
+        if (words.Length == 0 || room <= 12) return words.Length == 0 ? x : end;
+        if (text.WidthIncludingTrailingWhitespace <= room) { MonitorDraw.Baseline(context, text, x, baseline); return x + text.WidthIncludingTrailingWhitespace; }
+        MonitorDraw.Baseline(context, MonitorDraw.Trimmed(words, _small, color, room, ppd), x, baseline);
+        return end;
     }
 
     // Touch and a pen do not hover (motion-review F4).
@@ -476,7 +498,9 @@ internal sealed class ColumnGraph : FrameworkElement
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e) { base.OnMouseLeftButtonUp(e); if (_button) { e.Handled = true; Clicked?.Invoke(); } }
 }
 
-// One wide column, as ftop draws the GPU beside the cores: the fill is usage, the line its memory in use against its size.
+// One wide column, as ftop draws the GPU beside the cores: the fill is usage, the line its memory in use against its size, which
+// is also written at the top ("显存 18%", or the share alone where the column is too narrow for the words, or nothing where it is too short),
+// so the memory shows without pointing at the block.
 internal sealed class BlockGauge : FrameworkElement
 {
     // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
@@ -485,9 +509,16 @@ internal sealed class BlockGauge : FrameworkElement
     private Eased _value, _tick, _hover = new(0, Eased.Hover);
     private bool _hasTick, _hasValue;
     private readonly string _action;
+    // The memory line's words, in full and the share alone, and the caption's size (0: no words).
+    private readonly double _caption;
+    private string _label = "", _short = "";
+    private readonly DrawingCache<(string, string, double, double, double, string)> _words = new();
     public event Action? Clicked;
 
-    public BlockGauge(string color, string button) { _color = color; _action = button; Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); SnapsToDevicePixels = true; }
+    public BlockGauge(string color, string button, double caption = 0)
+    {
+        _color = color; _action = button; _caption = caption; Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); SnapsToDevicePixels = true;
+    }
 
     protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Button, Spoken, () => Clicked?.Invoke());
     // For screen readers, named as the block it is, with the memory its line shows, so it never reads the same as the small GPU figure beside the main
@@ -503,6 +534,8 @@ internal sealed class BlockGauge : FrameworkElement
         bool moving = _value.Set(value ?? 0, motion);
         if (tick is { } t) moving |= _tick.Set(t, motion && _hasTick);
         _hasTick = tick is not null;
+        _short = tick is { } share ? MonitorFormat.Percent(share) + "%" : "";
+        _label = tick is null ? "" : Loc.T("显存 ", "VRAM ") + _short;
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
     }
     private bool Step(double now) { InvalidateVisual(); return _value.Moving(now) || _tick.Moving(now) || _hover.Moving(now); }
@@ -520,10 +553,30 @@ internal sealed class BlockGauge : FrameworkElement
         if (hover > .01) { drawing.PushOpacity(hover); drawing.DrawRoundedRectangle(UI.Brush(Look.Hex("hover")), null, box, radius, radius); drawing.Pop(); }
         double fill = Math.Max(3, Math.Clamp(_value.At(now), 0, 1) * h);
         drawing.DrawRoundedRectangle(UI.Brush(_color), null, new Rect(0, h - fill, w, fill), radius, radius);
+        Rect words = Rect.Empty;
+        if (_label.Length > 0 && _caption > 0 && h >= _caption * 3 + 8)
+        {
+            double ppd = MonitorDraw.PixelsPerDip(this);
+            var label = (_words.Get((_label, _short, w, _caption, ppd, Look.Secondary), context =>
+            {
+                var text = MonitorDraw.Text(_label, _caption, Look.Secondary, ppd);
+                if (text.WidthIncludingTrailingWhitespace > w - 6) text = MonitorDraw.Text(_short, _caption, Look.Secondary, ppd);
+                if (text.WidthIncludingTrailingWhitespace <= w - 6) MonitorDraw.Baseline(context, text, Math.Round((w - text.Width) / 2), Math.Round(4 + text.Baseline));
+            }));
+            drawing.DrawDrawing(label);
+            words = label.Bounds;
+        }
         if (!_hasTick || w < 10) return;
         var pen = new Pen(UI.Brush(Look.Current["textPrimary"].WithAlpha(0xB3).ToString()), 1.6); pen.Freeze();
         double y = Math.Round((1 - Math.Clamp(_tick.At(now), 0, 1)) * (h - 2)) + 1;
-        drawing.DrawLine(pen, new Point(w * .2, y), new Point(w * .8, y));
+        double left = w * .2, right = w * .8;
+        // A tick that falls on the label does not run through its letters: the line leaves a gap of the label's width there.
+        if (!words.IsEmpty && y >= words.Top - 2 && y <= words.Bottom + 2 && words.Right > left && words.Left < right)
+        {
+            if (words.Left - 2 > left) drawing.DrawLine(pen, new Point(left, y), new Point(words.Left - 2, y));
+            if (words.Right + 2 < right) drawing.DrawLine(pen, new Point(words.Right + 2, y), new Point(right, y));
+        }
+        else drawing.DrawLine(pen, new Point(left, y), new Point(right, y));
     }
     protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (PressFeedback.Hovers(true, e.StylusDevice is not null)) Hover(true); }
     protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); Hover(false); }
@@ -656,8 +709,10 @@ internal sealed class NetworkBlock : FrameworkElement
     public void Set(Reading<NetworkSample> reading, IReadOnlyList<double> down, IReadOnlyList<double> up)
     {
         _rates = reading.OrDefault; _reason = reading.HasValue ? "" : reading.Reason; _down = down; _up = up;
-        string? downText = _rates is { } d && _download ? Loc.T("下载 ", "Download ") + MonitorFormat.Rate(d.DownBytesPerSecond).Text : null;
-        string? upText = _rates is { } u && _upload ? Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(u.UpBytesPerSecond).Text : null;
+        // The traffic over the period chosen after each rate: "下载 1.2 MB/s，当天 2.31 GB".
+        string Total(double? bytes) => bytes is { } moved ? Loc.T("，", ", ") + TrafficPeriods.Name(_rates!.TotalPeriod) + " " + MonitorFormat.Total(moved).Text : "";
+        string? downText = _rates is { } d && _download ? Loc.T("下载 ", "Download ") + MonitorFormat.Rate(d.DownBytesPerSecond).Text + Total(d.DownTotalBytes) : null;
+        string? upText = _rates is { } u && _upload ? Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(u.UpBytesPerSecond).Text + Total(u.UpTotalBytes) : null;
         ToolTip = _rates is not null ? string.Join(" · ", (_uploadFirst ? new[] { upText, downText } : [downText, upText]).OfType<string>())
             : Loc.T("暂无读数：", "No reading: ") + _reason;
         InvalidateVisual();
@@ -672,14 +727,16 @@ internal sealed class NetworkBlock : FrameworkElement
         if (_download && _upload)
         {
             double downAt = _uploadFirst ? half + 12 : 0, upAt = _uploadFirst ? 0 : half + 12;
-            Half(drawing, downAt, half, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _down, _colors.Download, ppd);
-            Half(drawing, upAt, half, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _up, _colors.Upload, ppd);
+            Half(drawing, downAt, half, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _rates?.DownTotalBytes, _down, _colors.Download, ppd);
+            Half(drawing, upAt, half, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _rates?.UpTotalBytes, _up, _colors.Upload, ppd);
         }
-        else if (_download) Half(drawing, 0, w, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _down, _colors.Download, ppd);
-        else Half(drawing, 0, w, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _up, _colors.Upload, ppd);
+        else if (_download) Half(drawing, 0, w, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _rates?.DownTotalBytes, _down, _colors.Download, ppd);
+        else Half(drawing, 0, w, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _rates?.UpTotalBytes, _up, _colors.Upload, ppd);
     }
 
-    private void Half(DrawingContext drawing, double left, double width, double line, MonitorGlyph glyph, double? rate, IReadOnlyList<double> history, string color, double ppd)
+    // total: the traffic over the period chosen (TrafficPeriods), at the end of the half in the caption's type where there is room for it (with
+    // its label if that fits, else the figure alone), and the curve ends before it.
+    private void Half(DrawingContext drawing, double left, double width, double line, MonitorGlyph glyph, double? rate, double? total, IReadOnlyList<double> history, string color, double ppd)
     {
         double badge = Math.Round(_body + 5), baseline = Math.Round(line / 2 + _body * .38);
         // The arrow in the room a dial takes, as large against it as the collapsed strip draws it, so the figures line up with memory's.
@@ -691,12 +748,26 @@ internal sealed class NetworkBlock : FrameworkElement
         MonitorDraw.Baseline(drawing, number, x, baseline);
         x += number.WidthIncludingTrailingWhitespace;
         if (q.Unit.Length > 0) { var unit = MonitorDraw.Text(q.Unit, _caption, Look.Tertiary, ppd); MonitorDraw.Baseline(drawing, unit, x + 3, baseline); x += 3 + unit.WidthIncludingTrailingWhitespace; }
+        double reserved = 0;
+        if (total is { } moved)
+        {
+            var figure = MonitorFormat.Total(moved).Text;
+            foreach (var label in new[] { TrafficPeriods.Name(_rates?.TotalPeriod ?? TrafficPeriod.Today) + " " + figure, figure })
+            {
+                var drawn = MonitorDraw.Text(label, _caption, Look.Tertiary, ppd);
+                double drawnWidth = Math.Ceiling(drawn.WidthIncludingTrailingWhitespace);
+                if (x + 8 + drawnWidth > left + width) continue;
+                MonitorDraw.Baseline(drawing, drawn, left + width - drawnWidth, baseline);
+                reserved = drawnWidth + 8;
+                break;
+            }
+        }
         if (_mode == MetricsMode.Line || history.Count < 3) return;
         // The sparkline takes the rest of the half after the rate, centred on the line and as tall as the power line's curve (a drive
         // line less 4), so the page's small curves are one size. Measured before a Rect is made: a Rect does not take a negative size,
         // and a narrow half leaves none.
         double start = Math.Max(x + 10, left + width * .45);
-        double areaWidth = left + width - start, areaHeight = Math.Min(line - 4, Math.Ceiling(_body * 1.5) - 4), areaTop = Math.Round((line - areaHeight) / 2);
+        double areaWidth = left + width - reserved - start, areaHeight = Math.Min(line - 4, Math.Ceiling(_body * 1.5) - 4), areaTop = Math.Round((line - areaHeight) / 2);
         if (areaWidth >= 24 && areaHeight >= 6) Sparkline(drawing, new Rect(start, areaTop, areaWidth, areaHeight), history, color);
     }
 

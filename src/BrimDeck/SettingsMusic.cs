@@ -32,13 +32,19 @@ public sealed partial class SettingsWindow
     {
         if (_styleOptions is not { } host) return;
         var incoming = Collect(() => { StyleOptions(style); CollapsedSizeOptions(style); });
+        SwapOptions(host, incoming, previous is { } from && from != style ? (style > from ? 1 : -1) : 0);
+    }
+    // Shows `incoming` in a host in place of what it shows: at once (direction 0, nothing shown yet, or without animations), or
+    // with the old options leaving to one side as the new come in from the other (1: the new from the right; -1: from the left).
+    // The options of a choice among cards (the collapsed style, the clipboard page's arrangement) are shown this way.
+    private static void SwapOptions(Grid host, FrameworkElement incoming, int direction)
+    {
         var outgoing = host.Children.OfType<FrameworkElement>().LastOrDefault();
         double width = host.ActualWidth;
-        if (outgoing is null || previous is not { } from || from == style || width <= 0 || !Soft.Enabled)
+        if (outgoing is null || direction == 0 || width <= 0 || !Soft.Enabled)
         { host.Children.Clear(); host.Children.Add(incoming); return; }
         // A panel still leaving from an earlier choice is dropped; the one arriving becomes the one leaving.
         foreach (var leaving in host.Children.OfType<FrameworkElement>().Where(child => child != outgoing).ToList()) host.Children.Remove(leaving);
-        double direction = style > from ? 1 : -1;
         host.ClipToBounds = true; outgoing.IsHitTestVisible = false; host.Children.Add(incoming);
         var leave = outgoing.RenderTransform as TranslateTransform ?? new TranslateTransform(); outgoing.RenderTransform = leave;
         var enter = new TranslateTransform(direction * width, 0); incoming.RenderTransform = enter;
@@ -258,8 +264,65 @@ public sealed partial class SettingsWindow
             S.MusicLyricColor, S.MusicLyricCustomColor, UI.Brush(PanelTheme.Hex("textPrimary")),
             (chosen, custom) => Change(s => { s.MusicLyricColor = chosen; s.MusicLyricCustomColor = custom; })));
         lyricColor.IsEnabled = S.MusicPage;
-        Group(Toggle(Loc.T("显示封面", "Show cover"), S.MusicPageCover, v => Change(s => s.MusicPageCover = v), S.MusicPage),
-            Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), lyricColor);
+        var rows = new List<FrameworkElement>
+        {
+            Toggle(Loc.T("显示封面", "Show cover"), S.MusicPageCover, v => { Change(s => s.MusicPageCover = v); ShowPage(_page); }, S.MusicPage),
+            Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => { Change(s => s.LyricsEnabled = v); ShowPage(_page); }, S.MusicPage), lyricColor
+        };
+        if (PageLayoutCards() is { } layout) rows.Add(layout);
+        Group([.. rows]);
+    }
+
+    // The open page's layout, the last setting of "展开时": its name and, under it, the cards to choose from. The cards follow what
+    // the page shows: with the cover and the lyrics both, the two layouts; with the lyrics alone, the columns card without a
+    // record and the stacked one at the page's left or in the middle (MusicLyricsAlign); with the cover alone, the columns card
+    // without its divider and lyrics and the stacked one without the lyrics. With neither the page has only the titles, centred
+    // whatever was chosen, and there is nothing to choose. Each card draws its own diagram (MusicLyricsPreview).
+    private FrameworkElement? PageLayoutCards()
+    {
+        bool cover = S.MusicPageCover, lyrics = S.LyricsEnabled;
+        if (!cover && !lyrics) return null;
+        var choices = new List<(string Name, bool Selected, Func<FrameworkElement> Preview, Action Choose)>();
+        void AddCard(string name, bool selected, Func<FrameworkElement> preview, MusicLyricsLayout layout, MusicLyricsAlign? align = null) => choices.Add((name, selected, preview, () =>
+        {
+            if (S.MusicLyricsLayout == layout && (align is null || S.MusicLyricsAlign == align)) return;
+            Change(s => { s.MusicLyricsLayout = layout; if (align is { } value) s.MusicLyricsAlign = value; });
+        }));
+        if (lyrics && cover)
+        {
+            AddCard(Loc.T("堆叠", "Stacked"), S.MusicLyricsLayout == MusicLyricsLayout.Stacked,
+                () => MusicLyricsPreview.StackedWithCover(_palette), MusicLyricsLayout.Stacked);
+            AddCard(Loc.T("分栏", "Separate columns"), S.MusicLyricsLayout == MusicLyricsLayout.Columns,
+            () => MusicLyricsPreview.ColumnsWithCover(_palette), MusicLyricsLayout.Columns);
+        }
+        else if (lyrics)
+        {
+            AddCard(Loc.T("居左", "Left"), S.MusicLyricsLayout == MusicLyricsLayout.Stacked && S.MusicLyricsAlign == MusicLyricsAlign.Left,
+                () => MusicLyricsPreview.StackedWithoutCover(_palette, MusicLyricsAlign.Left), MusicLyricsLayout.Stacked, MusicLyricsAlign.Left);
+            AddCard(Loc.T("居中", "Center"), S.MusicLyricsLayout == MusicLyricsLayout.Stacked && S.MusicLyricsAlign == MusicLyricsAlign.Center,
+                () => MusicLyricsPreview.StackedWithoutCover(_palette, MusicLyricsAlign.Center), MusicLyricsLayout.Stacked, MusicLyricsAlign.Center);
+            AddCard(Loc.T("分栏", "Separate columns"), S.MusicLyricsLayout == MusicLyricsLayout.Columns,
+            () => MusicLyricsPreview.ColumnsWithoutCover(_palette), MusicLyricsLayout.Columns);
+        }
+        else
+        {
+            AddCard(Loc.T("堆叠", "Stacked"), S.MusicLyricsLayout == MusicLyricsLayout.Stacked,
+                () => MusicLyricsPreview.StackedWithoutLyrics(_palette), MusicLyricsLayout.Stacked);
+            AddCard(Loc.T("分栏", "Separate columns"), S.MusicLyricsLayout == MusicLyricsLayout.Columns,
+            () => MusicLyricsPreview.ColumnsWithoutLyrics(_palette), MusicLyricsLayout.Columns);
+        }
+        var cards = new UniformGrid { Columns = choices.Count, Margin = new Thickness(-6, 6, -6, 0), IsEnabled = S.MusicPage };
+        foreach (var (name, selected, preview, choose) in choices)
+        {
+            var card = new RadioButton { Style = (Style)FindResource("SettingsChoice"), Content = preview(), Margin = new Thickness(6, 3, 6, 0), Tag = name, GroupName = "MusicLyricsLayout", IsChecked = selected };
+            AutomationProperties.SetName(card, name);
+            card.Checked += (_, _) => choose();
+            cards.Children.Add(card);
+        }
+        var title = SettingLabel(Loc.T("布局", "Layout")); title.Margin = new Thickness(0, 12, 0, 0);
+        var panel = new StackPanel();
+        panel.Children.Add(title); panel.Children.Add(cards);
+        return panel;
     }
     // Operations only one player supports, grouped under that player's name.
     private void Players()

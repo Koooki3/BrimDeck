@@ -40,9 +40,12 @@ public static class ThunderobotMice
     public static bool Takes(HidShape shape) => shape.Vendor == Vendor && shape.Product == Ml903
         && MouseShapes.Collection(shape, 0xFFA0, 0x02) && shape.InputLength >= 25;
 
+    // The device-info read (MetapandaMice asks the vendor's other products it as well).
+    public static BrandWay Info() => new("thunderobot.info", WayTransport.Output, Request(), Battery) { TimeoutMs = 800 };
+
     public static IEnumerable<BrandFamily> Families =>
     [
-        new("Thunderobot", Takes, _ => [new BrandWay("thunderobot.info", WayTransport.Output, Request(), Battery) { TimeoutMs = 800 }])
+        new("Thunderobot", Takes, _ => [Info()])
         { Kind = _ => DeviceKind.Mouse, Prefix = "thunderobot", DisplayName = _ => "Thunderobot ML903" },
     ];
 }

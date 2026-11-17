@@ -16,7 +16,7 @@ public sealed partial class SettingsWindow
 
     private void DismissPreviewOutsideControl(object? source)
     {
-        if (_page is 1 or 2 or ThemePage or MonitorSettingsPage && (source is not DependencyObject control || !(bool)control.GetValue(PreviewControlProperty)))
+        if (_page is 1 or 2 or ThemePage or MonitorSettingsPage or ShelfLayoutSettingsPage && (source is not DependencyObject control || !(bool)control.GetValue(PreviewControlProperty)))
             QueuePreviewDismissal();
     }
 

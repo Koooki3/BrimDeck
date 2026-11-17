@@ -32,7 +32,7 @@ Under "When expanded", "What the page shows" has a chip for each reading, clicke
 
 ## CPU and GPU
 
-- CPU usage is worked out from the time the processor is busy, as Task Manager does from Windows 11 24H2.
+- CPU usage is worked out from the time the processor is busy (including WSL2 and virtual machines when Hyper-V is on), as Task Manager does from Windows 11 24H2.
 - With more than one graphics card, the discrete one shows by default. Click the large GPU reading on the page to show the next card, or choose one under General › GPU.
 - GPU usage comes from the graphics driver by default (NVIDIA, AMD, Intel), which matches nvidia-smi and HWiNFO; where the driver gives no reading, it is worked out as Task Manager does. If the driver's reading is wrong, choose Windows under Sources › GPU usage.
 
@@ -47,6 +47,17 @@ Choose it under "General > Core display":
 - Dot matrix: always the matrix.
 
 The squares are as large as the room allows, on whole device pixels at any display scale, with a one-pixel gap where there is room and touching where there is not. The frequency line of a column has no equivalent in the matrix; point at a square to see it.
+
+## Traffic
+
+On the expanded page, the network line shows the traffic over a period after the download and upload rates, such as "Today 2.31 GB"; with less room it shows the figure alone, and with less still only in the tooltip. In the collapsed row, the readings table has "Downloaded" and "Uploaded" rows of their own, shown with a double arrow; turn either on alongside the rates or without them.
+
+Choose the period under General › Traffic period:
+
+- Today: from midnight local time, starting over each midnight.
+- 1 day, 7 days, 30 days: that long back from now.
+
+The traffic comes from Windows' own record, the one the Data usage page in Windows Settings shows, so it includes the time BrimDeck was not running and does not start over when it restarts. Wi-Fi, Ethernet and cellular networks are counted; a VPN or another virtual network is not counted again, as its traffic is already counted on the network it runs over. Windows updates its record a little later, so traffic that has just happened may be counted some time afterwards.
 
 ## Drives
 

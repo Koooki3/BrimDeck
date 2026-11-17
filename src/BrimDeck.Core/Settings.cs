@@ -14,7 +14,8 @@ public enum EdgeAnchor { Screen, Taskbar }
 // Peek: the indicator that shows a readout of the system readings beside it while the pointer is on it (WindowPeek). Appended, so saved numbers keep their meaning.
 public enum WindowBehavior { Normal, Line, Hide, Peek }
 // BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
-public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen }
+// Occupied: a window that neither is maximized nor fills the screen overlaps the place of the collapsed panel.
+public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen, Occupied }
 // The monitors that show the panel. Chosen uses DisplayMonitors and falls back to the primary monitor while none of them is connected.
 public enum DisplayPlacement { Primary, Chosen }
 // A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named. Profile is
@@ -350,7 +351,8 @@ public sealed class DeckSettings
     // What the user changed under each panel theme, by theme id (see ThemeChoices); the theme in use keeps its choices in the
     // ordinary settings, and they are saved here when another theme is chosen.
     public Dictionary<string, ThemeChoices> ThemeChoices { get; set; } = [];
-    // When a theme with a night look shows its day look, "HH:mm-HH:mm" local time; empty keeps the theme's own hours.
+    // When a theme with a night look shows its day look: "HH:mm-HH:mm" local time, "system" to follow Windows' dark and light
+    // mode, or empty for the theme's own choice (PanelThemes.DaylightModeOf).
     public string ThemeDaylight { get; set; } = "";
     // A first start replaces the default with the Windows display language (SettingsStore.Load); files saved before
     // English existed are Chinese (SettingsMigrations).
@@ -459,9 +461,11 @@ public sealed class DeckSettings
         }
     }
     // Mouse pass-through: hovering does not open the panel and every click goes to the window beneath; only the shortcuts open
-    // it. ClickThroughPanel lets the open panel take clicks as usual.
+    // it. ClickThroughPanel lets the open panel take clicks as usual; ClickThroughKeyboard lets a panel opened by a shortcut take
+    // the keyboard and Esc, which it otherwise leaves to the window in use (a game).
     public bool ClickThrough { get; set; }
     public bool ClickThroughPanel { get; set; }
+    public bool ClickThroughKeyboard { get; set; }
     public bool MusicPage { get; set; } = true;
     public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
@@ -519,6 +523,11 @@ public sealed class DeckSettings
     public bool MusicPageCover { get; set; } = true;
     public bool MusicIndicatorProgress { get; set; } = true;
     public bool LyricsEnabled { get; set; } = true;
+    // Where the lyrics sit on the page, chosen apart from the cover: under the artist in the titles' column, or in a column of
+    // their own right of the titles (the cover then stands above the titles). Without the cover the titles' column may sit at the
+    // page's left edge or be centred.
+    public MusicLyricsLayout MusicLyricsLayout { get; set; } = MusicLyricsLayout.Columns;
+    public MusicLyricsAlign MusicLyricsAlign { get; set; } = MusicLyricsAlign.Left;
     // What dragging with the left button over the expanded music page does in each direction, and a two-finger touchpad swipe
     // to either side (MusicGestures). A number not listed does nothing.
     public MusicGestureAction MusicDragLeft { get => _musicDragLeft; set => _musicDragLeft = Gesture(value); }
@@ -592,6 +601,9 @@ public sealed class DeckSettings
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
+    // A window that overlaps the place of the collapsed panel in its own style, such as one dragged under it. Maximized and
+    // full-screen windows follow the rules above; the app rules do not choose for this one.
+    public WindowBehavior Occupied { get; set; } = WindowBehavior.Normal;
     // Whether a window behind the foreground one counts too: maximized or borderless across the panel's monitor, it calls for
     // the same rule as if it were in front. Off, only the foreground window is read, as before the background was looked at.
     public bool BackgroundWindows { get; set; } = true;
@@ -614,13 +626,36 @@ public sealed class DeckSettings
     public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
     public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
     public bool ClipboardRecord { get; set; } = true;
+    public bool WeTypeClipboardSync { get; set; }
+    public bool DoubaoClipboardSync { get; set; }
+    public bool LanClipboardSync { get; set; }
     // Applications whose copies are not recorded: the executable's path, or a process name (ClipboardExclusions).
     public List<string> ClipboardExcluded { get; set; } = [];
     // Off, the clipboard history goes when BrimDeck exits; on, it stays, and each copy goes once it is older than ClipboardKeepFor.
     // What is kept (ShelfData.Kept: phrases, 常用, the categories set to keep) stays either way.
     public bool ClipboardKeepHistory { get; set; }
     public HistoryLength ClipboardKeepFor { get; set; } = HistoryLength.Month;
+    // What the left button does with files dragged out of the file transfer; the right button does the other of the two.
     public TransferDragOut TransferDragOut { get; set; } = TransferDragOut.Copy;
+    // On, files dragged out to be moved that a target took as copies (a chat window, a browser) leave the list as well.
+    public bool TransferRemoveAfterCopyDrop { get; set; }
+    // Which columns the page shows: both, or only the clipboard or only the file transfer over the whole width. Only with both are
+    // they arranged (ShelfArrangement): side by side or stacked as cards (ShelfLayout), and side by side the file transfer's share
+    // of the width in percent, set by dragging the divider between them or in the settings.
+    public ShelfShown ShelfShown { get; set; } = ShelfShown.Both;
+    public ShelfArrangement ShelfArrangement { get; set; } = ShelfArrangement.Split;
+    public bool ShelfSameSideStack { get; set; } = true;
+    public double ShelfFileShare { get; set; } = ShelfLayout.DefaultShare;
+    // Stacked, further ways to bring the card behind forward, besides a click on its side strip, on the title of the card in
+    // front or on the page's own button: resting the pointer on the side strip, a middle click anywhere on the page, and a
+    // two-finger sideways swipe or Shift with the wheel.
+    public bool ShelfHoverSwitch { get; set; }
+    public bool ShelfMiddleSwitch { get; set; } = true;
+    public bool ShelfSwipeSwitch { get; set; }
+    // How each column shows its entries (ClipView, FileView), chosen for each by itself. At first the clipboard shows one line an
+    // entry, and the file transfer two, under a larger icon.
+    public ClipView ShelfClipView { get; set; } = ClipView.Single;
+    public FileView ShelfFileView { get; set; } = FileView.Two;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
     // The Custom scheme's colors; kept while another scheme is chosen.
@@ -635,6 +670,8 @@ public sealed class DeckSettings
     public CoreDisplay CoreDisplay { get; set; } = CoreDisplay.Auto;
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
+    // The span the traffic shown beside the network's rates is summed over, from Windows' own record (TrafficPeriods).
+    public TrafficPeriod MonitorTrafficPeriod { get; set; } = TrafficPeriod.Today;
     public bool MonitorProcesses { get; set; } = true;
     public ProcessSort MonitorSort { get; set; }
     public MonitorMain MonitorMain { get; set; }
@@ -747,8 +784,10 @@ public sealed class DeckSettings
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
     public bool ShowsDevices(CompactStyle style) => style switch { CompactStyle.Notch => NotchDevices, CompactStyle.Capsule => CapsuleDevices, _ => false };
-    // The file transfer's count needs the page: with the page off, nothing can be dropped there.
-    public bool ShowsTransfer(CompactStyle style) => ClipboardPage && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
+    // The file transfer's count needs the page and its column: with either hidden, nothing can be dropped there.
+    public bool ShowsTransfer(CompactStyle style) => ClipboardPage && ShelfShown != ShelfShown.Clipboard && style switch { CompactStyle.Notch => NotchTransfer, CompactStyle.Capsule => CapsuleTransfer, _ => false };
+    // The page's columns are stacked as cards only while it shows both.
+    public bool ShelfStacked() => ShelfShown == ShelfShown.Both && ShelfArrangement == ShelfArrangement.Stacked;
     public IReadOnlyList<CompactPart> CompactOrder(CompactStyle style) => style == CompactStyle.Capsule ? CapsuleOrder : NotchOrder;
     public void SetCompactOrder(CompactStyle style, IEnumerable<CompactPart> order) { if (style == CompactStyle.Notch) NotchOrder = [.. order]; else if (style == CompactStyle.Capsule) CapsuleOrder = [.. order]; }
     public bool CompactAutoWidth(CompactStyle style) => style switch { CompactStyle.Notch => NotchAutoWidth, CompactStyle.Capsule => CapsuleAutoWidth, _ => false };
@@ -761,7 +800,7 @@ public sealed class DeckSettings
     // Media is detected for the expanded music page, the chosen style's music or equalizer, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
     [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || ShowsEqualizer(Style) || MusicIndicatorProgress
-        && (Style == CompactStyle.Line || Maximized.IsIndicator() || Borderless.IsIndicator() || Exclusive.IsIndicator());
+        && (Style == CompactStyle.Line || Maximized.IsIndicator() || Borderless.IsIndicator() || Exclusive.IsIndicator() || Occupied.IsIndicator());
     // The switched-on applications. Their quotas are read for the AI usage page or for the rings of the chosen compact
     // style; the two are shown independently, so either one keeps the data current.
     [JsonIgnore] public IReadOnlyList<AppEntry> ConfiguredApps => Apps.Where(app => app.Enabled).Take(AppPresets.MaximumShownApps).ToList();
@@ -811,7 +850,7 @@ public sealed class DeckSettings
         return kind switch
         {
             ScreenContext.Maximized => Maximized, ScreenContext.Borderless => Borderless,
-            ScreenContext.Exclusive => Exclusive, _ => WindowBehavior.Normal
+            ScreenContext.Exclusive => Exclusive, ScreenContext.Occupied => Occupied, _ => WindowBehavior.Normal
         };
     }
     public DeckSettings Copy()
@@ -881,6 +920,11 @@ public sealed class DeckSettings
         ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;
         if (!Enum.IsDefined(TransferDragOut)) TransferDragOut = TransferDragOut.Copy;
+        if (!Enum.IsDefined(ShelfShown)) ShelfShown = ShelfShown.Both;
+        if (!Enum.IsDefined(ShelfArrangement)) ShelfArrangement = ShelfArrangement.Split;
+        if (!Enum.IsDefined(ShelfClipView)) ShelfClipView = ClipView.Single;
+        if (!Enum.IsDefined(ShelfFileView)) ShelfFileView = FileView.Two;
+        ShelfFileShare = ShelfLayout.ClampShare(Math.Round(ShelfFileShare, 1), ShelfFileView);
         if (!Enum.IsDefined(ClipboardKeepFor)) ClipboardKeepFor = HistoryLength.Month;
         ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);
@@ -891,6 +935,7 @@ public sealed class DeckSettings
         CompactWarningColor = AppPresets.NormalizeColor(CompactWarningColor) is { Length: > 0 } warning ? warning : null;
         CompactCriticalColor = AppPresets.NormalizeColor(CompactCriticalColor) is { Length: > 0 } critical ? critical : null;
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
+        if (!Enum.IsDefined(MonitorTrafficPeriod)) MonitorTrafficPeriod = TrafficPeriod.Today;
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
         if (!Enum.IsDefined(MonitorGpuUsage)) MonitorGpuUsage = GpuUsageSource.Driver;
@@ -912,6 +957,8 @@ public sealed class DeckSettings
         CompactMonitor = Core.CompactMonitor.Preset(CompactReadings) ?? CompactMonitorMode.Custom;
         CompactMonitorItems = Core.CompactMonitor.Shown(CompactReadings);
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
+        if (!Enum.IsDefined(MusicLyricsLayout)) MusicLyricsLayout = MusicLyricsLayout.Columns;
+        if (!Enum.IsDefined(MusicLyricsAlign)) MusicLyricsAlign = MusicLyricsAlign.Left;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
         ClockCustomColor = AppPresets.NormalizeColor(ClockCustomColor) is { Length: > 0 } custom ? custom : ClockColors.DefaultCustom;
@@ -924,9 +971,8 @@ public sealed class DeckSettings
         AnimationDuration = Math.Clamp(AnimationDuration, 100, 1000);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
-        // Two valid, different times or none: anything else keeps the theme's own hours.
-        ThemeDaylight = (ThemeDaylight ?? "").Split('-', 2) is [var day, var night] && PanelThemes.ParseTimeOfDay(day) is { } d && PanelThemes.ParseTimeOfDay(night) is { } n && d != n
-            ? PanelThemes.FormatDaylight(d, n) : "";
+        // "system" or two valid, different times; anything else keeps the theme's own choice.
+        ThemeDaylight = PanelThemes.NormalizeDaylightSetting(ThemeDaylight);
         Language = Loc.Normalize(Language);
         UiFont = UiFonts.Normalize(UiFont);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
@@ -955,6 +1001,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
+        if (!Enum.IsDefined(Occupied)) Occupied = WindowBehavior.Normal;
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
         // A file saved before MouseWheel had the page switch turned off as MouseWheelPages = false.
         if (MouseWheelPages is false) MouseWheel = MouseWheelAction.None;
@@ -1013,7 +1060,14 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
     // True when the last Load found no settings file, or none it could read, and returned defaults.
     public bool IsFirstStart { get; private set; }
     // Without saved settings the interface follows the Windows display language; saved settings keep their language.
-    private DeckSettings FirstStart() { IsFirstStart = true; return new() { Language = Loc.SystemLanguage() }; }
+    // Normalized as read settings are: the start relies on what Normalize ensures, such as one current profile (Profiles.Keep).
+    private DeckSettings FirstStart()
+    {
+        IsFirstStart = true;
+        var settings = new DeckSettings { Language = Loc.SystemLanguage() };
+        settings.Normalize();
+        return settings;
+    }
     public DeckSettings Load()
     {
         _snapshots = []; _newerFile = null; _unknown = []; IsFirstStart = false; _loadWarning = null;

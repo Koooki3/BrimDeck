@@ -1,5 +1,10 @@
 namespace BrimDeck.Core;
 
+public enum MusicLyricsLayout { Stacked, Columns }
+
+// Where the artist's column of the stacked layout sits when the cover is not shown: against the page's left edge or centred.
+public enum MusicLyricsAlign { Left, Center }
+
 // Type sizes and spacing of the music page. Each value is given at the three size presets and at the largest panel
 // (density 0, 1, 2 and 3) and runs linearly between them, so a panel between two presets gets sizes between theirs.
 // Bottom is the margin below the transport glyphs and equals Side, so the page has the same inset on three sides.
@@ -100,12 +105,25 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
             timeline ? progressY : 0, timeline ? c.SeekRow : 0, timesY, controlsY, gap, tripletX, tripletW, modeX, enable, fullControlRoom) { UpperHeight = upper };
     }
 
-    // Without the cover the upper part has two columns, so the titles and the lyrics are not read as one block: the title,
+    // In the column layout the upper part has two columns, so the titles and the lyrics are not read as one block: the title,
     // artist and album centred in the left one, and the lyrics right of a thin divider. The left column takes about a third of
     // the width; a wider panel gives the lyrics the rest. The lyrics fill the upper part's height, the current line a size
-    // larger, with as many lines before it as after it (one more after when the count is even). Without lyrics the titles
-    // are centred across the whole width. The album, then the equalizer below the titles, give way to a short upper part.
-    public MusicColumns Columns(bool lyrics)
+    // larger, with as many lines before it as after it. An even count has one line more on one side: after it while the
+    // equalizer is under the titles, and before it while the equalizer is at the top right corner, so the current line stands
+    // in the lower half, away from the bars. Without lyrics the titles are centred across the whole width.
+    //
+    // Without the cover the equalizer is under the titles, in the middle of their column (EqualizerBelow), where the height
+    // holds it; the album's own line gives way to it first. A part too short for that leaves it at the upper part's top right
+    // corner, where the one-column layout has it.
+    //
+    // The cover, when shown, stands above the titles and comes before what is under them: it takes the height the title and one
+    // line of artist and album leave, no wider than the column and no larger than the one-column layout's cover. The equalizer
+    // is at the top right corner then and takes no height. The album's own line comes back only where the cover still has
+    // CoverShare of the height with it. A part too short for a cover of that share above the titles has it beside them instead,
+    // as tall as the part and no wider than .42 of the column, and the titles read from the left there; the album then follows
+    // the height.
+    public const double CoverShare = .45, MinimumColumnCover = 24;
+    public MusicColumns Columns(bool lyrics, bool cover = false)
     {
         var c = Metrics;
         double height = Math.Max(0, UpperHeight), gap = c.Gap;
@@ -113,19 +131,33 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
         double lyricsX = lyrics ? info + 2 * gap + 1 : BodyWidth, lyricsW = Math.Max(0, BodyWidth - lyricsX);
         double currentFont = Math.Round(c.Lyric * 1.15 * 2, MidpointRounding.AwayFromZero) / 2, currentLine = Math.Round(c.LyricLine * 1.15, MidpointRounding.AwayFromZero);
         int lines = !lyrics ? 0 : (int)Math.Clamp(1 + Math.Floor((height - currentLine) / c.LyricLine), 1, 7);
-        int before = Math.Max(0, lines - 1) / 2, after = Math.Max(0, lines - 1 - before);
-        bool album = c.TitleLine + 2 * c.ArtistLine <= height;
-        double titles = c.TitleLine + (album ? 2 : 1) * c.ArtistLine;
-        bool equalizer = titles + c.SectionGap + c.Equalizer <= height;
-        return new(height, info, gap, lyricsX, lyricsW, currentFont, currentLine, before, after, album, equalizer, c.SectionGap);
+        double bars = c.SectionGap + c.Equalizer;
+        bool below = !cover && c.TitleLine + c.ArtistLine + bars <= height;
+        int before = below ? Math.Max(0, lines - 1) / 2 : lines / 2, after = Math.Max(0, lines - 1 - before);
+        bool album = c.TitleLine + 2 * c.ArtistLine + (below ? bars : 0) <= height;
+        double above = 0, beside = 0;
+        if (cover)
+        {
+            double widest = Math.Min(Cover, info);
+            double Above(bool twoLines) => Math.Floor(Math.Min(widest, height - c.TitleLine - (twoLines ? 2 : 1) * c.ArtistLine - c.MiddleGap));
+            double wanted = Math.Max(MinimumColumnCover, Math.Min(widest, Math.Round(height * CoverShare)));
+            double side = Math.Floor(Math.Min(height, info * .42));
+            if (Above(false) >= wanted) { album = Above(true) >= wanted; above = Above(album); }
+            else if (side >= MinimumColumnCover && info >= side + c.MiddleGap + 40) beside = side;
+            else if (Above(false) >= MinimumColumnCover) { album = false; above = Above(false); }
+        }
+        return new(height, info, gap, lyricsX, lyricsW, currentFont, currentLine, before, after, album, below, c.SectionGap) { Cover = above, SideCover = beside };
     }
 }
 
-// The two columns of the music page without the cover (MusicLayout.Columns). Widths and positions are relative to the page body.
+// The two columns of the music page's column layout (MusicLayout.Columns). Widths and positions are relative to the page body.
 public sealed record MusicColumns(double Height, double InfoWidth, double DividerGap, double LyricsX, double LyricsWidth,
-    double CurrentLyric, double CurrentLine, int Before, int After, bool ShowAlbum, bool ShowEqualizer, double EqualizerGap)
+    double CurrentLyric, double CurrentLine, int Before, int After, bool ShowAlbum, bool EqualizerBelow, double EqualizerGap)
 {
     public int LyricLines => LyricsWidth > 0 ? Before + 1 + After : 0;
+    // The cover's size above the titles, or beside them; at most one is set, and neither without a cover or the room for one.
+    public double Cover { get; init; }
+    public double SideCover { get; init; }
 }
 
 // What the open music page's title needs worked out outside the window. The title's room is decided by the page's grid (the line
@@ -142,6 +174,11 @@ public static class MusicTitleFit
         double fiveBars = Math.Max(27, Math.Round(equalizerHeight * 1.7));
         return Math.Round(3 + (CompactMusicLayout.SafeBars(bars) - 1) * (fiveBars - 3) / 4);
     }
+    // Centred without the cover, the title has the page's whole line and the equalizer stands over its right end. The title keeps
+    // this far from both ends of the line: the equalizer and its gap at the right, and as much at the left, so the room left for
+    // it is centred on the page. Both follow the equalizer's width, which grows with the bar count and the page's type size.
+    public static double CenteredInset(double equalizerWidth) => Math.Max(0, equalizerWidth) + EqualizerGap;
+    public static double CenteredRoom(double line, double equalizerWidth) => Math.Max(0, line - 2 * CenteredInset(equalizerWidth));
     // What a screen reader reads for the title: the whole title, and the artist when the short page merges it into the line.
     public static string ReadAs(string title, string tail = "") => Loc.T("歌名 ", "Title ") + title + tail;
     // How far the text overhangs its room, in whole device pixels (scale: device pixels per DIP). The small allowance keeps

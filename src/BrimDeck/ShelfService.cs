@@ -15,6 +15,8 @@ namespace BrimDeck;
 // are read only to paste. Only the list is held in memory; pictures are read to be shown. Earlier versions encrypted both for the current Windows user
 // (DPAPI); such files are still read, and the list is written plain at its next save. Encrypting the whole list took from a
 // tenth of a second to seconds once it held thousands of entries, on the panel's thread, at every save.
+internal enum PasteResult { Pasted, Copied, Elevated }
+
 internal sealed class ShelfService : IDisposable
 {
     private readonly string _folder, _file, _pictures;
@@ -25,6 +27,17 @@ internal sealed class ShelfService : IDisposable
     public ShelfData Data { get; private set; } = new();
     // A copy was recorded, an entry changed, files were added: the panels show the page again.
     public event Action? Changed;
+    // The category each column shows, null for "全部". It is one for every panel, as the entries are: chosen on one display, it
+    // is the one shown on the others, so no display shows an empty category while another shows everything.
+    public Guid? ClipTab { get; private set; }
+    public Guid? FileTab { get; private set; }
+    public event Action? TabChanged;
+    public void ShowTab(ShelfSide side, Guid? category)
+    {
+        if ((side == ShelfSide.Clipboard ? ClipTab : FileTab) == category) return;
+        if (side == ShelfSide.Clipboard) ClipTab = category; else FileTab = category;
+        TabChanged?.Invoke();
+    }
     private Func<DeckSettings> _settings = () => new();
 
     public ShelfService(string folder, Dispatcher dispatcher)
@@ -63,6 +76,7 @@ internal sealed class ShelfService : IDisposable
 
     private void Copied(ClipCopy copy)
     {
+        if (BrimDeck.Core.ClipboardSync.LanClipboardLink.ContainsInvitation(copy.Text)) return;
         var now = DateTimeOffset.Now;
         ClipEntry entry;
         if (copy.Png is { } png)
@@ -85,6 +99,82 @@ internal sealed class ShelfService : IDisposable
         // is saved all the same: its file is deleted with its entry, and a start after a forced end finds that entry only in the
         // saved list.
         if (_settings().ClipboardKeepHistory || entry.Kind == ClipKind.Image || Data.Kept(entry)) QueueSave();
+    }
+
+    // html: the text's formatting in the clipboard's HTML form, when the other device sent it.
+    internal void AcceptRemoteText(string text, string source, string html = "")
+    {
+        var data = TextData(text);
+        if (html.Length > 0) data.SetData(DataFormats.Html, html);
+        if (!Put(Synced(data))) throw new ExternalException("The clipboard is busy.");
+        _watch?.IgnoreCurrent();
+        if (_settings().ClipboardRecord) Copied(new ClipCopy(text, html, "", null, 0, 0, source));
+    }
+
+    internal static BitmapSource DecodeRemoteImage(BrimDeck.Core.ClipboardSync.LanPng png)
+    {
+        using var bytes = new MemoryStream(png.Bytes, writable: false);
+        var frame = BitmapFrame.Create(bytes, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        if (frame.PixelWidth != png.Width || frame.PixelHeight != png.Height)
+            throw new InvalidDataException("PNG dimensions do not match the frame.");
+        frame.Freeze();
+        return frame;
+    }
+
+    // What another device copied is marked, as it is put on this clipboard, as not for clipboard monitors: an input method
+    // installed here and syncing by itself would otherwise take it for a copy made here and send it on, and with the same
+    // on the other computer the content went round between the two without end (seen on 2026-11-16: WeType to here, Doubao
+    // back). Windows' own clipboard history leaves it out as well; BrimDeck's history takes it directly.
+    private static DataObject Synced(DataObject data)
+    {
+        data.SetData("ExcludeClipboardContentFromMonitorProcessing", new MemoryStream(new byte[4]), false);
+        return data;
+    }
+
+    // A picture another device sent through an input method's service, as PNG or JPEG: read within the limits of a copied
+    // picture, turned the way a photo's orientation says, and kept as PNG like every picture of the history.
+    internal static (BrimDeck.Core.ClipboardSync.LanPng Png, BitmapSource Image) DecodeRemotePicture(byte[] encoded)
+    {
+        const int maxBytes = 32 * 1024 * 1024;
+        BitmapSource picture;
+        using (var input = new MemoryStream(encoded, writable: false))
+        {
+            // The size is read from the header before any pixel is decoded.
+            var frame = BitmapDecoder.Create(input, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.None).Frames[0];
+            if (frame.PixelWidth is <= 0 or > BrimDeck.Core.ClipboardSync.LanPng.MaxSide || frame.PixelHeight is <= 0 or > BrimDeck.Core.ClipboardSync.LanPng.MaxSide ||
+                (long)frame.PixelWidth * frame.PixelHeight > BrimDeck.Core.ClipboardSync.LanPng.MaxPixels)
+                throw new InvalidDataException("The picture is too large.");
+            ushort orientation = 1;
+            try { if ((frame.Metadata as BitmapMetadata)?.GetQuery("/app1/ifd/{ushort=274}") is ushort value) orientation = value; }
+            catch (Exception error) when (error is NotSupportedException or InvalidOperationException or ArgumentException) { }
+            double angle = orientation switch { 3 => 180, 6 => 90, 8 => 270, _ => 0 };
+            picture = angle == 0 ? frame : new TransformedBitmap(frame, new System.Windows.Media.RotateTransform(angle));
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(picture));
+            using var output = new MemoryStream(); encoder.Save(output);
+            if (output.Length > maxBytes) throw new InvalidDataException("The picture is too large.");
+            var png = new BrimDeck.Core.ClipboardSync.LanPng(output.ToArray(), picture.PixelWidth, picture.PixelHeight);
+            return (png, DecodeRemoteImage(png));
+        }
+    }
+
+    // A copied picture for an input method's service: the PNG itself, or a JPEG when the PNG is larger than the service takes;
+    // null when that is too large as well.
+    internal static byte[]? EncodeForSync(byte[] png, int limit)
+    {
+        if (png.Length <= limit) return png;
+        using var input = new MemoryStream(png, writable: false);
+        var frame = BitmapDecoder.Create(input, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
+        var encoder = new JpegBitmapEncoder { QualityLevel = 90 };
+        encoder.Frames.Add(BitmapFrame.Create(new FormatConvertedBitmap(frame, System.Windows.Media.PixelFormats.Bgr24, null, 0)));
+        using var output = new MemoryStream(); encoder.Save(output);
+        return output.Length <= limit ? output.ToArray() : null;
+    }
+
+    internal bool AcceptRemoteImage(BrimDeck.Core.ClipboardSync.LanPng png, BitmapSource image, string source)
+    {
+        if (!Put(Synced(ImageData(png.Bytes, image)))) return false;
+        if (_settings().ClipboardRecord) Copied(new ClipCopy("", "", "", png.Bytes, png.Width, png.Height, source));
+        return true;
     }
 
     // The history kept past an exit that has grown older than its length goes (Shelf.Expired).
@@ -123,7 +213,12 @@ internal sealed class ShelfService : IDisposable
     }
 
     // ---- Pictures ----
-    private readonly Dictionary<Guid, BitmapSource?> _thumbs = [];
+    // The thumbnails read so far, each with the width it was decoded at: a wider one is read when a wider one is asked for.
+    private readonly Dictionary<Guid, (BitmapSource? Image, int Width)> _thumbs = [];
+    private readonly Dictionary<Guid, (int Width, List<Action<BitmapSource?>> Waiting)> _decoding = [];
+    private static int _reading;
+    // Thumbnails being decoded; for the pictures of the README, which wait for them.
+    public static int Reading => Volatile.Read(ref _reading);
     private string PicturePath(Guid id) => Path.Combine(_pictures, id.ToString("N") + ".dat");
     private bool WritePicture(Guid id, byte[] png)
     {
@@ -155,7 +250,44 @@ internal sealed class ShelfService : IDisposable
     // The picture decoded at most this many pixels wide; the row's thumbnails are kept, the details' full picture is not.
     public BitmapSource? Picture(Guid id, int decodeWidth = 0)
     {
-        if (decodeWidth > 0 && _thumbs.TryGetValue(id, out var known)) return known;
+        if (decodeWidth > 0 && _thumbs.TryGetValue(id, out var known) && known.Width >= decodeWidth) return known.Image;
+        var image = Decode(id, decodeWidth);
+        if (decodeWidth > 0) Keep(id, image, decodeWidth);
+        return image;
+    }
+    private void Keep(Guid id, BitmapSource? image, int width)
+    {
+        if (_thumbs.Count > 300) _thumbs.Clear();
+        _thumbs[id] = (image, width);
+    }
+    // An entry's thumbnail for a list. A picture the size of a screenshot takes some 60 ms to decode (measured: 2560 x 1440,
+    // whatever the width asked), which held up the list each time such an entry scrolled into view. So it is decoded on a pool
+    // thread: this gives the thumbnail when it has been read at that width or wider, else the narrower one read before, or
+    // nothing, and `arrived` is called on this thread with the new one when it is there (null when the picture cannot be read).
+    public BitmapSource? Thumb(Guid id, int width, Action<BitmapSource?> arrived)
+    {
+        _thumbs.TryGetValue(id, out var known);
+        if (known.Width >= width) return known.Image;
+        if (_decoding.TryGetValue(id, out var under) && under.Width >= width) { under.Waiting.Add(arrived); return known.Image; }
+        var waiting = new List<Action<BitmapSource?>> { arrived };
+        _decoding[id] = (width, waiting);
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        Interlocked.Increment(ref _reading);
+        Task.Run(() =>
+        {
+            var image = Decode(id, width);
+            dispatcher.BeginInvoke(() =>
+            {
+                Interlocked.Decrement(ref _reading);
+                if (_decoding.TryGetValue(id, out var now) && now.Waiting == waiting) _decoding.Remove(id);
+                Keep(id, image, width);
+                foreach (var each in waiting) each(image);
+            });
+        });
+        return known.Image;
+    }
+    private BitmapSource? Decode(Guid id, int decodeWidth)
+    {
         BitmapSource? image = null;
         if (PictureBytes(id) is { } bytes)
         {
@@ -168,7 +300,6 @@ internal sealed class ShelfService : IDisposable
             }
             catch (Exception error) when (error is NotSupportedException or ArgumentException or InvalidOperationException or FileFormatException) { }
         }
-        if (decodeWidth > 0) { if (_thumbs.Count > 300) _thumbs.Clear(); _thumbs[id] = image; }
         return image;
     }
 
@@ -308,8 +439,7 @@ internal sealed class ShelfService : IDisposable
             if (PictureBytes(entry.Id) is { } png)
             {
                 var image = BitmapFrame.Create(new MemoryStream(png), BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
-                data.SetImage(image);
-                data.SetData("PNG", new MemoryStream(png));
+                return ImageData(png, image);
             }
         }
         else
@@ -319,6 +449,36 @@ internal sealed class ShelfService : IDisposable
             if (!plain && ReadRich(entry.Id, "rtf") is { Length: > 0 } rtf) data.SetData(DataFormats.Rtf, rtf);
         }
         return data;
+    }
+    // A picture for the clipboard in two forms: PNG, for the applications that keep transparency, and a device-independent
+    // bitmap, which every application reads (Windows makes the other bitmap forms from it). The bitmap WPF's own SetImage
+    // puts there could not be read back by other WPF and Windows Forms programs.
+    internal static DataObject ImageData(byte[] png, BitmapSource image)
+    {
+        var data = new DataObject();
+        data.SetData(DataFormats.Dib, new MemoryStream(Dib(image)), false);
+        data.SetData("PNG", new MemoryStream(png, writable: false), false);
+        return data;
+    }
+    // BITMAPINFOHEADER and 32-bit pixels, the rows from the bottom up.
+    private static byte[] Dib(BitmapSource image)
+    {
+        var source = image.Format == System.Windows.Media.PixelFormats.Bgra32 ? image : new FormatConvertedBitmap(image, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+        int width = source.PixelWidth, height = source.PixelHeight, stride = width * 4;
+        var dib = new byte[40 + stride * height];
+        BitConverter.TryWriteBytes(dib.AsSpan(0), 40);
+        BitConverter.TryWriteBytes(dib.AsSpan(4), width);
+        BitConverter.TryWriteBytes(dib.AsSpan(8), height);
+        BitConverter.TryWriteBytes(dib.AsSpan(12), (short)1);
+        BitConverter.TryWriteBytes(dib.AsSpan(14), (short)32);
+        BitConverter.TryWriteBytes(dib.AsSpan(20), stride * height);
+        var row = new byte[stride];
+        for (int y = 0; y < height; y++)
+        {
+            source.CopyPixels(new Int32Rect(0, y, width, 1), row, stride, 0);
+            row.CopyTo(dib, 40 + (height - 1 - y) * stride);
+        }
+        return dib;
     }
     public static DataObject TextData(string text) { var data = new DataObject(); data.SetText(text, TextDataFormat.UnicodeText); return data; }
     // Files to paste or drop. Preferred DropEffect tells the Explorer to copy them (1), or, for a drag set to move, to move them (2)
@@ -350,13 +510,19 @@ internal sealed class ShelfService : IDisposable
     // The window to paste into after the panel took the focus for typing (MainWindow.ShelfTyping).
     public IntPtr TypingTarget { get; set; }
 
-    // Puts data on the clipboard and pastes it into the window the user was typing in. done: true once Ctrl+V was sent, false when
-    // it could only be copied (no other window to paste into, or keys still held after a second).
-    public void Paste(DataObject data, Action<bool> done)
+    // Puts data on the clipboard and pastes it into the window the user was typing in. done: Pasted once Ctrl+V was sent; Copied
+    // when it could only be copied (no other window to paste into, or keys still held after a second).
+    //
+    // The paste is always tried first. A window of a program run as administrator does not take it: Windows drops the keys an
+    // ordinary program sends there, and says nothing of it, SendInput reporting them sent all the same. So once the paste has
+    // been tried, whether it seemed to go or not, the window's program is looked at: with more rights than BrimDeck it cannot
+    // have had the paste, and done is Elevated.
+    public void Paste(DataObject data, Action<PasteResult> done)
     {
-        if (!Put(data)) { done(false); return; }
+        if (!Put(data)) { done(PasteResult.Copied); return; }
         var target = PasteInput.IsOther(PasteInput.Foreground) ? PasteInput.Foreground : TypingTarget;
-        if (!PasteInput.IsOther(target)) { done(false); return; }
+        if (!PasteInput.IsOther(target)) { done(PasteResult.Copied); return; }
+        void Tried(bool sent) => done(PasteInput.HasMoreRights(target) ? PasteResult.Elevated : sent ? PasteResult.Pasted : PasteResult.Copied);
         long started = Environment.TickCount64;
         bool asked = false;
         var wait = new DispatcherTimer(DispatcherPriority.Input, _dispatcher) { Interval = TimeSpan.FromMilliseconds(20) };
@@ -366,12 +532,12 @@ internal sealed class ShelfService : IDisposable
             if (PasteInput.Foreground != target)
             {
                 if (!asked) { asked = true; PasteInput.Activate(target); }
-                if (late) { wait.Stop(); done(false); }
+                if (late) { wait.Stop(); Tried(false); }
                 return;
             }
-            if (PasteInput.ModifiersDown) { if (late) { wait.Stop(); done(false); } return; }
+            if (PasteInput.ModifiersDown) { if (late) { wait.Stop(); Tried(false); } return; }
             wait.Stop();
-            done(PasteInput.SendPaste());
+            Tried(PasteInput.SendPaste());
         };
         wait.Start();
     }

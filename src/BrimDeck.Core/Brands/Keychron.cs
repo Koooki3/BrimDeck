@@ -38,6 +38,10 @@ public static class KeychronMice
     // - Motospeed X6, its 8K receiver 0BDA:FFE0 (Realtek's id) on 0xFFC1 (usage 1 as on Keychron's own): from OpenMouse's
     //   Motospeed module (AGPL; facts only, not verified on hardware). On its cable (FFF1) the mouse answers a random level,
     //   so the cable is not asked.
+    // - VGN's Dragonfly mice on their 8K receivers, 391D:1A20 to 1A23, 1A35, 1A36, 1A3B, 1A3C and 1A3E, on 0xFFC1 / 1: VGN HUB's
+    //   table (hub.vgnlab.com) gives them this collection and the B3 06 status command. Not measured by us; their cables are
+    //   not asked (the Motospeed cable's random levels).
+    public static readonly int[] VgnReceivers = [0x1A20, 0x1A21, 0x1A22, 0x1A23, 0x1A35, 0x1A36, 0x1A3B, 0x1A3C, 0x1A3E];
     public static readonly (string Brand, string Prefix, string Name, int Vendor, int Product, int Page)[] Partners =
     [
         ("JD Jingzao mouse", "jingzao", "京东京造 JZM5", 0x362D, 0xD107, 0x008C),
@@ -57,5 +61,8 @@ public static class KeychronMice
             shape => shape.Vendor == partner.Vendor && shape.Product == partner.Product && MouseShapes.Collection(shape, partner.Page, 0x01) && shape.InputLength >= 21,
             _ => [new BrandWay(partner.Prefix + ".status", WayTransport.Output, Request(), Battery) { TimeoutMs = 500 }])
         { Kind = _ => DeviceKind.Mouse, Prefix = partner.Prefix, DisplayName = _ => partner.Name }),
+        new("VGN mouse", shape => shape.Vendor == 0x391D && VgnReceivers.Contains(shape.Product) && MouseShapes.Collection(shape, 0xFFC1, 0x01) && shape.InputLength >= 21,
+            _ => [new BrandWay("vgn.b3", WayTransport.Output, Request(), Battery) { TimeoutMs = 500 }])
+        { Kind = _ => DeviceKind.Mouse, Prefix = "vgn" },
     ];
 }
