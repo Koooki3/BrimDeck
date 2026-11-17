@@ -97,6 +97,8 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // Space between the rings and the lyric, only while both have room.
     public double Between { get; init; }
     public double RingThickness { get; init; } = 2;
+    // Drawing scale follows the final diameter, including the nested rings' readability floor.
+    public double RingScale { get; init; } = 1;
     // Fade beside rotating rings and at the lyric's edges.
     public double RingEdge { get; init; } = 3;
     public double TextEdge { get; init; } = 6;
@@ -226,7 +228,13 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // A ring's size in the row: its diameter at scale 1 (ring: QuotaRing.Diameter) at this scale, in whole DIPs.
     public static double RingSizeFor(double scale) => RingSizeFor(QuotaRing.Nested, scale);
-    public static double RingSizeFor(double ring, double scale) => Math.Max(1, Whole((double.IsFinite(ring) && ring > 0 ? ring : QuotaRing.Nested) * SafeScale(scale)));
+    public static double RingSizeFor(double ring, double scale)
+    {
+        double diameter = double.IsFinite(ring) && ring > 0 ? ring : QuotaRing.Nested;
+        // Nested rings match the system dials (16 DIP at the default height), but keep 20 DIP for legible inner rings.
+        return diameter == QuotaRing.Nested ? Math.Max(QuotaRing.Nested, Whole(16 * SafeScale(scale)))
+            : Math.Max(1, Whole(diameter * SafeScale(scale)));
+    }
 
     // The width the rings and the lyric's fixed slot take without cutting or rotating the rings.
     private static double RingsAndText(double s, int rings, bool text, double size, double textSlot = 0)
@@ -301,14 +309,16 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         textWidth = Math.Max(0, textWidth); ringWidth = Math.Max(0, ringWidth);
         // Whole rings inside the region, for reference; the region itself is not rounded to them.
         int visible = Math.Clamp((int)Math.Floor((ringWidth + gap) / (size + gap) + 1e-9), 0, rings);
+        double ringScale = ring == QuotaRing.Nested || !double.IsFinite(ring) || ring <= 0 ? size / QuotaRing.Nested : s;
         return new(middle, size, gap, visible, ringWidth, textWidth, rings > 0 && ringWidth >= size && ringWidth < all - 1e-9)
         {
-            Scale = s, ContentWidth = width, RowHeight = Math.Max(1, Whole(24 * s)),
+            Scale = s, ContentWidth = width, RowHeight = Math.Max(size, Math.Max(1, Whole(24 * s))),
             CoverWidth = coverRegion, CoverSize = cover, CoverRadius = Whole(4 * s),
             EqualizerWidth = eqRegion, EqualizerSize = eqW, EqualizerHeight = eqH, EqualizerBar = bar,
             ClockWidth = clockRegion, ClockFace = face, ClockAlone = clockAlone,
             MonitorWidth = monitorRegion, MonitorAlone = monitorAlone,
-            Between = used, RingThickness = Math.Max(.5, Half(2 * s)), RingEdge = Whole(3 * s), TextEdge = Whole(6 * s),
+            Between = used, RingScale = ringScale,
+            RingThickness = Math.Max(.5, Half(2 * ringScale)), RingEdge = Whole(3 * s), TextEdge = Whole(6 * s),
             TextFont = Math.Max(1, Half(11.5 * s)), TextHeight = Math.Max(1, Whole(22 * s)), TextScrolls = text && textWidth >= minimum
         };
     }

@@ -277,7 +277,7 @@ internal static class MusicTests
         var tall = CompactMusicLayout.Calculate(400, 1.5, true, 4, true, 50);
         check("A taller row scales the cover, equalizer, rings and type, in whole and half DIPs", tall.CoverSize == 30 && tall.CoverWidth == 42 && tall.EqualizerSize == 27
             && tall.EqualizerHeight == 21 && tall.EqualizerWidth == 39 && tall.ClockWidth == 62 && tall.TextFont == 17.5 && tall.TextHeight == 33 && tall.RowHeight == 36
-            && tall.RingSize == 30 && tall.RingThickness == 3 && tall.TextEdge == 9);
+            && tall.RingSize == 24 && tall.RingThickness == 2.5 && tall.TextEdge == 9);
 
         // The middle gives way first; then the equalizer, the cover and the clock, each to nothing before the next.
         var sides = CompactMusicLayout.Calculate(95, 1, true, 4, true, 33);
@@ -482,7 +482,7 @@ internal static class MusicTests
                     string key = string.Join("|", l.RingSize, l.RingGap, l.RingThickness, l.RingEdge, l.CoverSize, l.CoverRadius, l.EqualizerSize, l.EqualizerHeight,
                         l.EqualizerBar, l.ClockFace, l.TextFont, l.TextHeight, l.TextEdge, l.RowHeight);
                     if (raw) { firstRaw ??= key; fixedSizes &= key == firstRaw; } else { first ??= key; fixedSizes &= key == first; }
-                    fixedSizes &= l.RingSize == Math.Max(1, CompactMusicLayout.Whole(20 * l.Scale)) && l.RingGap == CompactMusicLayout.Whole(8 * l.Scale)
+                    fixedSizes &= l.RingSize == Math.Max(20, CompactMusicLayout.Whole(16 * l.Scale)) && l.RingGap == CompactMusicLayout.Whole(8 * l.Scale)
                         && l.CoverSize == Math.Max(1, CompactMusicLayout.Whole(20 * l.Scale)) && l.EqualizerSize == Math.Max(1, CompactMusicLayout.Whole(18 * l.Scale));
                     // A region narrower than one ring cuts it; the ring keeps its size.
                     if (l.VisibleRings == 0 && l.RingWidth > 0 && l.RingWidth < l.RingSize) regionsMove = true;

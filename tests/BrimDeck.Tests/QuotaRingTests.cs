@@ -115,7 +115,15 @@ internal static class QuotaRingTests
         var one = CompactMusicLayout.Calculate(1000, 1, false, 3, false, 0);
         var two = CompactMusicLayout.Calculate(1000, 2, false, 3, false, 0);
         var small = CompactMusicLayout.Calculate(1000, 1, false, 3, false, 0, ring: QuotaRing.Diameter(QuotaRingStyle.Single));
-        check("Quota ring: nested rings are 20 DIP at scale 1 and follow the scale", one.RingSize == 20 && two.RingSize == 40 && two.RingWidth == 3 * 40 + 2 * 16);
+        check("Quota ring: nested rings keep a 20 DIP floor and match taller system dials", one.RingSize == 20 && two.RingSize == 32 && two.RingWidth == 3 * 32 + 2 * 16);
+        foreach (var (height, diameter) in new[] { (24d, 20d), (32d, 20d), (40d, 20d), (48d, 24d), (64d, 32d) })
+        {
+            var layout = CompactMusicLayout.Calculate(1000, height / 32, false, 3, false, 0);
+            check($"Quota ring: height {height} preserves readable concentric geometry and its full layout budget",
+                layout.RingSize == diameter && layout.RowHeight >= diameter && layout.RingScale == diameter / 20
+                && diameter - 2 * (3 * CompactMusicLayout.Half(1.5 * layout.RingScale) + 2 * CompactMusicLayout.Half(layout.RingScale)) >= 6
+                && CompactMusicLayout.NaturalWidth(height / 32, false, 3, false, 0, 0) == layout.RingWidth);
+        }
         check("Quota ring: the single ring is 12 DIP and narrows the row",
             small.RingSize == 12 && small.RingWidth == 3 * 12 + 2 * 8 && CompactMusicLayout.RingSizeFor(QuotaRing.Single, 2) == 24
             && CompactMusicLayout.NaturalWidth(1, false, 3, false, 0, 0, ring: QuotaRing.Single) == 3 * 12 + 2 * 8);

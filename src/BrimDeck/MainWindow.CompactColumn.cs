@@ -173,7 +173,7 @@ public partial class MainWindow
         {
             int line = i / perLine, inLine = Math.Min(perLine, rings.Length - line * perLine);
             double start = (column - (inLine * layout.RingSize + (inLine - 1) * gap)) / 2;
-            var ring = QuotaCarousel.Ring(rings[i], layout.RingSize, layout.RingThickness, layout.Scale, Look);
+            var ring = QuotaCarousel.Ring(rings[i], layout.RingSize, layout.RingThickness, layout.RingScale, Look);
             Canvas.SetLeft(ring, Math.Round(start + (i % perLine) * (layout.RingSize + gap)));
             Canvas.SetTop(ring, line * (layout.RingSize + gap));
             canvas.Children.Add(ring);

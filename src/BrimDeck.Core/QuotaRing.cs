@@ -8,8 +8,8 @@ public sealed record QuotaRing(IReadOnlyList<double?> Shares, string Detail)
 {
     // The nested style shows at most this many rings, one inside the other.
     public const int MaximumRings = 3;
-    // Diameters at scale 1 (QuotaRingStyle). Nested rings are 20 DIP across whether one, two or three show, so every ring in the
-    // row has one size and the row does not change width with the data; a single ring keeps the 12 DIP it had before.
+    // Nested is the minimum diameter: all nested quotas match the 16 DIP system dials as height grows, with a 20 DIP floor.
+    // One, two or three shares keep the same size so data never changes the row width. Single keeps its 12 DIP base diameter.
     public const double Nested = 20, Single = 12;
     public static double Diameter(QuotaRingStyle style) => style == QuotaRingStyle.Single ? Single : Nested;
 
