@@ -231,8 +231,8 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public static double RingSizeFor(double ring, double scale)
     {
         double diameter = double.IsFinite(ring) && ring > 0 ? ring : QuotaRing.Nested;
-        // Nested rings match the system dials (16 DIP at the default height), but keep 20 DIP for legible inner rings.
-        return diameter == QuotaRing.Nested ? Math.Max(QuotaRing.Nested, Whole(16 * SafeScale(scale)))
+        // Nested rings match the system dials, with a smaller floor that leaves breathing room in a 24 DIP island.
+        return diameter == QuotaRing.Nested ? Math.Max(QuotaRing.NestedMinimum, Whole(16 * SafeScale(scale)))
             : Math.Max(1, Whole(diameter * SafeScale(scale)));
     }
 

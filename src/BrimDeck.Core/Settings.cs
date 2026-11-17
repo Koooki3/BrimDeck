@@ -72,7 +72,7 @@ public enum PausedMusicHide { None, Text, Cover, Both }
 // drum beat or a voice is seen crossing them. Spectrum: the sound split by pitch, each bar one band, low on the left and high
 // on the right. Saved as numbers, so new members go at the end; a file without it, or with a number not listed, is Flow.
 public enum EqualizerMode { Flow = 0, Spectrum = 1 }
-// How the collapsed quota rings are drawn (QuotaRing). Nested: up to three rings about one centre, at least 20 DIP across, each quota in
+// How the collapsed quota rings are drawn (QuotaRing). Nested: up to three rings about one centre, at least 16 DIP across, each quota in
 // a ring of its own. Single: one 12 DIP ring per application with its highest share, as before there were nested rings. Saved
 // as numbers, so new members go at the end; a file without it, or with a number not listed, is Single.
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
