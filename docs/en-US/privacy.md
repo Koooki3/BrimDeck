@@ -48,9 +48,16 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 | `apple-music-lyrics.json` | Which lyrics each Apple Music song was matched to, used when the song plays again after a restart |
 | `shelf.dat`, `shelf\` | The clipboard history, the file transfer's file paths and the categories of both, and the copied pictures and the formatting copied with text from web pages, Word and other apps (one file per entry), not encrypted. Ordinary clipboard entries are cleared when BrimDeck exits (after an exit that did not clear them, at the next start), or, with "Keep history after exit" on, kept and deleted once older than the length chosen; what is in Favorites or in a category set to be kept stays until you delete it |
 | `themes\` | Custom panel theme files |
+| `backups\` | Backups saved automatically before importing settings (the latest 5), in the same form as an exported settings file; the API keys in them are a copy of `secrets.dat` as it is, still encrypted for the current user, so they import only on this PC and account |
 | `sensor-stops.json`, `sensor-pending.json` | The system monitor readings stopped because the PC froze (the drive or graphics adapter model, the board model and BIOS version), and the readings under way, so a reading that froze the PC is found at the next start; a record is removed when the reading is turned on again in the settings |
 | `crash.log` | Error records; cleared when it exceeds 1 MB |
 | `monitor.log` | Records of failed system monitor readings (the error, and the name of a drive, graphics card or board whose reading did not respond); each failure is recorded at most once in ten minutes and no readings are included; cleared when it exceeds 1 MB |
+
+## Exported settings files
+
+A `.brimbackup` file exported from Settings › Displays and profiles › Backup is an ordinary ZIP archive. It is not encrypted, it is saved where you choose, and BrimDeck never uploads it. It holds all the settings (every profile, the automatic switch rules and the profile each display uses) and, as chosen when exporting, the custom themes, the model prices added by hand and the API keys entered by hand. API keys chosen for export are written to the file as plain text; keep the file safe, and encrypt it with an archiver if needed.
+
+Not exported: the WorkBuddy and Xiaomi account sign-ins, the clipboard sync's connections and pairings, the clipboard history, the file transfer, cached quotas and prices, and logs. The scripts of custom sources are exported as they are, with anything written in them.
 
 ## Network and security
 

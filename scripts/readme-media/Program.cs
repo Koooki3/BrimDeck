@@ -181,6 +181,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (scenes.Contains("transfer-settings")) { await DragHints(); await SettingsPage("transfer-settings", 14, tips: true); }
             // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
             if (scenes.Contains("monitor-free")) { await MonitorFree(); await SettingsPage("monitor-free-settings", 9, 1100, tips: true); }
+            // The backup section of the displays and profiles page, and the export and import windows in each state; for checking.
+            if (scenes.Contains("config-backup")) { await ConfigBackupScene(); await SettingsPage("backup-settings", 16, 1500); }
         }
         finally { Directory.Delete(folder, true); }
     }
@@ -1574,6 +1576,110 @@ internal sealed class Renderer(App app, string output, string language, string[]
             devices.Children.Add(new System.Windows.Controls.Button { Content = device, Style = (Style)window.FindResource("SettingsOutlineButton"),
                 HorizontalContentAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) });
         await Dialog("sync-lan-choose", lanTitle, Part<FrameworkElement>(lan, "Root"));
+    }
+
+    // The export and import windows (SettingsBackup.cs), each state drawn from invented data: what the PC has to export, a file with
+    // displays this PC lacks, files that cannot be imported, and what is left to do after an import.
+    private async Task ConfigBackupScene()
+    {
+        _settings.Theme = SettingsTheme.Dark;
+        var window = new SettingsWindow(app);
+        T Part<T>(object view, string name) => (T)view.GetType().GetProperty(name)!.GetValue(view)!;
+        object Call(string name, Type[] types, params object?[] args) => Program.Call(window, name, types, args)!;
+        void Say(object status, string text, bool error = true) => window.GetType().GetMethod("SetBackupStatus", Program.Any)!.Invoke(null, [status, text]);
+        string Short(string name) => (string)window.GetType().GetMethod("ShortName", Program.Any)!.Invoke(null, [name])!;
+        async Task Dialog(string name, string title, FrameworkElement content, double width)
+        {
+            var body = new System.Windows.Controls.StackPanel();
+            body.Children.Add(content);
+            var frame = (FrameworkElement)Call("SyncDialogFrame", [typeof(string), typeof(System.Windows.Controls.StackPanel), typeof(Action)], title, body, (Action)(() => { }));
+            const double scale = 1.5;
+            var host = new System.Windows.Controls.Border { Child = frame, Resources = window.Resources, Width = width };
+            System.Windows.Documents.TextElement.SetFontFamily(host, window.FontFamily);
+            TextOptions.SetTextFormattingMode(host, TextFormattingMode.Ideal);
+            host.Measure(new Size(width, double.PositiveInfinity)); host.Arrange(new Rect(host.DesiredSize));
+            await Settle();
+            host.UpdateLayout();
+            var bitmap = new RenderTargetBitmap((int)(width * scale), (int)Math.Ceiling(host.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            bitmap.Render(host); bitmap.Freeze();
+            Write(bitmap, Path.Combine(output, name + ".png"));
+            Console.WriteLine(name + " " + host.ActualHeight.ToString("0"));
+            host.Child = null;
+        }
+        string exportTitle = _english ? "Export settings" : "导出配置", importTitle = _english ? "Import settings" : "导入配置";
+
+        object Export(int themes, int prices, int keys, bool scripts) => Call("BackupExportView", [typeof(int), typeof(int), typeof(int), typeof(bool)], themes, prices, keys, scripts);
+        await Dialog("backup-export", exportTitle, Part<FrameworkElement>(Export(3, 5, 4, true), "Root"), 420);
+        var keyed = Export(3, 5, 4, true);
+        Part<System.Windows.Controls.CheckBox>(keyed, "Keys").IsChecked = true;
+        await Dialog("backup-export-keys", exportTitle, Part<FrameworkElement>(keyed, "Root"), 420);
+        await Dialog("backup-export-settings-only", exportTitle, Part<FrameworkElement>(Export(0, 0, 0, false), "Root"), 420);
+        var failed = Export(0, 1, 1, false);
+        Say(Part<object>(failed, "Status"), _english ? "The file could not be written there. Try another folder." : "无法写入这个位置，请换一个文件夹再试。", true);
+        await Dialog("backup-export-error", exportTitle, Part<FrameworkElement>(failed, "Root"), 420);
+        var exported = (FrameworkElement)Call("BackupExportedView", [typeof(string), typeof(Action)],
+            _english ? @"D:\Users\Study\Documents\BrimDeck backups\BrimDeck-settings-2026-11-17-with-keys.brimbackup" : @"D:\Users\书房\Documents\BrimDeck 备份\BrimDeck-配置-2026-11-17-含密钥.brimbackup", null);
+        await Dialog("backup-exported", exportTitle, exported, 420);
+
+        // A file from another PC: three profiles, two rules, seven sources; two of its three displays are not here.
+        var imported = new DeckSettings();
+        imported.Normalize();
+        var main = imported.CurrentProfile;
+        imported.Profiles.Add(Profiles.Duplicate(imported, main, _english ? "Work" : "工作"));
+        imported.Profiles.Add(Profiles.Duplicate(imported, main, _english ? "Games" : "游戏"));
+        imported.DisplayMonitors = [new(@"\\?\DISPLAY#DEL40B6#OLD-A", "DELL U2720Q"), new(@"\\?\DISPLAY#BOE0A1C#OLD-B", _english ? "Built-in display" : "内置显示器"),
+            new(@"\\?\DISPLAY#SAM7179#OLD-C", "Samsung Odyssey OLED G9 G95SC 49-inch Super Ultra-Wide")];
+        imported.Display = DisplayPlacement.Chosen;
+        imported.ProfileRules = [new ProfileRule { Name = "Code" }, new ProfileRule { Name = "Photoshop" }];
+        imported.Apps = [.. new[] { ProviderId.Claude, ProviderId.Codex, ProviderId.Cursor, ProviderId.DeepSeek, ProviderId.OpenRouter, ProviderId.Kimi, ProviderId.Custom }
+            .Select(id => new AppEntry { QuotaSource = id })];
+        var theme = System.Text.Encoding.UTF8.GetBytes("{}");
+        var themes = new Dictionary<string, byte[]> { ["dusk.json"] = theme, ["sea.json"] = theme, ["night/theme.json"] = theme };
+        var prices = Enumerable.Range(1, 5).Select(i => new ModelPrice($"acme/model-{i}", new TokenPrices(0, 0, null, null, null), [])).ToList();
+        var keys = imported.Apps.Skip(3).Take(4).ToDictionary(a => a.InstanceId, _ => "sk");
+        var manifest = new BackupManifest { Version = "1.3.2", Exported = new DateTimeOffset(2026, 11, 17, 21, 30, 0, TimeSpan.FromHours(8)), Computer = "DESKTOP-STUDY-7QK2M4" };
+        var full = new BackupPackage(manifest, imported, themes, prices, keys, null);
+        var here = new List<BackupDisplay> { new(@"\\?\DISPLAY#DEL40B6#NEW-1", _english ? "DELL U2720Q (2560×1440) · primary" : "DELL U2720Q (2560×1440) · 主显示器"),
+            new(@"\\?\DISPLAY#GSM5B09#NEW-2", "LG ULTRAFINE (2560×1440)"), new(@"\\?\DISPLAY#SAM0F9A#NEW-3", Short("Samsung Odyssey OLED G9 G95SC 49-inch") + " (5120×1440)") };
+        var missing = ConfigBackup.DisplaysToMatch(imported, here.Select(d => d.Id));
+        var guesses = ConfigBackup.GuessDisplays(missing, [new(@"\\?\DISPLAY#DEL40B6#NEW-1", "DELL U2720Q"), new(@"\\?\DISPLAY#GSM5B09#NEW-2", "LG ULTRAFINE")], []);
+        object Import(string file, BackupPackage package, IReadOnlyList<BackupDisplay> lacking, IReadOnlyList<string?> starts) => Call("BackupImportView",
+            [typeof(string), typeof(BackupPackage), typeof(IReadOnlyList<BackupDisplay>), typeof(IReadOnlyList<BackupDisplay>), typeof(IReadOnlyList<string?>)], file, package, lacking, here, starts);
+        string fileName = ConfigBackup.FileName(new DateTime(2026, 11, 17), true);
+        await Dialog("backup-import-displays", importTitle, Part<FrameworkElement>(Import(fileName, full, missing, guesses), "Root"), 460);
+        var one = new List<BackupDisplay> { missing[1] };
+        await Dialog("backup-import-one-display", importTitle, Part<FrameworkElement>(Import(fileName, full with { Themes = new Dictionary<string, byte[]>(), Prices = [] }, one, [null]), "Root"), 460);
+        var plain = new BackupPackage(manifest, imported, new Dictionary<string, byte[]>(), [], new Dictionary<Guid, string>(), null);
+        await Dialog("backup-import-plain", importTitle, Part<FrameworkElement>(Import(ConfigBackup.FileName(new DateTime(2026, 11, 17), false), plain, [], []), "Root"), 460);
+        var before = full with { Manifest = new BackupManifest { Version = "1.3.2", Exported = manifest.Exported, Computer = "DESKTOP-STUDY-7QK2M4", BeforeImport = true } };
+        await Dialog("backup-import-before-import", importTitle, Part<FrameworkElement>(Import(ConfigBackup.BackupName(new DateTime(2026, 11, 17, 21, 30, 0)), before, [], []), "Root"), 460);
+        var stuck = Import(fileName, plain, [], []);
+        Say(Part<object>(stuck, "Status"), _english ? "The current settings could not be backed up in the data folder, so nothing was imported. Check the data folder's permissions."
+            : "无法在数据文件夹中备份当前配置，没有导入。请检查数据文件夹的权限。", true);
+        await Dialog("backup-import-error", importTitle, Part<FrameworkElement>(stuck, "Root"), 460);
+
+        string Problem(Exception ex) => (string)window.GetType().GetMethod("BackupProblemText", Program.Any)!.Invoke(null, [ex])!;
+        FrameworkElement ProblemView(string file, string message)
+        {
+            var view = Call("BackupProblemView", [typeof(string), typeof(string)], file, message);
+            return (FrameworkElement)view.GetType().GetField("Item1")!.GetValue(view)!;
+        }
+        await Dialog("backup-problem-damaged", importTitle, ProblemView("notes.zip", Problem(new BackupException(BackupProblem.NotBackup, null))), 460);
+        await Dialog("backup-problem-newer", importTitle, ProblemView(fileName, Problem(new BackupException(BackupProblem.Newer, "1.4.0"))), 460);
+        await Dialog("backup-problem-unreadable", importTitle, ProblemView(fileName, Problem(new IOException())), 460);
+
+        string backupPath = Path.Combine(@"C:\Users\me\AppData\Local\BrimDeck\backups", ConfigBackup.BackupName(new DateTime(2026, 11, 17, 21, 42, 5)));
+        var notes = ConfigBackup.Notes(["Samsung Odyssey OLED G9 G95SC 49-inch Super Ultra-Wide"],
+            ["Logitech G Pro X Superlight 2", "AirPods Pro", _english ? "Xbox Wireless Controller" : "Xbox 无线控制器"],
+            ["WorkBuddy", _english ? "Xiaomi MiMo Desktop subscription" : "Xiaomi MiMo 桌面订阅"],
+            ["DeepSeek", "OpenRouter", _english ? "Office gateway" : "公司网关"], [_english ? "WeType" : "微信输入法", _english ? "Local network" : "局域网"]);
+        notes.Insert(0, ConfigBackup.ThemesNotWritten);
+        Task Done(string name, IReadOnlyList<ImportNote> list) => Dialog(name, _english ? "Import complete" : "导入完成",
+            (FrameworkElement)Call("BackupDoneView", [typeof(string), typeof(IReadOnlyList<ImportNote>), typeof(Action)], backupPath, list, null), 460);
+        await Done("backup-done-notes", notes);
+        await Done("backup-done-some", ConfigBackup.Notes([], [], [], ["DeepSeek"], []));
+        await Done("backup-done-clean", []);
+        try { window.Close(); } catch (ArgumentOutOfRangeException) { }
     }
 
     private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
