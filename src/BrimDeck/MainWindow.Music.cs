@@ -1307,7 +1307,7 @@ public partial class MainWindow
                     element = CompactRegion(devices, room, devicesWidth, devices.Height, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Rings:
                     element = _quotaCarousel = new QuotaCarousel(steadyItems, layout.RingSize, layout.RingThickness, layout.RingScale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
-                        flow > 0 ? rings.Window : null, ringCut); break;
+                        flow > 0 ? rings.Window : null, ringCut, rowHeight: row); break;
                 case CompactPart.Music:
                     element = _compactMarquee = CompactTitle(text, room, layout); break;
                 default:
