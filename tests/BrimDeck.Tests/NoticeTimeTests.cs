@@ -301,6 +301,7 @@ internal static class NoticeTimeTests
         AttentionItem Item(string lane, bool urgent = false) => new() { Lane = lane, Kind = AttentionKind.Notice, Key = lane, Group = lane, Duration = TimeSpan.FromSeconds(5), Urgent = urgent, Priority = urgent ? NoticePriority.High : NoticePriority.Normal };
         foreach (var lane in new[] { "a", "b", "c", "d" }) coordinator.Submit(Item(lane), TimeNow);
         coordinator.Submit(Item("alarm", urgent: true), TimeNow);
-        check("An alarm is not held back by the rate limit that holds an ordinary notice", coordinator.Current("d") is null && coordinator.Queued("d").Count == 1 && coordinator.Current("alarm") is not null);
+        check("An alarm is not subdued by the rate limit that subdues an ordinary notice", coordinator.Current("c") is { Subdued: false } && coordinator.Current("d") is { Subdued: true }
+            && coordinator.Queued("d").Count == 0 && coordinator.Current("alarm") is { Subdued: false });
     }
 }

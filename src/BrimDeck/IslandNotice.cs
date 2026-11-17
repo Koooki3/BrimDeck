@@ -19,6 +19,10 @@ namespace BrimDeck;
 // shows the notice's icon and words inside its outline, scrolling them when they are longer than it. While the notice shows, the
 // pointer resting on the island opens the panel on the notices page with this notice in front; there is no card of its own.
 //
+// How much of that plays follows the notice's level (NoticeLevels.Effect): a plain one only shows its words (the indicator, which
+// has none, lights up once), a glowing one flashes the backlight without moving the outline (the indicator breathes), a lively
+// one moves as well, and one that stays until handled plays the lively motion again every few seconds.
+//
 // The window lies over the island with room around it for the bubbles and the backlight, and is shown only while a notice is.
 // While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material:
 // over a glass theme with the blur of GlassBackdrop under it, as the island has it (the island's own glass is hidden with it). How
@@ -37,7 +41,7 @@ internal sealed class IslandNotice : Window
     private readonly Layer[] _moving, _layers;
     private readonly Border _hit = new() { Background = Brushes.Transparent, Cursor = Cursors.Hand };
     private readonly Canvas _content = new() { IsHitTestVisible = false, ClipToBounds = true };
-    private readonly PromptTimer _hoverOpen;
+    private readonly PromptTimer _hoverOpen, _replay;
     private AttentionItem? _item;
     private CollapsedShape _shape = null!;
     private NoticeLook _look = NoticeLook.Current();
@@ -49,9 +53,11 @@ internal sealed class IslandNotice : Window
     private bool _leaving, _arrivedUnderPointer, _held, _closed, _opening;
     private int _generation;
 
-    // The motion: its model, when it started, the factor from its design size to DIPs, and the shapes it draws each frame.
+    // The motion: its model, what of it plays and for how long, when it started, the factor from its design size to DIPs, and the
+    // shapes it draws each frame.
     private IslandLiquid? _liquid;
-    private double _start, _t, _k;
+    private NoticeEffect _effect;
+    private double _start, _t, _k, _length;
     private readonly List<IslandLiquid.Circle> _circles = [];
     private readonly List<IslandLiquid.Neck> _necks = [];
     private Geometry? _notchGlowCore, _notchGlowWide;
@@ -84,13 +90,15 @@ internal sealed class IslandNotice : Window
         RenderOptions.SetClearTypeHint(_content, ClearTypeHint.Enabled);
         AutomationProperties.SetName(_hit, Loc.T("灵动提示", "Live notice"));
         _hoverOpen = new(Dispatcher, () => { _hoverOpen!.Stop(); if (_item is not null && !_leaving && _hit.IsMouseOver) OpenPage(byKey: false); });
+        // A notice that stays until handled plays its motion again while it shows.
+        _replay = new(Dispatcher, () => { _replay!.Stop(); if (_item is { Persistent: true } && !_leaving && IsVisible) StartMotion(); });
         _hit.MouseEnter += (_, _) => PointerEntered();
         _hit.MouseLeave += (_, _) => PointerLeft();
         _hit.MouseLeftButtonUp += (_, e) => { e.Handled = true; if (_item is not null && !_leaving) Activate(byKey: false); };
         _hit.MouseRightButtonUp += (_, e) => e.Handled = true;
         SourceInitialized += (_, _) => WindowsHost.ConfigureOverlay(this, capturable: false);
         _app.Notices.Icons.Loaded += IconLoaded;
-        Closed += (_, _) => { _closed = true; StopMotion(); _hoverOpen.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
+        Closed += (_, _) => { _closed = true; StopMotion(); _hoverOpen.Stop(); _replay.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
         DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };
     }
 
@@ -161,13 +169,16 @@ internal sealed class IslandNotice : Window
         Announce();
     }
 
-    // The shown notice changed in place (a task's progress, a burst from the same application): its words change, the island stays.
+    // The shown notice changed in place (a task's progress, another message of its conversation): its words change, the island
+    // stays. One that now stays until handled starts playing again; one that no longer does plays no more.
     public void Update(AttentionItem item)
     {
         if (_item is null) return;
         _item = item;
         NameHit();
         BuildContent();
+        if (!item.Persistent) _replay.Stop();
+        else if (!_replay.IsEnabled && _liquid is null && IsVisible && !_leaving) StartMotion();
     }
 
     // The item ended: the words leave, the island's own content lands again and the window hides.
@@ -176,7 +187,7 @@ internal sealed class IslandNotice : Window
         if (_item is null || !ReferenceEquals(_item, item) && _item.Key != item.Key) return;
         _item = null; _leaving = true;
         WatchLive();
-        _hoverOpen.Stop(); Release();
+        _hoverOpen.Stop(); _replay.Stop(); Release();
         int generation = ++_generation;
         double fade = Soft.Enabled ? FadeOut : 0;
         if (fade <= 0) { Finish(reveal: true); return; }
@@ -199,7 +210,7 @@ internal sealed class IslandNotice : Window
         if (!IsVisible) { if (_item is not null) { _item = null; WatchLive(); _generation++; _deck.SetIslandCovered(false); } return; }
         _item = null;
         WatchLive();
-        _hoverOpen.Stop(); Release();
+        _hoverOpen.Stop(); _replay.Stop(); Release();
         _generation++;
         Finish();
     }
@@ -275,7 +286,7 @@ internal sealed class IslandNotice : Window
     private async void Activate(bool byKey)
     {
         var notice = Notice;
-        if (notice is null || _opening || NoticeClick.Decide(notice, Settings.NoticeClick) != NoticeClickAction.OpenApp && !Center.ClicksRestore(notice)) { OpenPage(byKey); return; }
+        if (notice is null || _opening || NoticeClick.Decide(notice, Settings.NoticeClick) != NoticeClickAction.OpenApp && !Center.ClicksRestore(notice)) { OpenPage(byKey, acted: true); return; }
         _opening = true;
         bool opened = false;
         try { opened = await Center.OpenAsync(notice); }
@@ -283,18 +294,24 @@ internal sealed class IslandNotice : Window
         finally { _opening = false; }
         // The notice may have ended or been replaced while the application started.
         if (_item is null || _leaving || !ReferenceEquals(Notice, notice) && Notice?.Id != notice.Id) return;
-        if (opened) Center.Dismiss(_deck, reportToSource: false); else OpenPage(byKey);
+        if (opened) Center.Dismiss(_deck, reportToSource: false); else OpenPage(byKey, acted: true);
     }
 
     // The screen reader's name for the click area says what a click does.
     private void NameHit()
     {
+        if (Track is { } track) { AutomationProperties.SetName(_hit, Loc.T("正在播放：", "Now playing: ") + track.Title); return; }
         bool app = NoticeClick.Decide(Notice, Settings.NoticeClick) == NoticeClickAction.OpenApp || Center.ClicksRestore(Notice);
         AutomationProperties.SetName(_hit, app ? Loc.T("灵动提示，点击打开来源应用", "Live notice, click to open the source app") : Loc.T("灵动提示", "Live notice"));
     }
 
-    private void OpenPage(bool byKey)
+    // acted: a click or the hotkey, rather than the pointer resting on the notice. With the notices page switched off there is
+    // nothing to open; a notice that stays until handled then ends with the click, which would otherwise do nothing.
+    private void OpenPage(bool byKey, bool acted = false)
     {
+        // A track change's title is not a notice: the panel opens as it does from the island itself.
+        if (Track is not null) { _deck.OpenFromHotkey(byKey: byKey); return; }
+        if (acted && _item is { Persistent: true } && !DeckPages.Shown(Settings, DeckPage.Notices)) { Center.Dismiss(_deck, reportToSource: false); return; }
         string? id = Notice?.Id;
         _deck.OpenNoticesPage(byKey, id);
     }
@@ -308,7 +325,7 @@ internal sealed class IslandNotice : Window
         // A notice that arrives under a resting pointer does not open the panel by itself: the pointer leaves and comes back, or clicks.
         // With the panel set to open on a click (ClickToExpand), resting on the notice does not open it either; nor when a click on the
         // notice opens its application (NoticeClick), or the page would open under the pointer before the click could.
-        if (_arrivedUnderPointer || Settings.ClickToExpand || Settings.NoticeClick == NoticeClickTarget.SourceApp || Center.ClicksRestore(Notice)) return;
+        if (_arrivedUnderPointer || Settings.ClickToExpand || Track is null && (Settings.NoticeClick == NoticeClickTarget.SourceApp || Center.ClicksRestore(Notice))) return;
         _hoverOpen.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay));
         _hoverOpen.Start();
     }
@@ -515,21 +532,30 @@ internal sealed class IslandNotice : Window
     // With animations on and outside high contrast; without, the island keeps still and only shows the words.
     private bool MotionAllowed => _arrival.Animated;
 
+    // What the shown item plays on this island (NoticeLevels.Effect): a notice that shows beyond the rate limit plays as a plain one.
+    private NoticeEffect Played => _item is { } item ? NoticeLevels.Effect(item.Level, item.Subdued, Form) : NoticeEffect.Still;
+
     private void StartMotion()
     {
         StopMotion();
-        if (!MotionAllowed) { RedrawAll(); return; }
+        _replay.Stop();
+        var effect = Played;
+        if (!MotionAllowed || effect == NoticeEffect.Still) { RedrawAll(); return; }
         var form = Form;
         double width = _island.Width / _k, height = _island.Height / _k;
         // The notice's weight on the theme's way of moving (NoticeArrivals): its strength and how long droplets are thrown; a theme that
         // keeps its outline still (pixel art) plays the backlight alone.
+        bool liquid = effect == NoticeEffect.Liquid && _arrival.Liquid;
         _liquid = form switch
         {
-            IslandForm.Notch => new IslandLiquid(form, width, height, liquid: _arrival.Liquid, fury: _arrival.Fury, separation: _arrival.Separation, corner: _shape.BottomRadius / _k, shoulder: _shape.Shoulder / _k, cut: _look.Pixel > 0 ? 0 : _look.Cut / _k),
-            _ => new IslandLiquid(form, width, height, liquid: _arrival.Liquid, fury: _arrival.Fury, separation: _arrival.Separation)
+            IslandForm.Notch => new IslandLiquid(form, width, height, liquid: liquid, fury: _arrival.Fury, separation: _arrival.Separation, corner: _shape.BottomRadius / _k, shoulder: _shape.Shoulder / _k, cut: _look.Pixel > 0 ? 0 : _look.Cut / _k),
+            _ => new IslandLiquid(form, width, height, liquid: liquid, fury: _arrival.Fury, separation: _arrival.Separation)
         };
+        _effect = effect;
+        _length = liquid ? _liquid.Total : effect == NoticeEffect.Liquid ? QuietEnd() : NoticeLevels.EffectLength(effect, form) + .05;
         _start = Eased.Now; _t = 0;
         Motion.Start(_body, Step);
+        if (_item is { Persistent: true }) { _replay.Interval = AttentionCoordinator.PersistentReplay; _replay.Start(); }
     }
 
     // One display frame of the motion; false once it has played.
@@ -537,7 +563,7 @@ internal sealed class IslandNotice : Window
     {
         if (_liquid is not { } liquid) return false;
         _t = Math.Max(0, now - _start) * _arrival.Pace;
-        if (liquid.Finished(_t) || !_arrival.Liquid && _t >= QuietEnd()) { StopMotion(); return false; }
+        if (liquid.Finished(_t) || !liquid.Liquid && _t >= _length) { StopMotion(); return false; }
         RedrawAll();
         return true;
     }
@@ -592,10 +618,11 @@ internal sealed class IslandNotice : Window
     private Pen[]? _edge;
 
     // The island's body at this frame: its outline pushed out by the ripples (the notch's top edge stays against the screen).
+    // Without the liquid it is the island at rest, to the pixel.
     private Geometry BodyOutline()
     {
         // A pixel theme's island is drawn in steps; its outline stays on them, and its liquid is the glow and the words alone.
-        if (_liquid is not { } liquid || Form == IslandForm.Line || _look.Pixel > 0) return RestOutline();
+        if (_liquid is not { } liquid || !liquid.Liquid || Form == IslandForm.Line || _look.Pixel > 0) return RestOutline();
         var geometry = new StreamGeometry();
         using (var g = geometry.Open())
         {
@@ -676,7 +703,7 @@ internal sealed class IslandNotice : Window
     // The beads that trail some ripples, in the island's own color.
     private void DrawParts(DrawingContext drawing)
     {
-        if (_liquid is not { } liquid || Form == IslandForm.Line || _look.Pixel > 0) return;
+        if (_liquid is not { } liquid || !liquid.Liquid || Form == IslandForm.Line || _look.Pixel > 0) return;
         liquid.Beads(_t, _circles);
         if (_circles.Count == 0) return;
         var parts = new StreamGeometry { FillRule = FillRule.Nonzero };
@@ -688,12 +715,15 @@ internal sealed class IslandNotice : Window
         if (_fillOpacity < 1) drawing.Pop();
     }
 
+    // How bright the indicator is at this frame: two breaths, or the one of a plain notice.
+    private double LineLight => _effect == NoticeEffect.Brighten ? IslandLiquid.FlashAt(_t) : IslandLiquid.BreathAt(_t);
+
     // The indicator: its thread with round ends, the droplets leaving them, in the indicator's color brightening as it breathes.
     private void DrawLine(DrawingContext drawing)
     {
         var color = PanelTheme.ColorOf("indicator");
         if (_liquid is not { } liquid) { drawing.DrawGeometry(Freeze(new SolidColorBrush(color)), null, RestOutline()); return; }
-        double b = Math.Min(1, IslandLiquid.BreathAt(_t, _arrival.Flashes) * .85 * _arrival.Glow);
+        double b = Math.Min(1, LineLight * .85 * _arrival.Glow);
         var lit = Color.FromArgb((byte)Math.Round(color.A + (_flash.A - color.A) * b), (byte)Math.Round(color.R + (_flash.R - color.R) * b),
             (byte)Math.Round(color.G + (_flash.G - color.G) * b), (byte)Math.Round(color.B + (_flash.B - color.B) * b));
         double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2, h0 = liquid.Height / 2;
@@ -754,9 +784,10 @@ internal sealed class IslandNotice : Window
     }
 
     // The indicator's bloom: its own shape grown by grow and moved down by drop, blurred (the layer's effect), breathing twice.
+    // A plain notice has none: the line alone lights up.
     private void DrawBloom(DrawingContext drawing, double grow, double drop, double opacity)
     {
-        if (_liquid is not { } liquid || Form != IslandForm.Line) return;
+        if (_liquid is not { } liquid || Form != IslandForm.Line || _effect == NoticeEffect.Brighten) return;
         double b = Math.Min(1, IslandLiquid.BreathAt(_t, _arrival.Flashes) * _arrival.Glow);
         if (b <= .004) return;
         double cx = _island.X + _island.Width / 2, cy = _island.Y + _island.Height / 2;
@@ -803,6 +834,9 @@ internal sealed class IslandNotice : Window
 
     // ----- Content -----
 
+    // The song of a track change shown on the island (MainWindow.AttentionStarted); null for a notice.
+    private TrackNoticeContent? Track => _item is { Kind: AttentionKind.Track } ? _item.Payload as TrackNoticeContent : null;
+
     private NoticePrivacy Privacy(Notice notice) => Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
 
     // spoken: the words for a screen reader, in which a verification code is not dots but a note that it is hidden.
@@ -810,6 +844,7 @@ internal sealed class IslandNotice : Window
     {
         if (_item is { Kind: AttentionKind.Summary, Payload: int count })
             return (NoticeText.Count(count), Loc.T("在 BrimDeck 安静期间收到", "Arrived while BrimDeck kept quiet"));
+        if (Track is { } track) return (track.Title, track.Artist);
         if (Notice is not { } notice) return ("", "");
         var (title, summary) = NoticeText.Presented(notice, Privacy(notice), !Settings.NoticeCodes ? CodeMask.Off : spoken ? CodeMask.Spoken : CodeMask.Dots);
         if (NoticeClock.Live(notice.Timing, DateTimeOffset.UtcNow, TimeZoneInfo.Local) is { } live) summary = live;
@@ -856,8 +891,12 @@ internal sealed class IslandNotice : Window
         if (_item is not null && !NoticeClock.IsLive(Notice?.Timing, now)) { _liveRun = null; _ring = null; WatchLive(); }
     }
 
-    // The icon and the words, laid out inside the island's content area at the island's scale. Words longer than the area scroll
-    // through once they have been read from the start, and start again; without animations they end in an ellipsis.
+    // Where the icon and the words sit when they fit: the sender's choice for this notice, else the setting.
+    private NoticeAlign Align => Notice?.Align ?? Settings.NoticeAlign;
+
+    // The icon and the words, laid out inside the island's content area at the island's scale: together at the left, in the middle
+    // or at the right of it (Align) when they fit. Words longer than the area start at the left and scroll through once they have
+    // been read from the start, and start again; without animations they end in an ellipsis.
     private void BuildContent()
     {
         BuildContentCore();
@@ -873,7 +912,7 @@ internal sealed class IslandNotice : Window
         double plate = Math.Round(NoticeMetrics.PlateSize * scale), gap = Math.Round(NoticeMetrics.PlateGap * scale);
         var (title, summary) = Texts();
         var icon = Plate(plate);
-        Canvas.SetLeft(icon, inset); Canvas.SetTop(icon, (_island.Height - plate) / 2);
+        Canvas.SetTop(icon, (_island.Height - plate) / 2);
         _content.Children.Add(icon);
         // A countdown shows how far it has run as a ring at the right end of the words' area (it replaces nothing: the words give it room).
         double ring = 0;
@@ -902,11 +941,14 @@ internal sealed class IslandNotice : Window
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
         _announced = line;
         double viewport = Math.Max(0, available - plate - gap - (ring > 0 ? ring + gap : 0));
-        var window = new Canvas { Width = viewport, Height = _island.Height, ClipToBounds = true };
-        Canvas.SetLeft(window, inset + plate + gap);
-        _content.Children.Add(window);
         line.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         double width = line.DesiredSize.Width;
+        // The room left over goes before the group: none of it, half, or all.
+        double shift = NoticeAligns.Shift(viewport, width, Align);
+        Canvas.SetLeft(icon, inset + shift);
+        var window = new Canvas { Width = viewport - shift, Height = _island.Height, ClipToBounds = true };
+        Canvas.SetLeft(window, inset + shift + plate + gap);
+        _content.Children.Add(window);
         Canvas.SetTop(line, (_island.Height - line.DesiredSize.Height) / 2);
         window.Children.Add(line);
         if (width <= viewport) return;
@@ -927,6 +969,8 @@ internal sealed class IslandNotice : Window
     // on a plate tinted with it (a bell for a summary).
     private FrameworkElement Plate(double size)
     {
+        // A track change shows the song's cover, as the music part does.
+        if (Track is { } track) return MusicVisuals.Cover(track.Cover, size, Math.Round(size * .22), look: PanelTheme.Main);
         var notice = Notice;
         if (notice is not null && NoticeLetter.ShowsPicture(notice, Settings) && Center.Icons.Get(notice.Picture, out _) is { } avatar) return NoticeLetter.Round(avatar, size);
         var image = _item?.Kind == AttentionKind.Summary ? null : Center.Icons.Get(notice?.IconRef, out _);
@@ -970,6 +1014,8 @@ internal sealed class IslandNotice : Window
     // Screen readers hear the new notice once, politely, without the window taking focus.
     private void Announce()
     {
+        // A song's title is not read out at every track change: the music part never announced it either.
+        if (Track is not null) return;
         if (_announced is null || !AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged)) return;
         (UIElementAutomationPeer.FromElement(_announced) ?? UIElementAutomationPeer.CreatePeerForElement(_announced))?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
     }

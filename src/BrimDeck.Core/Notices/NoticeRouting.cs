@@ -17,4 +17,12 @@ public static class NoticeRouting
             return match.Available ? match.Lane : null;
         return main.Available ? main.Lane : null;
     }
+
+    // The panels that show an arriving notice: with NoticeScreen.All every panel that can show one now, each on its own
+    // monitor; otherwise the one Choose names, or none.
+    public static IReadOnlyList<string> Lanes(IReadOnlyList<Candidate> panels, long? foregroundMonitor, NoticeScreen screen)
+    {
+        if (screen == NoticeScreen.All) return panels.Where(p => p.Available && p.Lane is not null).Select(p => p.Lane).Distinct(StringComparer.Ordinal).ToList();
+        return Choose(panels, foregroundMonitor, screen) is { } lane ? [lane] : [];
+    }
 }

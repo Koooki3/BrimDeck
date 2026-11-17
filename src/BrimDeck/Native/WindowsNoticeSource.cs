@@ -35,6 +35,9 @@ internal sealed class WindowsNoticeSource : IDisposable
     // The same for one notification a log entry named: a lookup takes milliseconds, so one that has not returned by then has
     // hung like a reading that does not return.
     private static readonly TimeSpan LookupLimit = TimeSpan.FromSeconds(5);
+    // How often, and how far apart, a notification the log named is looked up again when Windows cannot return it yet (LookUpNow).
+    private const int MissedLooks = 5;
+    private static readonly TimeSpan MissedLookWait = TimeSpan.FromMilliseconds(100);
     private readonly WindowsNoticeLoop _loop = new(DateTimeOffset.UtcNow);
     private readonly object _gate;
     private readonly Dictionary<string, Windows.ApplicationModel.AppInfo> _apps = new(StringComparer.OrdinalIgnoreCase);
@@ -284,6 +287,15 @@ internal sealed class WindowsNoticeSource : IDisposable
     private WindowsNoticeNotificationRead LookUpNow(UserNotificationListener listener, uint id)
     {
         var notification = listener.GetNotification(id);
+        // Windows writes the log entry a little before the listener can return the notification. Left to the full reading that
+        // follows a miss (WindowsNoticeLogBatch.FailedReadReconcileInterval), every notice reached BrimDeck about 1.2 s after it
+        // was made (measured 2026-11-17: thirteen notices, 0.6 to 1.4 s). A few short looks catch it sooner; one that is still
+        // missing after them is left to that reading as before.
+        for (int attempt = 0; notification is null && attempt < MissedLooks; attempt++)
+        {
+            Thread.Sleep(MissedLookWait);
+            notification = listener.GetNotification(id);
+        }
         if (notification is null) return WindowsNoticeNotificationRead.Missing;
         if (notification.Id != id) throw new InvalidOperationException("The event id did not match the returned notification.");
         var input = Read(notification, id);
@@ -326,6 +338,17 @@ internal sealed class WindowsNoticeSource : IDisposable
         // Each notification on its own: one Windows cannot describe must not fail the reading of all the others.
         return WindowsNoticeSnapshot.Build(notifications, notification => notification.Id, Read, known, token);
     }
+
+    // What Windows' notification center holds now, each notification read as the loop reads it, apart from the loop (the sync
+    // button of the notices page). Null without access. A notification that cannot be read, and BrimDeck's own, are left out.
+    // Throws TimeoutException when Windows does not answer in time or an earlier reading has not finished.
+    public Task<IReadOnlyList<NoticeInput>?> ReadCenterAsync(CancellationToken token = default) => Task.Run(async () =>
+    {
+        if (AccessStatus() != UserNotificationListenerAccessStatus.Allowed) return null;
+        var notifications = await ReadAsync(UserNotificationListener.Current, token);
+        var snapshot = WindowsNoticeSnapshot.Build(notifications, notification => notification.Id, Read, new HashSet<uint>(), token);
+        return (IReadOnlyList<NoticeInput>?)snapshot.Inputs.Values.OfType<NoticeInput>().ToList();
+    }, token);
 
     private void Publish(WindowsNoticeList.Changes changes)
     {

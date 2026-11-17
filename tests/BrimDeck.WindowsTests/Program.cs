@@ -30,6 +30,8 @@ internal static class Program
             if (args is ["--only", "popup"]) { PopupGhostChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themecards"]) { ThemeCardChecks.Run(Check); return Finish(); }
             if (args is ["--only", "fonts"]) { FontFollowTests.Run(Check); return Finish(); }
+            // "--only notices": the notice checks alone. They lay out panels and call Windows; none sends input or captures the screen.
+            if (args is ["--only", "notices"]) { NoticeChecks(); return Finish(); }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
             // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
             // says something about the machine, not the code. Without the flag every check runs.
@@ -101,6 +103,20 @@ internal static class Program
             return Finish();
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+
+    // The notice checks of the whole run, for "--only notices".
+    private static void NoticeChecks()
+    {
+        NoticeProtectionTests.Run(Check);
+        NoticeFlashWatchTests.Run(Check);
+        NoticeChatRestoreWindowsTests.Run(Check);
+        var bannerRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-WindowsTests-" + Guid.NewGuid().ToString("N"));
+        try { NoticeBannerRegistryTests.Run(bannerRoot, Check); NoticeBannerKeeperTests.Run(System.IO.Path.Combine(bannerRoot, "keeper"), Check); }
+        finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
+        NoticePanelTests.Run(Check);
+        NoticeRowBatchTests.Run(Check);
+        NoticeFocusChecks.Run(Check);
     }
 
     private static void CheckWindowChrome()

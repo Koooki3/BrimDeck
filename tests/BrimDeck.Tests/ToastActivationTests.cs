@@ -14,7 +14,6 @@ internal static class ToastActivationTests
         Plans(check);
         Parsing(check);
         Ids(check);
-        Setting(check);
     }
 
     private static void Schemes(Action<string, bool> check)
@@ -87,17 +86,5 @@ internal static class ToastActivationTests
         check("A key of another application or another shape gives none", ToastActivation.NotificationId($"windows:Other:42:1", App) is null
             && ToastActivation.NotificationId("wsl:x:42", App) is null && ToastActivation.NotificationId($"windows:{App}:x:1", App) is null
             && ToastActivation.NotificationId($"windows:{App}:-1:1", App) is null && ToastActivation.NotificationId($"windows:{App}:1", App) is null);
-    }
-
-    private static void Setting(Action<string, bool> check)
-    {
-        check("Replaying the launch string is off by default", !new DeckSettings().NoticeOpenReplay);
-        var on = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { NoticeOpenReplay = true }));
-        check("The switch survives a round trip", on is { NoticeOpenReplay: true });
-        var old = JsonSerializer.Deserialize<DeckSettings>("""{"NoticeHistory":true,"NoticeDuration":6}""");
-        check("An old settings file without the switch reads as off", old is { NoticeOpenReplay: false });
-        var reread = SettingsMigrations.Read("""{"Width":890}""");
-        reread.Normalize();
-        check("An old file through the migrations reads as off", !reread.NoticeOpenReplay);
     }
 }

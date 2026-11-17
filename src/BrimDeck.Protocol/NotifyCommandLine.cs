@@ -20,6 +20,7 @@ public static class NotifyCommandLine
         brim-notify stopwatch [TITLE]            Show the time elapsed since now
         brim-notify event TITLE --at TIME        An event; reminds before it starts
         brim-notify stop KEY                     End a timer, stopwatch or event
+        brim-notify close KEY                    Close the notice sent with -r KEY (ends a persistent one)
 
         Options:
           -b, --body TEXT        Body text
@@ -27,6 +28,8 @@ public static class NotifyCommandLine
           -i, --icon PATH        Local icon file (a relative path is from the current folder)
           -c, --category KIND    message, task, success, warning, error or info
           -p, --priority LEVEL   low, normal or high (a hint; BrimDeck's rules decide)
+          -l, --level LEVEL      silent, plain, glow, lively or persistent (stays until handled or closed)
+              --align SIDE       left, center or right: where the words sit on the island
           -r, --replace KEY      Update the earlier notice sent with the same key
               --id ID            Message id; a retry with the same id is shown once
               --progress N       Task progress, 0 to 100
@@ -42,6 +45,8 @@ public static class NotifyCommandLine
 
     private static readonly HashSet<string> Categories = ["message", "task", "success", "warning", "error", "info"];
     private static readonly HashSet<string> Priorities = ["low", "normal", "high"];
+    private static readonly HashSet<string> Levels = ["silent", "plain", "glow", "lively", "persistent"];
+    private static readonly HashSet<string> Sides = ["left", "center", "right"];
     private static readonly HashSet<string> PlainKinds = [NoticeTimes.Alarm, NoticeTimes.Mail];
 
     public static NotifyCommand Parse(IReadOnlyList<string> args)
@@ -58,6 +63,8 @@ public static class NotifyCommandLine
             case "stopwatch": timeKind = NoticeTimes.Stopwatch; index = 1; break;
             case "event": timeKind = NoticeTimes.Event; index = 1; break;
             case "stop": timeKind = "stop"; index = 1; break;
+            // The same message as stop: BrimDeck ends a timer with the key, or closes the plain notice sent with it.
+            case "close": timeKind = "close"; index = 1; break;
             case "status": return args.Count == 1 ? new(NotifyCommandKind.Status) : Fail("status takes no arguments");
             case "--stdio": return args.Count == 1 ? new(NotifyCommandKind.Stdio) : Fail("--stdio takes no arguments");
             case "-h" or "--help" or "help": return new(NotifyCommandKind.Help);
@@ -104,6 +111,12 @@ public static class NotifyCommandLine
                     case "-p" or "--priority":
                         if (!Priorities.Contains(value.ToLowerInvariant())) return Fail("unknown priority: " + value);
                         message.Priority = value.ToLowerInvariant(); break;
+                    case "-l" or "--level":
+                        if (!Levels.Contains(value.ToLowerInvariant())) return Fail("unknown level: " + value);
+                        message.Level = value.ToLowerInvariant(); break;
+                    case "--align":
+                        if (!Sides.Contains(value.ToLowerInvariant())) return Fail("--align takes left, center or right");
+                        message.Align = value.ToLowerInvariant(); break;
                     case "--at": message.At = value; break;
                     case "--ends": message.Until = value; break;
                     case "--in":
@@ -155,14 +168,15 @@ public static class NotifyCommandLine
         return new(NotifyCommandKind.Send, message);
     }
 
-    // timer, stopwatch, event and stop. Each running one needs a key for stop; without -r one is made up (and printed).
+    // timer, stopwatch, event, stop and close. Each running one needs a key for stop; without -r one is made up (and printed).
     private static NotifyCommand TimeCommand(string timeKind, NoticeMessage message, List<string> positional)
     {
         bool timed = message.At is not null || message.Until is not null || message.InMs is not null || message.LeadMs is not null;
-        if (timeKind == "stop")
+        if (timeKind is "stop" or "close")
         {
-            if (positional.Count != 1 || message.ReplaceId is not null) return Fail("stop takes one key: brim-notify stop KEY");
-            if (timed || message.Title is not null || message.Body is not null || message.Kind is not null) return Fail("stop takes only a key and --source");
+            if (positional.Count != 1 || message.ReplaceId is not null) return Fail($"{timeKind} takes one key: brim-notify {timeKind} KEY");
+            if (timed || message.Title is not null || message.Body is not null || message.Kind is not null || message.Level is not null || message.Align is not null)
+                return Fail(timeKind + " takes only a key and --source");
             message.ReplaceId = positional[0]; message.Stop = true; message.Kind = NoticeTimes.Stopwatch;
             message.AppName ??= "brim-notify";
             return new(NotifyCommandKind.Send, message);
@@ -218,7 +232,7 @@ public static class NotifyCommandLine
         var message = new NoticeMessage
         {
             Origin = options.Origin, AppName = options.AppName ?? "brim-notify", Icon = options.Icon, Title = options.Title, Body = options.Body,
-            ReplaceId = options.ReplaceId, EventId = options.EventId, Priority = options.Priority, Command = options.Command,
+            ReplaceId = options.ReplaceId, EventId = options.EventId, Priority = options.Priority, Level = options.Level, Align = options.Align, Command = options.Command,
             ExitCode = exitCode, DurationMs = (long)Math.Max(0, duration.TotalMilliseconds),
             Category = exitCode == 0 ? "success" : "error"
         };

@@ -12,6 +12,12 @@ public enum NoticePriority { Low, Normal, High }
 public enum NoticePrivacy { Full, TitleOnly, AppOnly }
 // What a click on a notice shown on the collapsed island does: open the notices page (the default), or open the source application.
 public enum NoticeClickTarget { Page, SourceApp }
+// How strongly a notice shows on the collapsed island. Silent: only in the recent notices. Plain: the island keeps still and
+// only shows the words. Glow: the backlight flashes as well. Lively: the backlight and the liquid ripples. Persistent: as
+// Lively, and it stays until it is handled, playing again every few seconds. Auto: not chosen; NoticeLevels.Resolve decides.
+public enum NoticeLevel { Auto, Silent, Plain, Glow, Lively, Persistent }
+// Where the icon and the words sit in the island when they fit; longer words start at the left and scroll.
+public enum NoticeAlign { Left, Center, Right }
 
 // Clears the whole recent list on a schedule, besides dropping each notice once it is older than the retention.
 public enum NoticeAutoClear { Off, OnExit, Daily, Weekly }
@@ -77,6 +83,9 @@ public sealed record NoticeInput
     public bool Call { get; init; }
     // A desktop notification its application marked "transient" (NoticeMessage.Transient): shown and listed, never saved.
     public bool Transient { get; init; }
+    // The level and the alignment the sender asked for (NoticeMessage.Level, Align); Auto and null leave them to BrimDeck.
+    public NoticeLevel Level { get; init; }
+    public NoticeAlign? Align { get; init; }
 }
 
 // A notice BrimDeck keeps. Id is BrimDeck's own; Revision counts updates, so a view can tell a changed notice apart.
@@ -118,6 +127,9 @@ public sealed class Notice
     // Not to be saved (NoticeInput.Transient): NoticeHistory.Save leaves it out, so it is gone once BrimDeck restarts. A
     // plain flag, as Call is.
     public bool Transient { get; set; }
+    // What the sender asked for (NoticeInput.Level, Align); Auto and null leave them to BrimDeck's rules and settings.
+    public NoticeLevel Level { get; set; }
+    public NoticeAlign? Align { get; set; }
     [JsonIgnore] public bool HasProgress => Progress is not null;
     [JsonIgnore] public NoticeTimeKind TimeKind => Timing?.Kind ?? NoticeTimeKind.None;
     public Notice Copy() { var copy = (Notice)MemberwiseClone(); copy.Actions = [.. Actions]; copy.Timing = Timing?.Copy(); return copy; }
@@ -132,6 +144,9 @@ public sealed class NoticeAppRule
     public bool Enabled { get; set; } = true;
     public bool Muted { get; set; }
     public NoticePriority Priority { get; set; } = NoticePriority.Normal;
+    // The level the user chose for the application's notices: Silent, Plain, Glow or Lively. Auto follows the rules
+    // (NoticeLevels.Resolve); Silent shows as Muted does.
+    public NoticeLevel Level { get; set; }
     public NoticePrivacy? Privacy { get; set; }
     // "#RRGGBB" chosen by hand; empty takes the color read from the icon.
     public string AccentColor { get; set; } = "";
@@ -159,4 +174,14 @@ public static class NoticeKeys
         "error" => NoticeCategory.Error, "info" => NoticeCategory.Info, _ => NoticeCategory.Message
     };
     public static NoticePriority Priority(string? text) => text switch { "low" => NoticePriority.Low, "high" => NoticePriority.High, _ => NoticePriority.Normal };
+    // A level or an alignment BrimDeck does not know (a later version's) reads as not given.
+    public static NoticeLevel Level(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        "silent" => NoticeLevel.Silent, "plain" => NoticeLevel.Plain, "glow" => NoticeLevel.Glow, "lively" => NoticeLevel.Lively,
+        "persistent" => NoticeLevel.Persistent, _ => NoticeLevel.Auto
+    };
+    public static NoticeAlign? Align(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        "left" => NoticeAlign.Left, "center" => NoticeAlign.Center, "right" => NoticeAlign.Right, _ => null
+    };
 }

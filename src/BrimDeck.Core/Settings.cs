@@ -68,7 +68,9 @@ public enum MouseWheelAction { None, Pages, Volume }
 public enum GripDoubleClick { AutoWidth, Move, Off }
 public enum CompactMusicText { None, Title, Lyrics }
 // The monitor an arriving notice is shown on: the one with the foreground window, or always the main panel's.
-public enum NoticeScreen { Foreground, Main }
+// Which panels show an arriving notice: the one on the screen in use (the foreground window's), the main panel, or every
+// panel that shows BrimDeck. All comes last, so the saved numbers of the others stay what they were.
+public enum NoticeScreen { Foreground, Main, All }
 // What the collapsed music hides while the song is paused: the title or lyric, the cover, or both. Saved as numbers, so new
 // members go at the end.
 public enum PausedMusicHide { None, Text, Cover, Both }
@@ -526,6 +528,8 @@ public sealed class DeckSettings
     public bool ClockSeconds { get; set; }
     public CompactMusicText MusicText { get; set; }
     public bool MusicTrackNotice { get; set; } = true;
+    // The title of a track change takes the whole island, shown as a notice is (IslandNotice), instead of the music part alone.
+    public bool MusicTrackNoticeWide { get; set; } = true;
     // A song taken as instrumental (Lyrics.Instrumental) shows its title in the collapsed lyric's place instead of "♪".
     public bool MusicInstrumentalTitle { get; set; }
     // With auto width (CompactAutoWidth), the collapsed middle text's room follows the length of what it shows, within
@@ -807,6 +811,10 @@ public sealed class DeckSettings
     public int NoticeDuration { get; set; } = 6;
     public int NoticeHighDuration { get; set; } = 8;
     public NoticeScreen NoticeScreen { get; set; }
+    // The level of a notice nothing else decides (NoticeLevels.Resolve): Plain, Glow or Lively.
+    public NoticeLevel NoticeDefaultLevel { get; set; } = NoticeLevel.Glow;
+    // Where the icon and the words sit in the island when they fit; a sender's own choice (NoticeInput.Align) comes first.
+    public NoticeAlign NoticeAlign { get; set; } = NoticeAlign.Center;
     public NoticePrivacy NoticePrivacy { get; set; }
     // What a click on a notice shown on the collapsed island opens; the notices page unless changed.
     public NoticeClickTarget NoticeClick { get; set; }
@@ -824,8 +832,7 @@ public sealed class DeckSettings
     // Notices are held back until this time (BrimDeck's own pause); null when not paused.
     public DateTimeOffset? NoticesPausedUntil { get; set; }
     public bool NoticeHistory { get; set; } = true;
-    // Opening an application from a Windows notice replays the toast's own launch string (ToastActivation); off until chosen.
-    public bool NoticeOpenReplay { get; set; }
+    public bool NoticeOpenReplay { get; set; } = true;
     public int NoticeHistoryHours { get; set; } = 24;
     // Where the encrypted recent notices are kept; empty for the default (a folder in BrimDeck's install folder).
     public string NoticeHistoryFolder { get; set; } = "";
@@ -1119,6 +1126,8 @@ public sealed class DeckSettings
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
         NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
+        if (NoticeDefaultLevel is not (NoticeLevel.Plain or NoticeLevel.Glow or NoticeLevel.Lively)) NoticeDefaultLevel = NoticeLevel.Glow;
+        if (!Enum.IsDefined(NoticeAlign)) NoticeAlign = NoticeAlign.Center;
         if (!Enum.IsDefined(NoticePrivacy)) NoticePrivacy = NoticePrivacy.Full;
         if (!Enum.IsDefined(NoticeClick)) NoticeClick = NoticeClickTarget.Page;
         if (!Enum.IsDefined(NoticeAutoClear)) NoticeAutoClear = NoticeAutoClear.Off;
@@ -1137,6 +1146,8 @@ public sealed class DeckSettings
             rule.Name = (rule.Name ?? "").Trim();
             rule.AccentColor = AppPresets.NormalizeColor(rule.AccentColor);
             if (!Enum.IsDefined(rule.Priority)) rule.Priority = NoticePriority.Normal;
+            // Persistent is never the user's choice for an application: a notice stays only while something is left to handle.
+            if (rule.Level is not (NoticeLevel.Silent or NoticeLevel.Plain or NoticeLevel.Glow or NoticeLevel.Lively)) rule.Level = NoticeLevel.Auto;
             if (rule.Privacy is { } privacy && !Enum.IsDefined(privacy)) rule.Privacy = null;
         }
         Core.Profiles.Normalize(this);

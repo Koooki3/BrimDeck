@@ -81,7 +81,7 @@ public partial class MainWindow
         switch (item.Kind)
         {
             case AttentionKind.Notice or AttentionKind.Summary:
-                if (!CanShowNotices) { _app.Notices.Dismiss(this, reportToSource: false); return; }
+                if (!CanShowNotices) { _app.Notices.Skip(this); return; }
                 // ui-2: one that arrives while the panel boots (the summary of what came in while BrimDeck was quiet) waits for
                 // the boot to play; covering the island then would hide the boot, and the island would show in the wrong shape.
                 // Likewise while the panel is still closing: the notice would take the island's final shape in one frame and the
@@ -92,11 +92,26 @@ public partial class MainWindow
             case AttentionKind.Quota when item.Payload is CompactAlertInfo alert:
                 PresentAlert(alert); break;
             case AttentionKind.Track:
+                // The title takes the whole island, shown as a notice is; the indicator has no room for words, and a panel that
+                // boots or closes keeps the title in its music part as before.
+                if (Settings.MusicTrackNoticeWide && Collapsed.Style != CompactStyle.Line && CanShowNotices && !HoldsNotices && TrackContent() is { } content)
+                {
+                    item.Payload = content; _trackWide = true;
+                    (_noticeWindow ??= new IslandNotice(this, _app)).Present(item);
+                    break;
+                }
+                _trackWide = false;
                 _trackNoticeUntil = DateTimeOffset.UtcNow + item.Duration;
                 RenderCompact(); UpdateMusicTimer();
                 break;
         }
     }
+
+    // A track change's title is on the whole island (MusicTrackNoticeWide) rather than in the music part.
+    private bool _trackWide;
+
+    private TrackNoticeContent? TrackContent()
+        => _mediaTrack is { Title.Length: > 0 } track ? new TrackNoticeContent(track.Title, track.Artist, _mediaCover) : null;
 
     internal void AttentionEnded(AttentionItem item)
     {
@@ -110,6 +125,13 @@ public partial class MainWindow
                 break;
             case AttentionKind.Quota when item.Payload is CompactAlertInfo alert: EndAlert(alert); break;
             case AttentionKind.Track:
+                if (_trackWide)
+                {
+                    _trackWide = false;
+                    _noticeWindow?.End(item);
+                    if (_expanded) _noticeWindow?.Abort();
+                    break;
+                }
                 if (_trackNoticeUntil == default) break;
                 _trackNoticeUntil = default; RenderCompact(); UpdateMusicTimer();
                 break;
@@ -120,6 +142,8 @@ public partial class MainWindow
     {
         if (item.IsNotice && _noticeAfterBoot?.Key == item.Key) _noticeAfterBoot = item;
         else if (item.IsNotice) _noticeWindow?.Update(item);
+        // The next song while the title of the one before still shows on the island: its words change in place.
+        else if (item.Kind == AttentionKind.Track && _trackWide) { if (TrackContent() is { } content) { item.Payload = content; _noticeWindow?.Update(item); } }
         // The same quota rose again while its alert shows: the alert shows the new level.
         else if (item.Kind == AttentionKind.Quota && item.Payload is CompactAlertInfo alert && _alert is not null) { _alert = alert; RenderCompact(); }
     }
@@ -155,7 +179,7 @@ public partial class MainWindow
                 _bootNotice.Stop();
                 if (_noticeAfterBoot is not { } waiting) return;
                 _noticeAfterBoot = null;
-                if (!CanShowNotices || _expanded) { _app.Notices.Dismiss(this, reportToSource: false); return; }
+                if (!CanShowNotices || _expanded) { _app.Notices.Skip(this); return; }
                 (_noticeWindow ??= new IslandNotice(this, _app)).Present(waiting);
             };
         }
@@ -255,7 +279,51 @@ public partial class MainWindow
 
     // What the page shows besides its rows; a change of it builds the whole page again.
     private string NoticePageKey(NoticeCenter center) => string.Join('|', center.Paused, center.Quiet, center.Epoch, _noticeEarlier, _noticeUnread, FocusedNotice(center)?.Id,
-        System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_freshNotices), Loc.Language, center.WindowsState, DateTime.Today);
+        System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_freshNotices), Loc.Language, center.WindowsState, DateTime.Today, _noticeSyncSaid);
+
+    // The sync button's state: what the page says in place of the day's count while it syncs and for a few seconds after.
+    private string? _noticeSyncSaid;
+    private bool _noticeSyncing;
+    private System.Windows.Threading.DispatcherTimer? _noticeSyncTimer;
+    private static readonly TimeSpan NoticeSyncSaidFor = TimeSpan.FromSeconds(4);
+
+    // Makes the notices from Windows' notification center match it: those gone from it are deleted, those missing are added.
+    // Notices of other sources stay (NoticeCenter.SyncWindowsAsync).
+    private async Task SyncWindowsNotices()
+    {
+        if (_noticeSyncing || _app.Notices is not { } center) return;
+        _noticeSyncing = true;
+        _noticeSyncTimer?.Stop();
+        ShowNoticeSync(Loc.T("正在同步 Windows 通知…", "Syncing Windows notifications…"));
+        try
+        {
+            var (status, removed, added) = await center.SyncWindowsAsync();
+            ShowNoticeSync(status switch
+            {
+                NoticeCenter.WindowsSyncStatus.Done when removed == 0 && added == 0 => Loc.T("已与 Windows 通知一致", "Already matches Windows notifications"),
+                NoticeCenter.WindowsSyncStatus.Done => Loc.T($"已同步：删除 {removed} 条，补充 {added} 条", $"Synced: {removed} removed, {added} added"),
+                NoticeCenter.WindowsSyncStatus.NoAccess => Loc.T("未获得读取 Windows 通知的权限", "No access to Windows notifications"),
+                NoticeCenter.WindowsSyncStatus.Off => Loc.T("未接收 Windows 应用通知", "Not receiving Windows notifications"),
+                _ => Loc.T("同步失败，请稍后再试", "Sync failed; try again later")
+            });
+        }
+        finally { _noticeSyncing = false; }
+        _noticeSyncTimer ??= new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Normal, Dispatcher) { Interval = NoticeSyncSaidFor };
+        _noticeSyncTimer.Tick -= NoticeSyncSaidEnded; _noticeSyncTimer.Tick += NoticeSyncSaidEnded;
+        _noticeSyncTimer.Start();
+    }
+
+    private void NoticeSyncSaidEnded(object? sender, EventArgs e)
+    {
+        _noticeSyncTimer?.Stop();
+        ShowNoticeSync(null);
+    }
+
+    private void ShowNoticeSync(string? said)
+    {
+        _noticeSyncSaid = said;
+        if (_expanded && CurrentPage == DeckPage.Notices) RenderNotices();
+    }
 
     // What the page's frame was built for: the settings (each change replaces them), its size and the theme.
     private (DeckSettings? Settings, int Theme, double Width, double Height, double UsageWidth) NoticeLayout()
@@ -344,14 +412,34 @@ public partial class MainWindow
 
     private static bool Today(Notice notice) => notice.ReceivedAt.ToLocalTime().Date == DateTime.Today;
 
-    // The notices the right column lists: today's (or all, once earlier ones were asked for), all or only the unread ones.
+    // Notices of one conversation: the same application and the same title (a chat application's title is the chat's name). A
+    // notice without a title stands alone.
+    private static string Conversation(Notice notice) => notice.Title.Length > 0 ? notice.AppKey + "\u0001" + notice.Title : "\u0001" + notice.Id;
+
+    // How many notices each listed conversation holds and whether any of them is unread, as of the last Listed.
+    private readonly Dictionary<string, (int Count, bool Fresh)> _conversations = new(StringComparer.Ordinal);
+
+    // The notices the right column lists: today's (or all, once earlier ones were asked for), all or only the unread ones. A
+    // conversation takes one row, its newest notice; the focus shows the others under it.
     private List<Notice> Listed(NoticeCenter center)
     {
         IEnumerable<Notice> notices = center.Hub.Notices;
         if (!_noticeEarlier) notices = notices.Where(Today);
         if (_noticeUnread) notices = notices.Where(n => _freshNotices.Contains(n.Id));
-        return notices.ToList();
+        _conversations.Clear();
+        var heads = new List<Notice>();
+        foreach (var notice in notices)
+        {
+            string key = Conversation(notice);
+            bool fresh = _freshNotices.Contains(notice.Id);
+            if (_conversations.TryGetValue(key, out var seen)) { _conversations[key] = (seen.Count + 1, seen.Fresh || fresh); continue; }
+            _conversations[key] = (1, fresh);
+            heads.Add(notice);
+        }
+        return heads;
     }
+
+    private (int Count, bool Fresh) ConversationOf(Notice notice) => _conversations.TryGetValue(Conversation(notice), out var found) ? found : (1, _freshNotices.Contains(notice.Id));
 
     private Notice? FocusedNotice(NoticeCenter center)
     {
@@ -452,6 +540,13 @@ public partial class MainWindow
         var plate = NoticePlate(notice, 56);
         plate.VerticalAlignment = VerticalAlignment.Center;
         hero.Children.Add(plate);
+        // The icon, the title and the lines beside them open the application, as the main button does.
+        if (center.CanOpen(notice))
+        {
+            hero.Background = Brushes.Transparent; hero.Cursor = Cursors.Hand;
+            hero.ToolTip = OpenLabel(notice);
+            hero.MouseLeftButtonUp += (_, e) => { e.Handled = true; _ = OpenFromPage(notice); };
+        }
         var who = new StackPanel { Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(who, 1); hero.Children.Add(who);
         who.Children.Add(UI.Fixed(notice.AppName + " · " + NoticeText.Relative(notice.ReceivedAt, now), TextSize.Body, 17, UI.Secondary));
@@ -474,7 +569,7 @@ public partial class MainWindow
         var privacy = Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
         if (notice.Body.Length > 0 && privacy == NoticePrivacy.Full)
         {
-            var body = IslandNotice.Directed(new TextBlock { Text = shown.Body, FontFamily = UI.PanelFont, FontSize = group.Count > 1 ? 14 : TextSize.Strong, LineHeight = group.Count > 1 ? 22 : 21, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.Wrap, Opacity = .9 });
+            var body = IslandNotice.Directed(new TextBlock { Text = shown.Body, FontFamily = UI.PanelFont, FontSize = group.Count > 1 ? 14 : TextSize.Strong, LineHeight = group.Count > 1 ? 22 : 21, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.Wrap });
             if (shown.HasCode) AutomationProperties.SetName(body, shown.SpokenBody);
             words.Children.Add(body);
         }
@@ -496,7 +591,18 @@ public partial class MainWindow
             }
             words.Children.Add(others);
         }
-        var scroll = new ScrollViewer { Content = words, Margin = new Thickness(0, 14, 0, 0), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly };
+        var scroll = new ScrollViewer { Content = words, Margin = new Thickness(0, 14, 0, 0), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly,
+            Background = Brushes.Transparent };
+        // A right click on the words offers to copy them (the panel does not take the keyboard, so there is no selection to copy).
+        scroll.MouseRightButtonUp += (_, e) =>
+        {
+            if (CopyText(notice, group.Count > 0 ? group : [notice], privacy) is not { Length: > 0 } text) return;
+            e.Handled = true;
+            var menu = NewMenu();
+            menu.Items.Add(Item(Loc.T("复制内容", "Copy text"), () => CopyWords(text)));
+            if (shown.Title.Length > 0) menu.Items.Add(Item(Loc.T("复制标题", "Copy title"), () => CopyWords(shown.Title)));
+            OpenMenu(menu, scroll, atPointer: true);
+        };
         // A long text fades at the column's foot rather than being cut mid line.
         NoticeFade.Foot(scroll, WordsFadeHeight);
         stack.Children.Add(scroll);
@@ -537,10 +643,21 @@ public partial class MainWindow
         // they do not fit one (at the narrowest page, with two actions), instead of being cut off (NoticeButtons).
         var row = new NoticeButtons { Margin = new Thickness(0, 12, 0, 0) };
         var flow = row.Children;
-        var delete = PillButton("", Loc.T("删除这条记录", "Delete this notice"), () => { center.Delete(notice); if (_noticeFocus == notice.Id) _noticeFocus = null; RenderNotices(); });
+        // Delete takes the whole conversation the focus shows: left behind, its earlier messages would take the row again.
+        var members = center.Hub.Notices.Where(n => Conversation(n) == Conversation(notice)).ToList();
+        string deleteName = members.Count > 1 ? Loc.T($"删除这个会话的 {members.Count} 条记录", $"Delete this conversation's {members.Count} notices") : Loc.T("删除这条记录", "Delete this notice");
+        var delete = PillButton("", deleteName, () => { foreach (var member in members) center.Delete(member); _noticeFocus = null; RenderNotices(); });
         ((Border)delete.Content).Child = new TextBlock { Text = "", FontFamily = Fonts.Icon, FontSize = TextSize.Strong, Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        ((Border)delete.Content).Padding = new Thickness(0); delete.Width = 32; delete.ToolTip = Loc.T("删除这条记录", "Delete this notice");
+        ((Border)delete.Content).Padding = new Thickness(0); delete.Width = 32; delete.ToolTip = deleteName;
         flow.Add(delete);
+        var privacy = Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
+        if (CopyText(notice, members, privacy) is { Length: > 0 } text)
+        {
+            string copyName = Loc.T("复制内容", "Copy text");
+            Button? copyAll = null;
+            copyAll = GlyphPill("", copyName, () => SayCopied(copyAll!, CopyWords(text), copyName));
+            flow.Add(copyAll);
+        }
         if ((notice.Capabilities & NoticeCapabilities.Actions) != 0)
             foreach (var action in notice.Actions.Where(a => a.Key != "default").Take(2))
                 flow.Add(PillButton(action.Label, action.Label, () => { center.Invoke(notice, action.Key); RenderNotices(); }));
@@ -556,12 +673,56 @@ public partial class MainWindow
         }
         if (center.CanOpen(notice))
         {
-            string open = notice.Call ? Loc.T($"打开 {notice.AppName} 接听", $"Answer in {notice.AppName}") : Loc.T("打开应用", "Open app");
+            string open = OpenLabel(notice);
             var main = PillButton(open, open, () => _ = OpenFromPage(notice), primary: true);
             row.MainLast = true;
             flow.Add(main);
         }
         return row;
+    }
+
+    private static string OpenLabel(Notice notice) => notice.Call ? Loc.T($"打开 {notice.AppName} 接听", $"Answer in {notice.AppName}") : Loc.T("打开应用", "Open app");
+
+    // A round button that shows only a glyph of the system's icon font.
+    private static Button GlyphPill(string glyph, string name, Action click)
+    {
+        var button = PillButton("", name, click);
+        var face = (Border)button.Content;
+        face.Child = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 13, Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        face.Padding = new Thickness(0); button.Width = 32; button.ToolTip = name;
+        return button;
+    }
+
+    // What "copy" puts on the clipboard: the notice's words as the page shows them (a verification code stays hidden; it has its
+    // own button), and under them the other messages of the conversation, oldest first.
+    private string CopyText(Notice notice, IReadOnlyList<Notice> group, NoticePrivacy privacy)
+    {
+        if (privacy != NoticePrivacy.Full) return NoticeCodes.Words(notice, Settings.NoticeCodes).Title;
+        var lines = group.Where(n => n.Body.Length > 0).OrderBy(n => n.ReceivedAt).Select(n => NoticeCodes.Words(n, Settings.NoticeCodes).Body).ToList();
+        if (lines.Count == 0) lines.Add(NoticeCodes.Words(notice, Settings.NoticeCodes).Title);
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    // True when the text is on the clipboard; another application may hold the clipboard for a moment.
+    private static bool CopyWords(string text)
+    {
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            try { Clipboard.SetDataObject(new DataObject(DataFormats.UnicodeText, text), true); return true; }
+            catch (System.Runtime.InteropServices.ExternalException) { Thread.Sleep(30); }
+        }
+        return false;
+    }
+
+    // Says on the button whether the copy worked, for the eye and for a screen reader, then goes back to its name.
+    private static void SayCopied(Button button, bool done, string name)
+    {
+        string said = done ? Loc.T("已复制", "Copied") : Loc.T("复制失败，请再点一次", "Copy failed; click again");
+        button.ToolTip = said; AutomationProperties.SetName(button, said);
+        if (((Border)button.Content).Child is TextBlock glyph) glyph.Text = done ? "" : "";
+        var back = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        back.Tick += (_, _) => { back.Stop(); button.ToolTip = name; AutomationProperties.SetName(button, name); if (((Border)button.Content).Child is TextBlock block) block.Text = ""; };
+        back.Start();
     }
 
     // Copies the code on the user's click and says so on the button, for the eye and for a screen reader, then goes back to its name.
@@ -628,10 +789,13 @@ public partial class MainWindow
         string count = Loc.T($"今天 {today} 条", $"{today} today");
         if (center.Paused && center.Settings.NoticesPausedUntil is { } until) count += Loc.T($" · 暂停至 {until.ToLocalTime():HH:mm}", $" · paused until {until.ToLocalTime():HH:mm}");
         else if (center.Quiet) count += Loc.T(" · 安静中", " · quiet");
+        if (_noticeSyncSaid is { } said) count = said;
         var countText = UI.Centered(count, TextSize.Body, UI.Tertiary);
         countText.TextWrapping = TextWrapping.Wrap; countText.LineHeight = NoticeLines.CountLine; countText.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
         head.Children.Add(countText);
         var tools = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        if (center.WindowsState != NoticeSourceState.Off)
+            tools.Children.Add(IconToggle("", Loc.T("同步 Windows 通知", "Sync Windows notifications"), () => _ = SyncWindowsNotices()));
         var pause = IconToggle(center.Paused ? "" : "", center.Paused ? Loc.T("恢复提醒", "Resume") : Loc.T("暂停提醒 1 小时", "Pause for 1 h"),
             () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); RenderNotices(); });
         tools.Children.Add(pause);
@@ -675,7 +839,7 @@ public partial class MainWindow
 
     private void AddNoticeRow(StackPanel list, int index, Notice notice, Notice focus, DateTimeOffset now)
     {
-        var row = Row(notice, now, ReferenceEquals(notice, focus));
+        var row = Row(notice, now, Conversation(notice) == Conversation(focus));
         list.Children.Insert(index, row);
         _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row));
     }
@@ -728,11 +892,14 @@ public partial class MainWindow
             NoticeSourceState.Off => (Loc.T("未接收 Windows 应用通知", "Not receiving Windows notifications"), UI.Tertiary),
             _ => (Loc.T("正在接收 Windows 应用通知", "Receiving Windows notifications"), CallColor)
         };
+        if (_noticeSyncSaid is { } said) state = said;
         var status = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, 0) };
         status.Children.Add(new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(color), Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center });
         status.Children.Add(UI.Fixed(state, TextSize.Body, 16, UI.Tertiary));
         empty.Children.Add(status);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 18, 0, 0) };
+        if (center.WindowsState != NoticeSourceState.Off)
+            buttons.Children.Add(PillButton(Loc.T("同步 Windows 通知", "Sync Windows notifications"), Loc.T("同步 Windows 通知", "Sync Windows notifications"), () => _ = SyncWindowsNotices()));
         buttons.Children.Add(PillButton(Loc.T("通知设置", "Notice settings"), Loc.T("通知设置", "Notice settings"), () => _app.OpenSettings()));
         empty.Children.Add(buttons);
         return empty;
@@ -751,7 +918,8 @@ public partial class MainWindow
         icon.Children.Add(NoticePlate(notice, 24));
         // The unread dot has a ring in the color of what is behind it, which is the row's own fill (it changes with the row's state).
         Ellipse? dot = null;
-        if (_freshNotices.Contains(notice.Id))
+        var (count, fresh) = ConversationOf(notice);
+        if (fresh)
             icon.Children.Add(dot = new Ellipse { Width = 9, Height = 9, Fill = UI.Brush(notice.Call ? CallColor : UnreadColor), StrokeThickness = 2,
                 HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -3, -3, 0), IsHitTestVisible = false });
         grid.Children.Add(icon);
@@ -763,7 +931,8 @@ public partial class MainWindow
         title.TextTrimming = TextTrimming.CharacterEllipsis;
         if (codeWords.HasCode && notice.Title.Length > 0) AutomationProperties.SetName(title, codeWords.SpokenTitle);
         texts.Children.Add(title);
-        var when = UI.Fixed(NoticeText.Relative(notice.ReceivedAt, now), TextSize.Caption, NoticeLines.RowTitleLine, UI.Tertiary);
+        // A conversation's row says how many notices it stands for, before the time of its newest.
+        var when = UI.Fixed((count > 1 ? Loc.T($"{count} 条 · ", $"{count} · ") : "") + NoticeText.Relative(notice.ReceivedAt, now), TextSize.Caption, NoticeLines.RowTitleLine, UI.Tertiary);
         texts.Children.Add(when);
         var privacy = Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
         string preview = privacy == NoticePrivacy.Full && notice.Body.Length > 0 ? NoticeText.Summary(codeWords.Body) : notice.AppName;
@@ -814,7 +983,7 @@ public partial class MainWindow
     // Everything a row shows.
     private string RowKey(Notice notice, DateTimeOffset now)
         => string.Join('\u0001', Settings.NoticeCodes, notice.Title, notice.Body, notice.AppName, notice.IconRef, notice.Picture, notice.SourcePresent, notice.Category, notice.Call,
-            NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local), NoticeText.Relative(notice.ReceivedAt, now), _freshNotices.Contains(notice.Id));
+            NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local), NoticeText.Relative(notice.ReceivedAt, now), ConversationOf(notice));
 
     // The notice whose row last had the keyboard focus, to keep it there when the page is built again.
     private string? _focusedNotice;
@@ -888,8 +1057,8 @@ public partial class MainWindow
             NoticeBadges.Decorate(plate, notice, size, NoticeLook.Current().Glow, NoticeGlyphs.Plate(notice));
             return false;
         }
-        if (cover) plate.Children.Add(new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Lg)), Background = UI.Brush(UI.Fill), BorderBrush = UI.Brush(UI.Hairline), BorderThickness = new Thickness(1) });
-        var picture = new Image { Source = image, Width = cover ? 40 : size, Height = cover ? 40 : size, Stretch = Stretch.Uniform };
+        // The icon itself at the plate's size, with nothing behind it: on a plate of its own it read as an icon boxed into another.
+        var picture = new Image { Source = image, Width = size, Height = size, Stretch = Stretch.Uniform };
         RenderOptions.SetBitmapScalingMode(picture, BitmapScalingMode.HighQuality);
         plate.Children.Add(picture);
         NoticeBadges.Decorate(plate, notice, size, NoticeLook.Current().Glow, null);

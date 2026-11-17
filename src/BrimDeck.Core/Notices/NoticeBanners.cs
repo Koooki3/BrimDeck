@@ -151,7 +151,8 @@ public static class NoticeBanners
     // The applications whose banners BrimDeck should turn off now: every known one (candidates: the Start menu's applications,
     // those Windows already keeps notification settings for, and those notices arrived from) while the switch, notices and the
     // Windows source are on and Windows lets BrimDeck read notifications. Not BrimDeck itself (own), not one the user set to off
-    // or muted in BrimDeck (its notices only show in Windows), and not one whose banner the user turned on again (Released).
+    // or muted in BrimDeck (Muted, or the Silent level: its notices only show in Windows), and not one whose banner the user
+    // turned on again (Released).
     public static HashSet<string> Wanted(DeckSettings settings, bool windowsReadable, IEnumerable<string> candidates, IEnumerable<string> own, BannerLedger ledger)
     {
         var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -160,7 +161,7 @@ public static class NoticeBanners
         foreach (var appId in candidates)
         {
             if (!Usable(appId) || skip.Contains(appId) || ledger.IsReleased(appId)) continue;
-            if (settings.NoticeRule(NoticeKeys.Windows(appId)) is { } rule && (!rule.Enabled || rule.Muted)) continue;
+            if (settings.NoticeRule(NoticeKeys.Windows(appId)) is { } rule && (!rule.Enabled || rule.Muted || rule.Level == NoticeLevel.Silent)) continue;
             wanted.Add(appId);
         }
         return wanted;

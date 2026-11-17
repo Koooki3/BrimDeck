@@ -75,7 +75,16 @@ public static class Profiles
         nameof(DeckSettings.SettingsWindowWidth), nameof(DeckSettings.SettingsWindowHeight), nameof(DeckSettings.SettingsWindowMaximized),
         nameof(DeckSettings.IncludeWsl), nameof(DeckSettings.Apps),
         nameof(DeckSettings.Profiles), nameof(DeckSettings.CurrentProfile), nameof(DeckSettings.ReturnProfile), nameof(DeckSettings.ProfileRules),
-        nameof(DeckSettings.FullscreenExceptions), nameof(DeckSettings.MouseWheelPages)
+        nameof(DeckSettings.FullscreenExceptions), nameof(DeckSettings.MouseWheelPages),
+        nameof(DeckSettings.NoticesEnabled), nameof(DeckSettings.NoticeWindowsSource), nameof(DeckSettings.NoticeHideBanners),
+        nameof(DeckSettings.NoticeChatFlash), nameof(DeckSettings.NoticeChatFlashRestore), nameof(DeckSettings.NoticeWslDistros),
+        nameof(DeckSettings.NoticeDuration), nameof(DeckSettings.NoticeHighDuration), nameof(DeckSettings.NoticeScreen),
+        nameof(DeckSettings.NoticeDefaultLevel), nameof(DeckSettings.NoticeAlign),
+        nameof(DeckSettings.NoticePrivacy), nameof(DeckSettings.NoticeCodes), nameof(DeckSettings.NoticeClick),
+        nameof(DeckSettings.NoticeRespectFocus), nameof(DeckSettings.NoticesPausedUntil), nameof(DeckSettings.NoticeHistory),
+        nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHistoryFolder),
+        nameof(DeckSettings.NoticeAutoClear), nameof(DeckSettings.NoticeLastCleared), nameof(DeckSettings.NoticeHotkey),
+        nameof(DeckSettings.NoticeChatAppsFollowGlobal), nameof(DeckSettings.NoticeOpenReplay), nameof(DeckSettings.NoticeApps)
     };
 
     public static bool IsProfileKey(string key) => !GlobalKeys.Contains(key);

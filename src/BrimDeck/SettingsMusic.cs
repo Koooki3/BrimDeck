@@ -258,6 +258,9 @@ public sealed partial class SettingsWindow
                 help: Loc.T("音乐暂停时，收起状态下隐藏所选内容，恢复播放后重新显示。“文字”指按“中间文字”显示的歌名或歌词；“全部”指文字和封面，不包括律动条。",
                     "While music is paused, the chosen part is hidden when collapsed and comes back when playback resumes. \"Text\" is the title or lyric shown by \"Middle text\"; \"Both\" is the text and the cover, not the equalizer.")),
             Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v)),
+            Toggle(Loc.T("歌名占满整个岛", "The title takes the whole island"), S.MusicTrackNoticeWide, v => Change(s => s.MusicTrackNoticeWide = v), enabled: S.MusicTrackNotice,
+                help: Loc.T("切歌时，歌名和歌手像通知一样显示在整个岛上，位置跟随“灵动提示 › 文字位置”。关闭后只显示在音乐区域。指示条形态不显示文字。",
+                    "On a track change the title and artist show across the whole island, as a notice does, placed by \"Live notices › Text position\". When off they show in the music part only. The indicator shows no words.")),
             Toggle(Loc.T("显示封面", "Show cover"), S.MusicCompactCover, v => Change(s => s.MusicCompactCover = v))]);
         SectionTitle(Loc.T("展开时", "When expanded"));
         var lyricColor = Row(Loc.T("当前歌词颜色", "Current lyric color"), ColorSwatches("MusicLyricColor", Loc.T("当前歌词颜色 ", "Current lyric color "),

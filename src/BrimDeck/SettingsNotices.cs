@@ -23,8 +23,8 @@ public sealed partial class SettingsWindow
         var center = _app.Notices;
         _noticeStatusLines.Clear();
         Group(Toggle(Loc.T("启用灵动提示", "Turn on live notices"), S.NoticesEnabled, value => { Change(s => s.NoticesEnabled = value); ShowPage(NoticesSettingsPage); },
-            help: Loc.T("收到通知时，刘海、胶囊或指示条以液体动效闪动，刘海和胶囊在岛上显示应用图标、标题和摘要；鼠标移上去即打开通知页。Windows 自己的横幅和通知中心保持不变。全部在本机处理，不使用云端服务。",
-                "When a notice arrives, the notch, capsule or indicator moves like a liquid and flashes; the notch and the capsule show the application's icon, title and summary on the island. Rest the pointer on it to open the notices page. Windows' own banners and notification center stay as they are. Everything is processed on this PC, without any cloud service.")));
+            help: Loc.T("收到通知时在岛上显示图标、标题和摘要，鼠标移上去打开通知页。全部在本机处理。",
+                "Shows an arriving notice's icon, title and summary on the island; rest the pointer on it to open the notices page. Everything is processed on this PC.")));
         if (!S.NoticesEnabled)
         {
             var note = TextLine(Loc.T("开启后可选择接收 Windows 应用通知、WSL 中的通知以及 brim-notify 命令发送的提示。", "Once on, you can receive Windows app notifications, notices from WSL and those sent with the brim-notify command."), TextSize.Body, TextSecondary);
@@ -51,11 +51,12 @@ public sealed partial class SettingsWindow
             AutomationProperties.SetName(link, Loc.T("转到", "Go to ") + name);
             anchors.Children.Add(link);
         }
+        Section(Loc.T("提示方式", "How notices show"), () => NoticeLookSection(center));
         Section(Loc.T("来源", "Sources"), () => NoticeSources(center));
-        Section(Loc.T("外观", "Look"), () => NoticeAppearanceSection(center));
-        Section(Loc.T("提醒方式", "Behavior"), () => NoticeBehavior(center));
         Section(Loc.T("应用", "Apps"), () => NoticeRules(center));
+        Section(Loc.T("免打扰", "Quiet times"), () => NoticeQuietSection(center));
         Section(Loc.T("历史与隐私", "History"), () => NoticeHistorySection(center));
+        NoticeAdvancedSection(center);
         // The status lines follow the sources while the page is shown.
         var watcher = new Border();
         Action refresh = () => { foreach (var line in _noticeStatusLines.ToList()) line(); };
@@ -64,9 +65,9 @@ public sealed partial class SettingsWindow
         Target.Children.Add(watcher);
     }
 
-    // "Turn off other apps' notification banners" (NoticeBanners): off by default; what it changes and how it is undone are
-    // spelled out, since the setting is Windows' own and undocumented.
-    private void NoticeBannerRow(NoticeCenter center)
+    // "Stop Windows' own banners" (NoticeBanners): off by default. What it changes in Windows and how that is undone is in
+    // docs/notices.md; the row says what the user gets, and offers Windows' settings only when something went wrong.
+    private Grid NoticeBannerRow(NoticeCenter center)
     {
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NoticeHideBanners, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Space.S12, 0, 0, 0) };
         string title = Loc.T("统一关闭其他应用的通知横幅", "Turn off other apps' notification banners");
@@ -76,25 +77,26 @@ public sealed partial class SettingsWindow
         var windows = ActionButton(Loc.T("打开 Windows 通知设置", "Open Windows notification settings"), () => UI.OpenUrl("ms-settings:notifications"));
         var controls = new StackPanel { Orientation = Orientation.Horizontal };
         controls.Children.Add(windows); controls.Children.Add(toggle);
-        var status = StatusLine(() => BannerStatus(center));
-        Group(Row(title, controls, status,
-            () => Loc.T("BrimDeck 已在岛上显示 Windows 通知时，Windows 自己的横幅会把同一条通知再弹一次。打开后，BrimDeck 关掉其他应用在 Windows 中的“显示通知横幅”：开始菜单里的应用和 Windows 通知设置里已有的应用都会处理，新装的应用在 BrimDeck 下次启动或它的第一条通知到达时补上。通知照常进入通知中心，BrimDeck 照常读取；只关横幅，提示音照常播放。BrimDeck 自己、以及在下方“应用”里设为关闭或静音的应用不动，它们的通知只在 Windows 中显示。\n\n改动前，BrimDeck 先把每个应用原来的设置（包括原来没有这一项）记在数据文件夹的 notice-banners.json 里；关闭开关、退出或卸载 BrimDeck 时按记录恢复：原来没有的删掉，原来有的写回。你在 Windows 里重新打开了某个应用的横幅，BrimDeck 保留你的选择，开关打开期间不再改它。意外退出来不及恢复的，下次启动时按记录收尾。\n\n这项设置（注册表 HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\<应用>\\ShowBanner）不在 Windows 的公开文档里，以后的 Windows 版本可能不再生效。打开后如果仍看到横幅，请在 Windows 设置 › 系统 › 通知 中逐个关闭。",
-                "While BrimDeck shows Windows notifications on the island, Windows' own banner shows each one a second time. When this is on, BrimDeck turns off \"Show notification banners\" in Windows for other apps: the apps in the Start menu and those already in Windows' notification settings; an app installed later is added at BrimDeck's next start or with its first notification. Notifications still go to the notification center, where BrimDeck reads them; only the banner goes, the sound still plays. BrimDeck itself, and apps set to off or muted under \"Apps\" below, are left alone: their notifications show only in Windows.\n\nBefore it changes anything, BrimDeck records each app's previous setting (including that there was none) in notice-banners.json in its data folder, and restores it when you switch this off, quit or uninstall BrimDeck: a value that was not there is deleted, one that was is written back. If you turn an app's banner on again in Windows, BrimDeck keeps your choice and leaves that app alone while this stays on. Anything it could not restore after an unexpected exit is restored at the next start.\n\nThe setting (HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\<app>\\ShowBanner) is not documented by Windows and may stop working in a later version. If banners still appear with this on, turn them off per app in Windows Settings › System › Notifications.")));
+        var status = StatusLine(() =>
+        {
+            var state = BannerStatus(center);
+            windows.Visibility = state.Problem ? Visibility.Visible : Visibility.Collapsed;
+            return state;
+        });
+        return Row(title, controls, status,
+            () => Loc.T("同一条通知只在岛上显示，不再从屏幕角落弹出。通知照常进入 Windows 通知中心，提示音不变。关闭这个开关或退出 BrimDeck 时恢复原样。",
+                "A notice shows on the island only, no longer in the corner of the screen. It still goes to Windows' notification center and keeps its sound. Switching this off or quitting BrimDeck puts Windows' banners back."));
     }
 
-    // "New messages of WeChat and other chat apps (taskbar flash)": off by default; says exactly what is and is not read.
+    // WeChat sends no Windows notification; its taskbar button flashing is what tells of a new message.
     private void NoticeChatFlashRow(NoticeCenter center)
     {
-        string title = Loc.T("微信等聊天应用的新消息提示（任务栏闪烁）", "New-message notices of WeChat and other chat apps (taskbar flash)");
         var status = StatusLine(() => center.ChatFlashError is { } error && S.NoticeChatFlash ? (Loc.T("无法启动：", "Could not start: ") + error, true) : ("", false));
-        Group(Toggle(title, S.NoticeChatFlash, value => Change(s => s.NoticeChatFlash = value),
-            help: Loc.T("桌面版微信不发送 Windows 通知，只会让任务栏图标闪烁。打开后，BrimDeck 只接收 Windows 的“某个窗口在任务栏闪烁”事件，读取闪烁窗口所属程序的文件名（目前只认微信：Weixin.exe、WeChat.exe），并显示一条“微信 有新消息”。\n\n读取的只有：哪个窗口闪烁、它的程序文件名。不读取消息内容、发送人或会话，不读取也不修改微信的内存、文件和界面（不使用界面自动化），不访问网络。微信已在前台时不提示；约 3 分钟内的连续闪烁合并为一条。\n\n只在有事件时才工作，没有定时器或轮询；关闭后立即注销监听并销毁窗口。默认关闭。微信缩在托盘或设为免打扰时是否闪烁取决于微信自己，不同版本可能不同。",
-                "Desktop WeChat sends no Windows notification; it only flashes its taskbar button. When this is on, BrimDeck receives only Windows' event \"a window is flashing on the taskbar\", reads the file name of the flashing window's program (only WeChat for now: Weixin.exe, WeChat.exe) and shows one \"WeChat New message\" notice.\n\nWhat is read: which window flashed and its program's file name. Not read: message text, sender or chats; nothing in WeChat's memory, files or interface is read or changed (no UI Automation), and nothing goes to the network. Nothing shows while WeChat is in front; flashes within about 3 minutes make up one notice.\n\nIt works only when an event arrives, with no timer or polling; switching it off deregisters the listener and destroys its window at once. Off by default. Whether WeChat flashes while parked in the tray or for do-not-disturb chats is up to WeChat and may differ between versions.")),
+        Group(Toggle(Loc.T("微信新消息", "WeChat new messages"), S.NoticeChatFlash, value => Change(s => s.NoticeChatFlash = value),
+                help: Loc.T("微信不发送 Windows 通知。打开后，微信的任务栏图标闪烁时显示一条“微信 有新消息”。不读取消息内容和发送人。",
+                    "WeChat sends no Windows notification. When this is on, a \"WeChat New message\" notice shows as WeChat's taskbar button flashes. Message text and sender are not read.")),
+            Toggle(Loc.T("点击提示时回到微信", "Clicking the notice brings WeChat forward"), S.NoticeChatFlashRestore, value => Change(s => s.NoticeChatFlashRestore = value), enabled: S.NoticeChatFlash),
             status);
-        Note(Loc.T("只读取“哪个窗口闪烁、它的程序文件名”，不读取消息内容和发送人。", "Reads only which window flashed and its program's file name, never message text or sender."));
-        Group(Toggle(Loc.T("点击微信新消息提示时带出微信主窗口", "Clicking the WeChat notice brings WeChat forward"), S.NoticeChatFlashRestore, value => Change(s => s.NoticeChatFlashRestore = value),
-            help: Loc.T("点击微信新消息提示时，通过微信自己的 weixin:// 入口把主窗口带到前台；微信在托盘时的表现取决于微信版本。\n\nBrimDeck 只把固定的 weixin:// 交给 Windows 里注册的微信，不带任何其他内容，并读取注册表中该协议的一个值（HKEY_CLASSES_ROOT\\weixin 的 URL Protocol），确认已注册才调用；不直接操作微信的窗口。没有注册或启动失败时，点击照常打开通知页。微信没有运行时，Windows 可能启动微信。默认关闭。",
-                "On clicking the WeChat new-message notice, WeChat's own weixin:// address brings its main window forward; what happens while WeChat is in the tray depends on its version.\n\nBrimDeck hands only the fixed weixin:// to the WeChat Windows has registered, nothing else, and reads one registry value (the URL Protocol value of HKEY_CLASSES_ROOT\\weixin) to check it is registered before doing so; WeChat's windows are not touched. Without a registration, or if the start fails, a click opens the notices page as usual. If WeChat is not running, Windows may start it. Off by default.")));
     }
 
     private (string Text, bool Problem) BannerStatus(NoticeCenter center)
@@ -131,8 +133,8 @@ public sealed partial class SettingsWindow
 
     private void NoticeSources(NoticeCenter center)
     {
-        SectionTitle(Loc.T("通知来源", "Sources"));
-        // Windows: access, then the event log or the timed reading.
+        SectionTitle(Loc.T("接收的通知", "What is received"));
+        // Windows: the switch, and the way to give access while Windows has not allowed it.
         var access = ActionButton(Loc.T("允许访问", "Allow access"), async () => { await center.RequestWindowsAccessAsync(); });
         var privacy = ActionButton(Loc.T("打开系统设置", "Open Windows settings"), () => UI.OpenUrl("ms-settings:privacy-notifications"));
         var windowsToggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NoticeWindowsSource, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Space.S12, 0, 0, 0) };
@@ -154,15 +156,33 @@ public sealed partial class SettingsWindow
                 NoticeSourceState.Denied => (Loc.T("Windows 拒绝了访问。可在“设置 › 隐私和安全性 › 通知”中允许应用访问通知。", "Windows denies access. Allow apps to access notifications in Settings › Privacy & security › Notifications."), true),
                 NoticeSourceState.EventLog => (Loc.T("正在接收（事件日志模式：Windows 记录通知后立即读取）", "Receiving (event log mode: reads as soon as Windows logs a notification)"), false),
                 NoticeSourceState.Polling => (Loc.T("正在接收（轮询模式：每 2.5 秒检查新通知，每 15 秒完整读取一次）", "Receiving (polling mode: checks for new notices every 2.5 s and reads the whole list every 15 s)"), false),
-                _ => (Loc.T("读取失败，稍后重试。", "Reading failed; trying again shortly."), true)
+                _ => (Loc.T("读取失败，稍后重试。", "Reading failed; trying again shortly.") + (center.WindowsFailure.Length > 0 ? " " + center.WindowsFailure : ""), true)
             };
         });
         Group(Row(Loc.T("Windows 应用通知", "Windows app notifications"), windowsControls, windowsStatus,
-            () => Loc.T("读取 Windows 通知中心里当前用户的应用通知（来源、图标、时间和文字），不读取应用内部消息，也不会清除或修改通知中心。BrimDeck 作为普通桌面程序运行时，Windows 不提供变化事件，因此在 Windows 的推送通知事件日志每记录一条通知时读取（事件日志模式），日志被关闭或不可用时改为轮询。",
-                "Reads the current user's app notifications in Windows' notification center (source, icon, time and text). It does not read messages inside apps, and never clears or changes the notification center. As an ordinary desktop program BrimDeck gets no change events from Windows, so it reads whenever Windows' push notification event log records a notification (event log mode), and polls when that log is turned off or unavailable.")));
-
-        NoticeBannerRow(center);
+            () => Loc.T("显示 QQ、邮件、浏览器等应用发到 Windows 通知中心的通知。不会清除或修改通知中心。",
+                "Shows the notifications apps such as chat, mail and browsers send to Windows' notification center. The notification center is never cleared or changed.")),
+            NoticeBannerRow(center));
         NoticeChatFlashRow(center);
+    }
+
+    // "Advanced", closed until asked for: WSL, the command line, the time-kind applications, verification codes and the hotkey.
+    private bool _noticeAdvancedOpen;
+
+    private void NoticeAdvancedSection(NoticeCenter center)
+    {
+        var open = ActionButton((_noticeAdvancedOpen ? Loc.T("收起高级设置", "Hide advanced") : Loc.T("高级设置", "Advanced")) + (_noticeAdvancedOpen ? " ▴" : " ▾"),
+            () => { _noticeAdvancedOpen = !_noticeAdvancedOpen; ShowPage(NoticesSettingsPage); });
+        AutomationProperties.SetName(open, Loc.T("灵动提示高级设置", "Advanced live notice settings"));
+        open.HorizontalAlignment = HorizontalAlignment.Left; open.Margin = new Thickness(0, 4, 0, 14);
+        Target.Children.Add(open);
+        if (!_noticeAdvancedOpen) return;
+        Group(SliderRow(Loc.T("重要通知停留时间", "Important notices shown for"), S.NoticeHighDuration, 2, 60, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeHighDuration = (int)Math.Round(value))),
+            Toggle(Loc.T("遮住验证码并提供复制按钮", "Hide verification codes and offer a copy button"), S.NoticeCodes, value => Change(s => s.NoticeCodes = value),
+                help: Loc.T("在本机识别通知里的验证码，用圆点遮住，通知页提供“复制验证码”按钮。复制后 60 秒自动清除剪贴板。",
+                    "Recognizes a verification code in a notice on this PC, hides it with dots and offers a \"Copy code\" button on the notices page. The clipboard is cleared 60 seconds after copying.")),
+            Toggle(Loc.T("打开应用时直达通知对应的会话", "Open the notice's conversation when opening the app"), S.NoticeOpenReplay, value => Change(s => s.NoticeOpenReplay = value)),
+            HotkeyRow(HotkeyKind.Notices));
 
         // WSL: one switch per distribution; none on by default.
         var distributions = WslLocations.Distributions();
@@ -295,11 +315,10 @@ public sealed partial class SettingsWindow
         Target.Children.Add(note);
     }
 
-    // Notices take the panel theme: the island, the panel and the notices are drawn in one material. The section says where the
-    // theme is chosen and lets the user try it.
-    private void NoticeAppearanceSection(NoticeCenter center)
+    // How a notice shows on the island: its effect, where its words sit, on which screens, for how long, how much of it, and
+    // what a click does. The test notice is beside the title, to try a choice at once.
+    private void NoticeLookSection(NoticeCenter center)
     {
-        SectionTitle(Loc.T("外观", "Look"));
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         var theme = ActionButton(Loc.T("更改主题", "Change theme"), () => ShowPage(ThemePage));
         var test = ActionButton(Loc.T("发送测试通知", "Send a test notice"), center.SendTest); test.Margin = new Thickness(Space.S8, 0, 0, 0);
@@ -307,41 +326,51 @@ public sealed partial class SettingsWindow
         var note = TextLine(Loc.T($"跟随面板主题“{PanelTheme.ShownTheme.DisplayName}”：通知与刘海、胶囊、指示条和展开面板使用同一套底色、边缘、辉光与文字颜色。",
             $"Follows the panel theme \"{PanelTheme.ShownTheme.DisplayName}\": notices share the surface, rim, glow and text colors of the notch, capsule, indicator and open panel."), TextSize.Body, TextSecondary);
         note.TextWrapping = TextWrapping.Wrap; note.TextTrimming = TextTrimming.None;
+        SectionTitle(Loc.T("提示方式", "How notices show"));
         Group(Row(Loc.T("通知外观", "Notice look"), buttons, note));
+        Group(
+            MusicChoice(Loc.T("提示效果", "Effect"), S.NoticeDefaultLevel,
+                [(NoticeLevel.Plain, Loc.T("简洁", "Plain")), (NoticeLevel.Glow, Loc.T("辉光", "Glow")), (NoticeLevel.Lively, Loc.T("灵动", "Lively"))],
+                value => Change(s => s.NoticeDefaultLevel = value),
+                help: Loc.T("简洁：只在岛上显示文字。辉光：岛的边缘亮一下。灵动：辉光加液体波纹。重要通知总是用灵动；来电和闹钟会一直显示到处理为止。每个应用可在下方“应用”中单独选择。",
+                    "Plain: only the words on the island. Glow: the island's edge lights up once. Lively: the glow and a liquid ripple. Important notices are always lively; calls and alarms stay until handled. Each app can have its own under \"Apps\" below.")),
+            MusicChoice(Loc.T("文字位置", "Text position"), S.NoticeAlign,
+                [(NoticeAlign.Left, Loc.T("居左", "Left")), (NoticeAlign.Center, Loc.T("居中", "Center")), (NoticeAlign.Right, Loc.T("居右", "Right"))],
+                value => Change(s => s.NoticeAlign = value)),
+            MusicChoice(Loc.T("显示在", "Show on"), S.NoticeScreen,
+                [(NoticeScreen.Foreground, Loc.T("正在使用的屏幕", "Screen in use")), (NoticeScreen.Main, Loc.T("主面板的屏幕", "Main panel's screen")), (NoticeScreen.All, Loc.T("所有屏幕", "All screens"))],
+                value => Change(s => s.NoticeScreen = value), width: 348),
+            SliderRow(Loc.T("停留时间", "Shown for"), S.NoticeDuration, 2, 30, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeDuration = (int)Math.Round(value))),
+            MusicChoice(Loc.T("显示内容", "What shows"), S.NoticePrivacy,
+                [(NoticePrivacy.Full, Loc.T("标题和摘要", "Title and summary")), (NoticePrivacy.TitleOnly, Loc.T("仅标题", "Title only")), (NoticePrivacy.AppOnly, Loc.T("仅应用", "App only"))],
+                value => { Change(s => { s.NoticePrivacy = value; s.NoticeChatAppsFollowGlobal = true; }); ShowPage(NoticesSettingsPage); }),
+            MusicChoice(Loc.T("点击岛上的提示", "Clicking a notice on the island"), S.NoticeClick,
+                [(NoticeClickTarget.Page, Loc.T("打开通知页", "Open the notices page")), (NoticeClickTarget.SourceApp, Loc.T("打开来源应用", "Open the source app"))],
+                value => Change(s => s.NoticeClick = value)));
     }
 
-    private void NoticeBehavior(NoticeCenter center)
+    // When notices keep quiet: Windows' focus and presentation states, and BrimDeck's own pause.
+    private void NoticeQuietSection(NoticeCenter center)
     {
-        SectionTitle(Loc.T("提醒方式", "Behavior"));
+        SectionTitle(Loc.T("免打扰", "Quiet times"));
         static string PauseLabel(NoticeCenter center) => center.Paused ? Loc.T("恢复提醒", "Resume") : Loc.T("暂停 1 小时", "Pause for 1 hour");
         var pause = ActionButton(PauseLabel(center), () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); ShowPage(NoticesSettingsPage); });
         // A pause that runs out while the page is open turns the button back as the status line changes.
         _noticeStatusLines.Add(() => pause.Content = PauseLabel(center));
         var pauseStatus = StatusLine(() => center.Paused && S.NoticesPausedUntil is { } until
-            ? (Loc.T($"已暂停至 {until.ToLocalTime():HH:mm}，期间的通知只进入通知历史。", $"Paused until {until.ToLocalTime():HH:mm}; notices meanwhile only go to the notice history."), false)
+            ? (Loc.T($"已暂停至 {until.ToLocalTime():HH:mm}，期间的通知只进入通知页。", $"Paused until {until.ToLocalTime():HH:mm}; notices meanwhile only go to the notices page."), false)
             : center.Quiet ? (Loc.T("Windows 正处于专注、演示或锁定状态，提示暂时不显示。", "Windows is in focus, presentation or locked state; notices are held back for now."), false) : ("", false));
-        Group(SliderRow(Loc.T("停留时间", "Shown for"), S.NoticeDuration, 2, 30, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeDuration = (int)Math.Round(value))),
-            SliderRow(Loc.T("高优先级停留", "High priority shown for"), S.NoticeHighDuration, 2, 60, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeHighDuration = (int)Math.Round(value))),
-            MusicChoice(Loc.T("显示在", "Show on"), S.NoticeScreen, [(NoticeScreen.Foreground, Loc.T("前台窗口所在屏幕", "Foreground window's screen")), (NoticeScreen.Main, Loc.T("主面板所在屏幕", "Main panel's screen"))], value => Change(s => s.NoticeScreen = value)),
-            MusicChoice(Loc.T("到达时显示", "On arrival show"), S.NoticePrivacy, [(NoticePrivacy.Full, Loc.T("标题和摘要", "Title and summary")), (NoticePrivacy.TitleOnly, Loc.T("仅标题", "Title only")), (NoticePrivacy.AppOnly, Loc.T("仅应用", "App only"))], value => { Change(s => { s.NoticePrivacy = value; s.NoticeChatAppsFollowGlobal = true; }); ShowPage(NoticesSettingsPage); }),
-            MusicChoice(Loc.T("点击岛上的通知", "Clicking a notice on the island"), S.NoticeClick, [(NoticeClickTarget.Page, Loc.T("打开通知页", "Open the notices page")), (NoticeClickTarget.SourceApp, Loc.T("打开来源应用", "Open the source app"))], value => Change(s => s.NoticeClick = value)),
-            Toggle(Loc.T("打开应用时直达通知对应的会话（回放通知的启动参数）", "Open the notice's own conversation when opening the app (replay the notice's launch parameters)"), S.NoticeOpenReplay, value => Change(s => s.NoticeOpenReplay = value),
-                help: Loc.T("仅在你点击“打开应用”的那一刻，只读地读取这一条通知的启动参数（来自 Windows 的通知数据库），不会在后台扫描；用于 Telegram、Discord 等直达对应会话。只打开 http(s) 与应用自己的链接，从不打开 file:、javascript:、ms-* 等；读不到或不支持时只打开应用。启动参数不保存、不写日志。",
-                    "Only at the moment you click \"open app\", the launch parameters of that one notice are read (read-only, from Windows' notification database); nothing is scanned in the background. Used by Telegram, Discord and similar to open the exact conversation. Only http(s) and the application's own links are opened, never file:, javascript:, ms-* and the like; if it cannot be read or is not supported, the application is just opened. The parameters are not saved or logged.")),
-            Toggle(Loc.T("识别验证码并遮罩，提供复制按钮", "Hide verification codes and offer a copy button"), S.NoticeCodes, value => Change(s => s.NoticeCodes = value),
-                help: Loc.T("在本机识别通知里的验证码（不联网，不写日志），在灵动提示和通知页里用圆点遮住，即使显示摘要也一样，并在通知页给出“复制验证码”按钮。只有点按钮时才写入剪贴板，并要求 Windows 不把它收入剪贴板历史、不同步到云端；60 秒后如果剪贴板里仍是这个验证码，就清空。通知历史里保存的也是遮住的文字，所以重启后无法再复制。",
-                    "Recognizes a verification code in a notice on this PC (nothing goes online or into a log) and hides it with dots on the island and the notices page, even where summaries show; the notices page gets a \"Copy code\" button. The clipboard is written only when you click it, marked so that Windows keeps it out of the clipboard history and cloud sync; after 60 seconds it is emptied if it still holds that code. The notice history keeps the hidden text, so a code cannot be copied after a restart.")),
-            Toggle(Loc.T("聊天应用也使用上面的设置", "Chat apps follow this setting too"), S.ChatAppsFollowGlobal, value => { Change(s => s.NoticeChatAppsFollowGlobal = value); ShowPage(NoticesSettingsPage); },
+        Group(Toggle(Loc.T("聊天应用也使用上面的设置", "Chat apps follow this setting too"), S.ChatAppsFollowGlobal, value => { Change(s => s.NoticeChatAppsFollowGlobal = value); ShowPage(NoticesSettingsPage); },
                 help: Loc.T("关闭时，微信、QQ、企业微信、飞书、钉钉、Telegram、Discord、WhatsApp、Signal、Slack、LINE、KakaoTalk 等聊天应用到达时只显示应用名和“有新消息”，不显示发送者和内容，因为聊天内容常含私人信息；其他应用按上面的设置。单个应用可在下方单独设置，优先于此开关。升级前已把上面改为“标题和摘要”以外选项的用户保持原样；其余用户升级后默认关闭此开关。",
                     "When off, chat apps such as WeChat, QQ, WeCom, Feishu, DingTalk, Telegram, Discord, WhatsApp, Signal, Slack, LINE and KakaoTalk show only the app name and \"New message\" on arrival, without the sender or text, because chat often holds private details; other apps follow the setting above. Each app can be set below, which takes precedence over this switch. Users who had already chosen something other than \"Title and summary\" above before this existed keep their behavior; for everyone else the switch starts off.")),
             Toggle(Loc.T("专注与演示时不打扰", "Quiet during focus and presentations"), S.NoticeRespectFocus, value => Change(s => s.NoticeRespectFocus = value),
-                help: (center.FocusSupported ? Loc.T("Windows 专注会话或演示模式期间不弹出提示，结束后显示一次数量汇总。", "No notices pop up during a Windows focus session or presentation mode; afterwards one summary shows how many arrived.")
-                    : Loc.T("此 Windows 版本不提供专注会话接口，仅识别演示模式。", "This version of Windows does not report focus sessions; only presentation mode is recognized."))
-                    + Loc.T("Windows 单独的“请勿打扰”开关没有公开接口，可使用 BrimDeck 自己的暂停。锁屏和切换用户时始终不显示内容。", " Windows' separate \"Do not disturb\" switch has no public interface; use BrimDeck's own pause instead. Nothing is shown while locked or switched to another user.")),
-            Row(Loc.T("暂停提醒", "Pause notices"), pause, pauseStatus),
-            HotkeyRow(HotkeyKind.Notices));
+                help: center.FocusSupported ? Loc.T("Windows 专注会话或演示模式期间不在岛上提示，结束后显示一次数量汇总。", "No notices show during a Windows focus session or presentation mode; afterwards one summary says how many arrived.")
+                    : Loc.T("此 Windows 版本不提供专注会话接口，只识别演示模式。", "This version of Windows does not report focus sessions; only presentation mode is recognized.")),
+            Row(Loc.T("暂停提醒", "Pause notices"), pause, pauseStatus));
     }
 
+    // One row per application that has sent a notice: how its notices show (one choice, from the default through the three
+    // effects and "first" to "list only" and "off"), and how much of them.
     private void NoticeRules(NoticeCenter center)
     {
         SectionTitle(Loc.T("应用", "Apps"));
@@ -350,11 +379,16 @@ public sealed partial class SettingsWindow
             .Where(app => app.Key != NoticeCenter.TestAppKey).ToList();
         if (apps.Count == 0)
         {
-            var none = TextLine(Loc.T("收到通知后，来源应用会列在这里，可分别设置静音、优先级和隐私。", "Apps appear here once their notices arrive; each can be muted, raised or kept private."), TextSize.Body, TextSecondary);
+            var none = TextLine(Loc.T("收到通知后，应用会列在这里，可以分别设置。", "Apps appear here once their notices arrive; each can be set on its own."), TextSize.Body, TextSecondary);
             none.TextWrapping = TextWrapping.Wrap;
             Group(new Border { Child = none, Padding = new Thickness(0, Space.S12, 0, Space.S12) });
             return;
         }
+        string[] modes =
+        [
+            Loc.T("默认", "Default"), Loc.T("简洁", "Plain"), Loc.T("辉光", "Glow"), Loc.T("灵动", "Lively"),
+            Loc.T("优先", "First"), Loc.T("只进通知页", "List only"), Loc.T("不接收", "Off")
+        ];
         var rows = new List<FrameworkElement>();
         foreach (var (key, name, origin) in apps.Take(60))
         {
@@ -365,27 +399,30 @@ public sealed partial class SettingsWindow
                 if (target is null) { target = new NoticeAppRule { Key = key, Name = name }; s.NoticeApps.Add(target); }
                 target.Name = name; edit(target);
             });
-            var mode = (rule?.Enabled ?? true) == false ? 0 : rule?.Muted == true ? 1 : rule?.Priority == NoticePriority.High ? 3 : 2;
-            var choices = new UniformGrid { Columns = 4, Width = 280 };
-            string[] labels = [Loc.T("关闭", "Off"), Loc.T("静音", "Muted"), Loc.T("正常", "Normal"), Loc.T("优先", "High")];
-            for (int i = 0; i < labels.Length; i++)
+            int mode = rule is null ? 0 : !rule.Enabled ? 6 : rule.Muted || rule.Level == NoticeLevel.Silent ? 5 : rule.Priority == NoticePriority.High ? 4
+                : rule.Level switch { NoticeLevel.Plain => 1, NoticeLevel.Glow => 2, NoticeLevel.Lively => 3, _ => 0 };
+            var show = new ComboBox { Width = 112, Style = (Style)FindResource("SettingsCombo"), ItemsSource = modes, SelectedIndex = mode };
+            AutomationProperties.SetName(show, name + " · " + Loc.T("提示方式", "How it shows"));
+            show.SelectionChanged += (_, _) =>
             {
-                int value = i;
-                var option = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = labels[i], GroupName = "NoticeApp" + key, IsChecked = mode == i };
-                AutomationProperties.SetName(option, name + " · " + labels[i]);
-                option.Checked += (_, _) => Edit(r => { r.Enabled = value != 0; r.Muted = value == 1; r.Priority = value == 3 ? NoticePriority.High : NoticePriority.Normal; });
-                choices.Children.Add(option);
-            }
+                int chosen = show.SelectedIndex;
+                if (chosen < 0) return;
+                Edit(r =>
+                {
+                    r.Enabled = chosen != 6; r.Muted = chosen == 5;
+                    r.Priority = chosen == 4 ? NoticePriority.High : NoticePriority.Normal;
+                    r.Level = chosen switch { 1 => NoticeLevel.Plain, 2 => NoticeLevel.Glow, 3 => NoticeLevel.Lively, _ => NoticeLevel.Auto };
+                });
+            };
             var chatDefault = !S.ChatAppsFollowGlobal && ChatApps.IsChat(key, name);
             var privacy = new ComboBox { Width = chatDefault ? 168 : 112, Style = (Style)FindResource("SettingsCombo"), Margin = new Thickness(10, 0, 0, 0),
-                ItemsSource = new[] { chatDefault ? Loc.T("聊天应用默认：仅应用", "Chat default: app only") : Loc.T("默认显示", "Default"), Loc.T("标题和摘要", "Full"), Loc.T("仅标题", "Title only"), Loc.T("仅应用", "App only") },
+                ItemsSource = new[] { chatDefault ? Loc.T("聊天应用默认：仅应用", "Chat default: app only") : Loc.T("默认内容", "Default"), Loc.T("标题和摘要", "Full"), Loc.T("仅标题", "Title only"), Loc.T("仅应用", "App only") },
                 SelectedIndex = rule?.Privacy is { } p ? (int)p + 1 : 0 };
-            AutomationProperties.SetName(privacy, name + " · " + Loc.T("到达时显示", "On arrival show"));
+            AutomationProperties.SetName(privacy, name + " · " + Loc.T("显示内容", "What shows"));
             privacy.SelectionChanged += (_, _) => Edit(r => r.Privacy = privacy.SelectedIndex <= 0 ? null : (NoticePrivacy)(privacy.SelectedIndex - 1));
             var controls = new StackPanel { Orientation = Orientation.Horizontal };
-            controls.Children.Add(SegmentBorder(choices)); controls.Children.Add(privacy);
-            var subtitle = TextLine(origin.Length > 0 ? origin : key, TextSize.Caption, TextTertiary);
-            rows.Add(Row(name, controls, subtitle));
+            controls.Children.Add(show); controls.Children.Add(privacy);
+            rows.Add(origin.Length > 0 ? Row(name, controls, TextLine(origin, TextSize.Caption, TextTertiary)) : Row(name, controls));
         }
         // Past five apps the rest wait behind one link (SW-10), until it is opened for this visit of the page.
         const int Shown = 5;
