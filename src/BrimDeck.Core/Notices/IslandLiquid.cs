@@ -93,8 +93,14 @@ public sealed class IslandLiquid
         return 0;
     }
 
+    // When the backlight's second flash has faded (GlowAt's last key).
+    public const double GlowLength = .75;
+
     // The indicator's two breaths.
     public static double BreathAt(double t) => t <= 0 || t >= 2 * Breath ? 0 : Math.Pow(Math.Sin(Math.PI * t / Breath), 2);
+
+    // One breath alone: the indicator lights up once for a plain notice.
+    public static double FlashAt(double t) => t <= 0 || t >= Breath ? 0 : Math.Pow(Math.Sin(Math.PI * t / Breath), 2);
 
     // mulberry32, as the prototype's rng().
     public static Func<double> Random(int seed)

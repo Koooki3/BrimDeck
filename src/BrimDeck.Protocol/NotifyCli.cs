@@ -16,7 +16,7 @@ public sealed record NotifySender(
 
 // brim-notify's commands, shared by the Windows sender (BrimDeck.Notify.exe) and the WSL agent (q-P1.5). Exit codes: 0
 // delivered (or filtered by the user's rules), 1 usage error (a message too large to send included), 2 refused by BrimDeck
-// (a stop that found nothing to stop included), 3 BrimDeck could not be reached or did not answer in time; "run" exits with
+// (a stop or close that found nothing included), 3 BrimDeck could not be reached or did not answer in time; "run" exits with
 // the program's own code.
 public static class NotifyCli
 {
@@ -84,11 +84,11 @@ public static class NotifyCli
             return Unreachable;
         }
         if (reply.Result == NoticeResults.Rejected) { Console.Error.WriteLine("brim-notify: BrimDeck refused the notice: " + (reply.Detail ?? "unknown reason")); return Refused; }
-        // A stop that found nothing: a mistyped key, or a timer started with another -s (W8).
+        // A stop or close that found nothing: a mistyped key, or one sent with another -s (W8).
         if (reply is { Result: NoticeResults.Filtered, Detail: "no-timer" })
         {
-            Console.Error.WriteLine("brim-notify: no timer, stopwatch or event has the key " + (sent?.ReplaceId ?? "given")
-                + " (one started with -s is stopped with the same -s).");
+            Console.Error.WriteLine("brim-notify: no timer, stopwatch, event or open notice has the key " + (sent?.ReplaceId ?? "given")
+                + " (one sent with -s is stopped or closed with the same -s).");
             return Refused;
         }
         if (reply.Result == NoticeResults.Filtered) Console.Error.WriteLine("brim-notify: received; BrimDeck's rules keep this source quiet.");

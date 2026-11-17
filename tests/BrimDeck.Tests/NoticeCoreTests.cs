@@ -172,28 +172,54 @@ internal static class NoticeCoreTests
         var started = c.Submit(Item("main", AttentionKind.Notice, "n1", "A"), T0);
         check("An item on a free lane starts at once", started is [{ Started.Key: "n1" }] && c.Current("main")?.Key == "n1" && c.NextDeadline(T0) == T0.AddSeconds(6));
         var merged = c.Submit(Item("main", AttentionKind.Notice, "n2", "A"), T0.AddMilliseconds(500));
-        check("A notice from the same application within 800 ms merges with a count", merged is [{ Updated.Key: "n2" }] && c.Current("main")!.Count == 2);
-        c.Submit(Item("main", AttentionKind.Notice, "n3", "A"), T0.AddMilliseconds(1200));
-        check("Within 800 ms of the last merge it merges again", c.Current("main")!.Count == 3);
-        c.Submit(Item("main", AttentionKind.Notice, "n4", "A"), T0.AddMilliseconds(2500));
-        check("Later notices from it wait instead", c.Current("main")!.Count == 3 && c.Queued("main").Count == 1);
-        c.Submit(Item("main", AttentionKind.Quota, "q"), T0.AddSeconds(3));
-        c.Submit(Item("main", AttentionKind.Notice, "hp", "B", NoticePriority.High, 8), T0.AddSeconds(3));
-        check("A high priority notice takes over; the one it replaced waits with its remaining time", c.Current("main")?.Key == "hp"
-            && c.Queued("main").Select(i => i.Key).SequenceEqual(["n3", "n4", "q"]));
-        var trackDropped = c.Submit(Item("main", AttentionKind.Track, "t", seconds: 4), T0.AddSeconds(3));
+        check("A notice of the conversation that shows merges with a count", merged is [{ Updated.Key: "n2" }] && c.Current("main")!.Count == 2);
+        c.Submit(Item("main", AttentionKind.Notice, "n3", "A"), T0.AddSeconds(4));
+        check("It merges however long after the one before, without waiting", c.Current("main") is { Key: "n3", Count: 3 } && c.Queued("main").Count == 0
+            && c.NextDeadline(T0.AddSeconds(4)) == T0.AddSeconds(6));
+        c.Submit(Item("main", AttentionKind.Notice, "n4", "A"), T0.AddSeconds(5));
+        check("A merge near the end keeps the notice long enough to be read", c.Current("main") is { Key: "n4", Count: 4 } && c.NextDeadline(T0.AddSeconds(5)) == T0.AddSeconds(6.5));
+        c.Submit(Item("main", AttentionKind.Quota, "q"), T0.AddSeconds(5));
+        var trackDropped = c.Submit(Item("main", AttentionKind.Track, "t", seconds: 4), T0.AddSeconds(5));
         check("A track change that cannot show at once is dropped", trackDropped.Count == 0 && c.Queued("main").All(i => i.Kind != AttentionKind.Track));
-        c.Hold("main", true, T0.AddSeconds(4));
-        check("While held, the only wake-up is for waiting items going stale", c.NextDeadline(T0.AddSeconds(4)) == T0.AddSeconds(30));
-        c.Submit(Item("main", AttentionKind.Notice, "hp2", "C", NoticePriority.High), T0.AddSeconds(5));
-        check("Nothing replaces a held item", c.Current("main")?.Key == "hp");
+        c.Hold("main", true, T0.AddSeconds(5.2));
+        check("While held, the only wake-up is for waiting items going stale", c.NextDeadline(T0.AddSeconds(5.2)) == T0.AddSeconds(35));
+        c.Submit(Item("main", AttentionKind.Notice, "hp", "B", NoticePriority.High), T0.AddSeconds(5.5));
+        check("Nothing replaces a held item", c.Current("main")?.Key == "n4" && c.Queued("main").Select(i => i.Key).SequenceEqual(["hp", "q"]));
         c.Tick(T0.AddSeconds(60));
-        check("A held item does not end on time", c.Current("main")?.Key == "hp");
+        check("A held item does not end on time", c.Current("main")?.Key == "n4");
         c.Hold("main", false, T0.AddSeconds(60));
-        check("Released, it keeps its remaining time", c.NextDeadline(T0.AddSeconds(60)) == T0.AddSeconds(67));
-        var ended = c.Tick(T0.AddSeconds(67));
-        check("Stale normal notices and alerts are not shown after 30 s; high priority ones still are", ended.Any(ch => ch.Ended?.Key == "hp") && c.Current("main")?.Key == "hp2"
+        check("Released, it stays a moment before it ends or gives way", c.NextDeadline(T0.AddSeconds(60)) == T0.AddSeconds(61.5) && c.Tick(T0.AddSeconds(61)).Count == 0);
+        var ended = c.Tick(T0.AddSeconds(61.5));
+        check("Stale alerts are not shown after 30 s; high priority notices still are", ended.Any(ch => ch.Ended?.Key == "n4") && c.Current("main")?.Key == "hp"
             && c.Queued("main").Count == 0);
+
+        // Another conversation's notice shows at once: it takes the island over as soon as the one that shows has been up 1.5 s.
+        var turn = new AttentionCoordinator();
+        turn.Submit(Item("t", AttentionKind.Notice, "a", "A"), T0);
+        var waits = turn.Submit(Item("t", AttentionKind.Notice, "b", "B"), T0.AddSeconds(.5));
+        check("Another conversation's notice waits only until the one that shows has been up 1.5 s", waits.Count == 0 && turn.Queued("t").Single().Key == "b"
+            && turn.NextDeadline(T0.AddSeconds(.5)) == T0 + AttentionCoordinator.MinimumShown);
+        turn.Submit(Item("t", AttentionKind.Notice, "b2", "B"), T0.AddSeconds(.8));
+        turn.Submit(Item("t", AttentionKind.Notice, "c", "C"), T0.AddSeconds(1));
+        check("Waiting conversations each keep their latest notice, with a count", turn.Queued("t").Select(i => (i.Key, i.Count)).SequenceEqual([("b2", 2), ("c", 1)]));
+        var took = turn.Tick(T0.AddSeconds(1.5));
+        check("They take over in the order they came; the notice replaced is not shown again", took is [{ Ended.Key: "a" }, { Started.Key: "b2" }]
+            && turn.Queued("t").Single().Key == "c" && turn.NextDeadline(T0.AddSeconds(1.5)) == T0.AddSeconds(3));
+        turn.Tick(T0.AddSeconds(3));
+        var atOnce = turn.Submit(Item("t", AttentionKind.Notice, "d", "D"), T0.AddSeconds(6));
+        check("A notice that has been up long enough gives way at once", turn.Current("t")?.Key == "d" && atOnce is [{ Ended.Key: "c" }, { Started.Key: "d" }]
+            && turn.Queued("t").Count == 0 && turn.NextDeadline(T0.AddSeconds(6)) == T0.AddSeconds(12));
+        var rank = new AttentionCoordinator();
+        rank.Submit(Item("p", AttentionKind.Notice, "hp", "H", NoticePriority.High, 8), T0);
+        rank.Submit(Item("p", AttentionKind.Notice, "n", "N"), T0.AddSeconds(3));
+        check("A less important notice waits for a high priority one to end", rank.Current("p")?.Key == "hp" && rank.Queued("p").Single().Key == "n"
+            && rank.NextDeadline(T0.AddSeconds(3)) == T0.AddSeconds(8));
+        rank.Submit(Item("p", AttentionKind.Notice, "hp2", "H2", NoticePriority.High), T0.AddSeconds(4));
+        check("Another high priority notice takes its place", rank.Current("p")?.Key == "hp2" && rank.Queued("p").Single().Key == "n");
+        rank.Tick(T0.AddSeconds(10));
+        check("The waiting notice shows once the island is free", rank.Current("p")?.Key == "n");
+        check("A conversation is an application and a title; without a title, the application",
+            AttentionCoordinator.GroupOf("windows:QQ", "群A") != AttentionCoordinator.GroupOf("windows:QQ", "群B") && AttentionCoordinator.GroupOf("windows:QQ", "") == "windows:QQ");
 
         // The song changes while its title still shows: the new title gets its whole time, counted from the change.
         var songs = new AttentionCoordinator();
@@ -203,12 +229,70 @@ internal static class NoticeCoreTests
 
         var rate = new AttentionCoordinator();
         for (int i = 0; i < 3; i++) { rate.Submit(Item("r", AttentionKind.Notice, "x" + i, "G" + i, seconds: 1), T0.AddSeconds(i * 2)); rate.Tick(T0.AddSeconds(i * 2 + 1)); }
-        rate.Submit(Item("r", AttentionKind.Notice, "x3", "G3", seconds: 1), T0.AddSeconds(6));
-        check("At most three notices show in ten seconds", rate.Current("r") is null && rate.Queued("r").Count == 1 && rate.NextDeadline(T0.AddSeconds(6)) == T0.AddSeconds(10));
-        rate.Submit(Item("r", AttentionKind.Quota, "quota", seconds: 5), T0.AddSeconds(6));
-        check("The limit does not hold back other kinds", rate.Current("r")?.Key == "quota");
-        rate.Tick(T0.AddSeconds(11));
-        check("The waiting notice shows once the window allows", rate.Current("r")?.Key == "x3");
+        var fourth = rate.Submit(Item("r", AttentionKind.Notice, "x3", "G3", seconds: 1), T0.AddSeconds(6));
+        check("Beyond three notices in ten seconds a notice still shows at once, but subdued", fourth is [{ Started: { Key: "x3", Subdued: true } }]
+            && rate.Queued("r").Count == 0 && rate.NextDeadline(T0.AddSeconds(6)) == T0.AddSeconds(7));
+        rate.Tick(T0.AddSeconds(7));
+        var fifth = rate.Submit(Item("r", AttentionKind.Notice, "x4", "G4", seconds: 1), T0.AddSeconds(10.5));
+        check("Subdued notices do not count: once the window moves on, the next shows with its full effect", fifth is [{ Started: { Key: "x4", Subdued: false } }]);
+
+        // The same notice on several screens: one item per lane with its key. It counts once, and ends everywhere at once.
+        var screens = new AttentionCoordinator();
+        var both = new List<AttentionChange>();
+        for (int i = 0; i < 3; i++)
+            foreach (var lane in new[] { "s1", "s2" }) both.AddRange(screens.Submit(Item(lane + i, AttentionKind.Notice, "k" + i, "G" + i), T0));
+        check("A notice shown on several lanes counts once toward the rate limit", both.Count == 6 && both.All(change => change.Started is { Subdued: false })
+            && screens.Submit(Item("s3", AttentionKind.Notice, "k3", "G3"), T0) is [{ Started.Subdued: true }]);
+        var everywhere = screens.Withdraw("k0", T0.AddSeconds(1));
+        check("Withdrawn, it ends on every lane", everywhere.Count == 2 && everywhere.All(change => change.Ended?.Key == "k0") && screens.Current("s10") is null && screens.Current("s20") is null
+            && screens.Current("s11")?.Key == "k1");
+        screens.Dismiss("s11", T0.AddSeconds(1));
+        check("Dismissed on one lane (its panel cannot show it), it stays on the other", screens.Current("s11") is null && screens.Current("s21")?.Key == "k1");
+        var rings = new AttentionCoordinator();
+        int rang = 0;
+        for (int i = 0; i < AttentionCoordinator.UrgentLimit; i++)
+            foreach (var lane in new[] { "a", "b" })
+                rang += rings.Submit(new AttentionItem { Lane = lane + i, Kind = AttentionKind.Notice, Key = "alarm" + i, Group = "windows:Clock", Urgent = true, Priority = NoticePriority.High, Duration = TimeSpan.FromSeconds(8) }, T0).Count(change => change.Started is not null);
+        check("An alarm ringing on several lanes counts once toward the urgent limit", rang == 2 * AttentionCoordinator.UrgentLimit);
+
+        // A notice that stays until it is handled.
+        static AttentionItem Stay(string key, string group, bool urgent = false) => new()
+        {
+            Lane = "p", Kind = AttentionKind.Notice, Key = key, Group = group, Level = NoticeLevel.Persistent, Urgent = urgent, Duration = TimeSpan.FromSeconds(6)
+        };
+        var stay = new AttentionCoordinator();
+        stay.Submit(Stay("call", "A"), T0);
+        check("A persistent notice does not run out with its duration", stay.Tick(T0.AddSeconds(60)).Count == 0 && stay.Current("p") is { Key: "call", Persistent: true }
+            && stay.NextDeadline(T0.AddSeconds(60)) == T0 + AttentionCoordinator.PersistentLimit);
+        stay.Submit(Item("p", AttentionKind.Notice, "m1", "A"), T0.AddSeconds(61));
+        stay.Submit(Item("p", AttentionKind.Notice, "hp", "B", NoticePriority.High), T0.AddSeconds(61));
+        stay.Submit(Stay("alarm", "C", urgent: true), T0.AddSeconds(62));
+        check("Nothing takes its place or merges into it; others wait behind it, also urgent ones", stay.Current("p") is { Key: "call", Count: 1 }
+            && stay.Queued("p").Select(i => i.Key).SequenceEqual(["hp", "m1", "alarm"]));
+        stay.Submit(Stay("call", "A"), T0.AddSeconds(63));
+        stay.Tick(T0.AddSeconds(100));
+        check("A waiting ordinary notice goes stale as before; a waiting persistent one does not", stay.Queued("p").Select(i => i.Key).SequenceEqual(["hp", "alarm"]));
+        var handled = stay.Withdraw("call", T0.AddSeconds(101));
+        check("Withdrawn (handled, or gone from its source), it ends and the next shows", handled is [{ Ended.Key: "call" }, { Started.Key: "hp" }]);
+        stay.Tick(T0.AddSeconds(107));
+        check("The next persistent notice then shows", stay.Current("p")?.Key == "alarm");
+        var capped = stay.Tick(T0.AddSeconds(107) + AttentionCoordinator.PersistentLimit);
+        check("Left unhandled, it ends at the safety limit", capped is [{ Ended.Key: "alarm" }] && stay.Current("p") is null);
+        stay.Submit(Stay("job", "J"), T0.AddSeconds(400));
+        stay.Hold("p", true, T0.AddSeconds(401));
+        stay.Tick(T0.AddSeconds(400) + AttentionCoordinator.PersistentLimit + TimeSpan.FromMinutes(1));
+        stay.Hold("p", false, T0.AddSeconds(700));
+        check("Held by the user, it does not end at the limit either", stay.Current("p")?.Key == "job");
+        var plainAgain = stay.Submit(Item("p", AttentionKind.Notice, "job", "J"), T0.AddSeconds(701));
+        check("Sent again as an ordinary notice, it runs out as one", plainAgain is [{ Updated: { Key: "job", Persistent: false } }] && stay.NextDeadline(T0.AddSeconds(701)) == T0.AddSeconds(707));
+        stay.Submit(Stay("job", "J"), T0.AddSeconds(702));
+        check("Sent again as persistent, it stays again", stay.NextDeadline(T0.AddSeconds(702)) == T0.AddSeconds(702) + AttentionCoordinator.PersistentLimit);
+        stay.SetBusy("p", true, T0.AddSeconds(703));
+        check("Opening the panel ends a persistent notice", stay.Current("p") is null);
+        var unhurried = new AttentionCoordinator();
+        for (int i = 0; i < AttentionCoordinator.RateLimit; i++) unhurried.Submit(Item("u" + i, AttentionKind.Notice, "n" + i, "G" + i), T0);
+        var beyond = unhurried.Submit(new AttentionItem { Lane = "p", Kind = AttentionKind.Notice, Key = "stay", Level = NoticeLevel.Persistent, Duration = TimeSpan.FromSeconds(6) }, T0);
+        check("A persistent notice is never subdued by the rate limit", beyond is [{ Started: { Persistent: true, Subdued: false } }]);
 
         var busy = new AttentionCoordinator();
         busy.Submit(Item("b", AttentionKind.Quota, "q1", seconds: 5), T0);

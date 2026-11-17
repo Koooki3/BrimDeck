@@ -8,22 +8,30 @@ public sealed class AttentionItem
 {
     public required string Lane { get; init; }
     public required AttentionKind Kind { get; init; }
-    // The same key names the same item: submitting it again updates it in place.
+    // The same key names the same item: submitting it again updates it in place. The same notice shown on several panels
+    // (NoticeScreen.All) has one item per lane, all with its key.
     public required string Key { get; set; }
-    // Notices of one application share a group, so that a burst from it is shown as one notice with a count.
+    // Notices of one conversation share a group (AttentionCoordinator.GroupOf), so that its messages show as one notice
+    // with a count.
     public string Group { get; init; } = "";
     public NoticePriority Priority { get; init; } = NoticePriority.Normal;
     public TimeSpan Duration { get; init; }
     public object? Payload { get; set; }
-    // How many notices this one stands for: 1, or more after a burst from one application merged into it.
+    // How many notices this one stands for: 1, or more after others of its conversation merged into it.
     public int Count { get; set; } = 1;
     // An update that should keep the item on screen a little longer, such as a task's progress.
     public bool Refresh { get; init; }
-    // An alarm, a countdown that ended or an event's reminder (NoticeClock.Alerting): it is not held back by the rate limit,
-    // only by the wider UrgentLimit.
+    // An alarm, a countdown that ended or an event's reminder (NoticeClock.Alerting): it never shows subdued, and is held
+    // back only by UrgentLimit.
     public bool Urgent { get; init; }
+    // How strongly a notice shows (NoticeLevels.Resolve); an update in place brings the notice's level of then.
+    public NoticeLevel Level { get; set; } = NoticeLevel.Lively;
+    // Stays until it is handled: it ends only when the user clicks or closes it, the panel opens, it is withdrawn (its
+    // source no longer has it), or after PersistentLimit.
+    public bool Persistent => Level == NoticeLevel.Persistent;
+    // Started beyond the rate limit: it shows at once all the same, but as a plain notice (no backlight, no ripples).
+    public bool Subdued { get; internal set; }
     internal DateTimeOffset SubmittedAt { get; set; }
-    internal DateTimeOffset LastMerge { get; set; }
     internal DateTimeOffset StartedAt { get; set; }
     internal TimeSpan Remaining { get; set; }
     // Lower comes first: high priority notices, then other notices and summaries, then quota alerts, then track changes.
@@ -41,18 +49,26 @@ public sealed class AttentionItem
 // One step for a lane's presenter: an item ended, started or changed. A lane is one panel (one monitor).
 public readonly record struct AttentionChange(string Lane, AttentionItem? Ended, AttentionItem? Started, AttentionItem? Updated);
 
-// Decides what each panel's collapsed island briefly shows. One item shows at a time per lane, for its duration; others wait
-// in rank order. A higher-ranked item takes over unless the user is interacting with the current one (Hold). Notices are
-// limited to RateLimit shows per RateWindow (urgent ones, such as an alarm, still count but are held back only beyond
-// UrgentLimit per UrgentWindow); a notice that has waited longer than Staleness is not shown at all (it stays in
-// the recent notices). While suppressed (locked, paused, in a focus session) nothing shows and arriving notices are only
-// counted, so that one summary can follow. The coordinator keeps no timer: the caller ticks it at NextDeadline.
+// Decides what each panel's collapsed island briefly shows. One item shows at a time per lane, for its duration.
+//
+// Notices show as they arrive. One of the conversation that already shows or waits merges into it (the latest words, a
+// count). Any other takes the island over once the notice that shows has been up for MinimumShown (an urgent one at
+// once), unless that one is persistent, more important (a lower Rank) or held by the user (Hold); what it replaces is not
+// shown again. Several that wait take over in the order they came. A notice that waited longer than Staleness is not shown
+// at all (it stays in the recent notices).
+//
+// More than RateLimit notices per RateWindow still show at once, but subdued: as plain notices, so the island does not
+// keep flashing. Urgent ones (an alarm) are never subdued and are held back beyond UrgentLimit per UrgentWindow. A notice
+// shown on several lanes counts once.
+//
+// A notice takes over a quota alert or a track change at once; the alert resumes later. While suppressed (locked, paused,
+// in a focus session) nothing shows and arriving notices are only counted, so that one summary can follow. The coordinator
+// keeps no timer: the caller ticks it at NextDeadline.
 public sealed class AttentionCoordinator
 {
-    public static readonly TimeSpan AggregationWindow = TimeSpan.FromMilliseconds(800);
     public static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(10);
     public const int RateLimit = 3;
-    // Urgent notices are not held back by RateLimit, so that an alarm rings when it is due; a sender that sets off many at once
+    // Urgent notices are not subdued by RateLimit, so that an alarm rings when it is due; a sender that sets off many at once
     // still cannot keep the island ringing (sec-L5). The limit is per source (UrgentBucket): a flood of timers from one script
     // does not hold back another application's alarm (S4).
     public static readonly TimeSpan UrgentWindow = TimeSpan.FromMinutes(1);
@@ -64,19 +80,29 @@ public sealed class AttentionCoordinator
     public const int QueueLimit = 32;
     // A resumed or refreshed item stays at least this long, so it does not vanish the moment the pointer leaves.
     public static readonly TimeSpan MinimumRemaining = TimeSpan.FromMilliseconds(1500);
+    // A notice shows at least this long before another takes its place, so that each can be read.
+    public static readonly TimeSpan MinimumShown = TimeSpan.FromMilliseconds(1500);
+    // A persistent notice nobody handles ends after this, so that a call or an alarm does not hold the island for ever.
+    public static readonly TimeSpan PersistentLimit = TimeSpan.FromMinutes(3);
+    // While a persistent notice shows, its presenter plays the notice's motion again this often.
+    public static readonly TimeSpan PersistentReplay = TimeSpan.FromSeconds(3);
 
     private sealed class Lane
     {
         public AttentionItem? Current;
         public DateTimeOffset Ends;
+        // From when another notice may take the current one's place.
+        public DateTimeOffset Yields;
         // Leaving: the panel is still open but on its way to closing (the pointer has left it, the closing has begun).
         public bool Held, Busy, Leaving;
         public readonly List<AttentionItem> Queue = [];
     }
 
     private readonly Dictionary<string, Lane> _lanes = new(StringComparer.Ordinal);
-    private readonly List<DateTimeOffset> _noticeShows = [];
-    private readonly List<(DateTimeOffset At, string Group)> _urgentShows = [];
+    // The notices that started with their full effect in the last RateWindow, and the urgent ones of the last UrgentWindow;
+    // by key, so that a notice shown on several lanes counts once.
+    private readonly List<(DateTimeOffset At, string Key)> _noticeShows = [];
+    private readonly List<(DateTimeOffset At, string Group, string Key)> _urgentShows = [];
     // The notices counted for the summary: a notice updated while suppressed counts once (core-L7).
     private readonly HashSet<string> _suppressedKeys = new(StringComparer.Ordinal);
 
@@ -89,6 +115,11 @@ public sealed class AttentionCoordinator
 
     public AttentionItem? Current(string lane) => _lanes.TryGetValue(lane, out var state) ? state.Current : null;
     public IReadOnlyList<AttentionItem> Queued(string lane) => _lanes.TryGetValue(lane, out var state) ? state.Queue : [];
+
+    // The group of a notice: its application and, when it has one, its title (a chat's notifications are titled with the
+    // conversation), so that one conversation's messages merge and another's take the island over.
+    public static string GroupOf(string appKey, string title) => title.Length > 0 ? appKey + GroupSeparator + title : appKey;
+    private const char GroupSeparator = '\n';
 
     private Lane Get(string lane) { if (!_lanes.TryGetValue(lane, out var state)) _lanes[lane] = state = new Lane(); return state; }
 
@@ -107,34 +138,47 @@ public sealed class AttentionCoordinator
         }
         if (lane.Current is { } current && current.Key == item.Key)
         {
+            bool persisted = current.Persistent;
             current.Payload = item.Payload;
+            if (item.IsNotice) current.Level = item.Level;
             // The next song's title shows for its whole time, not what was left of the one before (the panel times it from now).
             if (item.Kind == AttentionKind.Track)
             {
                 if (lane.Held) current.Remaining = item.Duration; else lane.Ends = now + item.Duration;
             }
+            // Now to stay until it is handled, or no longer: its time starts again from here.
+            if (current.Persistent != persisted)
+            {
+                var span = current.Persistent ? PersistentLimit : Positive(current.Duration);
+                if (lane.Held) current.Remaining = span; else lane.Ends = now + span;
+            }
             // Progress keeps the island a little longer, at most twice the notice's duration like a merged burst: a long
             // task does not keep the island (or the notices waiting behind it) for as long as it runs.
-            if (item.Refresh && !lane.Held && lane.Ends - now < MinimumRemaining && now - current.StartedAt < current.Duration * 2) lane.Ends = now + MinimumRemaining;
+            else if (item.Refresh && !current.Persistent) Extend(lane, current, now);
             changes.Add(new(item.Lane, null, null, current));
             return changes;
         }
-        if (lane.Queue.FirstOrDefault(q => q.Key == item.Key) is { } waiting) { waiting.Payload = item.Payload; return changes; }
-        if (item.Kind == AttentionKind.Notice && item.Group.Length > 0)
+        if (lane.Queue.FirstOrDefault(q => q.Key == item.Key) is { } waiting)
         {
-            // A burst from one application becomes one notice that counts the others and shows the latest.
-            if (!item.Urgent && lane.Current is { Kind: AttentionKind.Notice } shown && shown.Group == item.Group && now - shown.LastMerge <= AggregationWindow)
+            waiting.Payload = item.Payload;
+            if (item.IsNotice) waiting.Level = item.Level;
+            return changes;
+        }
+        if (Merges(item))
+        {
+            // Another message of the conversation that shows: the notice counts it and shows the latest, however long ago the
+            // one before came.
+            if (lane.Current is { } shown && Merges(shown) && shown.Group == item.Group)
             {
-                Merge(shown, item, now);
+                Merge(shown, item);
                 // A source that keeps sending does not keep the island: a merged notice stays at most twice its duration.
-                if (!lane.Held && lane.Ends - now < MinimumRemaining && now - shown.StartedAt < shown.Duration * 2) lane.Ends = now + MinimumRemaining;
+                Extend(lane, shown, now);
                 changes.Add(new(item.Lane, null, null, shown));
                 return changes;
             }
-            if (!item.Urgent && lane.Queue.FirstOrDefault(q => q.Kind == AttentionKind.Notice && q.Group == item.Group && now - q.LastMerge <= AggregationWindow) is { } queued)
-            { Merge(queued, item, now); return changes; }
+            if (lane.Queue.FirstOrDefault(q => Merges(q) && q.Group == item.Group) is { } queued) { Merge(queued, item); return changes; }
         }
-        item.SubmittedAt = now; item.LastMerge = now; item.Remaining = item.Duration;
+        item.SubmittedAt = now; item.Remaining = item.Duration;
         if (lane.Busy)
         {
             // The open panel shows notices on its own page; a quota alert waits for the panel to close. So does a notice that
@@ -149,26 +193,36 @@ public sealed class AttentionCoordinator
             else if (item.Queueable) Enqueue(lane, item);
             return changes;
         }
-        if (!lane.Held && item.Rank < lane.Current.Rank && CanStart(item, now))
+        if (!lane.Current.IsNotice)
         {
-            End(lane, now, changes, requeue: true);
-            Start(lane, item, now, changes);
+            // A quota alert or a track change gives way at once; the alert resumes later with the time it had left.
+            if (!lane.Held && item.Rank < lane.Current.Rank && CanStart(item, now))
+            {
+                End(lane, now, changes, requeue: true);
+                Start(lane, item, now, changes);
+            }
+            else if (item.Queueable) Enqueue(lane, item);
             return changes;
         }
-        if (item.Queueable) Enqueue(lane, item);
+        if (!item.Queueable) return changes;
+        // A notice shows: this one waits for it to have been up long enough, or to end.
+        Enqueue(lane, item);
+        TakeOver(lane, now, changes);
         return changes;
     }
 
-    // Ends items whose time is up, drops stale waiting ones and starts the next. Call at NextDeadline (or any time later).
+    // Ends items whose time is up, drops stale waiting ones, and starts or lets take over the next. Call at NextDeadline (or
+    // any time later).
     public IReadOnlyList<AttentionChange> Tick(DateTimeOffset now)
     {
         var changes = new List<AttentionChange>();
         Forget(now);
-        foreach (var (name, lane) in _lanes)
+        foreach (var lane in _lanes.Values)
         {
             if (lane.Current is not null && !lane.Held && now >= lane.Ends) End(lane, now, changes, requeue: false);
             lane.Queue.RemoveAll(item => Stale(item, now));
-            if (lane.Current is null && !lane.Busy) StartNext(lane, now, changes);
+            if (lane.Current is not null) TakeOver(lane, now, changes);
+            else if (!lane.Busy) StartNext(lane, now, changes);
         }
         return changes;
     }
@@ -181,9 +235,13 @@ public sealed class AttentionCoordinator
         foreach (var lane in _lanes.Values)
         {
             if (lane.Current is not null && !lane.Held) Consider(lane.Ends);
-            // Waiting only for a rate limit: wake when the oldest show leaves its window.
+            // Waiting only for the urgent limit: wake when the oldest show leaves its window.
             if (lane.Current is null && !lane.Busy)
                 foreach (var item in lane.Queue) Consider(StartsFrom(item, now));
+            // Waiting for the notice that shows to have been up long enough.
+            if (lane.Current is { } shown && Yielding(lane))
+                foreach (var item in lane.Queue)
+                    if (Takes(item, shown)) { var from = StartsFrom(item, now); Consider(item.Urgent || from > lane.Yields ? from : lane.Yields); }
             foreach (var item in lane.Queue) if (StaleAfter(item) is { } limit) Consider(item.SubmittedAt + limit);
         }
         return next;
@@ -200,7 +258,11 @@ public sealed class AttentionCoordinator
         if (lane.Current is { } current)
         {
             if (held) current.Remaining = Positive(lane.Ends - now);
-            else lane.Ends = now + (current.Remaining > MinimumRemaining ? current.Remaining : MinimumRemaining);
+            else
+            {
+                lane.Ends = now + (current.Remaining > MinimumRemaining ? current.Remaining : MinimumRemaining);
+                if (lane.Yields < now + MinimumRemaining) lane.Yields = now + MinimumRemaining;
+            }
         }
         if (!held && lane.Current is null && !lane.Busy) StartNext(lane, now, changes);
         return changes;
@@ -233,7 +295,8 @@ public sealed class AttentionCoordinator
         if (!leaving) lane.Queue.RemoveAll(item => item.IsNotice);
     }
 
-    // Ends the current item at the user's request (close button, Escape). It is not shown again.
+    // Ends the lane's current item (its panel cannot show it, or the user closed a quota alert). It is not shown again
+    // there; the same notice on another lane stays (Withdraw ends it everywhere).
     public IReadOnlyList<AttentionChange> Dismiss(string laneName, DateTimeOffset now)
     {
         var changes = new List<AttentionChange>();
@@ -244,7 +307,8 @@ public sealed class AttentionCoordinator
         return changes;
     }
 
-    // Removes one waiting or shown item, for example a notice the user deleted from the recent list.
+    // Removes one waiting or shown item from every lane, for example a notice the user handled on one screen or deleted
+    // from the recent list.
     public IReadOnlyList<AttentionChange> Withdraw(string key, DateTimeOffset now) => Remove(item => item.Key == key, now);
 
     // Removes every waiting or shown item that matches, in all lanes, before anything else may start: switching notices off or
@@ -287,9 +351,19 @@ public sealed class AttentionCoordinator
     // A panel closed for good (its monitor was removed). Its items are dropped without being shown elsewhere.
     public void RemoveLane(string laneName) => _lanes.Remove(laneName);
 
-    private static void Merge(AttentionItem target, AttentionItem item, DateTimeOffset now)
+    // A plain arriving notice of a conversation: it joins the one of that conversation that shows or waits. An alarm, a call
+    // or anything that stays until handled is always its own.
+    private static bool Merges(AttentionItem item) => item.Kind == AttentionKind.Notice && item.Group.Length > 0 && !item.Urgent && !item.Persistent;
+
+    private static void Merge(AttentionItem target, AttentionItem item)
     {
-        target.Key = item.Key; target.Payload = item.Payload; target.Count += item.Count; target.LastMerge = now;
+        target.Key = item.Key; target.Payload = item.Payload; target.Level = item.Level; target.Count += item.Count;
+    }
+
+    // An item that just changed stays long enough to be read, but never much past twice its duration.
+    private static void Extend(Lane lane, AttentionItem item, DateTimeOffset now)
+    {
+        if (!lane.Held && lane.Ends - now < MinimumRemaining && now - item.StartedAt < item.Duration * 2) lane.Ends = now + MinimumRemaining;
     }
 
     private static void Enqueue(Lane lane, AttentionItem item)
@@ -305,23 +379,47 @@ public sealed class AttentionCoordinator
         }
     }
 
+    // Whether the notice that shows on the lane gives way to a waiting one once it has been up long enough.
+    private static bool Yielding(Lane lane) => lane.Current is { IsNotice: true, Persistent: false } && !lane.Held && !lane.Busy;
+
+    // Whether a waiting item may take the place of the notice that shows: a notice that is not less important.
+    private static bool Takes(AttentionItem item, AttentionItem shown) => item.IsNotice && item.Rank <= shown.Rank;
+
+    // The notice that shows has been up long enough and another waits: that one takes its place. The one replaced is not
+    // shown again (it stays in the recent notices). An alarm or a call does not wait for the notice to have been read.
+    private void TakeOver(Lane lane, DateTimeOffset now, List<AttentionChange> changes)
+    {
+        if (!Yielding(lane)) return;
+        var shown = lane.Current!;
+        bool Ready(AttentionItem item) => Takes(item, shown) && (item.Urgent || now >= lane.Yields) && CanStart(item, now);
+        lane.Queue.RemoveAll(item => Stale(item, now) || Ready(item) && CanShow?.Invoke(item) == false);
+        if (lane.Queue.FirstOrDefault(Ready) is not { } next) return;
+        lane.Queue.Remove(next);
+        End(lane, now, changes, requeue: false);
+        Start(lane, next, now, changes);
+    }
+
     private bool CanStart(AttentionItem item, DateTimeOffset now) => StartsFrom(item, now) <= now;
 
-    // The earliest moment the rate limits let the item start.
+    // The earliest moment the item may start: now, or for an urgent notice once its source's limit allows.
     private DateTimeOffset StartsFrom(AttentionItem item, DateTimeOffset now)
     {
-        if (!item.IsNotice) return now;
+        if (!item.IsNotice || !item.Urgent) return now;
         Forget(now);
-        if (!item.Urgent) return _noticeShows.Count < RateLimit ? now : _noticeShows.Min() + RateWindow;
+        // Counted already: it rings on another lane.
+        if (_urgentShows.Any(show => show.Key == item.Key)) return now;
         string bucket = UrgentBucket(item.Group);
         var own = _urgentShows.Where(show => show.Group == bucket).Select(show => show.At).ToList();
         return own.Count < UrgentLimit ? now : own.Min() + UrgentWindow;
     }
 
     // Each Windows application has its own urgent limit; senders that name themselves freely (brim-notify, WSL applications)
-    // share one per kind, so a script cannot get round the limit by changing its name (S4).
+    // share one per kind, so a script cannot get round the limit by changing its name (S4). The title in a group
+    // (GroupOf) is left out: an application's alarms count together whatever they are called.
     private static string UrgentBucket(string group)
     {
+        int title = group.IndexOf(GroupSeparator);
+        if (title >= 0) group = group[..title];
         if (group.StartsWith("windows:", StringComparison.Ordinal)) return group;
         int colon = group.IndexOf(':');
         return colon < 0 ? group : group[..colon];
@@ -329,8 +427,23 @@ public sealed class AttentionCoordinator
 
     private void Forget(DateTimeOffset now)
     {
-        _noticeShows.RemoveAll(time => now - time >= RateWindow);
+        _noticeShows.RemoveAll(show => now - show.At >= RateWindow);
         _urgentShows.RemoveAll(show => now - show.At >= UrgentWindow);
+    }
+
+    // Counts a notice that starts, once whatever the number of lanes it shows on, and decides whether it shows subdued:
+    // beyond RateLimit in RateWindow it does, unless it is urgent or stays until handled. Only notices that show with their
+    // full effect count, so the island flashes at most RateLimit times per window.
+    private void Count(AttentionItem item, DateTimeOffset now)
+    {
+        Forget(now);
+        if (_noticeShows.Any(show => show.Key == item.Key)) item.Subdued = false;
+        else
+        {
+            item.Subdued = !item.Urgent && !item.Persistent && _noticeShows.Count >= RateLimit;
+            if (!item.Subdued) _noticeShows.Add((now, item.Key));
+        }
+        if (item.Urgent && !_urgentShows.Any(show => show.Key == item.Key)) _urgentShows.Add((now, UrgentBucket(item.Group), item.Key));
     }
 
     private void Start(Lane lane, AttentionItem item, DateTimeOffset now, List<AttentionChange> changes)
@@ -339,9 +452,9 @@ public sealed class AttentionCoordinator
         if (CanShow?.Invoke(item) == false) { StartNext(lane, now, changes); return; }
         lane.Current = item;
         item.StartedAt = now;
-        lane.Ends = now + Positive(item.Remaining > TimeSpan.Zero ? item.Remaining : item.Duration);
-        if (item.IsNotice) _noticeShows.Add(now);
-        if (item.IsNotice && item.Urgent) _urgentShows.Add((now, UrgentBucket(item.Group)));
+        lane.Yields = now + MinimumShown;
+        lane.Ends = now + (item.Persistent ? PersistentLimit : Positive(item.Remaining > TimeSpan.Zero ? item.Remaining : item.Duration));
+        if (item.IsNotice) Count(item, now);
         changes.Add(new(item.Lane, null, item, null));
     }
 
@@ -373,9 +486,11 @@ public sealed class AttentionCoordinator
     }
 
     // How long an item may wait before it is no longer worth showing: normal notices and quota alerts briefly, high priority
-    // notices longer. A summary of notices held back waits as long as needed (there is only ever one).
+    // notices longer. A summary of notices held back waits as long as needed (there is only ever one), and so does a notice
+    // that stays until handled (its owner withdraws it when there is nothing left to handle).
     private static TimeSpan? StaleAfter(AttentionItem item) => item.Kind switch
     {
+        AttentionKind.Notice when item.Persistent => null,
         AttentionKind.Notice => item.Priority == NoticePriority.High ? HighStaleness : Staleness,
         AttentionKind.Quota => Staleness,
         _ => null

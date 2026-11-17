@@ -70,7 +70,8 @@ public static class NoticeIntake
         ExitCode = message.ExitCode, DurationMs = message.DurationMs, Command = Blank(message.Command),
         Timing = NoticeTimeIntake.Resolve(message, now ?? DateTimeOffset.UtcNow, zone ?? TimeZoneInfo.Local),
         StopTiming = message.Stop == true,
-        Transient = message.Transient == true
+        Transient = message.Transient == true,
+        Level = NoticeKeys.Level(message.Level), Align = NoticeKeys.Align(message.Align)
     };
 
     // Icons are local only: a Windows file path for the Windows link, a Linux path or icon name inside the distribution for

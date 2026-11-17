@@ -80,6 +80,8 @@ internal sealed class NoticeCenter : IDisposable
     public NoticeIcons Icons { get; }
     public NoticeHistoryState HistoryState { get; private set; } = NoticeHistoryState.Empty;
     public NoticeSourceState WindowsState => _enabled && Settings.NoticeWindowsSource ? _windows.State : NoticeSourceState.Off;
+    // Why the Windows source failed (the exception's message, never a notice's words); empty while it does not fail.
+    public string WindowsFailure => WindowsState == NoticeSourceState.Failed ? _windows.Detail : "";
     public string? PipeError => _pipe?.Error;
     public IReadOnlyDictionary<string, (WslAgentState State, string Detail, bool Conflict)> WslStates => _wsl.States;
     public bool Enabled => _enabled;
@@ -175,6 +177,8 @@ internal sealed class NoticeCenter : IDisposable
         _wsl.Apply(settings.NoticeWslDistros);
         _maintenance.Start();
         Hub.Prune(DateTimeOffset.UtcNow);
+        // A level chosen for an application may have ended what stayed on the island until handled.
+        DropMissing();
         UpdateQuiet();
         ScheduleDue();
         Banners.Update();
@@ -222,6 +226,8 @@ internal sealed class NoticeCenter : IDisposable
         var now = DateTimeOffset.UtcNow;
         var outcome = Hub.Receive(input, now);
         if (outcome.Notice is not { } notice) return outcome;
+        // Closed by its sender (brim-notify close): it leaves the island too, whatever its level.
+        if (input.StopTiming && !notice.SourcePresent) Withdraw(notice.Id);
         if (outcome.Present) Present(notice, refresh: outcome.Receipt == NoticeReceipt.Updated);
         // A task's progress moves the notice that shows; nothing new appears.
         else if (outcome.Receipt == NoticeReceipt.Updated) QueueRefresh(notice);
@@ -277,29 +283,41 @@ internal sealed class NoticeCenter : IDisposable
                 Apply(Attention.Submit(Item(deck.NoticeLane, notice, refresh: true), now));
     }
 
-    private AttentionItem Item(string lane, Notice notice, bool refresh = false) => new()
+    private AttentionItem Item(string lane, Notice notice, bool refresh = false)
     {
-        Lane = lane, Kind = AttentionKind.Notice, Key = notice.Id, Group = notice.AppKey, Priority = notice.Priority, Payload = notice, Refresh = refresh,
-        // A ringing call is as urgent as an alarm; the user can still make its application low priority (NoticeHub).
-        Urgent = NoticeClock.Alerting(notice.Timing, DateTimeOffset.UtcNow) || notice.Call && notice.Priority != NoticePriority.Low,
-        Duration = TimeSpan.FromSeconds(notice.Priority == NoticePriority.High ? Settings.NoticeHighDuration : Settings.NoticeDuration)
-    };
+        var now = DateTimeOffset.UtcNow;
+        return new()
+        {
+            // One conversation's messages (the application and the title) merge into one notice.
+            Lane = lane, Kind = AttentionKind.Notice, Key = notice.Id, Group = AttentionCoordinator.GroupOf(notice.AppKey, notice.Title),
+            Priority = notice.Priority, Payload = notice, Refresh = refresh, Level = Level(notice, now),
+            // A ringing call is as urgent as an alarm; the user can still make its application low priority (NoticeHub).
+            Urgent = NoticeClock.Alerting(notice.Timing, now) || notice.Call && notice.Priority != NoticePriority.Low,
+            Duration = TimeSpan.FromSeconds(notice.Priority == NoticePriority.High ? Settings.NoticeHighDuration : Settings.NoticeDuration)
+        };
+    }
 
+    // How strongly the notice shows on the island now (NoticeLevels.Resolve), by the user's rule for its application, what it
+    // is, what its sender asked and the default level of the settings.
+    internal NoticeLevel Level(Notice notice, DateTimeOffset now) => NoticeLevels.Resolve(notice, Settings.NoticeRule(notice.AppKey), Settings.NoticeDefaultLevel, now);
+
+    // Shows the notice on every panel NoticeScreen names. Each panel has its own item with the notice's key, so that handling
+    // it on one screen ends it on all (Withdraw).
     private void Present(Notice notice, bool refresh)
     {
         var now = DateTimeOffset.UtcNow;
         UpdateQuiet();
+        if (Level(notice, now) == NoticeLevel.Silent) return;
         if (Attention.Suppressed) { Attention.Submit(Item("", notice), now); return; }
-        if (Lane() is not { } lane) return;
-        Apply(Attention.Submit(Item(lane, notice, refresh), now));
+        foreach (var lane in Lanes()) Apply(Attention.Submit(Item(lane, notice, refresh), now));
     }
 
-    // The panel that shows an arriving notice (NoticeRouting), or null when that panel cannot show one now.
-    private string? Lane()
+    // The panels that show an arriving notice (NoticeRouting); none when the chosen panel cannot show one now.
+    private IReadOnlyList<string> Lanes()
     {
         long? foreground = NoticeNative.ForegroundMonitor() is var monitor && monitor != IntPtr.Zero ? monitor.ToInt64() : null;
         var panels = _app.Decks.Select(deck => new NoticeRouting.Candidate(deck.NoticeLane, deck.NoticeMonitor, deck == _app.Deck, deck.CanShowNotices)).ToList();
-        return NoticeRouting.Choose(panels, foreground, Settings.NoticeScreen);
+        return NoticeRouting.Lanes(panels, foreground, Settings.NoticeScreen);
     }
 
     private async Task<NoticeMessage> HandlePipeAsync(NoticeMessage message)
@@ -322,7 +340,8 @@ internal sealed class NoticeCenter : IDisposable
         NoticeReceipt.Duplicate => NoticeResults.Duplicate, _ => NoticeResults.Filtered
     }, outcome.Reason, eventId);
 
-    private string StatusLine() => $"Windows: {WindowsState}; WSL: {string.Join(", ", WslStates.Select(pair => pair.Key + " " + pair.Value.State))}" + (Quiet ? "; held back" : "");
+    // A failing Windows source says why (the exception's message; never a notice's words), so "brim-notify status" tells it.
+    private string StatusLine() => $"Windows: {WindowsState}{(WindowsFailure.Length > 0 ? " (" + WindowsFailure + ")" : "")}; WSL: {string.Join(", ", WslStates.Select(pair => pair.Key + " " + pair.Value.State))}" + (Quiet ? "; held back" : "");
 
     private void FromAgent(string distro, NoticeMessage message)
     {
@@ -400,7 +419,7 @@ internal sealed class NoticeCenter : IDisposable
     // A track change shows only if nothing else does right now. True when it shows.
     public bool TryTrack(MainWindow deck, TimeSpan duration)
     {
-        var changes = Attention.Submit(new AttentionItem { Lane = deck.NoticeLane, Kind = AttentionKind.Track, Key = "track", Duration = duration }, DateTimeOffset.UtcNow);
+        var changes = Attention.Submit(new AttentionItem { Lane = deck.NoticeLane, Kind = AttentionKind.Track, Key = "track", Duration = duration, Level = NoticeLevel.Plain }, DateTimeOffset.UtcNow);
         Apply(changes);
         return Attention.Current(deck.NoticeLane) is { Kind: AttentionKind.Track };
     }
@@ -408,7 +427,15 @@ internal sealed class NoticeCenter : IDisposable
 
     // The pointer is over the shown item, its details are open, or the keyboard works it: its time stands still.
     public void Hold(MainWindow deck, bool held) => Apply(Attention.Hold(deck.NoticeLane, held, DateTimeOffset.UtcNow));
-    public void DeckExpanded(MainWindow deck, bool expanded) => Apply(Attention.SetBusy(deck.NoticeLane, expanded, DateTimeOffset.UtcNow));
+    // The panel opened or closed. Opened over a notice (a click on it, the pointer resting on it, a hotkey), the user has it in
+    // front of them: it ends on the other screens too.
+    public void DeckExpanded(MainWindow deck, bool expanded)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var shown = expanded ? Attention.Current(deck.NoticeLane) : null;
+        Apply(Attention.SetBusy(deck.NoticeLane, expanded, now));
+        if (shown is { IsNotice: true }) Apply(Attention.Withdraw(shown.Key, now));
+    }
     // The pointer left the open panel, or came back to it (AttentionCoordinator.SetLeaving).
     public void DeckLeaving(MainWindow deck, bool leaving) => Attention.SetLeaving(deck.NoticeLane, leaving);
     public void DeckRetired(MainWindow deck) { Attention.RemoveLane(deck.NoticeLane); Schedule(); }
@@ -430,9 +457,13 @@ internal sealed class NoticeCenter : IDisposable
         return _app.Decks.FirstOrDefault(d => d.NoticeLane == item.Lane) is { CanShowNotices: true };
     }
 
+    // What the recent notices lost no longer shows or waits. Neither does a notice that stayed on the island until handled
+    // once there is nothing left to handle: Windows' notification center no longer has it, its alarm or countdown stopped
+    // ringing, its sender closed it or sent it again as an ordinary notice, or the user chose a level for its application.
     private void DropMissing()
     {
-        bool Missing(AttentionItem item) => item.Payload is Notice notice && Hub.Find(notice.Id) is null;
+        var now = DateTimeOffset.UtcNow;
+        bool Missing(AttentionItem item) => item.Payload is Notice notice && (Hub.Find(notice.Id) is null || item.Persistent && Level(notice, now) != NoticeLevel.Persistent);
         foreach (var deck in _app.Decks)
             if (Attention.Current(deck.NoticeLane) is { } current && Missing(current) || Attention.Queued(deck.NoticeLane).Any(Missing))
             {
@@ -441,15 +472,21 @@ internal sealed class NoticeCenter : IDisposable
             }
     }
 
-    // Closes what the panel shows (close button, Escape); the next waiting notice may follow. Only BrimDeck's own presentation
-    // closes; Windows' notification center keeps the notice. Closing it by hand is the one explicit act that also closes it at
-    // a WSL source whose agent is the notification service (as closing a desktop notification bubble does).
+    // The user closed what the panel shows (a click that opened its application, a close button, Escape); the next waiting
+    // notice may follow. A notice shown on several screens ends on all of them. Only BrimDeck's own presentation closes;
+    // Windows' notification center keeps the notice. Closing it by hand is the one explicit act that also closes it at a WSL
+    // source whose agent is the notification service (as closing a desktop notification bubble does).
     public void Dismiss(MainWindow deck, bool reportToSource)
     {
+        var now = DateTimeOffset.UtcNow;
         var current = Attention.Current(deck.NoticeLane);
-        Apply(Attention.Dismiss(deck.NoticeLane, DateTimeOffset.UtcNow));
+        if (current is { IsNotice: true }) Apply(Attention.Withdraw(current.Key, now)); else Apply(Attention.Dismiss(deck.NoticeLane, now));
         if (reportToSource && current?.Payload is Notice notice) ReportDismissed(notice);
     }
+
+    // The panel cannot show the item the coordinator gave it (hidden meanwhile, still opening): it ends there only, and the
+    // same notice on another screen stays.
+    public void Skip(MainWindow deck) => Apply(Attention.Dismiss(deck.NoticeLane, DateTimeOffset.UtcNow));
 
     private void ReportDismissed(Notice notice)
     {
@@ -477,8 +514,9 @@ internal sealed class NoticeCenter : IDisposable
         if (notice.Origin == NoticeOrigin.Windows)
         {
             if (notice.AppId.Length == 0) return false;
-            // Only when chosen: the toast is read now, for this one notice, and its launch string is used once and not kept.
-            WindowsNoticeSource.Replay? replay = Settings.NoticeOpenReplay && ToastActivation.NotificationId(notice.InstanceKey, notice.AppId) is { } id ? new WindowsNoticeSource.Replay(id) : null;
+            // Opening leads to the notice's own conversation: the toast is read now, for this one notice, and its launch string is
+            // used once and not kept. Where it cannot be read or is not supported, the application alone is opened (LaunchAsync).
+            WindowsNoticeSource.Replay? replay = ToastActivation.NotificationId(notice.InstanceKey, notice.AppId) is { } id ? new WindowsNoticeSource.Replay(id) : null;
             return await _windows.LaunchAsync(notice.AppId, replay);
         }
         if (notice.Actions.Any(action => action.Key == "default")) return Invoke(notice, "default");
@@ -519,16 +557,44 @@ internal sealed class NoticeCenter : IDisposable
         Hub.Clear();
     }
 
+    public enum WindowsSyncStatus { Done, Off, NoAccess, Failed }
+
+    // The sync button of the notices page: the notices read from Windows' notification center are made to match what it holds
+    // now (NoticeHub.SyncWindows). Notices of every other source (taskbar flashes, brim-notify, WSL) are not touched.
+    public async Task<(WindowsSyncStatus Status, int Removed, int Added)> SyncWindowsAsync()
+    {
+        bool On() => _enabled && !_disposed && Settings.NoticeWindowsSource;
+        if (!On()) return (WindowsSyncStatus.Off, 0, 0);
+        IReadOnlyList<NoticeInput>? present;
+        try { present = await _windows.ReadCenterAsync(); }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or TimeoutException or InvalidOperationException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            Log(ex);
+            return (WindowsSyncStatus.Failed, 0, 0);
+        }
+        if (present is null) return (WindowsSyncStatus.NoAccess, 0, 0);
+        if (!On()) return (WindowsSyncStatus.Off, 0, 0);
+        var sorted = present.Select(input => NoticeTimeSources.Classify(input, TimeZoneInfo.Local)).ToList();
+        var (removed, added) = Hub.SyncWindows(sorted, DateTimeOffset.UtcNow);
+        // A deleted notice that shows or waits to show goes too, as with Delete.
+        foreach (var id in removed) Withdraw(id);
+        return (WindowsSyncStatus.Done, removed.Count, added);
+    }
+
     // A notice of BrimDeck's own, to try the look and the placement. It is never sent to Windows, so it cannot come back
-    // through the notification list.
-    public void SendTest()
+    // through the notification list. It shows at the default level of the settings and with their alignment.
+    public void SendTest() => SendTest(NoticeLevel.Auto);
+
+    // level, align: to try one level or alignment; Auto and null take the settings'. BrimDeck's own features show their
+    // notices the same way: Receive with a NoticeInput that names its Level and Align.
+    public void SendTest(NoticeLevel level, NoticeAlign? align = null)
     {
         Receive(new NoticeInput
         {
             Origin = NoticeOrigin.Test, AppKey = TestAppKey, AppName = "BrimDeck", InstanceKey = "test:" + Guid.NewGuid().ToString("N"),
             Title = Loc.T("灵动提示测试", "Live notice test"),
             Body = Loc.T("通知会在岛上显示。鼠标移上去即可打开通知页。", "Notices show on the island. Rest the pointer on it to open the notices page."),
-            Category = NoticeCategory.Info
+            Category = NoticeCategory.Info, Level = level == NoticeLevel.Auto ? Settings.NoticeDefaultLevel : level, Align = align
         });
     }
 
@@ -660,8 +726,13 @@ internal sealed class NoticeCenter : IDisposable
     {
         var now = DateTimeOffset.UtcNow;
         Apply(Attention.SetSuppressed(false, now, out int arrived));
-        if (arrived > 0 && Lane() is { } lane)
-            Apply(Attention.Submit(new AttentionItem { Lane = lane, Kind = AttentionKind.Summary, Key = "summary:" + now.Ticks, Payload = arrived, Duration = TimeSpan.FromSeconds(Settings.NoticeDuration) }, now));
+        if (arrived <= 0) return;
+        foreach (var lane in Lanes())
+            Apply(Attention.Submit(new AttentionItem
+            {
+                Lane = lane, Kind = AttentionKind.Summary, Key = "summary:" + now.Ticks, Payload = arrived, Level = Settings.NoticeDefaultLevel,
+                Duration = TimeSpan.FromSeconds(Settings.NoticeDuration)
+            }, now));
     }
 
     // ----- Diagnostics -----

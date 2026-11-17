@@ -36,6 +36,13 @@ public sealed class NoticeMessage
     public string? Category { get; set; }
     // low, normal or high: a hint. Only the user's rule for the source can raise a notice above normal.
     public string? Priority { get; set; }
+    // How strongly the notice shows on the island: silent (only listed), plain (words only), glow (the backlight flashes),
+    // lively (the backlight and the liquid ripples) or persistent (lively, and it stays until it is handled or closed: a
+    // stop with the same ReplaceId, or a later notice with that id and another level). The user's level for the source comes
+    // first. A value BrimDeck does not know reads as not given, as does none.
+    public string? Level { get; set; }
+    // Where the icon and the words sit in the island: left, center or right. Not given, the user's setting decides.
+    public string? Align { get; set; }
     // 0 to 1 while a task runs.
     public double? Progress { get; set; }
     // The result of "brim-notify run": BrimDeck words the notice in its own language from these.
@@ -48,7 +55,8 @@ public sealed class NoticeMessage
     public long? AgeMs { get; set; }
     // Time-kind notices (see NoticeTimes): alarm, stopwatch, countdown, mail or event. At is a time and InMs a duration from
     // when BrimDeck receives the message (a countdown's end, an event's start); Until an event's end; LeadMs how long before
-    // an event's start BrimDeck reminds. Stop ends the stopwatch, countdown or event sent before with the same ReplaceId.
+    // an event's start BrimDeck reminds. Stop ends the stopwatch, countdown or event sent before with the same ReplaceId, or
+    // closes the plain notice sent with it (which ends a persistent one on the island).
     public string? Kind { get; set; }
     public string? At { get; set; }
     public long? InMs { get; set; }
@@ -188,6 +196,8 @@ public static class NoticeProtocol
         message.Icon = Clip(message.Icon, 1024);
         message.Command = Clip(message.Command, MaxField);
         message.Detail = Clip(message.Detail, 1024);
+        message.Level = Clip(message.Level, NoticeTimes.MaxText);
+        message.Align = Clip(message.Align, NoticeTimes.MaxText);
         if (message.Actions is { } actions)
             message.Actions = actions.Where(a => a is not null && !string.IsNullOrWhiteSpace(a.Key) && !string.IsNullOrWhiteSpace(a.Label))
                 .Take(MaxActions).Select(a => new NoticeActionInfo { Key = Clip(a.Key, 64)!, Label = Clip(a.Label, 64)! }).ToList();

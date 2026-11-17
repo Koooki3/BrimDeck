@@ -287,7 +287,7 @@ public partial class MainWindow
             if (_mediaTrack is not null && Settings.MusicTrackNotice && notice) _trackNotice.Arm(now); else _trackNotice.Disarm();
         }
         // The coordinator lets the title show only when nothing more important does (NoticeCenter.TryTrack).
-        if (_trackNotice.Observe(_mediaTrack, now) && _app.Notices.TryTrack(this, TrackNoticeTime)) _trackNoticeUntil = now + TrackNoticeTime;
+        if (_trackNotice.Observe(_mediaTrack, now) && _app.Notices.TryTrack(this, TrackNoticeTime) && !_trackWide) _trackNoticeUntil = now + TrackNoticeTime;
         if (lyricsChanged) UpdateLyrics();
         if (changedSong || lyricsChanged || coverChanged || old?.State != _mediaTrack?.State || old?.HasTimeline != _mediaTrack?.HasTimeline) RenderCompact();
         if (IsMusicPage) RenderMusic();

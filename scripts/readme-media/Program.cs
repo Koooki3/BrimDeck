@@ -10,6 +10,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using BrimDeck;
 using BrimDeck.Core;
+using BrimDeck.Core.Notices;
 using BrimDeck.Native;
 
 namespace ReadmeMedia;
@@ -179,8 +180,135 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (scenes.Contains("shelf-notice")) await ShelfNotice();
             // The file transfer's settings, and the word beside the pointer while files are dragged out; for checking.
             if (scenes.Contains("transfer-settings")) { await DragHints(); await SettingsPage("transfer-settings", 14, tips: true); }
+            // A notice on the island at each level and alignment, in each collapsed form; for checking, not for the README.
+            if (scenes.Contains("notice-levels")) await NoticeLevelsScene();
+            // The notices page with conversations of several messages, and the notices settings page; for checking.
+            if (scenes.Contains("notices-page")) await NoticesPageScene();
         }
         finally { Directory.Delete(folder, true); }
+    }
+
+    // The notices page at its default and its narrowest size, with invented notices: a chat with several messages (one row in the
+    // list, the others under the newest in the focus), a long title, a notice without a title, an application without an icon.
+    // No notice source is started: the notice center is only made, and the notices go straight to its list.
+    private async Task NoticesPageScene()
+    {
+        _settings.Animations = false; _settings.NoticesEnabled = true;
+        var center = Activator.CreateInstance(Type.GetType("BrimDeck.NoticeCenter, BrimDeck")!, Program.Any, null, [app], null)!;
+        Program.SetProperty(app, "Notices", center);
+        var hub = (NoticeHub)center.GetType().GetProperty("Hub", Program.Any)!.GetValue(center)!;
+        int serial = 0;
+        void Add(string app, string title, string body, int minutesAgo, NoticeCategory category = NoticeCategory.Message)
+            => hub.Receive(new NoticeInput
+            {
+                Origin = NoticeOrigin.Windows, AppKey = "windows:" + app, AppName = app, AppId = app, InstanceKey = "windows:" + app + ":" + ++serial, Title = title, Body = body,
+                Category = category, Capabilities = NoticeCapabilities.OpenApp, CreatedAt = _now.AddMinutes(-minutesAgo)
+            }, _now.AddMinutes(-minutesAgo).ToUniversalTime());
+        Add("Outlook", Loc.T("周会改到周四下午三点，请确认是否可以参加并回复", "The weekly meeting moves to Thursday at three; please confirm whether you can attend"), Loc.T("王敏：会议室改到 5 楼", "Wang: the room is now on the 5th floor"), 50);
+        Add("QQ", Loc.T("设计评审群", "Design review"), Loc.T("小林：稿子我放到共享盘了", "Lin: the draft is on the shared drive"), 31);
+        Add("QQ", Loc.T("产品群", "Product team"), Loc.T("小周：今天的版本什么时候发？", "Zhou: when does today's build go out?"), 12);
+        Add("Claude", Loc.T("系统配置导出功能", "Settings export"), Loc.T("BrimDeck 配置导出方案已出，分两阶段，密钥可选加密", "The export plan is ready: two stages, keys optionally encrypted"), 9, NoticeCategory.Task);
+        Add("QQ", Loc.T("产品群", "Product team"), Loc.T("阿杰：下午四点，测试刚过", "Jie: at four, the tests just passed"), 6);
+        Add("Backup Tool", "", Loc.T("备份已完成，共 1,284 个文件", "Backup finished: 1,284 files"), 4, NoticeCategory.Info);
+        Add("QQ", Loc.T("产品群", "Product team"), Loc.T("小周：好的，更新说明我来写，写完发群里大家看一下有没有遗漏的地方", "Zhou: fine, I will write the release notes and post them here so everyone can check whether anything is missing"), 1);
+        SelectPage(DeckPage.Notices);
+        foreach (var (width, height) in new (double, double)[] { (760, 330), (460, 280), (440, 140) })
+        {
+            _settings.NoticesWidth = width; _settings.NoticesHeight = height; Refresh();
+            _deck.SetExpanded(true, true);
+            await Settle();
+            await Save($"notices-page-{width}x{height}", 2);
+        }
+        SelectPage(DeckPage.Usage);
+        _deck.SetExpanded(false, true);
+        _settings.Animations = true;
+        await SettingsPage("notices-settings", 19, height: 1500);
+    }
+
+    // The island with a notice on it (IslandNotice). Its window is never shown: it is laid out as it lays itself out, its motion
+    // is stepped to a chosen moment, and the picture is taken from its visual tree. One sheet per collapsed form, on a backdrop
+    // against which both the island and its backlight show. No notice source is started: the notice center is only made.
+    private async Task NoticeLevelsScene()
+    {
+        const double scale = 3, pad = 14, labelHeight = 18;
+        Program.SetProperty(app, "Notices", Activator.CreateInstance(Type.GetType("BrimDeck.NoticeCenter, BrimDeck")!, Program.Any, null, [app], null)!);
+        var type = Type.GetType("BrimDeck.IslandNotice, BrimDeck")!;
+        string title = Loc.T("产品群", "Product team"), reply = Loc.T("收到", "Got it");
+        string longer = Loc.T("小林：下午三点在三楼会议室开评审会，请带上上周的测试报告和改动清单", "Lin: the review is at three in the room on the third floor; bring last week's test report and the list of changes");
+        foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Capsule, CompactStyle.Line })
+        {
+            _settings.Style = style; _settings.NoticeAlign = NoticeAlign.Center; Refresh();
+            await Settle();
+            var window = (Window)Activator.CreateInstance(type, Program.Any, null, [_deck, app], null)!;
+            var shots = new List<(string Label, BitmapSource Picture, Size Size)>();
+            void Shot(string label, NoticeLevel level, double time, string body, NoticeAlign setting = NoticeAlign.Center, NoticeAlign? asked = null, bool subdued = false, int count = 1, AttentionItem? given = null)
+            {
+                _settings.NoticeAlign = setting;
+                var notice = new Notice { AppKey = "windows:Chat", AppName = "QQ", Title = title, Body = body, Align = asked, ReceivedAt = _now, CreatedAt = _now };
+                var item = given ?? new AttentionItem { Lane = "main", Kind = AttentionKind.Notice, Key = notice.Id, Payload = notice, Level = level, Count = count, Duration = TimeSpan.FromSeconds(6) };
+                if (subdued) typeof(AttentionItem).GetProperty(nameof(AttentionItem.Subdued))!.SetValue(item, true);
+                Program.SetField(window, "_item", item);
+                Program.Call(window, "Layout", []); Program.Call(window, "Dress", []); Program.Call(window, "BuildContent", []);
+                Program.Call(window, "StartMotion", []);
+                bool moving = Program.Field(window, "_liquid") is not null;
+                if (moving) Program.Call(window, "Step", [typeof(double)], (double)Program.Field(window, "_start")! + time);
+                var stage = (FrameworkElement)window.Content;
+                var size = new Size(window.Width, window.Height);
+                stage.Measure(size); stage.Arrange(new Rect(size)); stage.UpdateLayout();
+                var picture = new RenderTargetBitmap((int)Math.Ceiling(size.Width * scale), (int)Math.Ceiling(size.Height * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+                picture.Render(stage); picture.Freeze();
+                Program.Call(window, "StopMotion", []);
+                shots.Add((label + (moving ? string.Create(CultureInfo.InvariantCulture, $"  (t = {time:0.##} s)") : "  (still)"), picture, size));
+            }
+            // The moments: the backlight's first and second flash; the indicator's breath at its brightest.
+            bool line = style == CompactStyle.Line;
+            double first = line ? IslandLiquid.Breath / 2 : .12, second = line ? IslandLiquid.Breath / 2 : .42;
+            Shot("Plain", NoticeLevel.Plain, first, reply);
+            Shot("Glow", NoticeLevel.Glow, first, reply);
+            Shot("Lively", NoticeLevel.Lively, second, reply);
+            Shot("Persistent", NoticeLevel.Persistent, second, reply);
+            Shot("Lively beyond the rate limit: shown as Plain", NoticeLevel.Lively, second, reply, subdued: true);
+            if (!line)
+            {
+                Shot("Align left (setting)", NoticeLevel.Plain, first, reply, NoticeAlign.Left);
+                Shot("Align center (setting)", NoticeLevel.Plain, first, reply, NoticeAlign.Center);
+                Shot("Align right (setting)", NoticeLevel.Plain, first, reply, NoticeAlign.Right);
+                Shot("Align right asked by the sender, setting left", NoticeLevel.Plain, first, reply, NoticeAlign.Left, asked: NoticeAlign.Right);
+                Shot("Merged, count 3, center", NoticeLevel.Plain, first, reply, count: 3);
+                Shot("Longer than the island: starts at the left and scrolls (setting right)", NoticeLevel.Plain, first, longer, NoticeAlign.Right);
+                // A track change on the whole island (MusicTrackNoticeWide): the title and the artist, no cover in this picture.
+                AttentionItem Song() => new()
+                {
+                    Lane = "main", Kind = AttentionKind.Track, Key = "track", Level = NoticeLevel.Plain, Duration = TimeSpan.FromSeconds(4),
+                    Payload = Activator.CreateInstance(Type.GetType("BrimDeck.TrackNoticeContent, BrimDeck")!, Program.Any, null, [Loc.T("海边的午后", "Afternoon by the Sea"), Loc.T("林夏", "Lin Xia"), null], null)
+                };
+                Shot("Track change, center", NoticeLevel.Plain, first, "", given: Song());
+                Shot("Track change, left", NoticeLevel.Plain, first, "", NoticeAlign.Left, given: Song());
+            }
+            Program.SetField(window, "_item", null);
+            window.Close();
+            _settings.NoticeAlign = NoticeAlign.Center;
+            double width = Math.Max(360, shots.Max(shot => shot.Size.Width)) + 2 * pad, height = shots.Sum(shot => shot.Size.Height + labelHeight + pad) + pad;
+            var sheet = new DrawingVisual();
+            using (var context = sheet.RenderOpen())
+            {
+                context.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x4A, 0x55, 0x66)), null, new Rect(0, 0, width, height));
+                double y = pad;
+                foreach (var (label, picture, size) in shots)
+                {
+                    context.DrawText(new FormattedText(label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 11, Brushes.White, 1), new Point(pad, y));
+                    y += labelHeight;
+                    context.DrawRectangle(null, new Pen(new SolidColorBrush(Color.FromArgb(60, 255, 255, 255)), 1) { DashStyle = DashStyles.Dash }, new Rect(pad, y, size.Width, size.Height));
+                    context.DrawImage(picture, new Rect(pad, y, size.Width, size.Height));
+                    y += size.Height + pad;
+                }
+            }
+            var bitmap = new RenderTargetBitmap((int)(width * scale), (int)(height * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            bitmap.Render(sheet); bitmap.Freeze();
+            Write(bitmap, Path.Combine(output, $"notice-levels-{style.ToString().ToLowerInvariant()}.png"));
+            Console.WriteLine($"notice-levels-{style.ToString().ToLowerInvariant()}");
+        }
+        _settings.Style = CompactStyle.Notch; Refresh();
     }
 
     private DeckSettings BuildSettings()

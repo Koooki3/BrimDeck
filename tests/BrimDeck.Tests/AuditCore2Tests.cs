@@ -137,7 +137,7 @@ internal static class AuditCore2Tests
         var spoof = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", Distro = "Ubuntu", ReplaceId = "t2", Title = "伪造" }, T0), T0.AddSeconds(3));
         var spoofStop = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", Distro = "Ubuntu", ReplaceId = "t2", Stop = true }, T0), T0.AddSeconds(4));
         check("S3: and a pipe sender cannot replace or stop the distribution's own", spoof.Receipt == NoticeReceipt.Accepted && spoof.Notice != real && real.Title != "伪造"
-            && spoofStop.Reason == "no-timer" && !real.Timing!.Stopped);
+            && spoofStop.Notice == spoof.Notice && !spoof.Notice!.SourcePresent && real.SourcePresent && !real.Timing!.Stopped);
         var byAgent = hub.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", EventId = "job", Title = "a" }, "Ubuntu", false, T0), T0.AddSeconds(5));
         var byPipe = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", Distro = "Ubuntu", EventId = "job", Title = "p" }, T0), T0.AddSeconds(6));
         check("S3: an --id over the pipe does not mark the distribution's message a retry", byAgent.Receipt == NoticeReceipt.Accepted && byPipe.Receipt == NoticeReceipt.Accepted);

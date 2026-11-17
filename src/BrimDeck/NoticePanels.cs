@@ -144,6 +144,8 @@ internal sealed class NoticeButtons : Panel
 // A scrolling column that fades out at its foot into the panel, whatever the panel is made of: the fade is a mask on the viewer
 // (the content shows through it less and less), not a color laid over it that would have to match the surface, its gradient, its
 // texture or the glass. The content leaves the same height free below it, so scrolled to its end the last line is not in the fade.
+// The mask is there only while more of the content lies below: under a mask WPF draws the text in a layer of its own, without
+// ClearType, and it looks blurred next to the text around it. Content that fits, or a column scrolled to its end, has no mask.
 internal static class NoticeFade
 {
     public static void Foot(ScrollViewer viewer, double height)
@@ -154,9 +156,14 @@ internal static class NoticeFade
         mask.GradientStops.Add(new GradientStop(Color.FromArgb(255, 0, 0, 0), 0));
         mask.GradientStops.Add(shown);
         mask.GradientStops.Add(new GradientStop(Color.FromArgb(0, 0, 0, 0), 1));
-        void Fit() => shown.Offset = viewer.ActualHeight > height ? 1 - height / viewer.ActualHeight : 0;
+        void Fit()
+        {
+            shown.Offset = viewer.ActualHeight > height ? 1 - height / viewer.ActualHeight : 0;
+            bool more = viewer.ScrollableHeight > 1 && viewer.VerticalOffset < viewer.ScrollableHeight - 1;
+            if (!ReferenceEquals(viewer.OpacityMask, more ? mask : null)) viewer.OpacityMask = more ? mask : null;
+        }
         viewer.SizeChanged += (_, _) => Fit();
+        viewer.ScrollChanged += (_, _) => Fit();
         Fit();
-        viewer.OpacityMask = mask;
     }
 }

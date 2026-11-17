@@ -79,9 +79,10 @@ public static class Profiles
         nameof(DeckSettings.NoticesEnabled), nameof(DeckSettings.NoticeWindowsSource), nameof(DeckSettings.NoticeHideBanners),
         nameof(DeckSettings.NoticeChatFlash), nameof(DeckSettings.NoticeChatFlashRestore), nameof(DeckSettings.NoticeWslDistros),
         nameof(DeckSettings.NoticeDuration), nameof(DeckSettings.NoticeHighDuration), nameof(DeckSettings.NoticeScreen),
+        nameof(DeckSettings.NoticeDefaultLevel), nameof(DeckSettings.NoticeAlign),
         nameof(DeckSettings.NoticePrivacy), nameof(DeckSettings.NoticeCodes), nameof(DeckSettings.NoticeClick),
         nameof(DeckSettings.NoticeRespectFocus), nameof(DeckSettings.NoticesPausedUntil), nameof(DeckSettings.NoticeHistory),
-        nameof(DeckSettings.NoticeOpenReplay), nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHistoryFolder),
+        nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHistoryFolder),
         nameof(DeckSettings.NoticeAutoClear), nameof(DeckSettings.NoticeLastCleared), nameof(DeckSettings.NoticeHotkey),
         nameof(DeckSettings.NoticeApps)
     };
