@@ -6,14 +6,16 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// Diagrams for the cards that choose the lyrics' layout ("展开时"). Each card draws its own page, as the cover and the lyrics
+// Diagrams for the cards that choose the open page's layout ("展开时"). Each card draws its own page, as the cover and the lyrics
 // are shown now: the record and the lyric lines come and go with them, and without the record the stacked layout's column
-// stands at the page's left edge or in the middle. Drawn at the arrangement cards' size (ShelfArrangementPreview) in the
-// settings' own colors, and standing still.
+// stands at the page's left edge or in the middle. The parts keep the page's own proportions: three lyric lines under the
+// titles with the current one in the middle, and in the column layout a cover that takes the larger part of the column's
+// height (MusicLayout.Columns). Drawn at
+// the arrangement cards' size (ShelfArrangementPreview) in the settings' own colors, and standing still.
 internal static class MusicLyricsPreview
 {
     private const double Width = 372, Height = 136, Left = 24, Right = 348, InfoWidth = 115;
-    private const double DividerX = 151, LyricsX = 175, CoverAbove = 60, CoverBeside = 88;
+    private const double DividerX = 151, LyricsX = 175, CoverAbove = 58, CoverBeside = 88;
 
     // Ground: the diagram's background. Album, AlbumEdge: the record. Line: a lyric line that is not the current one. Current:
     // the current lyric. Rule: the divider. Primary, Secondary: the title and the artist.
@@ -24,8 +26,8 @@ internal static class MusicLyricsPreview
             : new("#ECEDF2", "#FFFFFF", "#D3D6DE", "#CFD2DA", "#2F74DA", "#B9BCC6", palette.Primary, palette.Secondary);
     }
 
-    // The stacked layout with the cover: the cover left, the title and artist beside it, the lyrics under them, the last
-    // line even with the cover's bottom.
+    // The stacked layout with the cover: the cover left, the title and artist beside it, the lyrics under them (the line
+    // before, the current one, the line after), the last line even with the cover's bottom.
     public static FrameworkElement StackedWithCover(SettingsPalette palette)
     {
         var tones = Tones.For(palette);
@@ -34,8 +36,8 @@ internal static class MusicLyricsPreview
         double x = Left + CoverBeside + 16;
         Label(canvas, tones, Loc.T("歌名", "Song title"), x, 26, Right - x, primary: true, align: TextAlignment.Left);
         Label(canvas, tones, Loc.T("歌手", "Artist"), x, 48, Right - x, primary: false, align: TextAlignment.Left);
-        Bar(canvas, tones, x, 76, 150, current: true);
-        Bar(canvas, tones, x, 90, 120);
+        Bar(canvas, tones, x, 76, 120);
+        Bar(canvas, tones, x, 90, 150, current: true);
         Bar(canvas, tones, x, 104, 168);
         return Box(scene);
     }
@@ -45,9 +47,9 @@ internal static class MusicLyricsPreview
     {
         var tones = Tones.For(palette);
         var scene = Scene(tones, out var canvas);
-        Album(canvas, tones, Left + (InfoWidth - CoverAbove) / 2, 20, CoverAbove);
-        Label(canvas, tones, Loc.T("歌名", "Song title"), Left, 88, InfoWidth, primary: true, align: TextAlignment.Center);
-        Label(canvas, tones, Loc.T("歌手", "Artist"), Left, 108, InfoWidth, primary: false, align: TextAlignment.Center);
+        Album(canvas, tones, Left + (InfoWidth - CoverAbove) / 2, 19, CoverAbove);
+        Label(canvas, tones, Loc.T("歌名", "Song title"), Left, 84, InfoWidth, primary: true, align: TextAlignment.Center);
+        Label(canvas, tones, Loc.T("歌手", "Artist"), Left, 104, InfoWidth, primary: false, align: TextAlignment.Center);
         Divider(canvas, tones);
         Bar(canvas, tones, LyricsX, 22, 128);
         Bar(canvas, tones, LyricsX, 44, 144);
@@ -93,21 +95,21 @@ internal static class MusicLyricsPreview
     {
         var tones = Tones.For(palette);
         var scene = Scene(tones, out var canvas);
-        Album(canvas, tones, (Width - CoverAbove) / 2, 20, CoverAbove);
-        Label(canvas, tones, Loc.T("歌名", "Song title"), Left, 88, Right - Left, primary: true, align: TextAlignment.Center);
-        Label(canvas, tones, Loc.T("歌手", "Artist"), Left, 108, Right - Left, primary: false, align: TextAlignment.Center);
+        Album(canvas, tones, (Width - CoverAbove) / 2, 19, CoverAbove);
+        Label(canvas, tones, Loc.T("歌名", "Song title"), Left, 84, Right - Left, primary: true, align: TextAlignment.Center);
+        Label(canvas, tones, Loc.T("歌手", "Artist"), Left, 104, Right - Left, primary: false, align: TextAlignment.Center);
         return Box(scene);
     }
 
-    // The stacked layout without the lyrics: the cover left, the title and artist beside it.
+    // The stacked layout without the lyrics: the cover left, the title and artist beside it at the middle of its height.
     public static FrameworkElement StackedWithoutLyrics(SettingsPalette palette)
     {
         var tones = Tones.For(palette);
         var scene = Scene(tones, out var canvas);
-        Album(canvas, tones, Left, 32, CoverBeside);
+        Album(canvas, tones, Left, 24, CoverBeside);
         double x = Left + CoverBeside + 16;
-        Label(canvas, tones, Loc.T("歌名", "Song title"), x, 38, Right - x, primary: true, align: TextAlignment.Left);
-        Label(canvas, tones, Loc.T("歌手", "Artist"), x, 60, Right - x, primary: false, align: TextAlignment.Left);
+        Label(canvas, tones, Loc.T("歌名", "Song title"), x, 50, Right - x, primary: true, align: TextAlignment.Left);
+        Label(canvas, tones, Loc.T("歌手", "Artist"), x, 70, Right - x, primary: false, align: TextAlignment.Left);
         return Box(scene);
     }
 

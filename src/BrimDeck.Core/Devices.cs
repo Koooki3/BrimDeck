@@ -89,10 +89,100 @@ public static class DeviceLists
         return null;
     }
 
+    // Moves a remembered choice onto a device that came back under another key (such as a new Bluetooth address or switching
+    // between its receiver, cable and Bluetooth) while its old entry is offline, when only one offline choice matches it.
+    // Returns the updated list, or null when nothing changed.
+    public static List<DeviceChoice>? Adopt(IReadOnlyList<DeviceBattery> all, IReadOnlyList<DeviceChoice> choices)
+    {
+        if (all.Count == 0 || choices.Count == 0) return null;
+        var knownKeys = choices.Select(choice => choice.Key).ToHashSet(StringComparer.Ordinal);
+        var activeKeys = all.Select(device => device.Key).ToHashSet(StringComparer.Ordinal);
+        var unmatched = Enumerable.Range(0, all.Count).Where(i => !knownKeys.Contains(all[i].Key)).ToList();
+        var offline = Enumerable.Range(0, choices.Count).Where(i => !activeKeys.Contains(choices[i].Key)).ToList();
+        if (unmatched.Count == 0 || offline.Count == 0) return null;
+
+        static bool CompatibleKind(DeviceKind a, DeviceKind b) => a == b || a == DeviceKind.Other || b == DeviceKind.Other;
+        static bool SameName(string a, DeviceKind ak, string b, DeviceKind bk)
+            => ak == DeviceKind.Phone && bk == DeviceKind.Phone
+                ? Devices.SamePhone(a, b)
+                : string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
+        static bool CanTake(DeviceChoice choice, DeviceBattery device)
+            => choice.Read || string.IsNullOrEmpty(choice.Hardware)
+                || ReadSwitchable(device.Source) && string.Equals(choice.Hardware, device.Hardware, StringComparison.OrdinalIgnoreCase);
+
+        var pairs = new List<(int ChoiceIndex, int DeviceIndex)>();
+        var takenChoices = new HashSet<int>();
+        var takenDevices = new HashSet<int>();
+
+        // Pass 1: unambiguous 1-to-1 match by Hardware ("VVVV:PPPP").
+        foreach (int di in unmatched)
+        {
+            var device = all[di];
+            if (string.IsNullOrEmpty(device.Hardware)) continue;
+            if (all.Count(other => string.Equals(other.Hardware, device.Hardware, StringComparison.OrdinalIgnoreCase)) != 1) continue;
+            int match = -1, count = 0;
+            foreach (int ci in offline)
+            {
+                if (takenChoices.Contains(ci)) continue;
+                var choice = choices[ci];
+                if (!string.Equals(choice.Hardware, device.Hardware, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!CompatibleKind(choice.Kind, device.Kind) || !CanTake(choice, device)) continue;
+                match = ci; count++;
+            }
+            if (count == 1)
+            {
+                pairs.Add((match, di));
+                takenChoices.Add(match);
+                takenDevices.Add(di);
+            }
+        }
+
+        // Pass 2: unambiguous 1-to-1 match by trimmed raw Name + compatible Kind.
+        foreach (int di in unmatched)
+        {
+            if (takenDevices.Contains(di)) continue;
+            var device = all[di];
+            var name = device.Name.Trim();
+            if (name.Length == 0) continue;
+            if (all.Count(other => SameName(other.Name, other.Kind, name, device.Kind) && CompatibleKind(other.Kind, device.Kind)) != 1) continue;
+            int match = -1, count = 0;
+            foreach (int ci in offline)
+            {
+                if (takenChoices.Contains(ci)) continue;
+                var choice = choices[ci];
+                if (!SameName(choice.Name, choice.Kind, name, device.Kind)) continue;
+                if (!CompatibleKind(choice.Kind, device.Kind) || !CanTake(choice, device)) continue;
+                match = ci; count++;
+            }
+            if (count == 1)
+            {
+                pairs.Add((match, di));
+                takenChoices.Add(match);
+                takenDevices.Add(di);
+            }
+        }
+
+        if (pairs.Count == 0) return null;
+
+        var result = choices.Select(choice => choice.Copy()).ToList();
+        foreach (var (ci, di) in pairs)
+        {
+            var device = all[di];
+            var updated = result[ci];
+            updated.Key = device.Key;
+            updated.Name = device.Name;
+            if (device.Kind != DeviceKind.Other) updated.Kind = device.Kind;
+            if (ReadSwitchable(device.Source)) updated.Hardware = device.Hardware ?? updated.Hardware;
+            else { updated.Hardware = null; updated.Read = true; }
+        }
+        return [.. result.DistinctBy(choice => choice.Key, StringComparer.Ordinal)];
+    }
+
     // The devices read now in the list's order: those the settings remember in theirs, then the others in the roster's own,
     // each under the name the user gave it.
     public static List<DeviceBattery> Ordered(IReadOnlyList<DeviceBattery> all, IReadOnlyList<DeviceChoice> choices)
     {
+        choices = Adopt(all, choices) ?? choices;
         var place = new Dictionary<string, int>(StringComparer.Ordinal);
         for (int i = 0; i < choices.Count; i++) place.TryAdd(choices[i].Key, i);
         return [.. all.Select((device, i) => (device, rank: place.TryGetValue(device.Key, out var at) ? at : choices.Count + i)).OrderBy(entry => entry.rank)
@@ -101,16 +191,23 @@ public static class DeviceLists
 
     // The devices the page shows.
     public static List<DeviceBattery> Expanded(IReadOnlyList<DeviceBattery> all, IReadOnlyList<DeviceChoice> choices)
-        => [.. Ordered(all, choices).Where(device => Find(choices, device.Key)?.Expanded ?? true)];
+    {
+        choices = Adopt(all, choices) ?? choices;
+        return [.. Ordered(all, choices).Where(device => Find(choices, device.Key)?.Expanded ?? true)];
+    }
 
     // The devices the collapsed row shows, in the list's order.
     public static List<DeviceBattery> Collapsed(IReadOnlyList<DeviceBattery> all, IReadOnlyList<DeviceChoice> choices)
-        => [.. Ordered(all, choices).Where(device => Find(choices, device.Key)?.Collapsed ?? true)];
+    {
+        choices = Adopt(all, choices) ?? choices;
+        return [.. Ordered(all, choices).Where(device => Find(choices, device.Key)?.Collapsed ?? true)];
+    }
 
     // The list as the user changed it: every device read now and every one remembered, in this order, with the names and kinds
     // they have now. order: the keys in their new order (those missing keep their place after them).
     public static List<DeviceChoice> Remember(IReadOnlyList<DeviceBattery> all, IReadOnlyList<DeviceChoice> choices, IEnumerable<string>? order = null)
     {
+        choices = Adopt(all, choices) ?? choices;
         var listed = Ordered(all, choices).Select(device => device.Key).Concat(choices.Select(choice => choice.Key)).Distinct().ToList();
         if (order is not null) { var first = order.Where(listed.Contains).ToList(); listed = [.. first, .. listed.Except(first)]; }
         return [.. listed.Select(key =>
@@ -322,7 +419,8 @@ public sealed class DeviceRoster
         return changed;
     }
 
-    public void Clear() { _sources.Clear(); _addresses.Clear(); All = []; }
+    // Stopping readers drops readings, not the identities already established in this session.
+    public void Clear() { _sources.Clear(); All = []; }
 
     // One source's own list, before merging.
     public IReadOnlyList<DeviceBattery> Of(DeviceSource source) => _sources.TryGetValue(source, out var list) ? list : [];
@@ -347,9 +445,18 @@ public sealed class DeviceRoster
             var carries = new Dictionary<DeviceBattery, string>(ReferenceEqualityComparer.Instance);
             foreach (var phone in linked)
             {
-                var bluetooth = list.FirstOrDefault(device => device.Source == DeviceSource.Bluetooth && device.Kind == DeviceKind.Phone
-                    && device.Address is not null && !dropped.Contains(device) && Devices.SamePhone(phone.Name, device.Name));
-                if (bluetooth is not null) dropped.Add(bluetooth);
+                var candidates = list.Where(device => device.Source == DeviceSource.Bluetooth && device.Kind == DeviceKind.Phone
+                    && device.Address is not null && Devices.SamePhone(phone.Name, device.Name)).ToList();
+                // Multiple endpoints of one address are one phone; multiple addresses with the same name are ambiguous.
+                // Discard an earlier guess too, so it cannot merge the phones again after Bluetooth goes away.
+                if (candidates.Select(device => device.Address).Distinct(StringComparer.Ordinal).Count() > 1
+                    || linked.Count(other => Devices.SamePhone(phone.Name, other.Name)) > 1)
+                {
+                    seen?.Remove(Devices.PhoneIdentity(phone.Name));
+                    continue;
+                }
+                var bluetooth = candidates.FirstOrDefault();
+                foreach (var candidate in candidates) dropped.Add(candidate);
                 if ((bluetooth?.Address ?? Seen(seen, Devices.PhoneIdentity(phone.Name))) is not { } address) continue;
                 carries[phone] = address;
                 // One address per phone, whatever suffix the name carries this time: the identity, not the name, is the key.

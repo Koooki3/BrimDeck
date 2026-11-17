@@ -12,7 +12,7 @@ public partial class MainWindow
     private DevicesView? _devicesView;
     private string _devicesKey = "";
     private DevicesLayout? _devicesLayout;
-    private bool _devicesShowing;
+    private bool _devicesShowing, _deviceStripShowing;
 
     private void InitializeDevices()
     {
@@ -62,20 +62,28 @@ public partial class MainWindow
             else _devicesView.Update(ShownDevices, DevicesSettled, motion: false);
             _app.Devices?.Refresh();
         }
+        bool wasStrip = _deviceStripShowing;
         _devicesShowing = page;
+        _deviceStripShowing = strip;
+        if (strip && !wasStrip && !_inRenderCompact) UpdateCompactDevices();
+    }
+
+    private void UpdateCompactDevices()
+    {
+        // The part joins with the first charge reported and leaves with the last; a device more or fewer changes its width: the
+        // row is built again for either. Otherwise the part takes the new readings in place.
+        var devices = StripDevices();
+        bool shows = devices.Devices.Any(device => device.Percent is not null);
+        if (_compactDevices is { } strip && shows && strip.Holds(devices)) strip.SetDevices(devices);
+        else if (shows || _compactDevices is not null) RenderCompact();
     }
 
     private void DevicesChanged()
     {
         if (!_expanded)
         {
-            if (!Settings.ShowsDevices(EffectiveStyle)) return;
-            // The part joins with the first charge reported and leaves with the last; a device more or fewer changes its width: the
-            // row is built again for either. Otherwise the part takes the new readings in place.
-            var devices = StripDevices();
-            bool shows = devices.Devices.Any(device => device.Percent is not null);
-            if (_compactDevices is { } strip && shows && strip.Holds(devices)) strip.SetDevices(devices);
-            else if (shows || _compactDevices is not null) RenderCompact();
+            if (!Settings.ShowsDevices(EffectiveStyle) || _alert is not null) return;
+            UpdateCompactDevices();
             return;
         }
         if (CurrentPage != DeckPage.Devices || _devicesView is null) return;

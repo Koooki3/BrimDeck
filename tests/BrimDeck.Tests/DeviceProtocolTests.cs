@@ -77,7 +77,8 @@ static class DeviceProtocolTests
         check("Razer: the battery request as razer-battery-report encodes it", request.Length == 90 && request.Take(8).SequenceEqual(new byte[] { 0x00, 0x1F, 0x00, 0x00, 0x00, 0x02, 0x07, 0x80 })
             && request[88] == (0x02 ^ 0x07 ^ 0x80) && request[89] == 0 && request.Skip(8).Take(80).All(b => b == 0));
         var reply = Razer.Request(0x1F, Razer.Battery); reply[0] = Razer.Success; reply[9] = 0xFF; reply[88] = Razer.Checksum(reply);
-        check("Razer: a successful reply and its level", Razer.Reply(reply, Razer.Battery) == (Razer.Success, 0xFF) && Razer.Percent(0xFF) == 100 && Razer.Percent(0) == 0 && Razer.Percent(128) == 50);
+        check("Razer: a successful reply and its level", Razer.Reply(reply, Razer.Battery) == (Razer.Success, 0xFF) && Razer.Percent(0xFF) == 100 && Razer.Percent(0) == 0 && Razer.Percent(128) == 50
+            && Razer.Percent(152) == 59 && Razer.Percent(150) == 58);
         var garbled = (byte[])reply.Clone(); garbled[10] ^= 1;
         check("Razer: a bad checksum or another command is no reply", Razer.Reply(garbled, Razer.Battery) is null && Razer.Reply(reply, Razer.ChargingState) is null && Razer.Reply(reply[..89], Razer.Battery) is null);
         check("Razer: the catalog's models and transaction ids", Razer.Find(0x00C1) is { Transaction: 0x1F, Name: "Razer Viper V3 Pro" } && Razer.Find(0x007D) is { Transaction: 0x3F }
@@ -117,9 +118,11 @@ static class DeviceProtocolTests
         var beast = Dongles.F83Find(0x36A7, 0xA880)!;
         var request = Dongles.F83Request(beast);
         check("0x83: the request as HaloBattery sends it", request.Length == 65 && request[..7].SequenceEqual(new byte[] { 0, 0, 0, 2, 2, 0, 0x83 }) && request.Skip(7).All(b => b == 0));
-        check("0x83: a WLmouse reply with and without its report id; the request read back is none",
+        check("0x83: a WLmouse reply with and without its report id; 0xA2 busy 0 % and the request read back are none",
             Dongles.F83Battery(beast, Bytes("00 A1 00 02 02 00 83 00 4B 00")) == new BatteryRead(75) && Dongles.F83Battery(beast, Bytes("A1 00 02 02 00 83 01 4B 00")) == new BatteryRead(75, true)
-            && Dongles.F83Battery(beast, Bytes("A2 00 02 02 00 83 00 4B 00")) == new BatteryRead(75) && Dongles.F83Battery(beast, request) is null);
+            && Dongles.F83Battery(beast, Bytes("A2 00 02 02 00 83 00 4B 00")) == new BatteryRead(75)
+            && Dongles.F83Battery(beast, Bytes("00 A2 00 02 02 00 83 00 00 00")) is null
+            && Dongles.F83Battery(beast, request) is null);
         var gwolves = Dongles.F83Find(0x33E4, 0x3854)!;
         check("0x83: G-Wolves' receiver says not active (not A1): asleep", Dongles.F83Battery(gwolves, Bytes("00 A2 00 02 02 00 83 00 00 00")) == new BatteryRead(null, Asleep: true)
             && Dongles.F83Battery(gwolves, Bytes("00 A1 00 02 02 00 83 00 3C 00")) == new BatteryRead(60));
@@ -129,15 +132,42 @@ static class DeviceProtocolTests
             && Dongles.F83Battery(old, Bytes("00 A1 02 8F 00 01 50 00")) == new BatteryRead(80, true));
         var a5 = Dongles.F83Find(0x2023, 0xF013)!;
         check("0x83: the MCHOSE A5 Pro Max's level clamped to 100", Dongles.F83Battery(a5, Bytes("00 A1 00 02 02 00 83 01 6E 00")) == new BatteryRead(100, true));
-        check("0x83: G-Wolves on the 65-byte feature collection, LAMZU on interface 2, the rest on 0xFFFF",
+        check("0x83: G-Wolves on the 65-byte feature collection, LAMZU on interface 2, WLmouse on 65-byte 0xFFFF only (never 512B LCD or DFU/bootloader)",
             Dongles.Find(0x33E4, 0x3854, 0xFF00, "", 65) == Dongles.Protocol.F83 && Dongles.Find(0x33E4, 0x3854, 0xFF00, "", 9) is null
             && Dongles.Find(0x373E, 0x001E, 0xFFFF, "", 65, 2) == Dongles.Protocol.F83 && Dongles.Find(0x373E, 0x001E, 0xFFFF, "", 65, 1) is null
-            && Dongles.Find(0x36A7, 0xA887, 0xFFFF, "", 65, 1) == Dongles.Protocol.F83 && Dongles.Find(0x36A7, 0xA887, 0xFF00, "", 65, 1) is null);
-        DeviceBattery Device(string hardware, bool asleep, int? percent = 60) => new("f83:" + hardware, "G-Wolves", DeviceKind.Mouse, DeviceSource.Hid, percent) { Asleep = asleep, Hardware = hardware };
+            && Dongles.Find(0x36A7, 0xA887, 0xFFFF, "", 65, 1) == Dongles.Protocol.F83 && Dongles.Find(0x36A7, 0xA887, 0xFF00, "", 65, 1) is null
+            && Dongles.Find(0x36A7, 0xA880, 0xFFFF, "WLmouse Beast X Max", 513) is null
+            && Dongles.Find(0x36A7, 0xA856, 0xFFFF, "BEAST X V2 DFU", 65) is null
+            && Dongles.Find(0x36A7, 0xA857, 0xFFFF, "WLmouse Boot", 65) is null
+            && new[] { (0x36A7, 0xA882), (0x373E, 0x0065), (0x36A7, 0xA863), (0x36A7, 0xA864), (0x36A7, 0xA859), (0x36A7, 0xA870), (0x36A7, 0xA871), (0x36A7, 0xA856), (0x36A7, 0xA857), (0x36A7, 0xA899), (0x36A7, 0xA810) }
+                .All(pair => Dongles.Find(pair.Item1, pair.Item2, 0xFFFF, "WLmouse", 65) == Dongles.Protocol.F83)
+            && new[] { 0xB880, 0xB882, 0xB863 }.All(pid => Dongles.F83Find(0x36A7, pid) is null));
+        check("WLmouse heartbeat: 03 00 <percent> <charging> input reports at offset 0 or 1; 0%, >100% and invalid charging are none",
+            Dongles.WlmouseHeartbeat(Bytes("03 00 55 00")) == new BatteryRead(85)
+            && Dongles.WlmouseHeartbeat(Bytes("03 00 40 01")) == new BatteryRead(64, true)
+            && Dongles.WlmouseHeartbeat(Bytes("00 03 00 40 01")) == new BatteryRead(64, true)
+            && Dongles.WlmouseHeartbeat(Bytes("03 00 00 00")) is null
+            && Dongles.WlmouseHeartbeat(Bytes("03 00 65 00")) is null
+            && Dongles.WlmouseHeartbeat(Bytes("03 00 50 02")) is null
+            && Dongles.WlmouseHeartbeat(Bytes("02 00 50 00")) is null);
+        DeviceBattery Device(string hardware, bool asleep, int? percent = 60, bool charging = false)
+            => new("f83:" + hardware, "G-Wolves", DeviceKind.Mouse, DeviceSource.Hid, percent) { Asleep = asleep, Charging = charging, Hardware = hardware };
         var receiver = Device("33E4:3854", asleep: true);
-        check("Twins: a receiver finding its mouse asleep is left out while the mouse's cable reads it, and only then",
+        check("Twins: a receiver finding its mouse asleep (or CableWins when both answer) is left out while the cable reads it",
             Dongles.Shadowed(receiver, [receiver, Device("33E4:4719", asleep: false)]) && !Dongles.Shadowed(receiver, [receiver])
             && !Dongles.Shadowed(receiver, [receiver, Device("33E4:5804", asleep: false)]) && !Dongles.Shadowed(Device("33E4:3854", asleep: false), [Device("33E4:4719", asleep: false)])
+            && Dongles.Shadowed(Device("36A7:A882", asleep: true), [Device("36A7:A882", asleep: true), Device("36A7:A871", asleep: false)])
+            && Dongles.Shadowed(Device("36A7:A882", asleep: false), [Device("36A7:A882", asleep: false), Device("36A7:A899", asleep: false, charging: true)])
+            && Dongles.Shadowed(Device("36B0:3071", asleep: false), [Device("36B0:3071", asleep: false), Device("36B0:3075", asleep: false)])
+            && Dongles.Shadowed(Device("36B0:3091", asleep: false), [Device("36B0:3091", asleep: false), Device("36B0:3098", asleep: false)])
+            && Dongles.Shadowed(Device("36B0:3002", asleep: false), [Device("36B0:3002", asleep: false), Device("36B0:3004", asleep: false)])
+            && Dongles.Shadowed(Device("36B0:3002", asleep: false), [Device("36B0:3002", asleep: false), Device("36B0:3025", asleep: false)])
+            && Dongles.Shadowed(Device("1532:0577", asleep: false), [Device("1532:0577", asleep: false), Device("1532:0576", asleep: false)])
+            && Dongles.Shadowed(Device("1532:0565", asleep: false), [Device("1532:0565", asleep: false), Device("1532:056E", asleep: false)])
+            && Dongles.Shadowed(Device("1532:0568", asleep: false), [Device("1532:0568", asleep: false), Device("1532:0567", asleep: false)])
+            && Dongles.Shadowed(Device("1532:0588", asleep: false), [Device("1532:0588", asleep: false), Device("1532:0587", asleep: false)])
+            && Dongles.Shadowed(Device("19F5:2620", asleep: false), [Device("19F5:2620", asleep: false), Device("19F5:102C", asleep: false)])
+            && Dongles.Shadowed(Device("19F5:2620", asleep: false), [Device("19F5:2620", asleep: false), Device("19F5:1050", asleep: false)])
             && Dongles.Twins.Contains(("0B05:1AD0", "0B05:1C69")) && Dongles.Twins.Contains(("1038:1838", "1038:183A")));
 
         // MCHOSE on RealTek: every byte after the report id inverted.

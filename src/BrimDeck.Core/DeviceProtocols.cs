@@ -231,7 +231,8 @@ public static class Razer
         if (bytes.Length != ReportLength || Checksum(bytes) != bytes[88] || bytes[6] != command.Class || bytes[7] != command.Id) return null;
         return (bytes[0], bytes[9]);
     }
-    public static int Percent(byte raw) => (raw * 100 + 127) / 255;
+    // Scaled as Razer's own web configurator (synapse.razer.com) does: Math.floor(raw / 255 * 100).
+    public static int Percent(byte raw) => raw * 100 / 255;
 
     // The catalog: the transaction id each model answers to, the interface to use, how long to wait between the request and the
     // reply (microseconds), and whether it reports charging. Values from razer-battery-report's catalog (derived from openrazer).
@@ -632,6 +633,22 @@ public static class Dongles
         {
             new(WlmouseVendor, 0xA880, "WLmouse Beast X Max", false), new(WlmouseVendor, 0xA887, "WLmouse Beast X", false),
             new(WlmouseVendor, 0xA868, "WLmouse Beast X Mini Pro", false),
+            // WLmouse 1K shared receivers and 8K/wired models (gm.wlmouse.gg/Config/env-models.json; bootloader 0xB8xx IDs excluded).
+            new(WlmouseVendor, 0xA882, "WLmouse", false, BrandOnly: true),
+            new(0x373E, 0x0065, "WLmouse", false, BrandOnly: true),
+            new(WlmouseVendor, 0xA863, "WLmouse Huan", false), new(WlmouseVendor, 0xA864, "WLmouse Huan", true, Receiver: 0xA863),
+            new(WlmouseVendor, 0xA859, "WLmouse Huan M", true, Receiver: 0xA863),
+            new(WlmouseVendor, 0xA866, "WLmouse Beast Miao", false), new(WlmouseVendor, 0xA867, "WLmouse Beast Miao", true, Receiver: 0xA866),
+            new(WlmouseVendor, 0xA869, "WLmouse Beast X Mini Pro", true, Receiver: 0xA868),
+            new(WlmouseVendor, 0xA870, "WLmouse Beast X Pro", false), new(WlmouseVendor, 0xA871, "WLmouse Beast X Pro", true, Receiver: 0xA870),
+            new(WlmouseVendor, 0xA872, "WLmouse Strider", false), new(WlmouseVendor, 0xA873, "WLmouse Strider", true, Receiver: 0xA872),
+            new(WlmouseVendor, 0xA874, "WLmouse Ying", false), new(WlmouseVendor, 0xA875, "WLmouse Ying", true, Receiver: 0xA874),
+            new(WlmouseVendor, 0xA878, "WLmouse Sword X", false), new(WlmouseVendor, 0xA879, "WLmouse Sword X", true, Receiver: 0xA878),
+            new(WlmouseVendor, 0xA881, "WLmouse Beast X Max", true, Receiver: 0xA880),
+            new(WlmouseVendor, 0xA883, "WLmouse Beast X", false), new(WlmouseVendor, 0xA884, "WLmouse Beast X", true, Receiver: 0xA883),
+            new(WlmouseVendor, 0xA885, "WLmouse Beast X Mini", false), new(WlmouseVendor, 0xA886, "WLmouse Beast X Mini", true, Receiver: 0xA885),
+            new(WlmouseVendor, 0xA860, "WLmouse Beast G", false), new(WlmouseVendor, 0xA861, "WLmouse Beast G", true, Receiver: 0xA860),
+            new(WlmouseVendor, 0xA856, "WLmouse Beast X V2", false), new(WlmouseVendor, 0xA857, "WLmouse Beast X V2", true, Receiver: 0xA856),
             new(0x373E, 0x001E, "LAMZU Maya X", false, Interface: 2), new(0x373E, 0x001C, "LAMZU Maya X", true, Interface: 2, Receiver: 0x001E),
             new(0x37B0, 0x0010, "LAMZU Inca", false, Interface: 2), new(0x37B0, 0x0009, "LAMZU Inca", true, Interface: 2, Receiver: 0x0010),
             new(0x2023, 0xF013, "MCHOSE A5 Pro Max", false, Clamp: true), new(0x2023, 0xF015, "MCHOSE A5 Pro Max", false, Clamp: true),
@@ -676,9 +693,15 @@ public static class Dongles
         }
         return models;
     }
-    public static F83Model? F83Find(int vendor, int product) => F83Models.FirstOrDefault(model => model.Vendor == vendor && model.Product == product);
-    public static bool F83Collection(F83Model model, int iface, int usagePage, int featureLength)
+    public static F83Model? F83Find(int vendor, int product) => F83Models.FirstOrDefault(model => model.Vendor == vendor && model.Product == product)
+        ?? (vendor == WlmouseVendor && product is >= 0xA800 and <= 0xA8FF ? new(WlmouseVendor, product, "WLmouse", false, BrandOnly: true) : null);
+    public static bool IsWlmouseF83(F83Model model) => model.Vendor == WlmouseVendor || (model.Vendor == 0x373E && model.Product == 0x0065);
+    public static bool F83Collection(F83Model model, int iface, int usagePage, int featureLength, string productName = "")
         => model.Vendor == GwolvesVendor ? featureLength == 65
+        // Reject WLmouse's 512-byte LCD feature collection (featureLength == 513) and DFU/Boot modes.
+        : IsWlmouseF83(model)
+            ? usagePage == 0xFFFF && featureLength == 65
+              && !productName.Contains("DFU", StringComparison.OrdinalIgnoreCase) && !productName.Contains("Boot", StringComparison.OrdinalIgnoreCase)
         : usagePage == 0xFFFF && featureLength >= 65 && (model.Interface < 0 || iface == model.Interface);
 
     // The request as a feature report: report id 0, then the 64 bytes.
@@ -704,9 +727,19 @@ public static class Dongles
             if (marker == 0xA2 && (model.Strict || model.Exchange == F83Exchange.Old)) return new(null, Asleep: true);
             if (marker == 0xA2 && model.Clamp) continue;
             int charging = model.Exchange == F83Exchange.Old ? reply[at + 4] : reply[at + 6], level = model.Exchange == F83Exchange.Old ? reply[at + 5] : reply[at + 7];
+            if (marker == 0xA2 && level == 0 && charging == 0) continue;
             if (level > 100 && !model.Clamp) return null;
             return new(Math.Min(level, 100), charging != 0);
         }
+        return null;
+    }
+
+    // WLmouse mice/receivers also push periodic 03 00 <percent> <charging> input reports; used read-only when 0x83 fails.
+    public static BatteryRead? WlmouseHeartbeat(byte[] reply)
+    {
+        foreach (int at in new[] { 0, 1 })
+            if (reply.Length >= at + 4 && reply[at] == 0x03 && reply[at + 1] == 0x00 && reply[at + 2] is > 0 and <= 100 && reply[at + 3] <= 1)
+                return new(reply[at + 2], reply[at + 3] != 0);
         return null;
     }
 
@@ -1039,20 +1072,74 @@ public static class Dongles
         Pair(0x1E71, 0x2101, 0x2129);
         foreach (var (receiver, cable) in Asus.Pairs) Pair(Asus.Vendor, receiver, cable);
         foreach (var (receiver, cable) in SteelSeriesMice.Pairs) Pair(Headsets.SteelSeries, receiver, cable);
+        foreach (var cable in F83Models.Where(model => model.Vendor == WlmouseVendor && model.Cable))
+        {
+            Pair(WlmouseVendor, 0xA882, cable.Product);
+            twins.Add((Devices.Hardware(0x373E, 0x0065), Devices.Hardware(WlmouseVendor, cable.Product)));
+        }
+        Pair(WlmouseVendor, 0xA887, 0xA884);
         return [.. twins.Distinct()];
     }
-    // A dongle and the same headset on its cable that both answer while both are plugged in: the dongle's entry is left out
-    // whenever the cable read the headset, asleep or not (the Audeze Maxwell's dongles and its cable, which HaloBattery's
-    // audeze.py merges the same way, the cable winning).
-    public static readonly (string Receiver, string Cable)[] CableWins =
-    [
-        (Devices.Hardware(AirohaRace.Audeze, AirohaRace.Maxwell), Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellCable)),
-        (Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellXbox), Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellCable)),
-    ];
+    // A dongle and the same headset/device on its cable that both answer while both are plugged in: the dongle's entry is left
+    // out whenever the cable read it, asleep or not (Audeze Maxwell, WOBKEY/PMO, Razer headsets, NuPhy and WLmouse).
+    public static readonly (string Receiver, string Cable)[] CableWins = BuildCableWins();
+    private static (string, string)[] BuildCableWins()
+    {
+        var pairs = new List<(string, string)>
+        {
+            (Devices.Hardware(AirohaRace.Audeze, AirohaRace.Maxwell), Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellCable)),
+            (Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellXbox), Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellCable)),
+            (Devices.Hardware(WobRainy.Vendor, WobRainy.Receiver), Devices.Hardware(WobRainy.Vendor, WobRainy.Cable)),
+            (Devices.Hardware(WobRainy.Vendor, 0x3091), Devices.Hardware(WobRainy.Vendor, 0x3098)),
+            (Devices.Hardware(WobRainy.Vendor, WobRainy.RdrReceiver), Devices.Hardware(WobRainy.Vendor, 0x3004)),
+            (Devices.Hardware(WobRainy.Vendor, WobRainy.RdrReceiver), Devices.Hardware(WobRainy.Vendor, 0x3009)),
+            (Devices.Hardware(WobRainy.Vendor, WobRainy.RdrReceiver), Devices.Hardware(WobRainy.Vendor, 0x3025)),
+            (Devices.Hardware(RazerBlackSharkV3.Vendor, RazerBlackSharkV3.Dongle), Devices.Hardware(RazerBlackSharkV3.Vendor, RazerBlackSharkV3.Cable)),
+            (Devices.Hardware(RazerBlackSharkV3.Vendor, RazerBlackSharkV3.ProDongle), Devices.Hardware(RazerBlackSharkV3.Vendor, RazerBlackSharkV3.ProCable)),
+            (Devices.Hardware(RazerHeadsets.Vendor, 0x0565), Devices.Hardware(RazerHeadsets.Vendor, 0x056E)),
+            (Devices.Hardware(RazerHeadsets.Vendor, 0x0568), Devices.Hardware(RazerHeadsets.Vendor, 0x0567)),
+            (Devices.Hardware(RazerHeadsets.Vendor, 0x0588), Devices.Hardware(RazerHeadsets.Vendor, 0x0587)),
+            (Devices.Hardware(NuPhy.Vendor, 0x8F01), Devices.Hardware(NuPhy.Vendor, 0xA011)),
+            (Devices.Hardware(NuPhy.Vendor, 0x8F05), Devices.Hardware(NuPhy.Vendor, 0x1043)),
+            (Devices.Hardware(NuPhy.Vendor, 0x8F06), Devices.Hardware(NuPhy.Vendor, 0x1044)),
+        };
+        foreach (var product in NuPhy.KnownNames.Keys)
+            if (product is >= 0x1026 and <= 0x10FF)
+                pairs.Add((Devices.Hardware(NuPhy.Vendor, NuPhy.U1Dongle), Devices.Hardware(NuPhy.Vendor, product)));
+        foreach (var cable in F83Models.Where(model => model.Vendor == WlmouseVendor && model.Cable))
+        {
+            pairs.Add((Devices.Hardware(WlmouseVendor, 0xA882), Devices.Hardware(WlmouseVendor, cable.Product)));
+            pairs.Add((Devices.Hardware(0x373E, 0x0065), Devices.Hardware(WlmouseVendor, cable.Product)));
+            if (cable.Receiver >= 0) pairs.Add((Devices.Hardware(WlmouseVendor, cable.Receiver), Devices.Hardware(WlmouseVendor, cable.Product)));
+        }
+        pairs.Add((Devices.Hardware(WlmouseVendor, 0xA887), Devices.Hardware(WlmouseVendor, 0xA884)));
+        return [.. pairs.Distinct()];
+    }
+    private static bool TryParseHardware(string hardware, out int vendor, out int product)
+    {
+        vendor = 0; product = 0;
+        return hardware.Length == 9 && hardware[4] == ':'
+            && int.TryParse(hardware.AsSpan(0, 4), System.Globalization.NumberStyles.HexNumber, null, out vendor)
+            && int.TryParse(hardware.AsSpan(5, 4), System.Globalization.NumberStyles.HexNumber, null, out product);
+    }
     public static bool Shadowed(DeviceBattery device, IEnumerable<DeviceBattery> devices)
-        => device.Hardware is { } hardware
-        && (device.Asleep && Twins.Any(twin => twin.Receiver == hardware && devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware == twin.Cable))
-            || CableWins.Any(twin => twin.Receiver == hardware && devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware == twin.Cable)));
+    {
+        if (device.Hardware is not { } hardware) return false;
+        if (device.Asleep && Twins.Any(twin => twin.Receiver == hardware && devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware == twin.Cable)))
+            return true;
+        if (CableWins.Any(twin => twin.Receiver == hardware && devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware == twin.Cable)))
+            return true;
+        if (hardware == Devices.Hardware(WlmouseVendor, 0xA882) || hardware == Devices.Hardware(0x373E, 0x0065))
+            return devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware is { } h
+                && TryParseHardware(h, out int v, out int p) && v == WlmouseVendor && p is >= 0xA800 and <= 0xA8FF
+                && (other.Charging || F83Models.Any(m => m.Vendor == WlmouseVendor && m.Product == p && m.Cable))
+                && !F83Models.Any(m => m.Vendor == WlmouseVendor && m.Product == p && !m.Cable));
+        if (hardware == Devices.Hardware(NuPhy.Vendor, NuPhy.U1Dongle))
+            return devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware is { } h
+                && TryParseHardware(h, out int v, out int p) && v == NuPhy.Vendor
+                && p is (>= 0x1026 and <= 0x10FF) or 0xA011 && !NuPhy.IsExcluded(p));
+        return false;
+    }
 
     // Inphic IN9 (248A:5B2E cable, 5B2F receiver; on 2.4 GHz vendor 0x249A, whose product is not fixed; feature 0x0C, 33
     // bytes): [0x0C, 0x01, command, 0, sequence, payload...]; 0xF0 the handshake (payload 01 01 FF), 0x20 the battery, the two
@@ -1225,7 +1312,7 @@ public static class Dongles
         if (IsCompxFramed(vendor, product)) return CompxFramedCollection(usagePage, usage, inputLength, outputLength) ? Protocol.CompxFramed : null;
         if (IsCompxOfficial(vendor, product) && CompxFramedCollection(usagePage, usage, inputLength, outputLength)) return Protocol.CompxFramed;
         if (F83Find(vendor, product) is { } f83)
-            return F83Collection(f83, iface, usagePage, featureLength) ? Protocol.F83
+            return F83Collection(f83, iface, usagePage, featureLength, productName) ? Protocol.F83
                 : CompxBesideF83.Contains((vendor, product)) && CompxFramedCollection(usagePage, usage, inputLength, outputLength) ? Protocol.CompxFramed : null;
         if (Gmouse.Contains((vendor, product)) || GmouseNamed(vendor, product, productName) || (vendor, product) == N87Cable)
             return usagePage == 0xFF01 && usage == 0x0010

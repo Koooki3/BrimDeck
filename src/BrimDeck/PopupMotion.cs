@@ -128,9 +128,18 @@ internal static class PopupMotion
     // width to the left of the list, which showed twice side by side. An absolute place is not turned round that way.
     internal static Popup OpenGhost(Window window, Point screen, UIElement picture)
     {
-        var at = PresentationSource.FromVisual(window)?.CompositionTarget is { } target ? target.TransformFromDevice.Transform(screen) : window.PointFromScreen(screen);
-        return new Popup { PlacementTarget = window, Placement = PlacementMode.Absolute, HorizontalOffset = at.X, VerticalOffset = at.Y,
+        var ghost = new Popup { PlacementTarget = window, Placement = PlacementMode.Absolute,
             AllowsTransparency = true, StaysOpen = true, IsHitTestVisible = false, Focusable = false, Child = picture, IsOpen = true };
+        // Absolute offsets are converted back to pixels by the popup's own composition target. Its DPI can differ from
+        // the owner's when the window straddles monitors, so wait until the popup has a source and use that same target.
+        if (PresentationSource.FromVisual(picture)?.CompositionTarget is { } target)
+        {
+            var at = target.TransformFromDevice.Transform(screen);
+            ghost.HorizontalOffset = at.X;
+            ghost.VerticalOffset = at.Y;
+        }
+        else ghost.IsOpen = false;
+        return ghost;
     }
 
     // The content as it is drawn now (PageHandover.Snapshot).

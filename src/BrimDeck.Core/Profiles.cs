@@ -69,7 +69,7 @@ public static class Profiles
         nameof(DeckSettings.KugouFullControl), nameof(DeckSettings.AppleMusicFullControl), nameof(DeckSettings.IgnoredMediaApps),
         nameof(DeckSettings.Display), nameof(DeckSettings.DisplayMonitors),
         nameof(DeckSettings.ClipboardRecord), nameof(DeckSettings.ClipboardExcluded), nameof(DeckSettings.ClipboardKeepHistory),
-        nameof(DeckSettings.ClipboardKeepFor), nameof(DeckSettings.TransferDragOut), nameof(DeckSettings.TransferRightDragOut), nameof(DeckSettings.TransferRemoveAfterCopyDrop),
+        nameof(DeckSettings.ClipboardKeepFor), nameof(DeckSettings.TransferDragOut), nameof(DeckSettings.TransferRemoveAfterCopyDrop),
         nameof(DeckSettings.MonitorInterval), nameof(DeckSettings.MonitorTrafficPeriod), nameof(DeckSettings.MonitorGpu), nameof(DeckSettings.MonitorGpuName), nameof(DeckSettings.MonitorGpuUsage),
         nameof(DeckSettings.DeviceChoices), nameof(DeckSettings.MemoryMode), nameof(DeckSettings.TrimMemoryWhenIdle), nameof(DeckSettings.UsageAutoSync),
         nameof(DeckSettings.SettingsWindowWidth), nameof(DeckSettings.SettingsWindowHeight), nameof(DeckSettings.SettingsWindowMaximized),

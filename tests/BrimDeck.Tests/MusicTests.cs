@@ -150,16 +150,69 @@ internal static class MusicTests
             {
                 var l = MusicLayout.Calculate(width, height, true, true); var cols = l.Columns(true);
                 double lyricsHeight = cols.CurrentLine + (cols.LyricLines - 1) * l.Metrics.LyricLine;
-                double titles = l.Metrics.TitleLine + (cols.ShowAlbum ? 2 : 1) * l.Metrics.ArtistLine + (cols.ShowEqualizer ? cols.EqualizerGap + l.Metrics.Equalizer : 0);
+                double titles = l.Metrics.TitleLine + (cols.ShowAlbum ? 2 : 1) * l.Metrics.ArtistLine + (cols.EqualizerBelow ? cols.EqualizerGap + l.Metrics.Equalizer : 0);
                 columnsOk &= cols.LyricLines is >= 1 and <= 7 && lyricsHeight <= cols.Height + 1e-9 && titles <= cols.Height + 1e-9
                     && cols.InfoWidth + 2 * cols.DividerGap + 1 + cols.LyricsWidth == l.BodyWidth && cols.LyricsWidth > cols.InfoWidth
-                    && cols.Before <= cols.After && cols.After - cols.Before <= 1 && cols.CurrentLyric > l.Metrics.Lyric;
+                    && Math.Abs(cols.After - cols.Before) <= 1 && (cols.EqualizerBelow ? cols.Before <= cols.After : cols.Before >= cols.After) && cols.CurrentLyric > l.Metrics.Lyric;
             }
         }
         var wideColumns = MusicLayout.Calculate(1200, 400, true, true).Columns(true);
         check("Without the cover the titles take the left column and the lyrics the rest, as many lines as fit around the larger current one",
             columnsOk && wideColumns.LyricLines > MusicLayout.Calculate(1200, 400, true, true).LyricLines
             && MusicLayout.Calculate(440, 200, true, true).Columns(false) is { InfoWidth: 440 - 40, LyricsWidth: 0, LyricLines: 0 });
+        // With the cover, the column layout gives it the room first: above the titles where it can have its share of the height,
+        // beside them where it cannot, and shown at every page size, with a lyrics column or without one.
+        var coverFailures = new List<string>();
+        for (double width = DeckPages.MinWidth; width <= DeckPages.MaxWidth; width += 40)
+            for (double height = DeckPages.MinHeight; height <= DeckPages.MaxHeight; height += 10)
+                foreach (bool lyricColumn in new[] { true, false })
+                {
+                    var l = MusicLayout.Calculate(width, height, lyricColumn, true); var cols = l.Columns(lyricColumn, cover: true); var m = l.Metrics;
+                    double titles = m.TitleLine + (cols.ShowAlbum ? 2 : 1) * m.ArtistLine;
+                    bool above = cols.Cover > 0, beside = cols.SideCover > 0;
+                    bool ok = above != beside && !cols.EqualizerBelow
+                        && (!above || cols.Cover >= MusicLayout.MinimumColumnCover && cols.Cover <= cols.InfoWidth && cols.Cover + m.MiddleGap + titles <= cols.Height + 1e-9)
+                        && (!beside || cols.SideCover >= MusicLayout.MinimumColumnCover && cols.SideCover <= cols.Height && titles <= cols.Height + 1e-9
+                            && cols.InfoWidth - cols.SideCover - m.MiddleGap >= 40);
+                    if (!ok) coverFailures.Add($"{width}x{height} lyrics={lyricColumn}: above {cols.Cover}, beside {cols.SideCover}, titles {titles}, height {cols.Height}");
+                }
+        check("Column layout: the cover shows at every page size, above the titles or beside them, within the upper part" + (coverFailures.Count > 0 ? " (" + string.Join("; ", coverFailures.Take(4)) + ")" : ""),
+            coverFailures.Count == 0);
+        var spaciousCover = MusicLayout.Calculate(760, 300, true, true); var spaciousColumns = spaciousCover.Columns(true, cover: true);
+        check("Column layout: at the spacious preset the cover above the titles takes more than half of the upper part's height",
+            spaciousColumns.Cover > spaciousCover.UpperHeight / 2 && spaciousColumns.SideCover == 0);
+        var standardColumns = MusicLayout.Calculate(440, 200, true, true).Columns(true, cover: true);
+        check("Column layout: at the standard preset the upper part is too short for a cover above, and it stands beside the titles",
+            standardColumns.Cover == 0 && standardColumns.SideCover >= 40);
+        // Without the cover the equalizer goes under the titles where the height holds it, the album's line giving way first; a
+        // part too short for that leaves it at the top right. With the cover it is never under them.
+        var belowFailures = new List<string>();
+        for (double height = DeckPages.MinHeight; height <= DeckPages.MaxHeight; height += 10)
+            foreach (bool lyricColumn in new[] { true, false })
+            {
+                var l = MusicLayout.Calculate(760, height, lyricColumn, true); var cols = l.Columns(lyricColumn); var m = l.Metrics;
+                double content = m.TitleLine + (cols.ShowAlbum ? 2 : 1) * m.ArtistLine + (cols.EqualizerBelow ? cols.EqualizerGap + m.Equalizer : 0);
+                bool fits = m.TitleLine + m.ArtistLine + cols.EqualizerGap + m.Equalizer <= cols.Height;
+                if (content > cols.Height + 1e-9 && cols.EqualizerBelow || cols.EqualizerBelow != fits) belowFailures.Add($"{height} lyrics={lyricColumn}: {content} in {cols.Height}");
+            }
+        check("Column layout without the cover: the equalizer is under the titles wherever the upper part holds it" + (belowFailures.Count > 0 ? " (" + string.Join("; ", belowFailures.Take(4)) + ")" : ""), belowFailures.Count == 0);
+        check("Column layout without the cover: at the usual sizes the equalizer is under the titles, with a lyrics column or without one",
+            MusicLayout.Calculate(440, 200, true, true).Columns(true).EqualizerBelow && MusicLayout.Calculate(760, 300, true, true).Columns(true).EqualizerBelow
+            && MusicLayout.Calculate(440, 200, false, true).Columns(false).EqualizerBelow);
+        // An even count of lyric lines has the current one in the lower half while the equalizer is at the top right (with the
+        // cover), and in the upper half while it is under the titles; an odd count has it in the middle either way.
+        var linesFailures = new List<string>(); var counts = new HashSet<int>();
+        for (double height = DeckPages.MinHeight; height <= DeckPages.MaxHeight; height += 4)
+            foreach (bool withCover in new[] { true, false })
+            {
+                var cols = MusicLayout.Calculate(760, height, true, true).Columns(true, withCover); int lines = cols.LyricLines;
+                if (withCover) counts.Add(lines);
+                int expected = lines % 2 == 1 || cols.EqualizerBelow ? (lines - 1) / 2 : lines / 2;
+                if (cols.Before != expected || cols.Before + 1 + cols.After != lines) linesFailures.Add($"{height} cover={withCover}: {cols.Before} before, {cols.After} after");
+            }
+        check("Column layout: five lyric lines have the current one third, and six have it fourth beside the cover" + (linesFailures.Count > 0 ? " (" + string.Join("; ", linesFailures.Take(4)) + ")" : ""),
+            linesFailures.Count == 0 && counts.Contains(5) && counts.Contains(6));
+        check("Column layout: without the cover nothing is kept for one", MusicLayout.Calculate(760, 300, true, true).Columns(true) is { Cover: 0, SideCover: 0 });
         check("The bottom margin below the transport equals the side margin", standard.Metrics.Bottom == standard.Metrics.Side && spacious.Metrics.Bottom == spacious.Metrics.Side);
         var failures = new List<string>(); double title = 0;
         for (double h = 140; h <= 400; h += 2)
@@ -264,10 +317,11 @@ internal static class MusicTests
             && CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, cover: false) == CompactMusicLayout.TextSlot + 18 + 8
             && CompactMusicLayout.RequiredWidth(1, true, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, cover: false) == 18 + 8 + 18);
         // The middle text that follows its length (DeckSettings.MusicLyricAutoWidth, MusicTitleAutoWidth): its room is the text's width
-        // within its limits, and the text never widens the surface past the screen share unless the fixed slot needs more.
-        check("Middle text that follows its length asks for its room, within the shortest and longest room",
+        // from the shortest room up, with no longest, and the text never widens the surface past the widest the screen allows unless
+        // the fixed slot needs more.
+        check("Middle text that follows its length asks for its room, from the shortest room up and however long",
             CompactMusicLayout.FollowSlot(100.2, 1) == 102 && CompactMusicLayout.FollowSlot(10, 1) == CompactMusicLayout.FollowSlotMin
-            && CompactMusicLayout.FollowSlot(5000, 1) == CompactMusicLayout.FollowSlotMax && CompactMusicLayout.FollowSlot(5000, 2) == 2 * CompactMusicLayout.FollowSlotMax
+            && CompactMusicLayout.FollowSlot(5000, 1) == 5001 && CompactMusicLayout.FollowSlot(5000, 2) == 5001 && CompactMusicLayout.FollowSlot(10, 2) == 2 * CompactMusicLayout.FollowSlotMin
             && CompactMusicLayout.FollowSlot(double.NaN, 1) == CompactMusicLayout.FollowSlotMin && CompactMusicLayout.FollowSlot(-3, 1) == CompactMusicLayout.FollowSlotMin
             && CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true, CompactMusicLayout.DefaultBars, textSlot: 102) == 20 + 8 + 102 + 8 + 18
             && CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true) == CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0, 0, true, textSlot: 0));

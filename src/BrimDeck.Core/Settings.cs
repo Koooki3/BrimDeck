@@ -13,7 +13,8 @@ public enum ScreenEdge { Top, Bottom, Left, Right }
 public enum EdgeAnchor { Screen, Taskbar }
 public enum WindowBehavior { Normal, Line, Hide }
 // BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
-public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen }
+// Occupied: a window that neither is maximized nor fills the screen overlaps the place of the collapsed panel.
+public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen, Occupied }
 // The monitors that show the panel. Chosen uses DisplayMonitors and falls back to the primary monitor while none of them is connected.
 public enum DisplayPlacement { Primary, Chosen }
 // A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named. Profile is
@@ -524,7 +525,7 @@ public sealed class DeckSettings
     // Where the lyrics sit on the page, chosen apart from the cover: under the artist in the titles' column, or in a column of
     // their own right of the titles (the cover then stands above the titles). Without the cover the titles' column may sit at the
     // page's left edge or be centred.
-    public MusicLyricsLayout MusicLyricsLayout { get; set; } = MusicLyricsLayout.Stacked;
+    public MusicLyricsLayout MusicLyricsLayout { get; set; } = MusicLyricsLayout.Columns;
     public MusicLyricsAlign MusicLyricsAlign { get; set; } = MusicLyricsAlign.Left;
     // What dragging with the left button over the expanded music page does in each direction, and a two-finger touchpad swipe
     // to either side (MusicGestures). A number not listed does nothing.
@@ -600,6 +601,9 @@ public sealed class DeckSettings
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
+    // A window that overlaps the place of the collapsed panel in its own style, such as one dragged under it. Maximized and
+    // full-screen windows follow the rules above; the app rules do not choose for this one.
+    public WindowBehavior Occupied { get; set; } = WindowBehavior.Normal;
     // Whether a window behind the foreground one counts too: maximized or borderless across the panel's monitor, it calls for
     // the same rule as if it were in front. Off, only the foreground window is read, as before the background was looked at.
     public bool BackgroundWindows { get; set; } = true;
@@ -622,21 +626,25 @@ public sealed class DeckSettings
     public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
     public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
     public bool ClipboardRecord { get; set; } = true;
+    public bool WeTypeClipboardSync { get; set; }
+    public bool DoubaoClipboardSync { get; set; }
+    public bool LanClipboardSync { get; set; }
     // Applications whose copies are not recorded: the executable's path, or a process name (ClipboardExclusions).
     public List<string> ClipboardExcluded { get; set; } = [];
     // Off, the clipboard history goes when BrimDeck exits; on, it stays, and each copy goes once it is older than ClipboardKeepFor.
     // What is kept (ShelfData.Kept: phrases, 常用, the categories set to keep) stays either way.
     public bool ClipboardKeepHistory { get; set; }
     public HistoryLength ClipboardKeepFor { get; set; } = HistoryLength.Month;
+    // What the left button does with files dragged out of the file transfer; the right button does the other of the two.
     public TransferDragOut TransferDragOut { get; set; } = TransferDragOut.Copy;
-    public TransferDragOut TransferRightDragOut { get; set; } = TransferDragOut.Move;
+    // On, files dragged out to be moved that a target took as copies (a chat window, a browser) leave the list as well.
     public bool TransferRemoveAfterCopyDrop { get; set; }
     // Which columns the page shows: both, or only the clipboard or only the file transfer over the whole width. Only with both are
     // they arranged (ShelfArrangement): side by side or stacked as cards (ShelfLayout), and side by side the file transfer's share
     // of the width in percent, set by dragging the divider between them or in the settings.
     public ShelfShown ShelfShown { get; set; } = ShelfShown.Both;
     public ShelfArrangement ShelfArrangement { get; set; } = ShelfArrangement.Split;
-    public bool ShelfSameSideStack { get; set; }
+    public bool ShelfSameSideStack { get; set; } = true;
     public double ShelfFileShare { get; set; } = ShelfLayout.DefaultShare;
     // Stacked, further ways to bring the card behind forward, besides a click on its side strip, on the title of the card in
     // front or on the page's own button: resting the pointer on the side strip, a middle click anywhere on the page, and a
@@ -792,7 +800,8 @@ public sealed class DeckSettings
     // Media is detected for the expanded music page, the chosen style's music or equalizer, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
     [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || ShowsEqualizer(Style) || MusicIndicatorProgress
-        && (Style == CompactStyle.Line || Maximized == WindowBehavior.Line || Borderless == WindowBehavior.Line || Exclusive == WindowBehavior.Line);
+        && (Style == CompactStyle.Line || Maximized == WindowBehavior.Line || Borderless == WindowBehavior.Line || Exclusive == WindowBehavior.Line
+            || Occupied == WindowBehavior.Line);
     // The switched-on applications. Their quotas are read for the AI usage page or for the rings of the chosen compact
     // style; the two are shown independently, so either one keeps the data current.
     [JsonIgnore] public IReadOnlyList<AppEntry> ConfiguredApps => Apps.Where(app => app.Enabled).Take(AppPresets.MaximumShownApps).ToList();
@@ -842,7 +851,7 @@ public sealed class DeckSettings
         return kind switch
         {
             ScreenContext.Maximized => Maximized, ScreenContext.Borderless => Borderless,
-            ScreenContext.Exclusive => Exclusive, _ => WindowBehavior.Normal
+            ScreenContext.Exclusive => Exclusive, ScreenContext.Occupied => Occupied, _ => WindowBehavior.Normal
         };
     }
     public DeckSettings Copy()
@@ -912,7 +921,6 @@ public sealed class DeckSettings
         ClipboardWidth = double.IsFinite(ClipboardWidth) ? Math.Clamp(ClipboardWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : ShelfSizes.Default.Width;
         ClipboardHeight = double.IsFinite(ClipboardHeight) ? Math.Clamp(ClipboardHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : ShelfSizes.Default.Height;
         if (!Enum.IsDefined(TransferDragOut)) TransferDragOut = TransferDragOut.Copy;
-        if (!Enum.IsDefined(TransferRightDragOut)) TransferRightDragOut = TransferDragOut.Move;
         if (!Enum.IsDefined(ShelfShown)) ShelfShown = ShelfShown.Both;
         if (!Enum.IsDefined(ShelfArrangement)) ShelfArrangement = ShelfArrangement.Split;
         if (!Enum.IsDefined(ShelfClipView)) ShelfClipView = ClipView.Single;
@@ -951,7 +959,7 @@ public sealed class DeckSettings
         CompactMonitor = Core.CompactMonitor.Preset(CompactReadings) ?? CompactMonitorMode.Custom;
         CompactMonitorItems = Core.CompactMonitor.Shown(CompactReadings);
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
-        if (!Enum.IsDefined(MusicLyricsLayout)) MusicLyricsLayout = MusicLyricsLayout.Stacked;
+        if (!Enum.IsDefined(MusicLyricsLayout)) MusicLyricsLayout = MusicLyricsLayout.Columns;
         if (!Enum.IsDefined(MusicLyricsAlign)) MusicLyricsAlign = MusicLyricsAlign.Left;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
@@ -995,6 +1003,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
+        if (!Enum.IsDefined(Occupied)) Occupied = WindowBehavior.Normal;
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
         // A file saved before MouseWheel had the page switch turned off as MouseWheelPages = false.
         if (MouseWheelPages is false) MouseWheel = MouseWheelAction.None;

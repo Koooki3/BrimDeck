@@ -306,18 +306,14 @@ internal static class ShelfTests
             && new DeckSettings { ShelfHoverSwitch = true, ShelfMiddleSwitch = false, ShelfSwipeSwitch = true }.Copy() is { ShelfHoverSwitch: true, ShelfMiddleSwitch: false, ShelfSwipeSwitch: true });
         var unknownShown = new DeckSettings { ShelfShown = (ShelfShown)9 };
         var dragDefaults = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{}")!;
-        check("File drag: old settings keep left copy, default right move and optional removal off",
-            dragDefaults.TransferDragOut == TransferDragOut.Copy && dragDefaults.TransferRightDragOut == TransferDragOut.Move
-            && !dragDefaults.TransferRemoveAfterCopyDrop);
-        var dragChoices = new DeckSettings { TransferDragOut = TransferDragOut.Move, TransferRightDragOut = TransferDragOut.Copy, TransferRemoveAfterCopyDrop = true };
+        check("File drag: old settings keep left copy and optional removal off; a right-button choice saved by a test build is ignored",
+            dragDefaults.TransferDragOut == TransferDragOut.Copy && !dragDefaults.TransferRemoveAfterCopyDrop
+            && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"TransferDragOut\":1,\"TransferRightDragOut\":1}")!.TransferDragOut == TransferDragOut.Move);
+        var dragChoices = new DeckSettings { TransferDragOut = TransferDragOut.Move, TransferRemoveAfterCopyDrop = true };
         var dragRoundTrip = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>(System.Text.Json.JsonSerializer.Serialize(dragChoices))!;
-        check("File drag: independent button settings and copy-drop removal survive save and copy",
-            dragRoundTrip.TransferDragOut == TransferDragOut.Move && dragRoundTrip.TransferRightDragOut == TransferDragOut.Copy
-            && dragRoundTrip.TransferRemoveAfterCopyDrop && dragChoices.Copy().TransferRemoveAfterCopyDrop
-            && dragChoices.Copy().TransferRightDragOut == TransferDragOut.Copy);
-        dragChoices.TransferRightDragOut = (TransferDragOut)99;
-        dragChoices.Normalize();
-        check("File drag: invalid right-button setting returns to move without changing left", dragChoices.TransferRightDragOut == TransferDragOut.Move && dragChoices.TransferDragOut == TransferDragOut.Move);
+        check("File drag: the button choice and copy-drop removal survive save and copy",
+            dragRoundTrip.TransferDragOut == TransferDragOut.Move && dragRoundTrip.TransferRemoveAfterCopyDrop
+            && dragChoices.Copy() is { TransferDragOut: TransferDragOut.Move, TransferRemoveAfterCopyDrop: true });
         unknownShown.Normalize();
         check("Shelf settings: both columns by default; an unknown choice shows both; stacking and the transfer count follow the columns shown",
             settings.ShelfShown == ShelfShown.Both && unknownShown.ShelfShown == ShelfShown.Both
