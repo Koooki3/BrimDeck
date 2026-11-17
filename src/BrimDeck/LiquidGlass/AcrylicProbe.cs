@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using BrimDeck.Core;
 
 namespace BrimDeck.LiquidGlass;
 
@@ -10,7 +11,7 @@ namespace BrimDeck.LiquidGlass;
 // island and its shadow are never in it and none of our windows needs to be left out of anything.
 internal static class AcrylicProbe
 {
-    public readonly record struct Reading(double Mean, double Bright, double Dark, double Changed, double Median)
+    public readonly record struct Reading(double MiddleMean, double Bright, double Dark, double Changed, double Median)
     {
         // The brightest and darkest the glass has to answer for, by its openness: the collapsed island's ring is small, so one
         // bright neighbour would hold its 90th percentile up; the capsule answers to the ring's middle, the open panel (a
@@ -90,7 +91,8 @@ internal static class AcrylicProbe
         }
         _last = now;
         lumas.Sort();
-        return new Reading(lumas.Average(), lumas[(int)(lumas.Count * Tail)], lumas[(int)(lumas.Count * (1 - Tail))], changed, lumas[lumas.Count / 2]);
+        double middleMean = GlassAppearance.SortedRangeMean(CollectionsMarshal.AsSpan(lumas));
+        return new Reading(middleMean, lumas[(int)(lumas.Count * Tail)], lumas[(int)(lumas.Count * (1 - Tail))], changed, lumas[lumas.Count / 2]);
     }
 
     private const int Halftone = 4, SrcCopy = 0x00CC0020;

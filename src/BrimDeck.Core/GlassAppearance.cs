@@ -55,6 +55,17 @@ public sealed class GlassAppearance(bool dark, bool appDark)
         return weight > 0 ? sum / weight : double.NaN;
     }
 
+    // The same middle quantiles from raw luma samples already sorted in ascending order.
+    public static double SortedRangeMean(ReadOnlySpan<double> sorted)
+    {
+        if (sorted.IsEmpty) return double.NaN;
+        double from = sorted.Length * LowQuantile, to = sorted.Length * HighQuantile;
+        double sum = 0;
+        for (int i = (int)from; i < to; i++)
+            sum += sorted[i] * (Math.Min(i + 1, to) - Math.Max(i, from));
+        return sum / (to - from);
+    }
+
     public bool Dark { get; private set; } = dark;
     public bool AppDark { get; private set; } = appDark;
     // The thresholds the smoothed measure is compared with now.

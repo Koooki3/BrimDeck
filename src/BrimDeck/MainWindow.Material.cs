@@ -22,6 +22,8 @@ public partial class MainWindow
     // The open panel's height the last time it opened (SetExpanded): how far the island is open is read from its height between
     // the collapsed shape's and this, so it follows the opening motion as it is drawn.
     private double _glassOpenHeight;
+    private bool IsGlassOpen => _expanded || GlassOpenness() > .001;
+
     internal double GlassOpenness()
     {
         double closed = Collapsed.Surface.Height, open = _glassOpenHeight, now = Island.ActualHeight;
@@ -241,6 +243,8 @@ public partial class MainWindow
             _glass.LiquidTint = () => _surface.Color.A / 255d;
             // Automatic liquid glass takes its look from what lies behind the island (App.BackdropMeasured).
             _glass.AutoLook = () => _app.AutoLookFrom(this);
+            _glass.HoldSharedLook = () => _app.Decks.Any(deck => deck != this && ReferenceEquals(deck.Look, Look)
+                && deck.IsVisible && deck.IsGlassOpen);
             _glass.Look += (dark, instant) => _app.TurnGlass(this, dark, instant);
             _glass.Crossed += () => _app.GlassCrossed(this);
             _glass.Openness = GlassOpenness;

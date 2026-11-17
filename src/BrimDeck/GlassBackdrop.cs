@@ -217,6 +217,7 @@ internal sealed class GlassBackdrop : IDisposable
     // (BackdropLook, stepped on every frame drawn and every tick of the poll). Look is raised when the look should change, at
     // once (no fade) for the first decision.
     public Func<bool>? AutoLook { get; set; }
+    public Func<bool>? HoldSharedLook { get; set; }
     public event Action<bool, bool>? Look;
     // A turn of automatic liquid glass: the glass eases toward the new look first (Lead), and once what it shows over the
     // backdrop reaches the brightness where either look's text reads (LiquidFrame.TextTurn), Crossed is raised and the theme,
@@ -752,7 +753,7 @@ internal sealed class GlassBackdrop : IDisposable
         bool measured;
         if (auto)
         {
-            bool held = Openness?.Invoke() > .001 || _pointerDown || _feedback.Press > .01;
+            bool held = Openness?.Invoke() > .001 || _pointerDown || _feedback.Press > .01 || HoldSharedLook?.Invoke() == true;
             _look.AppDark = LiquidTheme.AppDark;
             int measures = _look.Measures;
             turn = _look.Step(renderer, now, current, out instant, _host.Source, held);
@@ -1164,9 +1165,9 @@ internal sealed class GlassBackdrop : IDisposable
             _probeLook.Prior(LiquidTheme.AppDark);
             if (_probeLook.Dark != dark) _probeLook.Reset(dark, now);
             _probeLook.Changed(reading.Changed, now);
-            bool held = Openness?.Invoke() > .001 || _pointerDown;
-            if (_probeLook.Feed(reading.Mean, now, held)) Look?.Invoke(_probeLook.Dark, false);
-            if (double.IsFinite(reading.Mean)) SeenLuma = reading.Mean;
+            bool held = Openness?.Invoke() > .001 || _pointerDown || HoldSharedLook?.Invoke() == true;
+            if (_probeLook.Feed(reading.MiddleMean, now, held)) Look?.Invoke(_probeLook.Dark, false);
+            if (double.IsFinite(reading.MiddleMean)) SeenLuma = reading.MiddleMean;
         }
         else _probeLook = null;
 

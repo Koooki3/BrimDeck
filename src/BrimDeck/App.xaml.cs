@@ -443,7 +443,7 @@ public partial class App : Application
         {
             double scale = Deck is null ? 1 : System.Windows.Media.VisualTreeHelper.GetDpi(Deck).DpiScaleX;
             if (LiquidGlass.AcrylicProbe.Read(around, (int)(24 * scale), (int)(40 * scale)) is { } reading)
-                LiquidTheme.Dark = dark = GlassAppearance.FirstLook(reading.Mean, LiquidTheme.AppDark);
+                LiquidTheme.Dark = dark = GlassAppearance.FirstLook(reading.MiddleMean, LiquidTheme.AppDark);
             GlanceEnded();
             return dark;
         }
