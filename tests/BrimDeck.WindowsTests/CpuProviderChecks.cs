@@ -7,12 +7,16 @@ using BrimDeck.Native;
 internal static class CpuProviderChecks
 {
     private const string BusyPath = @"\Processor Information(*)\% Processor Time";
+    private const string HypervisorBusyPath = @"\Hyper-V Hypervisor Logical Processor(*)\% Total Run Time";
+    private const string PerformancePath = @"\Processor Information(*)\% Processor Performance";
+    private const string BasePath = @"\Processor Information(*)\Processor Frequency";
 
     private sealed class Counters : ICounterSource
     {
         public bool Collects = true;
+        public HashSet<string> Added = [];
         public Dictionary<string, List<(string, double)>> Values = [];
-        public bool Add(string path) => true;
+        public bool Add(string path) { Added.Add(path); return true; }
         public bool Collect() => Collects;
         public IReadOnlyList<(string Instance, double Value)> Read(string path) => Values.TryGetValue(path, out var list) ? list : [];
     }
@@ -25,7 +29,7 @@ internal static class CpuProviderChecks
         int reads = 0;
         (long, long, long)[]? Times() { reads++; return [(idle, kernel, user), (idle, kernel, user), (idle, kernel, user), (idle, kernel, user)]; }
         void Advance(long busy, long free) { idle += free; kernel += busy + free; }
-        var cpu = new CpuProvider(counters, Times);
+        var cpu = new CpuProvider(counters, Times, hypervisor: false);
 
         check("cpu: the counters are not in the query at construction", !cpu.Attached);
         Advance(50, 50);
@@ -37,6 +41,7 @@ internal static class CpuProviderChecks
         check("cpu: before the counters join the frequency is waiting, not missing", second.TryGet(out var waiting) && waiting.Cores.All(core => core.FrequencyMhz.Reason == Why.Waiting));
 
         cpu.Attach();
+        check("cpu: without a hypervisor the Hyper-V counter is not added", !counters.Added.Contains(HypervisorBusyPath));
         counters.Values[BusyPath] = [("0,0", 40), ("0,1", 60)];
         int before = reads;
         var read = cpu.Sample(true);
@@ -63,7 +68,7 @@ internal static class CpuProviderChecks
         // The processor was not read for a while and is read again (CpuProvider.Prime): the counters' and the times' windows from before
         // cover the whole time off, so the reading that sets the baselines is not given and the next one covers only the time since.
         var restartCounters = new Counters();
-        var restart = new CpuProvider(restartCounters, Times);
+        var restart = new CpuProvider(restartCounters, Times, hypervisor: false);
         restart.Attach();
         restartCounters.Values[BusyPath] = [("0,0", 40), ("0,1", 60)];
         restart.Sample(true);
@@ -82,7 +87,7 @@ internal static class CpuProviderChecks
         // The counters gave readings, stop, and the kernel's times come back: the baseline is set from the times themselves (a stale
         // "the counters are reading" does not make the next reading wait another interval).
         var swapCounters = new Counters();
-        var swap = new CpuProvider(swapCounters, Times);
+        var swap = new CpuProvider(swapCounters, Times, hypervisor: false);
         swap.Attach();
         swapCounters.Values[BusyPath] = [("0,0", 40), ("0,1", 60)];
         swap.Sample(true);
@@ -93,7 +98,7 @@ internal static class CpuProviderChecks
         check("cpu: after counters that gave readings, a restart on the kernel's times covers the new window at the next reading",
             swap.Sample(true).TryGet(out var swapped) && swapped.Cores.All(core => Math.Abs(core.Usage - .2) < 1e-9));
 
-        var offTimes = new CpuProvider(new Counters(), Times);
+        var offTimes = new CpuProvider(new Counters(), Times, hypervisor: false);
         Advance(50, 50); offTimes.Sample(false);
         Advance(25, 75); offTimes.Sample(false);
         // A long time off: the times moved far since the baseline.
@@ -102,6 +107,82 @@ internal static class CpuProviderChecks
         Advance(20, 80);
         check("cpu: kernel times: the first figure after a restart covers only the time since it, not the time off",
             offTimes.Sample(false).TryGet(out var window) && window.Cores.All(core => Math.Abs(core.Usage - .2) < 1e-9));
+
+        // Topology classification: hybrid SMT, hybrid without SMT, and homogeneous SMT.
+        var hybridSmt = CpuTopology.Classify(new Dictionary<(int, int), (int, int)>
+        {
+            [(0, 0)] = (0, 1), [(0, 1)] = (0, 1), [(0, 2)] = (2, 1), [(0, 3)] = (2, 1),
+            [(0, 4)] = (4, 0), [(0, 5)] = (5, 0)
+        });
+        check("cpu topology: hybrid SMT numbers physical cores and distinguishes threads",
+            hybridSmt[(0, 0)] == new CpuTopology.CoreKind(0, CoreTier.Performance, 1, 1)
+            && hybridSmt[(0, 1)] == new CpuTopology.CoreKind(0, CoreTier.Performance, 1, 2)
+            && hybridSmt[(0, 2)] == new CpuTopology.CoreKind(0, CoreTier.Performance, 2, 1)
+            && hybridSmt[(0, 3)] == new CpuTopology.CoreKind(0, CoreTier.Performance, 2, 2)
+            && hybridSmt[(0, 4)] == new CpuTopology.CoreKind(1, CoreTier.Efficiency, 1, null)
+            && hybridSmt[(0, 5)] == new CpuTopology.CoreKind(1, CoreTier.Efficiency, 2, null));
+
+        var hybridNoSmt = CpuTopology.Classify(new Dictionary<(int, int), (int, int)>
+        {
+            [(0, 0)] = (0, 1), [(0, 1)] = (1, 0)
+        });
+        check("cpu topology: single-thread cores have no thread number",
+            hybridNoSmt[(0, 0)] == new CpuTopology.CoreKind(0, CoreTier.Performance, 1, null)
+            && hybridNoSmt[(0, 1)] == new CpuTopology.CoreKind(1, CoreTier.Efficiency, 1, null));
+
+        var homoSmt = CpuTopology.Classify(new Dictionary<(int, int), (int, int)>
+        {
+            [(0, 0)] = (0, 0), [(0, 1)] = (0, 0), [(0, 2)] = (2, 0), [(0, 3)] = (2, 0)
+        });
+        check("cpu topology: homogeneous CPU stays Unknown with sequential logical numbers",
+            homoSmt[(0, 0)] == new CpuTopology.CoreKind(0, CoreTier.Unknown, 1, null)
+            && homoSmt[(0, 1)] == new CpuTopology.CoreKind(0, CoreTier.Unknown, 2, null)
+            && homoSmt[(0, 2)] == new CpuTopology.CoreKind(0, CoreTier.Unknown, 3, null)
+            && homoSmt[(0, 3)] == new CpuTopology.CoreKind(0, CoreTier.Unknown, 4, null));
+
+        // Hyper-V host: prefers Hyper-V physical LP run time over root-only Processor Information.
+        var hvCounters = new Counters();
+        var hvCpu = new CpuProvider(hvCounters, Times, hypervisor: true, kinds: []);
+        hvCpu.Attach();
+        hvCounters.Values[HypervisorBusyPath] = [("Hv LP 0", 82), ("Hv LP 1", 91), ("_Total", 86.5)];
+        hvCounters.Values[BusyPath] = [("0,0", 12), ("0,1", 15)];
+        var hvSample = hvCpu.Sample(true);
+        bool gotHvRead = hvSample.TryGet(out var hvRead);
+        check("cpu: with Hyper-V active, Hyper-V LP counter is added and preferred over Processor Information",
+            gotHvRead && hvCounters.Added.Contains(HypervisorBusyPath) && hvRead.Cores.Count == 2
+            && Math.Abs(hvRead.Cores[0].Usage - .82) < 1e-9 && Math.Abs(hvRead.Cores[1].Usage - .91) < 1e-9);
+
+        // Transient empty Hyper-V tick keeps _last once, then second empty tick falls back to Processor Information.
+        hvCounters.Values.Remove(HypervisorBusyPath);
+        hvCounters.Values[BusyPath] = [("0,0", 24), ("0,1", 36)];
+        var hvHeld = hvCpu.Sample(true);
+        var hvFallback = hvCpu.Sample(true);
+        check("cpu: transient Hyper-V gap holds last reading once, then falls back to Processor Information",
+            hvHeld.TryGet(out var heldRead) && gotHvRead && ReferenceEquals(heldRead, hvRead)
+            && hvFallback.TryGet(out var fallbackRead) && Math.Abs(fallbackRead.Cores[0].Usage - .24) < 1e-9 && Math.Abs(fallbackRead.Cores[1].Usage - .36) < 1e-9);
+
+        // Guest VM: Hyper-V bit set in CPUID, HypervisorBusyPath yields nothing, immediately reads Processor Information on first sample.
+        var guestCounters = new Counters();
+        var guestCpu = new CpuProvider(guestCounters, Times, hypervisor: true, kinds: []);
+        guestCpu.Attach();
+        guestCounters.Values[BusyPath] = [("0,0", 35), ("0,1", 55)];
+        var guestRead = guestCpu.Sample(true);
+        check("cpu: in a guest VM without Hyper-V LP readings, falls back to Processor Information immediately",
+            guestRead.TryGet(out var guest) && Math.Abs(guest.Cores[0].Usage - .35) < 1e-9 && Math.Abs(guest.Cores[1].Usage - .55) < 1e-9);
+
+        // Multi-group mapping: Hv LP 0..3 maps to (0,0), (0,1), (1,0), (1,1) using nominal frequency keys.
+        var multiCounters = new Counters();
+        var multiCpu = new CpuProvider(multiCounters, Times, hypervisor: true, kinds: []);
+        multiCpu.Attach();
+        multiCounters.Values[BasePath] = [("0,0", 3000), ("0,1", 3000), ("1,0", 3000), ("1,1", 3000)];
+        multiCounters.Values[PerformancePath] = [("0,0", 100), ("0,1", 100), ("1,0", 100), ("1,1", 100)];
+        multiCounters.Values[HypervisorBusyPath] = [("Hv LP 0", 10), ("Hv LP 1", 20), ("Hv LP 2", 70), ("Hv LP 3", 80)];
+        var multiRead = multiCpu.Sample(true);
+        check("cpu: Hyper-V multi-group mapping preserves all processors and frequencies",
+            multiRead.TryGet(out var multi) && multi.Cores.Count == 4
+            && Math.Abs(multi.Cores[0].Usage - .10) < 1e-9 && Math.Abs(multi.Cores[1].Usage - .20) < 1e-9
+            && Math.Abs(multi.Cores[2].Usage - .70) < 1e-9 && Math.Abs(multi.Cores[3].Usage - .80) < 1e-9
+            && multi.Cores.All(core => core.FrequencyMhz.TryGet(out var mhz) && Math.Abs(mhz - 3000) < 1e-9));
 
         // The real counters and times on this machine: only what holds whatever the load (structure, never values).
         using var pdh = new PdhQuery();

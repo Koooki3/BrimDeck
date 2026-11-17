@@ -52,7 +52,7 @@ The file transfer holds files you will need shortly. It keeps only where each fi
 - **Click**: pastes the file into the current window. It becomes an attachment in a chat window, and a copy in the current folder in File Explorer.
 - **Select several**: hold Ctrl or Shift and click to select several files, then paste, drag out or remove them together.
 - **Right-click**: Paste, Open, Show in folder, Copy path, Details, Add to category, Remove from the file transfer, Delete the original.
-- **Drag out**: drag a file to where you need it; a button in the column's title row drags out all files at once. Files are copied by default; with "Move" chosen under Settings › File transfer › Drag files out, files moved to a new place leave the list, while chat apps, browsers and other places that only take copies still get copies.
+- **Drag out**: drag a file to where you need it; a button in the column's title row drags out all files at once. By default the left button copies and the right button moves; Settings › File transfer › Drag files out swaps them. While you drag, a word beside the pointer says whether letting go there copies or moves.
 - A file whose original has been moved or deleted is marked "Missing".
 - The notch and capsule can show how many files the file transfer holds.
 
@@ -69,6 +69,10 @@ The clipboard history, the file transfer's list and the categories are stored in
 
 ### Left and right file drags
 
-File transfer settings configure each button independently: left defaults to Copy and right to Move. Right drags use ordinary drag delivery to avoid shell drop menus. A right click without dragging still opens the entry menu.
+- Copy: the original stays where it is, a copy goes to the new place, and the file stays in the file transfer.
+- Move: the original goes to the new place and leaves the file transfer.
+- Chat apps and browsers cannot take a move; files dragged there are always copied, and the word beside the pointer then says "Copy".
 
-The optional remove-after-copy/link setting defaults off. When enabled, a move-configured drag successfully accepted as Copy or Link by an external application removes its transfer entries without deleting the original files. Canceled or rejected drops, Explorer, internal drops and Ctrl-copy gestures retain entries. Success means the target reported accepting the drop, not that an attachment finished uploading. Other file managers reporting Copy are also subject to this option.
+Settings › File transfer › Drag files out has two choices: "Left copies, right moves" (the default) and "Left moves, right copies". A right drag does its action directly, without the shell's drop menu. A right click without dragging still opens the entry menu.
+
+The optional remove-after-copy/link setting defaults off. When enabled, a moving drag successfully accepted as Copy or Link by an external application removes its transfer entries without deleting the original files. Canceled or rejected drops, Explorer, internal drops and Ctrl-copy gestures retain entries. Success means the target reported accepting the drop, not that an attachment finished uploading. Other file managers reporting Copy are also subject to this option.

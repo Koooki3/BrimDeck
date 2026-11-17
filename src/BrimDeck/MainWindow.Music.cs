@@ -496,7 +496,10 @@ public partial class MainWindow
         bool animate = Animates;
         // In the column layout the lyrics, or a message, take a column of their own right of the titles; with neither the titles
         // have the width.
-        bool splitLyrics = Settings.MusicLyricsLayout == MusicLyricsLayout.Columns;
+        // With neither the cover nor the lyrics the page has only the titles, and no layout to choose: they are centred, the
+        // equalizer under them, as the column layout draws them without a lyrics column (bare).
+        bool bare = !Settings.MusicPageCover && !Settings.LyricsEnabled;
+        bool splitLyrics = Settings.MusicLyricsLayout == MusicLyricsLayout.Columns && !bare;
         bool lyricColumn = splitLyrics && (hasLyrics || message.Length > 0);
         string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
@@ -550,7 +553,7 @@ public partial class MainWindow
         }
         var body = new Grid();
         bool synchronized = playerLyrics || _lyrics.CanSynchronize(track);
-        if (splitLyrics) MusicColumns(body, layout, track, lyricColumn, hasLyrics, synchronized, playerLyrics, message, shown && songChanging, lyricsArrive);
+        if (splitLyrics || bare) MusicColumns(body, layout, track, lyricColumn, hasLyrics, synchronized, playerLyrics, message, shown && songChanging, lyricsArrive);
         else
         {
             // Without the cover the titles' column can sit against the page's left edge or be centred (MusicLyricsAlign).
@@ -570,21 +573,32 @@ public partial class MainWindow
             if (newCover && animate) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; art.BeginAnimation(OpacityProperty, fade); }
             var right = new Grid(); Grid.SetColumn(right, 2); upper.Children.Add(right);
             int lyricLines = playerLyrics ? Math.Min(1, layout.LyricLines) : layout.LyricLines;
-            right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.HeaderHeight) });
-            right.RowDefinitions.Add(new RowDefinition());
+            // With the lyrics switched off no line comes under the titles, so they stand at the middle of the upper part's height
+            // instead of its top; a message, when one shows, has its line under them. With the lyrics on the titles keep the top
+            // whether or not a song has lyrics, so they do not move when the lyrics arrive. The equalizer keeps the top right
+            // corner either way, and the title the room left of it.
+            bool alone = !Settings.LyricsEnabled;
+            right.RowDefinitions.Add(new RowDefinition { Height = alone ? new GridLength(1, GridUnitType.Star) : new GridLength(layout.HeaderHeight) });
+            right.RowDefinitions.Add(new RowDefinition { Height = alone ? GridLength.Auto : new GridLength(1, GridUnitType.Star) });
             double equalizerWidth = MusicEqualizerWidth(c);
             var header = new Grid();
-            // Centred, the titles take the page's whole width, so their centre is the page's and the equalizer cannot shift it;
-            // it stands over the end of their room instead.
-            if (!centered)
+            // Centred, the titles take the page's whole width, so their centre is the page's, and the equalizer stands over the
+            // end of the title's line. The title keeps clear of it and leaves as much room free at its left (MusicTitleFit
+            // .CenteredRoom), so it stays centred and scrolls within what is left; the artist's line, below the bars, has the
+            // whole width. At the middle of the height the titles may stand lower than the equalizer, and then they have the
+            // whole width as well: the title's room is cut only where the two share a line (their top is taken as if a message
+            // had its line under them, which raises them a little).
+            bool sharesLine = !alone || (layout.Cover - layout.HeaderHeight - c.MiddleGap - c.LyricLine) / 2 < (c.TitleLine + c.Equalizer) / 2 + 2;
+            if (!centered && sharesLine)
             {
                 header.ColumnDefinitions.Add(new ColumnDefinition());
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(equalizerWidth + MusicTitleFit.EqualizerGap) });
             }
-            var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
+            var titles = new StackPanel { VerticalAlignment = alone ? VerticalAlignment.Center : VerticalAlignment.Top };
             // The title shares its line with the equalizer, so its room shrinks as the bars grow (MusicTitleFit); it rests when it
             // fits and scrolls when it does not. The merged title of a short page carries the artist as a second run.
             var title = PageTitle(track, c, center: centered, merge: layout.MergeTitle); titles.Children.Add(title);
+            if (centered) title.Margin = new Thickness(MusicTitleFit.CenteredInset(equalizerWidth), 0, MusicTitleFit.CenteredInset(equalizerWidth), 0);
             if (!layout.MergeTitle)
             {
                 string artist = string.Join(" · ", new[] { track.Artist, track.Album }.Where(s => s.Length > 0));
@@ -595,7 +609,7 @@ public partial class MainWindow
             if (shown && songChanging) RiseIn(titles);
             _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = equalizerWidth, Height = c.Equalizer, Color = EqualizerColor, HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, (c.TitleLine - c.Equalizer) / 2, 0, 0) };
-            if (centered) Panel.SetZIndex(_musicEqualizer, 1); else Grid.SetColumn(_musicEqualizer, 1);
+            if (header.ColumnDefinitions.Count > 0) Grid.SetColumn(_musicEqualizer, 1); else Panel.SetZIndex(_musicEqualizer, 1);
             header.Children.Add(_musicEqualizer); right.Children.Add(header);
 
             var middle = new Grid(); Grid.SetRow(middle, 1); right.Children.Add(middle); _musicInfo = middle;
@@ -627,6 +641,7 @@ public partial class MainWindow
                 // One line; a longer message (a failed full control connection) is read whole in its tooltip, like a cut title.
                 _musicMessage = UI.Fixed(message, c.Lyric, c.LyricLine, Look.Tertiary); ShowCutText(_musicMessage, message);
                 _musicMessage.TextAlignment = centered ? TextAlignment.Center : TextAlignment.Left;
+                if (alone) _musicMessage.Margin = new Thickness(0, c.MiddleGap, 0, 0);
                 _musicMessage.Visibility = layout.ShowMessage ? Visibility.Visible : Visibility.Collapsed; middle.Children.Add(_musicMessage);
             }
         }
@@ -834,29 +849,27 @@ public partial class MainWindow
     // The upper part in the column layout (MusicLayout.Columns): the cover above the titles when the column is tall enough for it,
     // beside them when it is not, and the lyrics or the message right of a divider, in a column of their own. The current lyric is
     // larger and in its own color, the others dim, so the lyrics do not read as more titles. Without a lyrics column the titles are
-    // centred across the width, and a message that comes later (ShowMusicError) appears below them.
+    // centred across the width, and a message that comes later (ShowMusicError) appears below them. Without the cover the
+    // equalizer is under the titles, in the middle of their column, where the height holds it. With the cover, or in a part too
+    // short for that, it stands at the upper part's top right corner, as in the one-column layout, and what would run under it
+    // keeps clear of it: a lyric line at its height ends before it, and a title at its height leaves its width free at both ends
+    // (or at the right, read from the left). The page with neither the cover nor the lyrics is drawn here too, as the titles
+    // alone.
     private void MusicColumns(Grid body, MusicLayout layout, MediaTrack track, bool lyricColumn, bool hasLyrics, bool synchronized, bool playerLyrics,
         string message, bool rise, bool lyricsArrive)
     {
         var c = layout.Metrics;
-        var columns = layout.Columns(lyricColumn);
+        var columns = layout.Columns(lyricColumn, Settings.MusicPageCover);
+        // Where the equalizer stands at the top right, and the room it and its gap take of a line that reaches it.
+        double barsWidth = MusicEqualizerWidth(c), barsTop = (c.TitleLine - c.Equalizer) / 2, barsRoom = MusicTitleFit.CenteredInset(barsWidth);
+        bool MeetsBars(double top, double height) => !columns.EqualizerBelow && top < barsTop + c.Equalizer + 2 && top + height > barsTop - 2;
         var upper = new Grid { Height = columns.Height, VerticalAlignment = VerticalAlignment.Top };
         body.Children.Add(upper);
-        // The cover stands above the titles, no wider than the column and no larger than the cover of the one-column layout. A
-        // column too short for that keeps the cover beside the titles instead, when the lyrics have a column of their own; the
-        // divider and the lyrics' column stay where they are, and the titles take the room the cover leaves of the information
-        // column. The equalizer shows under the titles, so the cover above them leaves room for it.
-        int detailLines = columns.ShowAlbum ? 2 : 1;
-        double eqRoom = columns.ShowEqualizer ? columns.EqualizerGap + c.Equalizer : 0;
-        double artSize = Settings.MusicPageCover
-            ? Math.Min(layout.Cover, Math.Min(columns.InfoWidth, Math.Max(0, columns.Height - c.TitleLine - detailLines * c.ArtistLine - eqRoom - c.MiddleGap)))
-            : 0;
-        // Below this the cover above says too little; it moves beside the titles, where the column's height sizes it.
-        bool beside = lyricColumn && Settings.MusicPageCover && artSize < 24;
-        double sideArt = beside ? Math.Min(columns.Height, columns.InfoWidth * .42) : 0;
-        if (beside) beside = sideArt >= 24 && columns.InfoWidth >= sideArt + c.MiddleGap + 40;
-        if (!beside) sideArt = 0;
-        bool coverAbove = !beside && Settings.MusicPageCover && artSize >= 24;
+        // The cover stands above the titles, or beside them in a part too short for that (MusicLayout.Columns sizes it and says
+        // which); the divider and the lyrics' column stay where they are, and beside the cover the titles take the room it
+        // leaves of the information column.
+        double artSize = columns.Cover, sideArt = columns.SideCover;
+        bool beside = sideArt > 0, coverAbove = artSize > 0;
         var info = new StackPanel { Width = columns.InfoWidth, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
         FrameworkElement Art(double size, bool over)
         {
@@ -872,38 +885,52 @@ public partial class MainWindow
         // The titles are centred under the cover, or across the width without one; with the cover moved beside them they read
         // from the left.
         var titles = new StackPanel();
-        titles.Children.Add(PageTitle(track, c, center: !beside, merge: false));
-        var details = columns.ShowAlbum ? new[] { (Text: track.Artist, Color: Look.Secondary), (Text: track.Album, Color: Look.Tertiary) }
-            : [(Text: string.Join(" · ", new[] { track.Artist, track.Album }.Where(text => text.Length > 0)), Color: Look.Secondary)];
-        foreach (var (text, color) in details.Where(detail => detail.Text.Length > 0))
+        var title = PageTitle(track, c, center: !beside, merge: false); titles.Children.Add(title);
+        var details = (columns.ShowAlbum ? new[] { (Text: track.Artist, Color: Look.Secondary), (Text: track.Album, Color: Look.Tertiary) }
+            : [(Text: string.Join(" · ", new[] { track.Artist, track.Album }.Where(text => text.Length > 0)), Color: Look.Secondary)]).Where(detail => detail.Text.Length > 0).ToList();
+        foreach (var (text, color) in details)
         {
             var line = UI.Fixed(text, c.Artist, c.ArtistLine, color); line.TextAlignment = beside ? TextAlignment.Left : TextAlignment.Center;
             ShowCutText(line, text); titles.Children.Add(line);
         }
-        if (columns.ShowEqualizer)
+        _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = barsWidth, Height = c.Equalizer, Color = EqualizerColor };
+        if (columns.EqualizerBelow)
         {
-            _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = MusicEqualizerWidth(c), Height = c.Equalizer, Color = EqualizerColor,
-                HorizontalAlignment = beside ? HorizontalAlignment.Left : HorizontalAlignment.Center, Margin = new Thickness(0, columns.EqualizerGap, 0, 0) };
+            _musicEqualizer.HorizontalAlignment = HorizontalAlignment.Center; _musicEqualizer.Margin = new Thickness(0, columns.EqualizerGap, 0, 0);
             titles.Children.Add(_musicEqualizer);
         }
+        else
+        {
+            _musicEqualizer.HorizontalAlignment = HorizontalAlignment.Right; _musicEqualizer.VerticalAlignment = VerticalAlignment.Top;
+            _musicEqualizer.Margin = new Thickness(0, barsTop, 0, 0);
+        }
+        // Without a lyrics column the titles reach the page's right edge, where the equalizer is: the title's top follows from
+        // what stands in the column, which is centred in the upper part's height.
+        double over = coverAbove ? artSize + c.MiddleGap : 0;
+        double titleTop = (columns.Height - over - c.TitleLine - details.Count * c.ArtistLine) / 2 + over;
+        bool titleMeetsBars = !lyricColumn && MeetsBars(titleTop, c.TitleLine);
+        if (titleMeetsBars && !beside) title.Margin = new Thickness(barsRoom, 0, barsRoom, 0);
         if (beside)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal };
             row.Children.Add(Art(sideArt, over: false));
-            titles.Width = Math.Max(0, columns.InfoWidth - sideArt - c.MiddleGap);
+            titles.Width = Math.Max(0, columns.InfoWidth - sideArt - c.MiddleGap - (titleMeetsBars ? barsRoom : 0));
             titles.Margin = new Thickness(c.MiddleGap, 0, 0, 0);
             titles.VerticalAlignment = VerticalAlignment.Center;
             row.Children.Add(titles); info.Children.Add(row);
         }
         else info.Children.Add(titles);
         upper.Children.Add(info);
+        if (!columns.EqualizerBelow) upper.Children.Add(_musicEqualizer);
         if (rise) RiseIn(info);
         var middle = new Grid { VerticalAlignment = VerticalAlignment.Center }; _musicInfo = middle;
         _musicMessage = UI.Fixed(message, c.Lyric, c.LyricLine, Look.Tertiary); ShowCutText(_musicMessage, message);
         _musicMessage.Visibility = message.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (!lyricColumn)
         {
-            _musicMessage.TextAlignment = TextAlignment.Center; middle.Margin = new Thickness(0, c.MiddleGap, 0, 0);
+            // The gap is the message's own, so it takes no room while there is none: the titles fill the part's height with the
+            // cover, and a gap kept for a message that is not there pushed the cover past the part's top.
+            _musicMessage.TextAlignment = beside ? TextAlignment.Left : TextAlignment.Center; _musicMessage.Margin = new Thickness(0, c.MiddleGap, 0, 0);
             middle.Children.Add(_musicMessage); info.Children.Add(middle); return;
         }
         double inset = Math.Min(c.MiddleGap, columns.Height / 4);
@@ -911,6 +938,9 @@ public partial class MainWindow
             Background = UI.Brush(Look.Hex("rowDivider")), IsHitTestVisible = false });
         middle.HorizontalAlignment = HorizontalAlignment.Left; middle.Width = columns.LyricsWidth; middle.Margin = new Thickness(columns.LyricsX, 0, 0, 0);
         upper.Children.Add(middle);
+        // The lyrics' column ends at the page's right edge: what is at the equalizer's height ends before it.
+        var clearOfBars = new Thickness(0, 0, barsRoom, 0);
+        if (MeetsBars((columns.Height - c.LyricLine) / 2, c.LyricLine)) _musicMessage.Margin = clearOfBars;
         var lyricsVisibility = message.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
         if (hasLyrics && synchronized)
         {
@@ -922,6 +952,13 @@ public partial class MainWindow
                 Backdrop = Look.MarqueeBackdrop, InkFade = Look.InkFade };
             lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
             _lyricsBelow = [.. Enumerable.Range(0, below).Select(_ => Dim())];
+            double lineTop = (columns.Height - columns.CurrentLine - (above + below) * c.LyricLine) / 2;
+            foreach (FrameworkElement line in lyrics.Children)
+            {
+                double lineHeight = ReferenceEquals(line, _lyricCurrent) ? columns.CurrentLine : c.LyricLine;
+                if (MeetsBars(lineTop, lineHeight)) line.Margin = clearOfBars;
+                lineTop += lineHeight;
+            }
             middle.Children.Add(lyrics);
         }
         else if (hasLyrics)
@@ -932,6 +969,7 @@ public partial class MainWindow
                 VerticalAlignment = VerticalAlignment.Center, Height = Math.Max(1, Math.Floor(columns.Height / c.LyricLine)) * c.LyricLine, CanContentScroll = false, Visibility = lyricsVisibility };
             // The viewport clip would turn the lyrics grayscale; they lie over the island's opaque surface.
             RenderOptions.SetClearTypeHint(text, PanelTheme.ClearType);
+            if (MeetsBars((columns.Height - lyrics.Height) / 2, lyrics.Height)) lyrics.Margin = clearOfBars;
             AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
         }
         middle.Children.Add(_musicMessage);
@@ -1116,15 +1154,15 @@ public partial class MainWindow
     private double CompactTextWidth(string text, double size) => text.Length == 0 ? 0
         : new FormattedText(text, System.Globalization.CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, Fonts.Face(UiFontRole.Panel, FontWeights.Normal), size,
             Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip).Width;
-    // The most content the middle text may widen the surface to: FollowScreenShare of the widest the style may be on this monitor (the
-    // screen, or the work area for the capsule), less the surface's insets.
+    // The most content the middle text may widen the surface to: the widest the style may be on this monitor (the screen, or the
+    // work area for the capsule, as when its width is set by hand), less the surface's insets.
     private double FollowContentLimit(CollapsedShape shape)
     {
         var style = shape.Style;
         var (monitor, work) = style == CompactStyle.Capsule ? (_screenMonitor, _screenWork) : (MonitorBoundsDip, WorkDip);
         double span = CollapsedGeometry.WidthRange(style, monitor, work, _scale).Max;
         double insets = CollapsedGeometry.SurfaceWidth(style, shape.Surface.Height, 1, _scale) - 1;
-        return double.IsFinite(span) && span > 0 ? Math.Max(0, span * CompactMusicLayout.FollowScreenShare - Math.Max(0, insets)) : double.PositiveInfinity;
+        return double.IsFinite(span) && span > 0 ? Math.Max(0, span - Math.Max(0, insets)) : double.PositiveInfinity;
     }
     // The collapsed lyric: the line, or the title without one, and for an instrumental when chosen (DeckSettings.MusicInstrumentalTitle).
     private string CompactLyricText(MediaTrack track, string line)
@@ -1310,8 +1348,12 @@ public partial class MainWindow
     // The surface moves to a new width for its middle text's length (SetExpanded, a content resize). The row is built at once for the
     // new width and centred in the surface, so the cover and the parts at the ends stood at their new places from the first frame and
     // the moving edges only uncovered or covered them. Instead each part starts where it was and travels with its end of the surface:
-    // the parts before the text and the text itself with the left end, the parts after it with the right end, on the surface's own
-    // curve; the text's room opens with them, so a longer line never runs under the parts after it. delta: the surface's change of width.
+    // the parts before the text with the left end, the parts after it with the right end, on the surface's own curve. The text
+    // itself does not travel: the two ends move by the same amount, so the middle of its room stays where it is, and the text,
+    // centred in its room, is in the middle of the room all through the move. (It used to travel with the left end: a shorter
+    // line stood at the left of the old room, the gap all on its right, and the surface seemed to draw in from the right alone.)
+    // A longer line shows as much as the room holds, from its middle outwards, so it never runs under the parts beside it.
+    // delta: the surface's change of width.
     private void SlideCompactRow(double delta, int duration, BrimDeck.Core.Notices.NoticeMotion.Track track, IEasingFunction easing)
     {
         if (duration <= 0 || !double.IsFinite(delta) || Math.Abs(delta) < .5 || _compactMarquee is not { } title
@@ -1321,14 +1363,16 @@ public partial class MainWindow
         double half = delta / 2;
         for (int i = 0; i < grid.Children.Count; i++)
         {
+            if (i == at) continue;
             var part = grid.Children[i];
-            var shift = new TranslateTransform(i <= at ? half : -half, 0);
+            var shift = new TranslateTransform(i < at ? half : -half, 0);
             var own = part.RenderTransform;
             part.RenderTransform = own is null || own.Value.IsIdentity ? shift : new TransformGroup { Children = { own, shift } };
             shift.BeginAnimation(TranslateTransform.XProperty, Timed(new DoubleAnimation { To = 0, EasingFunction = easing }, duration, track));
         }
         if (delta <= 0 || !double.IsFinite(title.Width) || !double.IsFinite(title.Height)) return;
-        var room = new RectangleGeometry(new Rect(0, 0, Math.Max(0, title.Width - delta), title.Height));
+        double held = Math.Max(0, title.Width - delta);
+        var room = new RectangleGeometry(new Rect((title.Width - held) / 2, 0, held, title.Height));
         title.Clip = room;
         var open = Timed(new RectAnimation { To = new Rect(0, 0, title.Width, title.Height), EasingFunction = easing }, duration, track);
         open.Completed += (_, _) => { if (ReferenceEquals(title.Clip, room)) title.Clip = null; };

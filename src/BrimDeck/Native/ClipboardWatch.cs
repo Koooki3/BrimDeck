@@ -11,7 +11,8 @@ using BrimDeck.Core;
 namespace BrimDeck.Native;
 
 // What one copy held, as read from the clipboard: text with its rich forms, or a picture encoded as PNG.
-internal sealed record ClipCopy(string Text, string Html, string Rtf, byte[]? Png, int PixelWidth, int PixelHeight, string Source);
+// Source: the name of the application that copied; SourcePath: its program file, when it can be told.
+internal sealed record ClipCopy(string Text, string Html, string Rtf, byte[]? Png, int PixelWidth, int PixelHeight, string Source, string SourcePath = "");
 
 // Tells when the clipboard changes (AddClipboardFormatListener on a message-only window) and reads what was copied. The change
 // notice arrives while the copying application may still hold the clipboard open, so the read waits a moment and tries a few
@@ -58,9 +59,9 @@ internal sealed class ClipboardWatch : IDisposable
         try
         {
             if (Private()) { _seen = sequence; return; }
-            string source = OwnerName();
+            var (source, path) = Owner();
             if (source.Length > 0 && _excluded(source)) { _seen = sequence; return; }
-            var copy = ReadCopy(source);
+            var copy = ReadCopy(source, path);
             // A newer copy arrived while this one was read: read again for that one.
             if (GetClipboardSequenceNumber() != sequence) { Retry(); return; }
             _seen = sequence;
@@ -71,7 +72,7 @@ internal sealed class ClipboardWatch : IDisposable
     }
     private void Retry() { if (++_tries < 4) _read.Start(); else _seen = GetClipboardSequenceNumber(); }
 
-    private static ClipCopy? ReadCopy(string source)
+    private static ClipCopy? ReadCopy(string source, string path)
     {
         var data = Clipboard.GetDataObject();
         if (data is null) return null;
@@ -79,9 +80,9 @@ internal sealed class ClipboardWatch : IDisposable
         if (data.GetDataPresent(DataFormats.FileDrop, false)) return null;
         string text = Text(data, DataFormats.UnicodeText) ?? "";
         if (text.Trim().Length == 0 && Picture(data) is { } picture)
-            return new ClipCopy("", "", "", picture.Png, picture.Width, picture.Height, source);
+            return new ClipCopy("", "", "", picture.Png, picture.Width, picture.Height, source, path);
         if (text.Trim().Length == 0 || text.Length > Shelf.MaxText) return null;
-        return new ClipCopy(text, Text(data, DataFormats.Html) ?? "", Text(data, DataFormats.Rtf) ?? "", null, 0, 0, source);
+        return new ClipCopy(text, Text(data, DataFormats.Html) ?? "", Text(data, DataFormats.Rtf) ?? "", null, 0, 0, source, path);
     }
     private static string? Text(IDataObject data, string format)
     {
@@ -144,12 +145,12 @@ internal sealed class ClipboardWatch : IDisposable
         }
         finally { CloseClipboard(); }
     }
-    private static string OwnerName()
+    private static (string Name, string Path) Owner()
     {
         var owner = GetClipboardOwner();
-        if (owner == IntPtr.Zero) return "";
+        if (owner == IntPtr.Zero) return ("", "");
         GetWindowThreadProcessId(owner, out uint pid);
-        return pid == 0 ? "" : AppIdentity.NameAndPath((int)pid).Name;
+        return pid == 0 ? ("", "") : AppIdentity.NameAndPath((int)pid);
     }
 
     public void Dispose()

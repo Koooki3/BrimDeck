@@ -364,7 +364,7 @@ public partial class MainWindow
                     row.Children.Add(text);
                     row.MouseEnter += (_, _) => text.Foreground = UI.Brush(Look.Accent);
                     row.MouseLeave += (_, _) => text.Foreground = UI.Brush(Look.Primary);
-                    row.MouseLeftButtonUp += (_, e) => { e.Handled = true; _app.Shelf.Paste(ShelfService.TextData(value), done => text.Text = value + (done ? Loc.T("  已粘贴", "  pasted") : Loc.T("  已复制", "  copied"))); };
+                    row.MouseLeftButtonUp += (_, e) => { e.Handled = true; _app.Shelf.Paste(ShelfService.TextData(value), result => text.Text = value + "  " + PasteWord(result)); };
                     forms.Children.Add(row);
                 }
                 panel.Children.Add(forms);

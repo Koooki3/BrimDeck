@@ -141,6 +141,55 @@ internal static class ExpandSnapTests
         }
         check($"Expand snap: just before the end the island and the page are where the end puts them ({jumps} of 2000 random moves step on the last frame)", jumps == 0);
 
+        // A surface at rest taking its content's width (a lyric line of another length, MusicLyricAutoWidth): what is centred in the
+        // island is the collapsed row, built for the end width, and not the open page. Given the row, the moving width keeps the row's
+        // parity: the row stays in the middle of the island from a quarter of the move on (the width it leaves has the old row's
+        // parity) and nothing steps on the last frame. Given an open page of the other parity, as SetExpanded gave it, the row
+        // stood half a pixel off the middle, rounded a pixel to one side or the other, and stepped on the last frame. The capsule's
+        // insets are a whole, even number of pixels at the default height (32 DIP at 100 to 200 percent); with two pixels more the
+        // layout rounds that half pixel the other way, and the row moves within the island on the last frame.
+        int resizes = 0, offMiddle = 0, lastSteps = 0, toAndFro = 0, offMiddleOnPage = 0, lastStepsOnPage = 0, toAndFroOnPage = 0;
+        foreach (double scale in new[] { 1d, 1.25, 1.5, 1.75, 2 })
+            for (int fromPixels = 300; fromPixels <= 330; fromPixels += 3)
+                for (int change = -12; change <= 12; change++)
+                foreach (double insets in new[] { 32 * scale, 32 * scale + 2 })
+                {
+                    if (Math.Abs(change) < 3) continue;
+                    resizes++;
+                    double toPixels = fromPixels + change, rowPixels = toPixels - insets;
+                    double w0 = fromPixels / scale, w1 = toPixels / scale, row = rowPixels / scale;
+                    double x0 = (900 - fromPixels / 2d) / scale, x1 = (900 - toPixels / 2d) / scale;
+                    // The frames of a 300 ms move at 60 Hz, from a quarter of it on: whether the row's middle leaves the island's,
+                    // whether the row moves within the island on the last frame, and how often its place on screen turns back.
+                    (bool Off, bool Step, int Turns) Follow(double page)
+                    {
+                        bool off = false; double last = 0, before = 0;
+                        var places = new List<double>();
+                        for (int frame = 5; frame <= 18; frame++)
+                        {
+                            double e = frame == 18 ? 1 : Curves.Bezier(.45, 0, .25, 1, frame / 18d);
+                            var place = Place(SurfaceSnap.Left(x0, x1, w0, w1, e, scale, page), SurfaceSnap.Width(w0, w1, e, scale, page), row, scale);
+                            if (Math.Abs(place.Page + rowPixels / 2 - (place.Left + place.Right) / 2) > 1e-6) off = true;
+                            before = last; last = place.Page - place.Left;
+                            places.Add(place.Page);
+                        }
+                        return (off, Math.Abs(last - before) > 1e-6, Reversals(places));
+                    }
+                    var onRow = Follow(row);
+                    if (onRow.Off) offMiddle++;
+                    if (onRow.Step) lastSteps++;
+                    if (onRow.Turns > 0) toAndFro++;
+                    // An open page whose width in pixels has the other parity.
+                    var onPage = Follow((toPixels + 201) / scale);
+                    if (onPage.Off) offMiddleOnPage++;
+                    if (onPage.Step) lastStepsOnPage++;
+                    if (onPage.Turns > 0) toAndFroOnPage++;
+                }
+        check($"Expand snap: a collapsed row keeps the middle of a surface that takes its content's width (of {resizes} moves, {offMiddle} leave it, {lastSteps} step on the last frame, {toAndFro} step to and fro)",
+            offMiddle == 0 && lastSteps == 0 && toAndFro == 0);
+        check($"Expand snap: on an open page's parity the model finds the row off the middle, stepping on the last frame and to and fro ({offMiddleOnPage}, {lastStepsOnPage} and {toAndFroOnPage} of {resizes} moves)",
+            offMiddleOnPage == resizes && lastStepsOnPage > 0 && toAndFroOnPage > 0);
+
         // A width that does not change does not move: no parity step in the middle of a move that only shifts the island.
         check("Expand snap: a width that stays the same stays the same, and the edge follows the curve",
             Enumerable.Range(1, 99).All(i => SurfaceSnap.Width(520, 520, i / 100d, 1.5, 520) == 520 && Math.Abs(SurfaceSnap.Left(240, 200, 520, 520, i / 100d, 1.5, 520) - (240 - 40 * i / 100d)) <= 1 / 1.5));
@@ -159,6 +208,11 @@ internal static class ExpandSnapTests
         check("Expand snap: the finder rejects the plain animations the panel had",
             !Uses(text.Replace("new SnappedWidthAnimation", "new DoubleAnimation").Replace("new SnappedLeftAnimation", "new ThicknessAnimation"))
             && !Uses("Animate(Island, WidthProperty, width, duration, surface, settle); HoverZone.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { To = new Thickness(left, 0, 0, 0) }, duration, surface));"));
+        // Both take what is centred in the island: the collapsed row while the surface at rest takes its content's width, else the page.
+        check("Expand snap: a content resize gives the snapped animations the collapsed row's width, every other move the page's",
+            Regex.IsMatch(text, @"double centred = resizing\b[^;]*\? Compact\.Width : pageWidth;")
+            && Regex.IsMatch(text, @"new SnappedWidthAnimation \{ To = width, Page = centred,")
+            && Regex.IsMatch(text, @"new SnappedLeftAnimation \{ To = left, FromWidth = fromWidth, ToWidth = width, Page = centred,"));
     }
 
     private static bool Uses(string text) =>

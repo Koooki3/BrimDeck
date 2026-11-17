@@ -75,6 +75,23 @@ static class SystemMonitorTests
         var cpu = new CpuSample([core, core with { Id = 1, Group = 1, Usage = .1 }, core with { Id = 2, Group = 1, Usage = .3 }], 3000d);
         check("Monitor CPU usage is the cores' mean", Math.Abs(cpu.Usage - .3) < 1e-9 && cpu.GroupCount == 2 && cpu.Groups.Select(g => g.Count).SequenceEqual([1, 2]));
         check("Monitor CPU without cores", new CpuSample([], 0d) is { Usage: 0, GroupCount: 0, Groups.Count: 0 });
+        string previousLanguage = Loc.Language;
+        try
+        {
+            var perfThread = new CoreSample(0, 0, CoreTier.Performance, 1, .47, 3410d, 4700, Thread: 2);
+            var effCore = new CoreSample(12, 1, CoreTier.Efficiency, 3, .18, Reading<double>.Unavailable("x"), null);
+            var logicalCore = new CoreSample(3, 0, CoreTier.Unknown, 4, .25, Reading<double>.Unavailable("x"), null);
+            Loc.Use(Loc.Chinese);
+            bool zh = perfThread.Describe() == "性能核 1 · 线程 2 · 47% · 3.41 GHz"
+                && effCore.Describe() == "能效核 3 · 18%"
+                && logicalCore.Describe() == "逻辑处理器 4 · 25%";
+            Loc.Use(Loc.English);
+            bool en = perfThread.Describe() == "Performance core 1 · thread 2 · 47% · 3.41 GHz"
+                && effCore.Describe() == "Efficiency core 3 · 18%"
+                && logicalCore.Describe() == "Logical processor 4 · 25%";
+            check("Monitor core tooltips distinguish cores and threads", zh && en);
+        }
+        finally { Loc.Use(previousLanguage); }
     }
 
     private static void Folding(Action<string, bool> check)
