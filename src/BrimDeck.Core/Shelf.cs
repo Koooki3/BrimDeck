@@ -105,8 +105,9 @@ public sealed class ShelfData
     }
 }
 
-// What dragging files out of the file transfer does (DeckSettings.TransferDragOut). Move lets the target move the originals; a
-// target that only takes copies (a chat window, a browser) still copies them. Files moved away leave the list.
+// What dragging files out of the file transfer with the left button does (DeckSettings.TransferDragOut); the right button does
+// the other. Move lets the target move the originals; a target that only takes copies (a chat window, a browser) still copies
+// them. Files moved away leave the list.
 public enum TransferDragOut { Copy, Move }
 
 // How long the history is kept past an exit (DeckSettings.ClipboardKeepFor): 1, 7 or 30 days.

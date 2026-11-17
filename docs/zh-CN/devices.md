@@ -1,6 +1,6 @@
 # 设备电量支持
 
-设备电量页显示已连接的无线鼠标、键盘、耳机、手柄和触控笔的电量；刘海与胶囊也可以显示。相关设置在“设置 › 显示与设备”中。
+设备电量页显示已连接的无线鼠标、键盘、耳机、手柄、触控笔和手机的电量；刘海与胶囊也可以显示。相关设置在“设置 › 显示与设备”中。
 
 BrimDeck 只读取电量：不配对、不断开，也不改动任何设备与 Windows 设置，不需要管理员权限，也不安装驱动。只在设备电量页打开、刘海或胶囊显示设备电量，或“设置 › 显示与设备”打开时读取。
 
@@ -9,6 +9,7 @@ BrimDeck 只读取电量：不配对、不断开，也不改动任何设备与 W
 | 连接方式 | 读取方法 | 说明 |
 | --- | --- | --- |
 | 蓝牙 | Windows 自己读取的电量，与“Windows 设置 › 蓝牙和其他设备”中显示的一致；蓝牙低功耗设备另外读取其电池服务 | 只列出已连接的设备 |
+| 手机 | 优先读取 Phone Link 在本机保存的“开始”面板卡片（电量与充电状态）；卡片 30 分钟内直接采信，30 分钟至 2 小时之间需 Phone Link 仍在运行，超过 2 小时或卡片报告手机已断开时，回退到蓝牙 | 只读该卡片，不通过 Phone Link 联网；只在手机报告了电量时列出 |
 | AirPods、Beats | 耳机出盒或开盖时发出的蓝牙广播 | 分别显示左右耳与充电盒 |
 | 2.4G 接收器或数据线 | 各品牌设备自己的协议 | 见下方品牌表 |
 | 游戏手柄 | Windows 的游戏控制器接口，以及部分品牌自己的协议 | 见下方品牌表 |
@@ -25,7 +26,7 @@ BrimDeck 只读取电量：不配对、不断开，也不改动任何设备与 W
 | --- | --- |
 | 罗技、迈从（MCHOSE）、ATK、Endgame Gear、VAXEE、雷柏（Rapoo）、Keychron、Finalmouse | 整个品牌 |
 | 雷蛇、华硕 ROG、赛睿（SteelSeries）、海盗船（Corsair）、HyperX | 已知的无线型号 |
-| VXE、VGN、Pulsar、LAMZU、G-Wolves、WLmouse、Ninjutso、LINGBAO、NZXT、HECATE、达尔优（Dareu）、英菲克（Inphic）、黑爵（AJAZZ）、Attack Shark、多彩（DELUX）、Glorious、Darmoshark、前行者（EWEADN）、狼蛛（AULA）、雷神 ML903、Scyrox、Cougar、红龙（Redragon）、Hitscan、iRocks、Vancer、Incott、Ryunix、京东京造 JZM5、RIDLAG、摩豹（Motospeed）X6 | 已知型号 |
+| VXE、VGN、Pulsar、LAMZU、G-Wolves、WLmouse、Ninjutso、LINGBAO、NZXT、HECATE、达尔优（Dareu）、英菲克（Inphic）、黑爵（AJAZZ）、Attack Shark、多彩（DELUX）、Glorious、Darmoshark、前行者（EWEADN）、狼蛛（AULA）、雷神 ML903、玄派 玄熊猫 P1、Scyrox、Cougar、红龙（Redragon）、Hitscan、iRocks、Vancer、Incott、Ryunix、京东京造 JZM5、RIDLAG、摩豹（Motospeed）X6 | 已知型号 |
 
 **键盘**
 

@@ -104,6 +104,12 @@ internal static class FullscreenRuleTests
             && ScreenPolicy.WhatChanged(ScreenContext.Maximized, "app", "q", ScreenContext.Maximized, "app", "p") == ScreenPolicy.ForegroundChange.App);
         check("What changed: identical readings change nothing",
             ScreenPolicy.WhatChanged(ScreenContext.Desktop, "app", "p", ScreenContext.Desktop, "app", "p") == ScreenPolicy.ForegroundChange.None);
+        // The panel read the lock screen's full screen for itself as it started and no poll saw it: the first poll, on the desktop
+        // like the host's own start, still reports the change, and a context the panel read that still holds reports none.
+        check("What changed: a context the panel read for itself and no poll saw is a context change",
+            ScreenPolicy.WhatChanged(ScreenContext.Desktop, "", "", ScreenContext.Desktop, "", "", ScreenContext.Borderless) == ScreenPolicy.ForegroundChange.Context
+            && ScreenPolicy.WhatChanged(ScreenContext.Desktop, "app", "p", ScreenContext.Desktop, "app", "p", ScreenContext.Desktop) == ScreenPolicy.ForegroundChange.None
+            && ScreenPolicy.WhatChanged(ScreenContext.Desktop, "app2", "p", ScreenContext.Desktop, "app", "p", ScreenContext.Desktop) == ScreenPolicy.ForegroundChange.App);
         var many = new DeckSettings { FullscreenRules = Enumerable.Range(0, 40).Select(i => new FullscreenRule("App" + i)).ToList() };
         many.Normalize();
         check("The rule list is capped", many.FullscreenRules.Count == AppPresets.MaximumFullscreenExceptions);
@@ -131,5 +137,22 @@ internal static class FullscreenRuleTests
         check("A background window its app's rule says nothing about takes the global rule",
             browser.Behavior(ScreenContext.BackgroundFullscreen, "firefox", "", ScreenContext.Maximized) == WindowBehavior.Line
             && browser.Behavior(ScreenContext.BackgroundFullscreen, "chrome", "", ScreenContext.Borderless) == WindowBehavior.Hide);
+        // A window over the panel's place: off by default, the global choice everywhere, the app rules say nothing about it.
+        check("A window over the panel keeps the style by default", new DeckSettings().Behavior(ScreenContext.Occupied, "Any", "") == WindowBehavior.Normal);
+        var occupied = new DeckSettings
+        {
+            Occupied = WindowBehavior.Line, AlwaysOnTop = false,
+            FullscreenRules = [new FullscreenRule("chrome") { Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal }]
+        };
+        check("A window over the panel follows the global choice, whatever its app's rule",
+            occupied.Behavior(ScreenContext.Occupied) == WindowBehavior.Line
+            && occupied.Behavior(ScreenContext.Occupied, "chrome", "") == WindowBehavior.Line
+            && occupied.Behavior(ScreenContext.Desktop, "chrome", "") == WindowBehavior.Normal);
+        var savedChoice = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { Occupied = WindowBehavior.Hide }))!;
+        var broken = JsonSerializer.Deserialize<DeckSettings>("""{"Occupied":7}""")!;
+        broken.Normalize();
+        check("The choice for a window over the panel is saved, and an unknown one falls back to keeping the style",
+            savedChoice.Occupied == WindowBehavior.Hide && broken.Occupied == WindowBehavior.Normal
+            && JsonSerializer.Deserialize<DeckSettings>("{}")!.Occupied == WindowBehavior.Normal);
     }
 }

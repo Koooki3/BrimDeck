@@ -32,7 +32,7 @@ Under "When expanded", "What the page shows" has a chip for each reading, clicke
 
 ## CPU and GPU
 
-- CPU usage is worked out from the time the processor is busy, as Task Manager does from Windows 11 24H2.
+- CPU usage is worked out from the time the processor is busy (including WSL2 and virtual machines when Hyper-V is on), as Task Manager does from Windows 11 24H2.
 - With more than one graphics card, the discrete one shows by default. Click the large GPU reading on the page to show the next card, or choose one under General › GPU.
 - GPU usage comes from the graphics driver by default (NVIDIA, AMD, Intel), which matches nvidia-smi and HWiNFO; where the driver gives no reading, it is worked out as Task Manager does. If the driver's reading is wrong, choose Windows under Sources › GPU usage.
 

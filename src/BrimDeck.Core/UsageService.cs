@@ -1208,7 +1208,10 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     // sources), its Start Plan event allowances and ZCode's daily MCP allowance. Each part is shown when available.
     private async Task ReadZCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {
-        var account = ZCodeUsage.ReadAccount(_locations.ZCodeHome);
+        ZCodeAccount? account;
+        try { account = ZCodeUsage.ReadAccount(_locations.ZCodeHome); }
+        // Credentials that cannot be opened are sent nowhere, and the reason is shown.
+        catch (InvalidDataException ex) { snapshot.StatusLabel = Loc.T("数据不可用", "Data unavailable"); snapshot.Status = ex.Message; return; }
         if (account is null || account.ApiKey.Length == 0 && account.Jwt.Length == 0) { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请先登录 ZCode", "Sign in to ZCode first."); return; }
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(10));
         // Each part keeps its last good result for the same account, so a failed or slow read never hides it.
@@ -1232,12 +1235,18 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 "https://zcode.z.ai/api/v1/zcode-plan/billing/balance", ("X-Device-Mid", account.DeviceMid))
             : Task.FromResult<JsonElement?>(null);
         ScriptSession? session = null; ProviderResult? coding = null; Exception? failure = null;
-        var codingOwner = Owner(account.Family + ":" + account.ApiKey);
-        if (account.ApiKey.Length > 0)
+        // The Coding Plan is read with the plan's API key where ZCode stores one, as older versions do. ZCode 3.18.2 stores none
+        // and asks with a short-lived token it gets for the sign-in; the quota request accepts the sign-in itself, so that is
+        // used and no token is created. Like ZCode, the sign-in goes bare to 智谱 and as a Bearer token to Z.ai.
+        var planKey = account.ApiKey.Length > 0 ? account.ApiKey : account.AccessToken.Length == 0 ? "" : account.Family == "zai" ? "Bearer " + account.AccessToken : account.AccessToken;
+        var codingOwner = Owner(account.Family + ":" + planKey);
+        if (planKey.Length > 0)
         {
-            session = new ScriptSession(_http, new AppEntry { QuotaSource = account.Family == "zai" ? ProviderId.GlmGlobal : ProviderId.GlmChina }, account.ApiKey, now, deadline.Token);
+            session = new ScriptSession(_http, new AppEntry { QuotaSource = account.Family == "zai" ? ProviderId.GlmGlobal : ProviderId.GlmChina }, planKey, now, deadline.Token);
             try { coding = await Task.Run(session.RunAsync, deadline.Token); _zcodeCoding = (codingOwner, coding, now); }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { failure = ex; }
+            // Asked with the sign-in, an account without a Coding Plan is answered without a quota: that is no failure.
+            if (failure is not null && account.ApiKey.Length == 0 && session.Answered && session.FailureStatus is null) failure = null;
         }
         (string Label, string Status)? codingFailure = failure is null || session is null ? null : session.FailureStatus switch
         {
@@ -1255,8 +1264,15 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var mcp = mcpRoot is { } mcpValue ? ZCodeUsage.McpMetric(mcpValue) : null;
         if (coding is null && start.Metrics.Count == 0 && mcp is null)
         {
-            (snapshot.StatusLabel, snapshot.Status) = codingFailure ?? (startRequested && startRoot is null
-                ? (Loc.T("读取超时", "Timed out"), Loc.T("ZCode 服务响应较慢，稍后自动重试", "The ZCode service is responding slowly. Retrying automatically later."))
+            // Without a Start Plan result, the request that finished last says why; none has finished while the service is still answering.
+            (snapshot.StatusLabel, snapshot.Status) = codingFailure ?? (startRequested && startRoot is null ? _zcodeStart.Error switch
+            {
+                HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }
+                    => (Loc.T("登录已失效", "Sign-in expired"), Loc.T("ZCode 的登录已失效，请在 ZCode 中重新登录", "The ZCode sign-in has expired. Sign in again in ZCode.")),
+                null or OperationCanceledException
+                    => (Loc.T("读取超时", "Timed out"), Loc.T("ZCode 服务响应较慢，稍后自动重试", "The ZCode service is responding slowly. Retrying automatically later.")),
+                _ => (Loc.T("暂不可用", "Unavailable"), Loc.T("ZCode 服务暂时不可用，稍后自动重试", "The ZCode service is temporarily unavailable. Retrying automatically later."))
+            }
                 : (Loc.T("未连接", "Not connected"), Loc.T("ZCode 账户没有可用的 Coding Plan 或 Start Plan", "The ZCode account has no active Coding Plan or Start Plan.")));
             return;
         }

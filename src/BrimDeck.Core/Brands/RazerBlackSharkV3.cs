@@ -1,8 +1,8 @@
 namespace BrimDeck.Core;
 
-// The Razer BlackShark V3 on its 2.4 GHz dongle, 1532:057A (Razer's id is shared, so only this product), on its vendor
-// collection: usage page 0xFF14 usage 1, interface 5, 64-byte frames with report id 02. It answers neither the PA frames of
-// the 2023 BlackShark nor Razer's 90-byte feature reports. A frame: 02 at 0, the status at 1 (02 in a reply), transaction 0x60
+// The Razer BlackShark V3 (057A 2.4 GHz dongle, 0579 USB-C cable) and V3 Pro (0577 2.4 GHz dongle, 0576 USB-C cable; OpenRazer
+// #2567/#2794/#2838 facts only), on their vendor collection: usage page 0xFF14 usage 1, interface 5, 64-byte frames with report id 02.
+// It answers neither the PA frames of the 2023 BlackShark nor Razer's 90-byte feature reports. A frame: 02 at 0, the status at 1 (02 in a reply), transaction 0x60
 // at 2, 4 + the argument count at 6, the direction at 9 (0x80 a query, 0x00 a wake), the class at 10 (0x21 the battery, 0x2A
 // charging, 0x02 the first wake), 0x00 (a request), 0x01 (a reply) or 0x02 (a push) at 11, the argument count at 12, the value
 // at 13, and the XOR of bytes 0 to 61 at 62. A value of 0xFF is "not ready" (the link not up yet). Synapse sends two wake
@@ -17,7 +17,7 @@ namespace BrimDeck.Core;
 [BrandFamilies]
 public static class RazerBlackSharkV3
 {
-    public const int Vendor = 0x1532, Dongle = 0x057A;
+    public const int Vendor = 0x1532, Cable = 0x0579, Dongle = 0x057A, ProCable = 0x0576, ProDongle = 0x0577;
     public const byte Battery = 0x21, Charging = 0x2A, Init = 0x02;
     private const byte Query = 0x80, Wake = 0x00;
 
@@ -38,7 +38,7 @@ public static class RazerBlackSharkV3
         return xor == r[62] && r[13] is > 0 and <= 100 ? new(r[13]) : null;
     }
 
-    private static bool Takes(HidShape s) => s.Vendor == Vendor && s.Product == Dongle && s.UsagePage == 0xFF14 && s.Usage == 0x0001
+    private static bool Takes(HidShape s) => s.Vendor == Vendor && s.Product is Cable or Dongle or ProCable or ProDongle && s.UsagePage == 0xFF14 && s.Usage == 0x0001
         && s.Interface is 5 or -1 && s.OutputLength >= 64 && s.InputLength >= 64;
 
     public static IEnumerable<BrandFamily> Families =>
@@ -48,6 +48,6 @@ public static class RazerBlackSharkV3
             {
                 Before = [Frame(Init, Wake), Frame(Charging, Wake), Frame(Charging)], GapMs = 50, TimeoutMs = 1000, Attempts = 1, MinIntervalMs = 300_000
             }])
-        { Kind = _ => DeviceKind.Headphones, Prefix = "razer-headset" },
+        { Kind = _ => DeviceKind.Headphones, Prefix = "razer-headset", DisplayName = s => s.Product is ProCable or ProDongle ? "Razer BlackShark V3 Pro" : "Razer BlackShark V3" },
     ];
 }
