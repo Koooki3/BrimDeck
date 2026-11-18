@@ -133,8 +133,9 @@ public partial class MainWindow
 
     private async void SampleGlass(object? sender, EventArgs e)
     {
+        var monitorHandle = MonitorHandle;
         if (!_glassActive || _glassReading || _glassDark is not { } dark
-            || WindowsHost.MonitorScreen(MonitorHandle) is not { Bounds: var monitor }) return;
+            || WindowsHost.MonitorScreen(monitorHandle) is not { Bounds: var monitor }) return;
         _glassReading = true;
         long generation = _glassGeneration;
         var bounds = _glassBounds;
@@ -145,7 +146,10 @@ public partial class MainWindow
         {
             double scale = VisualTreeHelper.GetDpi(Island).DpiScaleX;
             var reading = await Task.Run(() => probe.Read(bounds, screen, (int)(24 * scale), (int)(40 * scale)));
-            if (!_glassActive || generation != _glassGeneration || !ReferenceEquals(sourceLook, Look) || _glassBounds != bounds || reading is not { } sample) return;
+            if (reading is not { } sample || !_glassActive || generation != _glassGeneration
+                || !ReferenceEquals(sourceLook, Look) || sourceLook.Current.IsDark != dark || _glassBounds != bounds
+                || MonitorHandle != monitorHandle || WindowsHost.MonitorScreen(monitorHandle)?.Bounds != monitor
+                || VisualTreeHelper.GetDpi(Island).DpiScaleX != scale) return;
             double openness = _expanded ? 1 : 0;
             long now = Environment.TickCount64;
             if (UpdateAutomaticGlass(sample, now)) return;

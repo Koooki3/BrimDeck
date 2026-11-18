@@ -73,28 +73,33 @@ internal sealed class AcrylicProbe
         bool sameGeometry = _layout.Island == island && _layout.Display == display
             && _layout.Gap == gap && _layout.Band == band;
         IntPtr memory = CreateCompatibleDC(screen);
+        // StretchBlt writes at the top left. Reuse one small bitmap for all four strips; the unused
+        // pixels outside each strip's grid are ignored when reading the fixed-stride DIB.
+        IntPtr bitmap = memory == IntPtr.Zero ? IntPtr.Zero : CreateCompatibleBitmap(screen, Cells, Cells);
         try
         {
+            if (bitmap == IntPtr.Zero) { _lastCount = 0; return null; }
+            SetStretchBltMode(memory, Halftone);
+            SetBrushOrgEx(memory, 0, 0, IntPtr.Zero);
             for (int i = 0; i < strips.Length; i++)
             {
                 var strip = strips[i];
                 if (strip.IsEmpty) continue;
                 var (w, h) = Grid(strip.Width, strip.Height);
-                IntPtr bitmap = CreateCompatibleBitmap(screen, w, h);
                 IntPtr old = SelectObject(memory, bitmap);
-                SetStretchBltMode(memory, Halftone);
-                SetBrushOrgEx(memory, 0, 0, IntPtr.Zero);
+                if (old == IntPtr.Zero) continue;
                 bool ok = StretchBlt(memory, 0, 0, w, h, screen, strip.X, strip.Y, strip.Width, strip.Height, SrcCopy);
                 SelectObject(memory, old);
                 if (ok)
                 {
-                    var info = new BitmapInfo { Size = 40, Width = w, Height = -h, Planes = 1, BitCount = 32 };
+                    var info = new BitmapInfo { Size = 40, Width = Cells, Height = -Cells, Planes = 1, BitCount = 32 };
                     if (GetDIBits(memory, bitmap, 0, (uint)h, data, ref info, 0) == h)
                     {
                         valid |= 1 << i;
-                        for (int cell = 0; cell < w * h; cell++)
+                        for (int row = 0; row < h; row++)
+                        for (int x = 0, offset = row * Cells * 4; x < w; x++, offset += 4)
                         {
-                            byte b = data[cell * 4], g = data[cell * 4 + 1], r = data[cell * 4 + 2];
+                            byte b = data[offset], g = data[offset + 1], r = data[offset + 2];
                             int at = count * 3;
                             if (sameGeometry && count < _lastCount
                                 && Math.Abs(r - pixels[at]) + Math.Abs(g - pixels[at + 1]) + Math.Abs(b - pixels[at + 2]) > 24)
@@ -107,10 +112,14 @@ internal sealed class AcrylicProbe
                         }
                     }
                 }
-                DeleteObject(bitmap);
             }
         }
-        finally { DeleteDC(memory); ReleaseDC(IntPtr.Zero, screen); }
+        finally
+        {
+            if (memory != IntPtr.Zero) DeleteDC(memory);
+            if (bitmap != IntPtr.Zero) DeleteObject(bitmap);
+            ReleaseDC(IntPtr.Zero, screen);
+        }
         if (count == 0) { _lastCount = 0; return null; }
         // The earlier pixels are replaced as we read. Only compare complete samples with matching strip coverage.
         var layout = (island, display, gap, band, valid);

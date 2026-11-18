@@ -42,8 +42,7 @@ public sealed partial class SettingsWindow
         var users = PanelTheme.UserThemes;
         ThemeSection(Loc.T("基础", "Basics"));
         ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
-            (PanelThemes.GlassAuto, Loc.T("液态玻璃 Beta · 自动", "Liquid Glass Beta · Auto"), PanelTheme.Find(PanelThemes.GlassAuto)),
-            .. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)], chosen);
+            .. WithGlassAuto(PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card).ToList())], chosen);
         ThemeSection(Loc.T("更多主题", "More themes"));
         ThemeCards([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Extension).Select(Card)], chosen);
         CustomSection(users, chosen);
@@ -52,6 +51,13 @@ public sealed partial class SettingsWindow
         var cards = new[] { PanelThemes.SystemId, PanelThemes.GlassAuto }.Concat(PanelThemes.BuiltIns.Select(t => t.Id)).Concat(users.Where(t => t.Usable).Select(t => t.Id)).ToHashSet();
         foreach (var key in _themePreviews.Keys.Where(key => !cards.Contains(key.Card) || key.Language != Loc.Language).ToList()) _themePreviews.Remove(key);
         static (string Id, string Name, PanelThemeInfo Theme) Card(PanelThemeInfo theme) => (theme.Id, theme.DisplayName, theme);
+    }
+
+    private static List<(string Id, string Name, PanelThemeInfo Theme)> WithGlassAuto(List<(string Id, string Name, PanelThemeInfo Theme)> basics)
+    {
+        basics.RemoveAll(card => card.Id is PanelThemes.GlassLight or PanelThemes.GlassDark);
+        basics.Add((PanelThemes.GlassAuto, Loc.T("液态玻璃", "Liquid Glass"), PanelTheme.Find(PanelThemes.GlassAuto)));
+        return basics;
     }
 
     // A section title with a divider under it, as the other pages' groups start.
@@ -131,10 +137,11 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("当前主题", "Current theme"));
         var rows = new List<FrameworkElement>();
         string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")") : theme.DisplayName;
-        if (automaticGlass) title = Loc.T("液态玻璃 Beta · 自动", "Liquid Glass Beta · Auto");
+        if (automaticGlass) title = Loc.T("液态玻璃 Beta", "Liquid Glass Beta");
         rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
-        if (automaticGlass) description = Loc.T("根据面板周围的亮度选择深浅，展开时保持当前配色。", "Matches the brightness around the panel and holds the current appearance while expanded.");
+        if (automaticGlass) description = Loc.T("随背景调整玻璃衬底。面板展开时，文字配色保持稳定。",
+            "Adapts the glass veil to the backdrop and keeps the text palette stable while expanded.");
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
         if (theme.BuiltIn && PanelThemes.Resolve(theme).Effects.Glass is not null)
         {

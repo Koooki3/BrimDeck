@@ -1,6 +1,6 @@
 # Panel theme guide
 
-Liquid Glass Beta includes fixed dark and light themes and an Auto choice. Auto uses the brightness around the collapsed panel and keeps its current appearance while expanded. Before a sample is available, it follows the Windows app theme. Glass transparency adjusts the material, subject to the contrast required for text.
+Choose **Liquid Glass** to let the backdrop guide its appearance. The expanded panel keeps its text palette stable while the veil adapts. Before the first sample, the palette follows the Windows app theme. The transparency slider controls how much of the backdrop shows through while keeping a veil for readable text.
 
 The Notch, Capsule and Indicator, the quota notice, the expanded panel and its pop-ups are colored by a "panel theme". Choose it in **Settings › Panel theme**. There are three kinds:
 

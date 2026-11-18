@@ -977,7 +977,16 @@ public sealed class DeckSettings
         CloseDelay = Math.Clamp(CloseDelay, 0, 2000);
         AnimationDuration = Math.Clamp(AnimationDuration, 100, 1000);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
-        PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
+        var previousTheme = PanelThemes.NormalizeId(PanelTheme);
+        PanelTheme = previousTheme switch
+        {
+            PanelThemes.GlassLight or PanelThemes.GlassDark => PanelThemes.GlassAuto,
+            "" => PanelThemes.Dark,
+            _ => previousTheme
+        };
+        if (PanelTheme != previousTheme && PanelTheme == PanelThemes.GlassAuto
+            && !ThemeChoices.ContainsKey(PanelTheme) && ThemeChoices.TryGetValue(previousTheme, out var legacyGlass))
+            ThemeChoices[PanelTheme] = legacyGlass.Copy();
         // "system" or two valid, different times; anything else keeps the theme's own choice.
         ThemeDaylight = PanelThemes.NormalizeDaylightSetting(ThemeDaylight);
         Language = Loc.Normalize(Language);

@@ -46,5 +46,18 @@ internal static class GlassMaterialTests
         settings.Normalize();
         var copy = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(settings))!;
         check("Glass transparency: settings are clamped and survive a save", copy.GlassTransparency == 100);
+        foreach (string id in new[] { PanelThemes.GlassLight, PanelThemes.GlassDark })
+        {
+            var legacy = new DeckSettings
+            {
+                PanelTheme = id, GlassTransparency = 67,
+                ThemeChoices = new() { [id] = new ThemeChoices { ClockCustomColor = "#123456" } }
+            };
+            legacy.Normalize();
+            check($"Legacy glass selection {id} migrates to the unified entry",
+                legacy.PanelTheme == PanelThemes.GlassAuto && legacy.GlassTransparency == 67
+                && legacy.ThemeChoices.ContainsKey(id)
+                && legacy.ThemeChoices.TryGetValue(PanelThemes.GlassAuto, out var migrated) && migrated.ClockCustomColor == "#123456");
+        }
     }
 }
