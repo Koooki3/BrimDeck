@@ -101,5 +101,31 @@ static class BrandFamilyTests
             && BrimDeck.Core.Betop.Battery([0x02, 0x15, 0x00, 0x00, 0x50]) is null
             && BrimDeck.Core.Betop.Battery([0x02, 0x15, 0x00, 0x00, 0x00]) is null && BrimDeck.Core.Betop.Battery([0x02, 0x15, 0x99, 0x00, 0x50]) is null
             && BrimDeck.Core.Betop.Battery([0x02, 0x12, 0x40, 0x00, 0x50]) is null);
+
+        // #348: the KP20's receiver 20BC:5128 scrambles every byte after the report id (BETOP's client 2.6.2).
+        var kp20 = Shape(0x20BC, 0x5128, 0x00FF, 3, outputIds: [0x02]);
+        check("BETOP: the scrambling models get only the scrambled status read, 5125/5127 scrambled then plain, the others only plain",
+            BrandFamilies.Find(kp20) is { } scrambled && scrambled.Ways.Select(way => way.Name).SequenceEqual(["betop.status.scrambled"])
+            && BrandFamilies.Find(Shape(0x20BC, 0x5126, 0x00FF, 3, outputIds: [0x02])) is { } cable && cable.Ways.Select(way => way.Name).SequenceEqual(["betop.status.scrambled"])
+            && BrandFamilies.Find(Shape(0x20BC, 0x5127, 0x00FF, 3, outputIds: [0x02])) is { } both && both.Ways.Select(way => way.Name).SequenceEqual(["betop.status.scrambled", "betop.status"])
+            && BrandFamilies.Find(Shape(0x20BC, 0x515C, 0x00FF, 3, outputIds: [0x02])) is { } plain && plain.Ways.Select(way => way.Name).SequenceEqual(["betop.status"]));
+        check("BETOP: 0x20DD only for the products BETOP's client lists",
+            BrandFamilies.Find(Shape(0x20DD, 0x5128, 0x00FF, 3, outputIds: [0x02])) is { Family.Brand: "BETOP", Ways.Count: 1 }
+            && BrandFamilies.Find(Shape(0x20DD, 0x5130, 0x00FF, 3, outputIds: [0x02])) is { Family.Brand: "BETOP", Ways.Count: 1 }
+            && BrandFamilies.Find(Shape(0x20DD, 0x1234, 0x00FF, 3, outputIds: [0x02])) is null);
+        check("BETOP: the scrambling table, its inverse, and the KP20's scrambled status request",
+            BrimDeck.Core.Betop.Scramble(0x15) == 0xAD && BrimDeck.Core.Betop.Scramble(0x00) == 0x08 && BrimDeck.Core.Betop.Scramble(0x55) == 0xCD
+            && BrimDeck.Core.Betop.Scramble(0x64) == 0x2C && BrimDeck.Core.Betop.Scramble(0x51) == 0xC9
+            && Enumerable.Range(0, 256).All(value => BrimDeck.Core.Betop.Unscramble(BrimDeck.Core.Betop.Scramble((byte)value)) == value)
+            && BrimDeck.Core.Betop.ScrambledRequest().SequenceEqual(new byte[] { 0x02, 0xAD }));
+        check("BETOP: a scrambled answer on battery and charging (state 0/1 or 0x50/0x51), and the request read back, the firmware report, a level of 0 and a plain answer are none",
+            BrimDeck.Core.Betop.ScrambledBattery([0x02, 0xAD, 0x2C, 0x08, 0x08]) == new BatteryRead(100)
+            && BrimDeck.Core.Betop.ScrambledBattery([0x02, 0xAD, 0x6D, 0x08, 0x09]) == new BatteryRead(37, true)
+            && BrimDeck.Core.Betop.ScrambledBattery([0x02, 0xAD, 0x6D, 0x08, 0xC9]) == new BatteryRead(37, true)
+            && BrimDeck.Core.Betop.ScrambledBattery([0x02, 0xAD, 0x6D, 0x08, 0xC8]) == new BatteryRead(37)
+            && BrimDeck.Core.Betop.ScrambledBattery([0x02, 0xAD, 0x00, 0x00, 0x00]) is null
+            && BrimDeck.Core.Betop.ScrambledBattery([0x02, 0xCD, 0x09, 0x0A, 0x08]) is null
+            && BrimDeck.Core.Betop.ScrambledBattery([0x02, 0xAD, 0x08, 0x08, 0x08]) is null
+            && BrimDeck.Core.Betop.ScrambledBattery([0x02, 0x15, 0x64, 0x00, 0x50]) is null);
     }
 }
