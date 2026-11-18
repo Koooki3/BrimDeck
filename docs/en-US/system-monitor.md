@@ -46,6 +46,8 @@ Choose it under "General > Core display":
 - Columns: always columns.
 - Dot matrix: always the matrix.
 
+Set **Cores per matrix row** to 0 for automatic layout. Auto favors a complete rectangle when the cells remain readable, and centers the last short column in tight spaces. Choose 1–64 to set a preferred row width. If a panel cannot fit that width, it temporarily uses automatic layout and keeps your saved preference. This option applies only to the dot matrix.
+
 The squares are as large as the room allows, on whole device pixels at any display scale, with a one-pixel gap where there is room and touching where there is not. The frequency line of a column has no equivalent in the matrix; point at a square to see it.
 
 ## Traffic
