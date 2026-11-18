@@ -1100,7 +1100,12 @@ internal sealed class GlassBackdrop : IDisposable
 
     private void Probe(bool on)
     {
-        if (!on) { _probe?.Stop(); return; }
+        if (!on)
+        {
+            if (_probe?.IsEnabled == true) { _probe.Stop(); _probeRun++; }
+            _probeAgain = false;
+            return;
+        }
         if (_probe is null)
         {
             _probe = new DispatcherTimer(DispatcherPriority.Background, _owner.Dispatcher) { Interval = TimeSpan.FromMilliseconds(ProbeMs) };
@@ -1116,30 +1121,47 @@ internal sealed class GlassBackdrop : IDisposable
     // the copy runs on the thread pool and only what it found is applied here. A tick while one is still out is skipped.
     private readonly LiquidGlass.AcrylicProbe _acrylicProbe = new();
     private bool _probing;
-    private void ProbeTick()
+    private int _probeRun;
+    private readonly record struct ProbeTarget(Int32Rect Island, Int32Rect Display, int Gap, int Band, bool Dark);
+
+    private ProbeTarget? CurrentProbeTarget()
     {
-        if (_disposed || !AcrylicBody || _last is not { } frame || _windowRect is not { } window) { _probe?.Stop(); return; }
-        if (_probing) { _probeAgain = _luminosityLook != PanelTheme.Current.IsDark; return; }
+        if (_disposed || !_shown || !AcrylicBody || !Available || _last is not { } frame || _windowRect is not { } window) return null;
         double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
         var bounds = Native.WindowsHost.WindowScreen(_owner).Bounds;
         var display = new Int32Rect((int)bounds.Left, (int)bounds.Top, (int)bounds.Width, (int)bounds.Height);
         var island = new Int32Rect(window.X + (int)frame.Left, window.Y + (int)frame.Top,
             (int)frame.Right - (int)frame.Left, (int)frame.Bottom - (int)frame.Top);
-        int gap = (int)(24 * scale), band = (int)(40 * scale);
-        _probing = true;
-        Task.Run(() => _acrylicProbe.Read(island, display, gap, band)).ContinueWith(task =>
-        {
-            _probing = false;
-            if (_disposed || !AcrylicBody) return;
-            var reading = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
-            // Nothing read: the look is taken as settled as it is (not read again on every frame until a reading comes).
-            if (reading is null) _luminosityLook = PanelTheme.Current.IsDark;
-            else ProbeApply(reading.Value);
-            // Shown afresh or the look turned while this read was out (Probe): read again at once for the new look.
-            if (_probeAgain) { _probeAgain = false; ProbeTick(); }
-        }, TaskScheduler.FromCurrentSynchronizationContext());
+        return new ProbeTarget(island, display, (int)(24 * scale), (int)(40 * scale), PanelTheme.Current.IsDark);
     }
+
+    private void ProbeTick()
+    {
+        if (CurrentProbeTarget() is not { } target) { Probe(false); return; }
+        if (_probing) { _probeAgain |= _luminosityLook != target.Dark; return; }
+        _probing = true;
+        int run = _probeRun;
+        Task.Run(() => _acrylicProbe.Read(target.Island, target.Display, target.Gap, target.Band)).ContinueWith(task =>
+            ProbeCompleted(target, run, task.Status == TaskStatus.RanToCompletion ? task.Result : null),
+            TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
     private bool _probeAgain;
+    private void ProbeCompleted(ProbeTarget target, int run, LiquidGlass.AcrylicProbe.Reading? reading)
+    {
+        _probing = false;
+        if (_probe?.IsEnabled != true || CurrentProbeTarget() is not { } current) return;
+        bool again = _probeAgain && (run != _probeRun || target.Dark != current.Dark);
+        _probeAgain = false;
+        // A completed read describes the old material or screen region if the window moved, changed DPI or was hidden.
+        // Discard it and let the periodic timer sample the settled geometry instead of chasing every animation frame.
+        if (run == _probeRun && target == current)
+        {
+            if (reading is null) _luminosityLook = current.Dark;
+            else ProbeApply(reading.Value);
+        }
+        else if (again) ProbeTick();
+    }
 
     private void ProbeApply(LiquidGlass.AcrylicProbe.Reading reading)
     {
