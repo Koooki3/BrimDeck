@@ -95,11 +95,34 @@ internal static class GlassEffect
     }
     private static readonly Dictionary<AcrylicLook, CompositionEffectFactory> AcrylicFactories = [];
 
-    public static CompositionBrush Acrylic(Compositor compositor, AcrylicLook look)
+    // Both recipes have the same saturation and tint strength, with a neutral tint matching the luminosity target.
+    // Interpolate the effective coverage and offset so the combined matrix follows the same path as the rendered color.
+    internal static AcrylicLook BlendAcrylic(AcrylicLook start, AcrylicLook target, double share)
     {
-        if (!AcrylicFactories.TryGetValue(look, out var factory))
-            AcrylicFactories[look] = factory = compositor.CreateEffectFactory(Create(AcrylicMatrix(look), new CompositionEffectSourceParameter("backdrop")));
-        var brush = factory.CreateBrush();
+        double opacity = start.LuminosityOpacity + (target.LuminosityOpacity - start.LuminosityOpacity) * share;
+        double cover = AcrylicCoverage(start), targetCover = AcrylicCoverage(target);
+        double offset = cover * start.Luminosity * (1 - share) + targetCover * target.Luminosity * share;
+        double neutral = offset / (cover + (targetCover - cover) * share);
+        return start with { LuminosityOpacity = opacity, Luminosity = neutral, TintR = neutral, TintG = neutral, TintB = neutral };
+    }
+
+    internal static double AcrylicLuma(AcrylicLook look, double background)
+    {
+        double cover = AcrylicCoverage(look);
+        return background * (1 - cover) + look.Luminosity * cover;
+    }
+
+    private static double AcrylicCoverage(AcrylicLook look) => look.TintOpacity + (1 - look.TintOpacity) * look.LuminosityOpacity;
+
+    internal static CompositionEffectFactory CompileAcrylic(Compositor compositor, AcrylicLook look)
+        => compositor.CreateEffectFactory(Create(AcrylicMatrix(look), new CompositionEffectSourceParameter("backdrop")));
+
+    public static CompositionBrush Acrylic(Compositor compositor, AcrylicLook look, CompositionEffectFactory? transient = null)
+    {
+        var factory = transient;
+        if (factory is null && !AcrylicFactories.TryGetValue(look, out factory))
+            AcrylicFactories[look] = factory = CompileAcrylic(compositor, look);
+        var brush = factory!.CreateBrush();
         brush.SetSourceParameter("backdrop", compositor.CreateHostBackdropBrush());
         return brush;
     }

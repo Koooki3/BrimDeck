@@ -225,11 +225,56 @@ internal sealed class GlassBackdrop : IDisposable
     public event Action? Crossed;
     private bool? _lead;
     private bool _crossed;
+    private LiquidGlass.AcrylicProbe.Reading? _lastAcrylicReading;
+    private readonly record struct AcrylicLookTurn(GlassEffect.AcrylicLook From, GlassEffect.AcrylicLook To,
+        double Required, double Background, bool Dark, long Start);
+    private AcrylicLookTurn? _acrylicTurn;
+    private GlassEffect.AcrylicLook? _acrylicTurningLook;
     // null: no turn under way (automatic liquid glass no longer chosen), the glass follows the theme again.
     public void Lead(bool? dark)
     {
         _lead = dark; _crossed = false;
+        if (Trial.Contains("compact-look-turn") && AcrylicBody && _shown && (Openness?.Invoke() ?? 0) <= .001
+            && dark is { } next && Soft.At(_owner) && _lastAcrylicReading is { } reading)
+        {
+            var from = _acrylicTurningLook ?? AcrylicLookFor(PanelTheme.Current.IsDark, _luminosityShown);
+            double required = GlassEffect.LuminosityFor(next, reading.Median, reading.Median);
+            double opacity = GlassMaterial.LuminosityOpacity(required, 0, RequestedAcrylicTransparency);
+            _acrylicTurn = new(from, AcrylicLookFor(next, opacity), required, reading.MiddleMean, next, Environment.TickCount64);
+            _acrylicVeilMotion?.Stop();
+        }
+        else ClearAcrylicTurn();
         Follow(0);
+    }
+
+    private static GlassEffect.AcrylicLook AcrylicLookFor(bool dark, double opacity)
+        => (dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = opacity };
+
+    private void ClearAcrylicTurn()
+    {
+        if (_acrylicTurningLook is not null) _brushFor = null;
+        _acrylicTurn = null;
+        _acrylicTurningLook = null;
+    }
+
+    private bool AdvanceAcrylicTurn(AcrylicLookTurn turn, long now)
+    {
+        double progress = Soft.At(_owner) && (Openness?.Invoke() ?? 0) <= .001
+            ? Math.Clamp((now - turn.Start) / DarkFadeMs, 0, 1) : 1;
+        double share = Math.Round(Soft.InOut.Ease(progress) * 12) / 12;
+        var look = GlassEffect.BlendAcrylic(turn.From, turn.To, share);
+        if (_acrylicTurningLook != look) { _acrylicTurningLook = look; _brushFor = null; }
+        double surface = GlassEffect.AcrylicLuma(look, turn.Background);
+        if (!_crossed && (progress >= 1 || (turn.Dark ? surface <= LiquidFrame.TextTurn : surface >= LiquidFrame.TextTurn)))
+        {
+            _crossed = true;
+            _luminosityLook = turn.Dark;
+            _luminosity = _previousVeil = turn.Required;
+            SetAcrylicVeil(turn.To.LuminosityOpacity);
+            Crossed?.Invoke();
+        }
+        if (progress >= 1) ClearAcrylicTurn();
+        return progress < 1;
     }
     private readonly BackdropLook _look = new();
     // BRIMDECK_LIQUID_DEBUG=1: a line in %LOCALAPPDATA%\BrimDeck\liquid.log every DebugEveryMs and at every decision.
@@ -415,7 +460,8 @@ internal sealed class GlassBackdrop : IDisposable
             double progress = Math.Clamp((now - _darkSince) / DarkFadeMs, 0, 1);
             _dark = progress >= 1 ? _darkTo : _darkFrom + (_darkTo - _darkFrom) * Soft.InOut.Ease(progress);
         }
-        if (_lead is { } lead && !_crossed && LiquidFrame.TextTurns(double.IsNaN(_look.Luma) ? .5 : _look.Luma, _dark, lead, _dark == _darkTo))
+        if (_acrylicTurn is { } turn) turning |= AdvanceAcrylicTurn(turn, now);
+        else if (_lead is { } lead && !_crossed && LiquidFrame.TextTurns(double.IsNaN(_look.Luma) ? .5 : _look.Luma, _dark, lead, _dark == _darkTo))
         {
             _crossed = true;
             Crossed?.Invoke();
@@ -978,10 +1024,11 @@ internal sealed class GlassBackdrop : IDisposable
         if (AcrylicBody)
             try
             {
-                var look = (PanelTheme.Current.IsDark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = _luminosityShown };
-                _sprite.Brush = ProbeColor is { } probe ? compositor.CreateColorBrush(probe) : GlassEffect.Acrylic(compositor, look);
-                DressShoulder(_shoulderLeft, compositor, look, left: true);
-                DressShoulder(_shoulderRight, compositor, look, left: false);
+                var look = _acrylicTurningLook ?? AcrylicLookFor(PanelTheme.Current.IsDark, _luminosityShown);
+                using var transient = _acrylicTurningLook is not null ? GlassEffect.CompileAcrylic(compositor, look) : null;
+                _sprite.Brush = ProbeColor is { } probe ? compositor.CreateColorBrush(probe) : GlassEffect.Acrylic(compositor, look, transient);
+                DressShoulder(_shoulderLeft, compositor, look, left: true, transient);
+                DressShoulder(_shoulderRight, compositor, look, left: false, transient);
                 return;
             }
             catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or InvalidCastException) { }
@@ -1022,7 +1069,7 @@ internal sealed class GlassBackdrop : IDisposable
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException) { _rim = null; }
     }
 
-    private void DressShoulder(SpriteVisual? sprite, Compositor compositor, GlassEffect.AcrylicLook look, bool left)
+    private void DressShoulder(SpriteVisual? sprite, Compositor compositor, GlassEffect.AcrylicLook look, bool left, CompositionEffectFactory? transient)
     {
         if (sprite is null) return;
         if (sprite.Brush is CompositionMaskBrush old) { GlassEffect.Release(old.Source); old.Mask?.Dispose(); old.Dispose(); }
@@ -1034,7 +1081,7 @@ internal sealed class GlassBackdrop : IDisposable
         mask.ColorStops.Add(compositor.CreateColorGradientStop(.97f, Windows.UI.Color.FromArgb(0, 0, 0, 0)));
         mask.ColorStops.Add(compositor.CreateColorGradientStop(1, Windows.UI.Color.FromArgb(255, 0, 0, 0)));
         var brush = compositor.CreateMaskBrush();
-        brush.Source = ProbeColor is { } probe ? compositor.CreateColorBrush(probe) : GlassEffect.Acrylic(compositor, look);
+        brush.Source = ProbeColor is { } probe ? compositor.CreateColorBrush(probe) : GlassEffect.Acrylic(compositor, look, transient);
         brush.Mask = mask;
         sprite.Brush = brush;
     }
@@ -1150,6 +1197,8 @@ internal sealed class GlassBackdrop : IDisposable
     {
         if (!on)
         {
+            ClearAcrylicTurn();
+            _lastAcrylicReading = null;
             _acrylicVeilMotion?.Stop();
             if (_probe?.IsEnabled == true)
             {
@@ -1223,6 +1272,7 @@ internal sealed class GlassBackdrop : IDisposable
 
     private void ProbeApply(LiquidGlass.AcrylicProbe.Reading reading)
     {
+        _lastAcrylicReading = reading;
         bool dark = PanelTheme.Current.IsDark;
         long now = Environment.TickCount64;
         double openness = Openness?.Invoke() ?? 0;
