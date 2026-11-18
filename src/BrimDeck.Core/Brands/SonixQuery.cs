@@ -60,10 +60,13 @@ public static class SonixQuery
 
     // The drivers' other Huafenda receivers and keyboards (0C45 is Sonix's id and 05AC Apple's, both shared, so only these):
     // AJAZZ's and EWEADN's receivers FEF9, FEFA, FEFC and FEFD, Epomaker's TH and G84 Pro series on 8006 to 8100 and the TH65's
-    // receiver 8012, and the TH87 DE's 05AC:0250.
+    // receiver 8012, and the TH87 DE's 05AC:0250. LANGTU's (狼途) web driver langtu.driveall.cn (the same device-info read) lists
+    // its cables on 0C45 from 8008 to 880C (T87, MC68, BOOM68, LT104-D, LT75 LED, LT95V2, L16, L17, L21, T88, T99PRO, X102Air).
     public static readonly (int Vendor, int Product)[] HuafendaProducts =
     [
         .. new[] { 0xFEF9, 0xFEFA, 0xFEFC, 0xFEFD, 0x8006, 0x800A, 0x8009, 0x8010, 0x8100, 0x8007, 0x800B, 0x8011, 0x8012 }.Select(product => (SonixVendor, product)),
+        .. new[] { 0x8008, 0x8076, 0x8077, 0x8078, 0x8079, 0x8080, 0x8081, 0x8083, 0x8088, 0x8089, 0x808A, 0x8094, 0x8095, 0x80A1, 0x80A7, 0x80A8,
+            0x80AA, 0x80AB, 0x80B2, 0x80B5, 0x80B7, 0x80BB, 0x80D3, 0x80E1, 0x8501, 0x880C }.Select(product => (SonixVendor, product)),
         (AppleVendor, 0x0250),
     ];
     // Their device-info collection (the drivers' first function block): the 2.4 GHz receivers' usage 0x61 on page 0xFF60 on

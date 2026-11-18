@@ -13,6 +13,42 @@ static class BrandFamilyTests
         Betop(check);
         VgnV108(check);
         VgnV98ProV3(check);
+        LangtuLeobog(check);
+    }
+
+    // #349: LANGTU's T98 RGB on Shinetek's platform, LEOBOG's and LANGTU's models behind 3554:FA09, LANGTU's Huafenda cables.
+    private static void LangtuLeobog(Action<string, bool> check)
+    {
+        HidShape Shinetek(int product, int page = 0xFF02, int usage = 2, int length = 65) => Shape(0x1A2C, product, page, usage, 0, length, length, outputIds: [0x00]);
+        check("Shinetek: the T98 RGB's and T75's cables, the AK820 Max Plus's and their receiver, on the 65-byte 0xFF02 collection alone, named but the receiver",
+            new[] { 0xA047, 0xA071, 0xA036, 0x8FFF }.All(p => BrandFamilies.Find(Shinetek(p)) is { Family.Brand: "Shinetek keyboard" } f
+                && f.Ways.Select(way => way.Name).SequenceEqual(["shinetek.status"]) && f.Ways[0].Request.Length == 65
+                && f.Ways[0].Request[..6].SequenceEqual(new byte[] { 0x00, 0xAA, 0x55, 0xCC, 0x33, 0x0E }) && f.Ways[0].Request[6..].All(b => b == 0))
+            && BrandFamilies.Find(Shinetek(0xA047)) is { } t98 && t98.Family.DisplayName(Shinetek(0xA047)) == "LANGTU T98 RGB"
+            && t98.Family.DisplayName(Shinetek(0x8FFF)) is null
+            && BrandFamilies.Find(Shinetek(0xAFFF)) is null && BrandFamilies.Find(Shinetek(0xA047, 0xFF01, 1, 4)) is null
+            && BrandFamilies.Find(Shinetek(0xA047, length: 33)) is null && BrandFamilies.Find(Shinetek(0xA047, 0x0001, 6)) is null);
+        check("Shinetek: the status answer (ajazz-linux's measured 64 03, full on the cable), charging and on battery, the keyboard gone from the receiver, and other frames",
+            BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x64, 0x03, 0x00], false) == new BatteryRead(100, true)
+            && BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x61, 0x01], true) == new BatteryRead(97, true)
+            && BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x2A, 0x02], true) == new BatteryRead(42)
+            && BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x00, 0x00], true) == new BatteryRead(null, Asleep: true)
+            && BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x00, 0x00], false) is null
+            && BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x65, 0x02], true) is null
+            && BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x50, 0x04], true) is null
+            && BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0C, 0x50, 0x02], true) is null
+            && BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x50], true) is null);
+        static byte[] Fa09(params byte[] head) { var frame = new byte[20]; head.CopyTo(frame, 0); frame[19] = (byte)frame.Take(19).Sum(b => b); return frame; }
+        check("3554:FA09: LEOBOG's keyboards and LANGTU's L18 named by their drivers' codes",
+            Dongles.AulaModel(Fa09(0x13, 0x05, 0x01, 0x00, 0x0A, 0x03, 0x00, 0x00, 0x00, 0x00, 0xA2)) == "LEOBOG Hi75"
+            && Dongles.AulaModel(Fa09(0x13, 0x05, 0x01, 0x00, 0x0A, 0x03, 0x00, 0x00, 0x00, 0x01, 0x21)) == "LEOBOG Hi98"
+            && Dongles.AulaModel(Fa09(0x13, 0x05, 0x01, 0x00, 0x0A, 0x03, 0x00, 0x00, 0x00, 0x01, 0xAD)) == "LANGTU L18"
+            && Dongles.AulaModels.Select(model => Convert.ToHexString(model.Code)).Distinct().Count() == Dongles.AulaModels.Length);
+        HidShape Sonix(int product, int page = 0xFF68) => Shape(0x0C45, product, page, 0x61, 2, 65, 65, outputIds: [0x00]);
+        check("Huafenda: LANGTU's cables (T87 8008, T88 8501, X102Air 880C) on their 0xFF68 collection take the device-info read, not on another page",
+            new[] { 0x8008, 0x8501, 0x880C, 0x80BB }.All(p => BrandFamilies.Find(Sonix(p)) is { Family.Brand: "Huafenda keyboard" } f
+                && f.Ways.Select(way => way.Name).SequenceEqual(["huafenda.info"]))
+            && BrandFamilies.Find(Sonix(0x8008, 0xFF60)) is null && BrandFamilies.Find(Sonix(0x8005)) is null);
     }
 
     // The V98Pro V3's cable: 520-byte feature report 9, the query echoed, the level at 8 and the charging nibble at 9.

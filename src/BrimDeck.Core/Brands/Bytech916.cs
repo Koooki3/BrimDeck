@@ -28,10 +28,12 @@ public static class Bytech916
     public const int FeatureLength = 520;
     public const byte Command = 0x87;
 
-    public static readonly (int Vendor, int Product, byte Report, string Name)[] Vgn =
+    // 258A:010C is not VXE's alone (LEOBOG's and LANGTU's cables carry it too, their drivers' tables say), so it keeps its own
+    // product string.
+    public static readonly (int Vendor, int Product, byte Report, string? Name)[] Vgn =
     [
         (0x258A, 0x024E, 0x09, "VGN V98Pro V3"), (0x258A, 0x027E, 0x09, "VGN V98Pro V3"), (0x258A, 0x026A, 0x09, "VGN V87 V2"),
-        (0x258A, 0x010C, 0x06, "VXE V87pro"), (0x391D, 0x2003, 0x09, "VGN N75 V2"), (0x391D, 0x2004, 0x09, "VGN N75 V2"),
+        (0x258A, 0x010C, 0x06, null), (0x391D, 0x2003, 0x09, "VGN N75 V2"), (0x391D, 0x2004, 0x09, "VGN N75 V2"),
         (0x391D, 0x2005, 0x09, "VGN V108"), (0x391D, 0x2006, 0x09, "VGN V108"),
     ];
     public static readonly (int Vendor, int Product)[] OneKHub =
@@ -64,7 +66,7 @@ public static class Bytech916
             ? new(r[8], (r[9] >> 4 & 0xF) == 1) : null;
 
     private static bool Shape(HidShape s) => MouseShapes.VendorPage(s) && s.FeatureLength >= FeatureLength && s.FeatureIds.Count > 0;
-    private static (int Vendor, int Product, byte Report, string Name)? VgnOf(HidShape s)
+    private static (int Vendor, int Product, byte Report, string? Name)? VgnOf(HidShape s)
         => Vgn.Any(p => p.Vendor == s.Vendor && p.Product == s.Product) ? Vgn.First(p => p.Vendor == s.Vendor && p.Product == s.Product) : null;
     // VGN HUB: the collection that declares the table's feature report (it looks at no input report); 1khub: the collection's
     // first feature report where it has input reports too, which here is taken only where the collection declares one feature
