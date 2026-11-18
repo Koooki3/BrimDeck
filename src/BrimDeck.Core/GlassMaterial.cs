@@ -24,6 +24,15 @@ public static class GlassMaterial
     }
 
 
+    // A lone demanding sample gets a small response. When two readings agree, apply the
+    // shared readability floor promptly. Release slowly after both readings require less.
+    public static double FollowBackdrop(double shown, double required, double previous)
+    {
+        if (required > shown)
+            return Math.Min(required, Math.Max(shown + .025, previous));
+        return Math.Max(shown - .025, Math.Min(shown, Math.Max(required, previous)));
+    }
+
     public static double LuminosityOpacity(double required, double openness, int transparency)
     {
         double amount = NormalizeTransparency(transparency) / 100d;

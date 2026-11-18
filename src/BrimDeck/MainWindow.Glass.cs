@@ -17,11 +17,11 @@ public partial class MainWindow
     private PanelLook? _glassAppearanceLook;
     private DispatcherTimer? _glassProbe;
     private bool _glassActive, _glassQueued, _glassReading;
-    private long _glassGeneration, _glassDarkSince = -1;
+    private long _glassGeneration;
     private bool? _glassDark;
-    private bool _glassRise, _glassFirstSample;
+    private bool _glassFirstSample;
     private Int32Rect _glassBounds;
-    private double _glassRequired;
+    private double _glassRequired, _glassPreviousVeil;
     private (Size Size, double Shoulder, CornerRadius Corners, Point Origin, Point Along, Point Depth)? _glassOutline;
     private GlassSurface.PixelPoint[]? _glassContour;
 
@@ -106,8 +106,6 @@ public partial class MainWindow
             _glassRequired = GlassEffect.LuminosityFor(dark, 1, 0);
             _glassFirstSample = true;
             _glassGeneration++;
-            _glassDarkSince = -1;
-            _glassRise = false;
         }
         var look = dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight;
         double openness = _expanded ? 1 : 0;
@@ -152,27 +150,11 @@ public partial class MainWindow
             long now = Environment.TickCount64;
             if (UpdateAutomaticGlass(sample, now)) return;
             double wanted = GlassEffect.LuminosityFor(dark, sample.BrightFor(openness), sample.DarkFor(openness));
-            if (_glassFirstSample)
-            {
-                _glassRequired = wanted;
-                _glassFirstSample = false;
-            }
-            else if (wanted >= _glassRequired)
-            {
-                _glassDarkSince = -1;
-                if (wanted > _glassRequired && _glassRise) { _glassRequired = wanted; _glassRise = false; }
-                else _glassRise = wanted > _glassRequired;
-            }
-            else
-            {
-                _glassRise = false;
-                if (_glassDarkSince < 0) _glassDarkSince = now;
-                else if (now - _glassDarkSince >= 2500)
-                {
-                    _glassRequired = Math.Max(wanted, _glassRequired - .05);
-                    _glassDarkSince = now;
-                }
-            }
+            double next = _glassFirstSample ? wanted : GlassMaterial.FollowBackdrop(_glassRequired, wanted, _glassPreviousVeil);
+            _glassFirstSample = false;
+            _glassPreviousVeil = wanted;
+            if (next == _glassRequired) return;
+            _glassRequired = next;
             QueueGlass();
         }
         finally { _glassReading = false; }
