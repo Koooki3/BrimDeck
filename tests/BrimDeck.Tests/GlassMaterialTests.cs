@@ -23,10 +23,13 @@ internal static class GlassMaterialTests
         double flash = GlassMaterial.FollowBackdrop(.40, .90, .40);
         double steady = GlassMaterial.FollowBackdrop(flash, .90, .90);
         double firstCalm = GlassMaterial.FollowBackdrop(steady, .30, .90);
-        check("Glass veil responds gently to one frame and strengthens faster on sustained demand",
-            Math.Abs(flash - .425) < 1e-9 && Math.Abs(steady - .525) < 1e-9);
+        check("Glass veil responds gently to one frame and reaches the confirmed floor on the next",
+            Math.Abs(flash - .425) < 1e-9 && steady == .90);
+        check("An unusually high first reading cannot lift the veil above the next reading",
+            GlassMaterial.FollowBackdrop(flash, .60, .90) == .60
+            && GlassMaterial.FollowBackdrop(flash, .90, .50) == .50);
         check("Glass veil holds through an alternating frame and releases on consecutive calmer frames",
-            firstCalm == steady && Math.Abs(GlassMaterial.FollowBackdrop(firstCalm, .30, .30) - .50) < 1e-9);
+            firstCalm == steady && Math.Abs(GlassMaterial.FollowBackdrop(firstCalm, .30, .30) - .875) < 1e-9);
         check("Liquid glass advertises Beta separately from the stable theme name",
             new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id =>
                 PanelThemes.BuiltIn(id) is { File.Stage: "Beta" } theme
