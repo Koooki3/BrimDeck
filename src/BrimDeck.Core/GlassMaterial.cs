@@ -32,6 +32,18 @@ public static class GlassMaterial
         return Math.Max(shown - .025, Math.Min(shown, Math.Max(required, previous)));
     }
 
+    // Move up the next reading only when a broad change creates a substantially new readability demand.
+    public static bool ConfirmBackdropSoon(double shown, double required, double previous, double changed)
+        => changed > GlassAppearance.VideoShare && required - Math.Max(shown, previous) >= .25;
+
+    public static double TransitionVeil(double from, double to, double progress)
+    {
+        if (progress <= 0) return from;
+        if (progress >= 1) return to;
+        double weight = progress * progress * (3 - 2 * progress);
+        // Reuse the acrylic factories kept for the existing .05 levels.
+        return Math.Round((from + (to - from) * weight) * 20) / 20;
+    }
 
     public static double LuminosityOpacity(double required, double openness, int transparency)
     {

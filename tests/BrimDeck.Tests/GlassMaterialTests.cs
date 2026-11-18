@@ -30,6 +30,17 @@ internal static class GlassMaterialTests
             && GlassMaterial.FollowBackdrop(flash, .90, .50) == .50);
         check("Glass veil holds through an alternating frame and releases on consecutive calmer frames",
             firstCalm == steady && Math.Abs(GlassMaterial.FollowBackdrop(firstCalm, .30, .30) - .875) < 1e-9);
+        check("An earlier backdrop confirmation requires both a broad change and a new high reading",
+            GlassMaterial.ConfirmBackdropSoon(.35, .85, .35, .9)
+            && !GlassMaterial.ConfirmBackdropSoon(.35, .85, .35, .25)
+            && !GlassMaterial.ConfirmBackdropSoon(.35, .50, .35, .9)
+            && !GlassMaterial.ConfirmBackdropSoon(.35, .85, .85, .9)
+            && !GlassMaterial.ConfirmBackdropSoon(.85, .35, .85, .9));
+        var levels = Enumerable.Range(0, 8).Select(step => GlassMaterial.TransitionVeil(.35, .85, step / 7d)).ToArray();
+        check("Glass veil transitions smoothly in the existing acrylic levels and settles exactly",
+            levels[0] == .35 && levels[^1] == .85 && levels.Distinct().Count() >= 5
+            && levels.Zip(levels.Skip(1), (a, b) => b - a).All(change => change >= 0 && change <= .151)
+            && GlassMaterial.TransitionVeil(.85, .35, .5) == .60);
         check("Liquid glass advertises Beta separately from the stable theme name",
             new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id =>
                 PanelThemes.BuiltIn(id) is { File.Stage: "Beta" } theme

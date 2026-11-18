@@ -183,6 +183,7 @@ internal sealed class GlassBackdrop : IDisposable
     private DispatcherTimer? _probe;
     private GlassAppearance? _probeLook;
     private const int ProbeMs = 500;
+    private const int ProbeConfirmMs = 120;
     private LiquidHost? _host;
     private SpriteVisual? _liquid;
     private CompositionRoundedRectangleGeometry? _liquidClip;
@@ -253,7 +254,53 @@ internal sealed class GlassBackdrop : IDisposable
     private int RequestedAcrylicTransparency => AcrylicTransparency?.Invoke() ?? GlassMaterial.DefaultTransparency;
     private double AcrylicLuminosity() => GlassMaterial.LuminosityOpacity(_luminosity, Openness?.Invoke() ?? 0, RequestedAcrylicTransparency);
     private bool AcrylicAppearanceChanged => AcrylicBody &&
-        (_acrylicTransparencyShown != RequestedAcrylicTransparency || AcrylicLuminosity() != _luminosityShown);
+        (_acrylicTransparencyShown != RequestedAcrylicTransparency || AcrylicLuminosity() !=
+            (_acrylicVeilMotion?.IsEnabled == true ? _veilTo : _luminosityShown));
+
+    private DispatcherTimer? _acrylicVeilMotion;
+    private double _veilFrom, _veilTo;
+    private long _veilStart;
+    private bool _veilDark;
+
+    private void PresentAcrylicVeil(double target, bool dark, bool animate = false)
+    {
+        bool enabled = Trial.Contains("flow-veil") && _shown && (Openness?.Invoke() ?? 0) >= .999 && Soft.At(_owner);
+        bool running = _acrylicVeilMotion?.IsEnabled == true;
+        if (enabled && running && target == _veilTo && dark == _veilDark) return;
+        if (!enabled || !animate || Math.Abs(target - _luminosityShown) < .075)
+        {
+            _acrylicVeilMotion?.Stop();
+            SetAcrylicVeil(target);
+            return;
+        }
+        _veilFrom = _luminosityShown;
+        _veilTo = target;
+        _veilDark = dark;
+        _veilStart = Environment.TickCount64;
+        _acrylicVeilMotion ??= new DispatcherTimer(TimeSpan.FromMilliseconds(24), DispatcherPriority.Render, AdvanceAcrylicVeil, _owner.Dispatcher);
+        _acrylicVeilMotion.Start();
+    }
+
+    private void AdvanceAcrylicVeil(object? sender, EventArgs e)
+    {
+        if (!_shown || !AcrylicBody || !Available || _veilDark != PanelTheme.Current.IsDark)
+        {
+            _acrylicVeilMotion!.Stop();
+            return;
+        }
+        double duration = _veilTo > _veilFrom ? 180 : 260;
+        double progress = Soft.At(_owner) ? (Environment.TickCount64 - _veilStart) / duration : 1;
+        SetAcrylicVeil(GlassMaterial.TransitionVeil(_veilFrom, _veilTo, progress));
+        Dress();
+        if (progress >= 1) _acrylicVeilMotion!.Stop();
+    }
+
+    private void SetAcrylicVeil(double value)
+    {
+        if (_luminosityShown == value) return;
+        _luminosityShown = value;
+        _brushFor = null;
+    }
 
     // After anything that can change the island's shape, place or look; cheap when nothing changed.
     public void Update()
@@ -485,8 +532,7 @@ internal sealed class GlassBackdrop : IDisposable
             if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
             // The luminosity layer for the text (the probe's) and the thickness for the island's size (GlassEffect.Shown).
             _acrylicTransparencyShown = RequestedAcrylicTransparency;
-            double shownLuminosity = AcrylicLuminosity();
-            if (shownLuminosity != _luminosityShown) { _luminosityShown = shownLuminosity; _brushFor = null; }
+            PresentAcrylicVeil(AcrylicLuminosity(), PanelTheme.Current.IsDark);
             Dress();
             // The body's sides (the shoulders are not the body: a rectangle as wide as the flare would stand out past the sides);
             // the shoulders beside its top corners.
@@ -1102,14 +1148,24 @@ internal sealed class GlassBackdrop : IDisposable
     {
         if (!on)
         {
-            if (_probe?.IsEnabled == true) { _probe.Stop(); _probeRun++; }
+            _acrylicVeilMotion?.Stop();
+            if (_probe?.IsEnabled == true)
+            {
+                _probe.Stop();
+                _probe.Interval = TimeSpan.FromMilliseconds(ProbeMs);
+                _probeRun++;
+            }
             _probeAgain = false;
             return;
         }
         if (_probe is null)
         {
             _probe = new DispatcherTimer(DispatcherPriority.Background, _owner.Dispatcher) { Interval = TimeSpan.FromMilliseconds(ProbeMs) };
-            _probe.Tick += (_, _) => ProbeTick();
+            _probe.Tick += (_, _) =>
+            {
+                if (_probe.Interval.TotalMilliseconds != ProbeMs) _probe.Interval = TimeSpan.FromMilliseconds(ProbeMs);
+                ProbeTick();
+            };
         }
         if (!_probe.IsEnabled) { _luminosityLook = null; _probe.Start(); ProbeTick(); }
         // The look turned while shown: read at once, so the new look's first frame is settled too.
@@ -1172,10 +1228,19 @@ internal sealed class GlassBackdrop : IDisposable
         // over a plain light one), as it took it from the refraction renderer's measure.
         Measured?.Invoke((float)reading.Dark, (float)reading.Bright);
         double wanted = GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness));
-        _luminosity = _luminosityLook == dark ? GlassMaterial.FollowBackdrop(_luminosity, wanted, _previousVeil) : wanted;
+        if (Trial.Contains("early-confirm") && openness >= .999 && _luminosityLook == dark
+            && GlassMaterial.ConfirmBackdropSoon(_luminosity, wanted, _previousVeil, reading.Changed)
+            && _probe?.IsEnabled == true)
+        {
+            // Replace the next regular tick. A lone sample still raises the veil by the normal small amount.
+            _probe.Interval = TimeSpan.FromMilliseconds(ProbeConfirmMs);
+        }
+        bool sameLook = _luminosityLook == dark;
+        _luminosity = sameLook ? GlassMaterial.FollowBackdrop(_luminosity, wanted, _previousVeil) : wanted;
         _luminosityLook = dark;
         _previousVeil = wanted;
-        Redress();
+        PresentAcrylicVeil(AcrylicLuminosity(), dark, animate: sameLook);
+        Dress();
         // Automatic liquid glass: its look from the same reading, held while the panel is open or pressed.
         if (AutoLook?.Invoke() == true)
         {
@@ -1189,12 +1254,6 @@ internal sealed class GlassBackdrop : IDisposable
         }
         else _probeLook = null;
 
-        void Redress()
-        {
-            double shown = AcrylicLuminosity();
-            if (shown == _luminosityShown) return;
-            _luminosityShown = shown; _brushFor = null; Dress();
-        }
     }
 
     // No blur now, the window kept for the next time.
@@ -1297,6 +1356,7 @@ internal sealed class GlassBackdrop : IDisposable
 
     private void Release()
     {
+        _acrylicVeilMotion?.Stop();
         ReleaseLiquid();
         _retry?.Stop();
         SurfaceAside = false;
