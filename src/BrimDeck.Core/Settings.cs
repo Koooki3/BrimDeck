@@ -78,7 +78,7 @@ public enum PausedMusicHide { None, Text, Cover, Both }
 // drum beat or a voice is seen crossing them. Spectrum: the sound split by pitch, each bar one band, low on the left and high
 // on the right. Saved as numbers, so new members go at the end; a file without it, or with a number not listed, is Flow.
 public enum EqualizerMode { Flow = 0, Spectrum = 1 }
-// How the collapsed quota rings are drawn (QuotaRing). Nested: up to three rings about one centre, 20 DIP across, each quota in
+// How the collapsed quota rings are drawn (QuotaRing). Nested: up to three rings about one centre, at least 16 DIP across, each quota in
 // a ring of its own. Single: one 12 DIP ring per application with its highest share, as before there were nested rings. Saved
 // as numbers, so new members go at the end; a file without it, or with a number not listed, is Single.
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
@@ -675,6 +675,7 @@ public sealed class DeckSettings
     public CompactSmoothing CompactSmoothing { get; set; } = CompactSmoothing.Ten;
     // How the processor's cores are drawn, collapsed and expanded: columns, a dot matrix, or by the count and the room (Auto).
     public CoreDisplay CoreDisplay { get; set; } = CoreDisplay.Auto;
+    public int CoreMatrixColumns { get; set; }
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     // The span the traffic shown beside the network's rates is summed over, from Windows' own record (TrafficPeriods).
@@ -955,6 +956,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
         if (!Enum.IsDefined(CompactSmoothing)) CompactSmoothing = CompactSmoothing.Ten;
         if (!Enum.IsDefined(CoreDisplay)) CoreDisplay = CoreDisplay.Auto;
+        CoreMatrixColumns = CoreMatrix.NormalizeColumns(CoreMatrixColumns);
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
