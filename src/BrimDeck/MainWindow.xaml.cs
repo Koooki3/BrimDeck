@@ -125,7 +125,8 @@ public partial class MainWindow : Window
     {
         _app = app; _lead = lead;
         _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
-            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove, OccupiedArea);
+            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove, OccupiedArea,
+            () => Settings.WindowCapture && _expanded && !_preview && InsideOpenPanel(WindowsHost.Cursor()));
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () =>
         {
