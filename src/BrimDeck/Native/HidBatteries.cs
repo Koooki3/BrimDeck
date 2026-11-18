@@ -798,6 +798,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             Dongles.Protocol.Asus => ReadAsus,
             Dongles.Protocol.SteelSeries => SteelSeriesMouse,
             Dongles.Protocol.RapooGen1 => RapooGen1,
+            Dongles.Protocol.RapooQuery => RapooQuery,
             Dongles.Protocol.Aula => Aula,
             Dongles.Protocol.MchoseKeyboard => MchoseKeyboard,
             Dongles.Protocol.AtkSerial => AtkSerial,
@@ -1507,6 +1508,29 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                     return [Mouse("rapoo", info, "Rapoo VT3 PRO", battery)];
                 }
                 if (Environment.TickCount64 - sent >= 100) break;
+            }
+        }
+        return [];
+    }
+
+    // The rest of Rapoo's receivers (Dongles.RapooQueryCollection): the same query, its input report got once 100 ms later (as
+    // MouseDock waits); busy or no answer, and the request is sent again, within 1.5 s in all.
+    private static IEnumerable<DeviceBattery> RapooQuery(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info);
+        var request = Dongles.RapooGen1Request(cable: false);
+        long deadline = Environment.TickCount64 + 1500;
+        for (int sends = 0; sends < 4 && Environment.TickCount64 < deadline; sends++)
+        {
+            device.Write(request);
+            Thread.Sleep(100);
+            byte[]? reply;
+            try { reply = device.GetInput(Dongles.RapooGen1Report, device.InputLength, 300); }
+            catch (TimeoutException) { continue; }
+            if (reply is not null && Dongles.RapooGen1Status(reply) == true && Dongles.RapooGen1Battery(reply) is { } battery)
+            {
+                claimed.Add(info.Path);
+                return [Mouse("rapoo", info, "Rapoo Mouse", battery)];
             }
         }
         return [];

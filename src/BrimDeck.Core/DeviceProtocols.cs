@@ -1044,15 +1044,24 @@ public static class Dongles
             ? new(reply[8], kind == StatusBlock.Cherry ? (reply[9] & 0x01) != 0 : reply[9] == 1) : null;
 
     // Rapoo's first generation (VT3 PRO: 24AE:1231 its receiver, 4431 on its cable), after mousectl's rapoo_vt3pro driver
-    // (MIT; measured on a 1231 receiver): output report 0xBA, 32 bytes [link (A5 the receiver, FF the cable), AA (the battery
-    // query; A4 and A5 there read and write the mouse's memory, never sent here), length 0, address 0 (4 bytes)], answered
-    // through the input report 0xBA got back: [status, state (1 discharging, 2 charging), percent]. The status reads busy (02)
-    // once the receiver has taken the request and 01 with the answer; a 01 before any busy is still the last answer. A
-    // block answer has 0 where the state goes, so a stale one is told apart. Not tried by us on a mouse.
+    // (MIT; measured on a 1231 receiver): output report 0xBA [link (A5 the receiver, FF the cable), AA (the battery query; A4
+    // and A5 there read and write the mouse's memory, never sent here), length 0, address 0 (4 bytes)], zeros to the report's
+    // length, answered through the input report 0xBA got back: [status, state (1 discharging, 2 charging), percent]. The
+    // status reads busy (02) once the receiver has taken the request and 01 with the answer; a 01 before any busy is still the
+    // last answer. A block answer has 0 where the state goes, so a stale one is told apart. Not tried by us on a mouse.
     public const int RapooVendor = 0x24AE;
     public static readonly int[] RapooGen1Products = [0x1231, 0x4431];
     public const byte RapooGen1Report = 0xBA;
-    public static byte[] RapooGen1Request(bool cable) { var frame = new byte[33]; frame[0] = RapooGen1Report; frame[1] = (byte)(cable ? 0xFF : 0xA5); frame[2] = 0xAA; return frame; }
+    public static byte[] RapooGen1Request(bool cable) { var frame = new byte[8]; frame[0] = RapooGen1Report; frame[1] = (byte)(cable ? 0xFF : 0xA5); frame[2] = 0xAA; return frame; }
+    // The same query on the rest of the brand, as one rule rather than a list of models: any other product of Rapoo's vendor id
+    // on a vendor collection that declares output report 0xBA (where the ids are not known, usage 0x0E), long enough for the
+    // request. Not the first generation (above) and not the products only listened to (Pushes). MouseDock reads its office
+    // receivers this way (186C, 1870 to 1876: usage page 0xFF00, usage 0x0E, 32-byte reports). Measured on a 1870 receiver:
+    // the input report is given once per request, the answer (01 01 2C, 44 %) when got 50 ms to 1 s after it, busy when got
+    // within about 30 ms, and every later get fails until the request is sent again.
+    public static bool RapooQueryCollection(int product, int usagePage, int usage, int outputLength, IReadOnlySet<byte>? outputIds)
+        => !RapooGen1Products.Contains(product) && !Pushes.RapooProducts.Contains(product) && !Pushes.RapooKeyboards.Contains(product)
+        && UsagePages.Vendor(usagePage) && outputLength >= 8 && (outputIds is null ? usage == 0x000E : outputIds.Contains(RapooGen1Report));
     // The status of an input report got back: true OK, false busy, null another report.
     public static bool? RapooGen1Status(byte[] reply)
     {
@@ -1291,7 +1300,7 @@ public static class Dongles
     public enum Protocol
     {
         BitMouse, Compx, Vgn, Endgame, Vaxee, Inphic, Mchose, Ajazz, CompxFramed, F83, Nordic, MchoseRealtek, Gmouse, Lingbao, Nzxt, Cherry, Hecate,
-        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial
+        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial, RapooQuery
     }
 
     // The Compx receivers atkctl documents (the ATK A9 Ultra), by vendor, product and usage page.
@@ -1341,6 +1350,7 @@ public static class Dongles
         if (Asus.Find(vendor, product) is { } asus) return Asus.Collection(asus, iface, collection, usagePage, outputLength) ? Protocol.Asus : null;
         if (SteelSeriesMice.Find(vendor, product) is { } mouse) return SteelSeriesMice.Collection(mouse, iface, usagePage, outputLength) ? Protocol.SteelSeries : null;
         if (vendor == RapooVendor && RapooGen1Products.Contains(product)) return usagePage >= 0xFF00 && outputLength >= 33 ? Protocol.RapooGen1 : null;
+        if (vendor == RapooVendor && RapooQueryCollection(product, usagePage, usage, outputLength, outputIds)) return Protocol.RapooQuery;
         if (vendor == AtkVendor && usagePage == 0xFF05) return Protocol.BitMouse;
         // ATK's N9 Pro and N9 Ultra: their consumer collection (the one ATK HUB lists them by) only finds the device; nothing is
         // sent to it, the battery being read on the device's serial port (AtkHeadsets.SerialRequest).
