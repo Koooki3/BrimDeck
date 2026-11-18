@@ -9,13 +9,13 @@ public static class ProviderCatalog
 {
     public static readonly ProviderId[] BuiltIns = [ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Cursor];
     // Sources read automatically from local applications; only the first four are added to new settings by default.
-    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.MiMoLinked, ProviderId.Qoder, ProviderId.QoderCn, ProviderId.Qianwen, ProviderId.QwenCloud];
+    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.MiMoLinked, ProviderId.Qoder, ProviderId.QoderCn, ProviderId.QwenWorkCn, ProviderId.QwenWork, ProviderId.Qianwen, ProviderId.QwenCloud];
     // Xiaomi MiMo, Qianwen and QwenCloud are read like the automatic sources but need a sign-in in settings, so the menu lists them with
     // the sources entered by hand: Xiaomi MiMo next to Xiaomi MiMo API and Token Plan, Qianwen and QwenCloud after them.
     private static bool SignsInFromSettings(ProviderId id) => id is ProviderId.MiMo or ProviderId.Qianwen or ProviderId.QwenCloud;
     public static readonly ProviderId[] Sources = [.. AutomaticSources.Where(id => !SignsInFromSettings(id)), ProviderId.GlmChina, ProviderId.GlmGlobal, ProviderId.MiMo, ProviderId.MiMoApi, ProviderId.MiMoTokenPlan, ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.DeepSeek, ProviderId.KimiApi, ProviderId.KimiPlatform, ProviderId.OpenCodeGo, ProviderId.CommandCodeApi, ProviderId.OpenRouter, ProviderId.NewApi, ProviderId.Sub2Api, ProviderId.Custom];
     // Grok Bot is quota-only; Pi is usage-only and must never appear in the quota-source menu. Qoder's statistics are its IDE's.
-    public static readonly ProviderId[] UsageSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.Pi, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.Qoder, ProviderId.QoderCn];
+    public static readonly ProviderId[] UsageSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.Pi, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.Qoder, ProviderId.QoderCn, ProviderId.QwenWorkCn, ProviderId.QwenWork];
     public static bool IsBuiltIn(ProviderId id) => AutomaticSources.Contains(id);
     public static bool IsUsageSource(ProviderId id) => UsageSources.Contains(id);
     // Which clients a statistics source covers; each reads the local records all of its clients share.
@@ -36,6 +36,7 @@ public static class ProviderCatalog
         ProviderId.MiMo => Loc.T("MiMo Code CLI + Xiaomi MiMo 桌面版", "MiMo Code CLI + Xiaomi MiMo desktop app"),
         ProviderId.Cursor => Loc.T("Cursor 账户用量，包含其他设备", "Cursor account usage, including other devices"),
         ProviderId.Qoder or ProviderId.QoderCn => Loc.T($"{Name(id)} IDE、CLI 与桌面版本机会话", $"Local {Name(id)} IDE, CLI and desktop app sessions"),
+        ProviderId.QwenWorkCn or ProviderId.QwenWork => Loc.T(Loc.Joined($"{Name(id)} 桌面版本机会话"), $"Local {Name(id)} desktop app sessions"),
         _ => Name(id)
     };
     // Antigravity quotas come only from the desktop app's local service; the CLI's own service cannot be queried.
@@ -63,6 +64,8 @@ public static class ProviderCatalog
             "The weekly allowance of the Xiaomi MiMo desktop membership; sign in to a Xiaomi account in Settings first. Token Plan is not included"),
         ProviderId.MiMoLinked => Loc.T("自动读取 Xiaomi MiMo 桌面版与 MiMo Code CLI 已关联的 API 密钥或 Token Plan", "Reads the API key or Token Plan linked in the Xiaomi MiMo desktop app and MiMo Code CLI"),
         ProviderId.Qoder or ProviderId.QoderCn => QoderDescription(id == ProviderId.QoderCn ? "Qoder CN" : "Qoder"),
+        ProviderId.QwenWorkCn or ProviderId.QwenWork => Loc.T(Loc.Joined($"{Name(id)} 桌面版登录账户的剩余积分，使用桌面版保存的登录读取；不续期登录"),
+            $"The credits left on the account signed in to the {Name(id)} desktop app, read with the sign-in the app keeps; the sign-in is never renewed"),
         ProviderId.Qianwen => Loc.T("千问 AI 平台账户的 Token Plan（个人版与团队版）、账户余额与本月扣费，需要在设置中通过浏览器登录",
             "The Token Plans (personal and team), balance and this month's charges of a Qianwen AI platform account; sign in in the browser from Settings first"),
         ProviderId.QwenCloud => Loc.T("QwenCloud 账户的 Token Plan（个人版与团队版）与本月扣费，需要在设置中通过浏览器登录；QwenCloud 不提供账户余额",
@@ -86,12 +89,12 @@ public static class ProviderCatalog
     public static string Group(ProviderId id) => IsBuiltIn(id) && !SignsInFromSettings(id) ? Loc.T("自动读取", "Read automatically") : Loc.T("手动填写", "Entered by hand");
     public static string Name(ProviderId id) => id switch
     {
-        ProviderId.GlmChina => Loc.T("智谱 GLM", "Zhipu GLM"), ProviderId.GlmGlobal => "Z.ai GLM", ProviderId.Dsh => "DeepSeek Harness", ProviderId.GrokBot => "Grok Bot", ProviderId.Kimi => "Kimi Code", ProviderId.KimiApi => "Kimi Code API", ProviderId.KimiPlatform => Loc.T("Kimi 开放平台", "Kimi Open Platform"),ProviderId.OpenCode => "OpenCode", ProviderId.OpenCodeGo => "OpenCode Go", ProviderId.CommandCode => "Command Code", ProviderId.CommandCodeApi => "Command Code API", ProviderId.WorkBuddy => "WorkBuddy", ProviderId.WorkBuddyAi => "WorkBuddy AI", ProviderId.MiMo => Loc.T("Xiaomi MiMo 桌面订阅", "Xiaomi MiMo Desktop subscription"), ProviderId.MiMoApi => "Xiaomi MiMo API", ProviderId.MiMoLinked => "Xiaomi MiMo", ProviderId.MiMoTokenPlan => "Xiaomi MiMo Token Plan", ProviderId.Qoder => "Qoder", ProviderId.QoderCn => "Qoder CN", ProviderId.Qianwen => Loc.T("千问", "Qianwen"), ProviderId.QwenCloud => "QwenCloud", ProviderId.OpenRouter => "OpenRouter", ProviderId.DeepSeek => "DeepSeek", ProviderId.NewApi => "New API", ProviderId.Sub2Api => "Sub2API", ProviderId.Custom => Loc.T("自定义", "Custom"),
+        ProviderId.GlmChina => Loc.T("智谱 GLM", "Zhipu GLM"), ProviderId.GlmGlobal => "Z.ai GLM", ProviderId.Dsh => "DeepSeek Harness", ProviderId.GrokBot => "Grok Bot", ProviderId.Kimi => "Kimi Code", ProviderId.KimiApi => "Kimi Code API", ProviderId.KimiPlatform => Loc.T("Kimi 开放平台", "Kimi Open Platform"),ProviderId.OpenCode => "OpenCode", ProviderId.OpenCodeGo => "OpenCode Go", ProviderId.CommandCode => "Command Code", ProviderId.CommandCodeApi => "Command Code API", ProviderId.WorkBuddy => "WorkBuddy", ProviderId.WorkBuddyAi => "WorkBuddy AI", ProviderId.MiMo => Loc.T("Xiaomi MiMo 桌面订阅", "Xiaomi MiMo Desktop subscription"), ProviderId.MiMoApi => "Xiaomi MiMo API", ProviderId.MiMoLinked => "Xiaomi MiMo", ProviderId.MiMoTokenPlan => "Xiaomi MiMo Token Plan", ProviderId.Qoder => "Qoder", ProviderId.QoderCn => "Qoder CN", ProviderId.Qianwen => Loc.T("千问", "Qianwen"), ProviderId.QwenWorkCn => Loc.T("千问办公", "QwenWork CN"), ProviderId.QwenWork => "QwenWork", ProviderId.QwenCloud => "QwenCloud", ProviderId.OpenRouter => "OpenRouter", ProviderId.DeepSeek => "DeepSeek", ProviderId.NewApi => "New API", ProviderId.Sub2Api => "Sub2API", ProviderId.Custom => Loc.T("自定义", "Custom"),
         _ => id.ToString()
     };
     public static string Key(ProviderId id) => id switch
     {
-        ProviderId.GlmChina => "glm-cn", ProviderId.GlmGlobal => "glm-global", ProviderId.NewApi => "newapi", ProviderId.Sub2Api => "sub2api", ProviderId.KimiApi => "kimi-api", ProviderId.KimiPlatform => "kimi-platform",ProviderId.OpenCodeGo => "opencode-go", ProviderId.CommandCodeApi => "commandcode-api", ProviderId.MiMoApi => "mimo-api", ProviderId.MiMoLinked => "mimo-linked", ProviderId.MiMoTokenPlan => "mimo-token-plan", ProviderId.QoderCn => "qoder-cn",
+        ProviderId.GlmChina => "glm-cn", ProviderId.GlmGlobal => "glm-global", ProviderId.NewApi => "newapi", ProviderId.Sub2Api => "sub2api", ProviderId.KimiApi => "kimi-api", ProviderId.KimiPlatform => "kimi-platform",ProviderId.OpenCodeGo => "opencode-go", ProviderId.CommandCodeApi => "commandcode-api", ProviderId.MiMoApi => "mimo-api", ProviderId.MiMoLinked => "mimo-linked", ProviderId.MiMoTokenPlan => "mimo-token-plan", ProviderId.QoderCn => "qoder-cn", ProviderId.QwenWorkCn => "qwenwork-cn",
         _ => id.ToString().ToLowerInvariant()
     };
     // Claude and Grok Bot rows each choose between the account API and the record the desktop app keeps on this PC.

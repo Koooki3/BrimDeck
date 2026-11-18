@@ -22,6 +22,7 @@ try
     await MiMoUsageTests.Run(root, Check);
     await MiMoApiTests.Run(root, Check);
     await QianwenUsageTests.Run(root, Check);
+    await QwenWorkUsageTests.Run(root, Check);
     MaasPricingTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);

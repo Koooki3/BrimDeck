@@ -15,6 +15,7 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
     public GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => GrokBotDesktopReader.Read(locations);
     public string? FindQoderDesktop(bool china) => QoderDesktopReader.Find(china);
     public string? ReadQoderDesktopSignIn(string folder) => QoderDesktopReader.ReadSignIn(folder);
+    public string? ReadQwenWorkSignIn(string folder) => QoderDesktopReader.ReadSignIn(folder, QwenWorkUsage.SignInFile);
 
     // Starts `codeagentcli auth status` without a window, with the environment the codeagent launcher sets (its certificates,
     // no proxy) and the data folder BrimDeck reads, and waits until the sign-in file holds a later expiry or the CLI ends. The

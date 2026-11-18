@@ -45,9 +45,11 @@ internal static partial class QoderDesktopReader
         try { return Path.GetDirectoryName(path); } catch (ArgumentException) { return null; }
     }
 
-    public static string? ReadSignIn(string folder)
+    // The QwenWork desktop apps (QwenWork CN, 千问办公, and the international QwenWork) are built on the same app and keep their
+    // sign-in the same way, in auth-v2.dat.
+    public static string? ReadSignIn(string folder, string name = "auth.v1.dat")
     {
-        var file = Path.Combine(folder, "auth.v1.dat");
+        var file = Path.Combine(folder, name);
         if (!File.Exists(file)) return null;
         byte[]? key = null, plain = null;
         try

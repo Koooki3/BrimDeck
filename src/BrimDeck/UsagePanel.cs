@@ -622,10 +622,10 @@ public partial class MainWindow
         {
             MetricKind.Balance => Loc.T("可用 " + quota.ValueText, quota.ValueText + " available")
                 + (quota.Total is { } total ? quota.TotalIsTarget
-                    ? Loc.T(" · 目标余额 " + UsageMetric.Money(total, quota.Currency), " · target " + UsageMetric.Money(total, quota.Currency))
-                    : Loc.T(" · 总额 " + UsageMetric.Money(total, quota.Currency), " · " + UsageMetric.Money(total, quota.Currency) + " total") : ""),
+                    ? Loc.T(" · 目标余额 " + quota.AmountText(total), " · target " + quota.AmountText(total))
+                    : Loc.T(" · 总额 " + quota.AmountText(total), " · " + quota.AmountText(total) + " total") : ""),
             MetricKind.Spend => Loc.T("已用 " + quota.ValueText, quota.ValueText + " used") + (quota.Unlimited ? Loc.T(" · 无上限", " · no limit") : "")
-                + (quota.Total is { } goal && quota.TotalIsTarget ? Loc.T(" · 目标金额 " + UsageMetric.Money(goal, quota.Currency), " · target " + UsageMetric.Money(goal, quota.Currency)) : ""),
+                + (quota.Total is { } goal && quota.TotalIsTarget ? Loc.T(" · 目标金额 " + quota.AmountText(goal), " · target " + quota.AmountText(goal)) : ""),
             MetricKind.Count => CountTooltip(quota),
             _ => MetricPercentTooltip(quota)
         };

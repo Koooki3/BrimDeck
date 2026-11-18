@@ -31,6 +31,9 @@ public interface IDesktopSources
     // The sign-in the Qoder desktop app keeps in its data folder (auth.v1.dat, encrypted with the app's os_crypt key), decrypted;
     // null when there is none or it cannot be decrypted.
     string? ReadQoderDesktopSignIn(string folder) => null;
+    // The sign-in a QwenWork desktop app (either edition) keeps in its data folder (QwenWorkUsage.SignInFile, encrypted the same way), decrypted;
+    // null when there is none or it cannot be decrypted.
+    string? ReadQwenWorkSignIn(string folder) => null;
 }
 
 // quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
@@ -338,6 +341,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (id is ProviderId.Qoder or ProviderId.QoderCn)
             QoderUsage.ReadTokens(snapshot, desktop, _locations.Roaming, id == ProviderId.QoderCn ? _locations.QoderCnHome : _locations.QoderHome, QoderUsage.For(id), start, now,
                 (QoderSwitch ?? QoderUsage.UserSwitch)(QoderUsage.For(id)));
+        if (id is ProviderId.QwenWorkCn or ProviderId.QwenWork)
+            QwenWorkUsage.ReadTokens(snapshot, desktop, id == ProviderId.QwenWork ? _locations.QwenWorkHome : _locations.QwenWorkCnHome, _locations.Roaming, QwenWorkUsage.For(id), start, now);
         try
         {
             switch (id)
@@ -412,6 +417,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 case ProviderId.Qianwen or ProviderId.QwenCloud:
                     await ReadQianwenAsync(snapshot, QianwenUsage.For(id), now, ct);
+                    break;
+                case ProviderId.QwenWorkCn or ProviderId.QwenWork:
+                    await ReadQwenWorkAsync(snapshot, QwenWorkUsage.For(id), now, ct);
                     break;
             }
         }
@@ -1542,6 +1550,66 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         snapshot.Plan = reading.Plan;
         Connected(snapshot, snapshot.PlanSource, now);
         if (reading.Warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
+    }
+
+    // QwenWork CN and QwenWork (QwenWorkUsage), read with the sign-in the edition's desktop app keeps. The app renews it while it runs;
+    // BrimDeck does not.
+    private async Task ReadQwenWorkAsync(ProviderSnapshot snapshot, QwenWorkUsage.Edition edition, DateTimeOffset now, CancellationToken ct)
+    {
+        var folder = QwenWorkUsage.DataFolder(_locations.Roaming, edition);
+        var name = ProviderCatalog.Name(edition.Id);
+        void Expired()
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T(Loc.Joined($"{name} 的登录已过期，打开 {name} 后会自动续期；如仍失效，请在 {name} 中重新登录"),
+                $"The {name} sign-in has expired. Opening {name} renews it; if it stays expired, sign in again in {name}.");
+        }
+        if (QwenWorkUsage.ParseSignIn(desktop.ReadQwenWorkSignIn(folder), edition) is not { } signIn)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Directory.Exists(folder) ? Loc.T(Loc.Joined($"请先在 {name} 中登录"), $"Sign in to {name} first") : Loc.T(Loc.Joined($"未找到 {name}，请先安装并登录"), $"{name} was not found. Install it and sign in first.");
+            return;
+        }
+        if (signIn.Enterprise)
+        {
+            snapshot.StatusLabel = Loc.T("暂不支持", "Not supported");
+            snapshot.Status = Loc.T(Loc.Joined($"暂不支持读取 {name} 企业专属部署的额度"), $"The credits of a dedicated {name} enterprise deployment cannot be read yet.");
+            return;
+        }
+        if (signIn.Expired(now)) { Expired(); return; }
+        async Task<JsonDocument> Get(string path)
+        {
+            using var request = Bearer(HttpMethod.Get, signIn.Api + path, signIn.Token);
+            return await SendAsync(_http, request, ct);
+        }
+        QwenWorkUsage.Reading reading;
+        try
+        {
+            using var context = await Get(QwenWorkUsage.ContextPath);
+            if (QwenWorkUsage.IsTeam(context.RootElement))
+            {
+                DateTimeOffset? reset = null;
+                try { using var settings = await Get(QwenWorkUsage.TeamResetPath); reset = QwenWorkUsage.Data(settings.RootElement).Get("next_used_reset_at").Date(); }
+                catch (Exception ex) when (ex is HttpRequestException { StatusCode: not HttpStatusCode.Unauthorized } or JsonException or InvalidDataException) { }
+                using var usage = await Get(QwenWorkUsage.TeamUsagePath);
+                reading = QwenWorkUsage.ParseTeam(usage.RootElement, QwenWorkUsage.PlanName(context.RootElement), reset);
+            }
+            else
+            {
+                // The wallets only say what kinds the credits are of; without them the credits left still show.
+                JsonDocument? wallets = null;
+                JsonElement kinds = default;
+                try { wallets = await Get(QwenWorkUsage.WalletsPath); kinds = QwenWorkUsage.Data(wallets.RootElement); }
+                catch (Exception ex) when (ex is HttpRequestException { StatusCode: not HttpStatusCode.Unauthorized } or JsonException or InvalidDataException) { }
+                using (wallets) reading = QwenWorkUsage.ParsePersonal(context.RootElement, kinds);
+            }
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized) { Expired(); return; }
+        snapshot.Metrics = reading.Metrics;
+        snapshot.Plan = reading.Plan;
+        snapshot.Scope = "account";
+        snapshot.PlanSource = name + Loc.T(" 账户", " account");
+        Connected(snapshot, snapshot.PlanSource, now);
     }
 
     private QianwenUsage.Session? ReadQianwenSession(QianwenUsage.Edition edition)
