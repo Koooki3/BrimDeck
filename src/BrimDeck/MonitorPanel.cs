@@ -209,7 +209,7 @@ public partial class MainWindow
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
         // The header keeps the usage page's controls, as the music page does, so the switch does not move between pages. Fitting
         // the usage page for them is kept until its size, data or settings change: a drag resizes this page many times a second.
-        var header = PanelHeader.For(ToolbarFor(height), height < 170 ? 14 : 20);
+        var header = MonitorPageHeader(height);
         ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
         MonitorContent.Margin = new Thickness(_header.Side, 0, _header.Side, MonitorBottom(height));
         // Worked out once for each render: a drag renders the page many times a second.
@@ -241,6 +241,8 @@ public partial class MainWindow
             if (fade && MonitorMotion) _monitorView.BeginAnimation(OpacityProperty, Soft.Fade(.15, 1, Soft.Short));
         }
     }
+
+    private static PanelHeader MonitorPageHeader(double height) => PanelHeader.For(ToolbarFor(height), height < 170 ? 14 : 20);
 
     private (double Width, double Height, IReadOnlyList<ProviderSnapshot> Snapshots, DeckSettings Settings, PanelHeader Header)? _usageHeader;
     private PanelHeader CachedUsageHeader()

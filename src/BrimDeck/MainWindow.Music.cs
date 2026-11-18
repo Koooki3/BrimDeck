@@ -219,14 +219,33 @@ public partial class MainWindow
     // controls are centred in the even part. Toolbar lies outside ContentCanvas's rows, so a band taller than the row is not
     // clipped. Only layout values change, and setting an unchanged value does nothing.
     private PanelHeader _header = PanelHeader.For(36, 20);
+    private double _headerControlSide = 20;
+
+    // Equal-size pages can share the controls without sharing the space reserved for their content.
+    private PanelHeader HeaderControls(PanelHeader page)
+    {
+        if (CurrentPage is not (DeckPage.Music or DeckPage.Monitor)) return page;
+        var size = DeckPages.Size(Settings, CurrentPage);
+        if (Settings.UsagePage && size == DeckPages.Size(Settings, DeckPage.Usage))
+            return CachedUsageHeader();
+        if (CurrentPage == DeckPage.Music && Settings.MonitorPage && size == DeckPages.Size(Settings, DeckPage.Monitor))
+        {
+            var monitor = MonitorPageHeader(ContentCanvas.Height);
+            return Settings.UsagePage ? monitor.WithControlsOf(page) : monitor;
+        }
+        return page;
+    }
+
     private void ApplyHeader(PanelHeader header)
     {
         bool gripBoundaryChanged = _header.Row != header.Row;
         _header = header;
+        var controls = HeaderControls(header);
+        _headerControlSide = controls.Side;
         ToolbarRow.Height = new GridLength(header.Row);
-        Toolbar.Height = header.Height;
-        PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
-        FitPageButtons(header);
+        Toolbar.Height = controls.Height;
+        PageSwitch.Margin = new Thickness(controls.Side, 0, 0, 0);
+        FitPageButtons(controls);
         foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton })
         {
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
@@ -234,9 +253,9 @@ public partial class MainWindow
             if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(Look.Corner(PanelHeader.ButtonRadius));
         }
         PageCapsule.CornerRadius = new CornerRadius(Look.Corner(PanelHeader.ButtonRadius));
-        SettingsButton.Height = header.SettingsHeight;
-        if (SettingsButton.Parent is FrameworkElement right) right.Margin = new Thickness(0, 0, header.RightMargin, 0);
-        ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(header.Side), 0, 0, 0);
+        SettingsButton.Height = controls.SettingsHeight;
+        if (SettingsButton.Parent is FrameworkElement right) right.Margin = new Thickness(0, 0, controls.RightMargin, 0);
+        ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(controls.Side), 0, 0, 0);
         // A same-size page switch can change the grip boundary without raising Island.SizeChanged.
         if (gripBoundaryChanged) UpdateGrips();
     }
@@ -257,7 +276,7 @@ public partial class MainWindow
         PlacePageCapsule();
         UpdateNoticeBadge();
         UpdateShelfPageButton();
-        ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(_header.Side), 0, 0, 0);
+        ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(_headerControlSide), 0, 0, 0);
         // With the entry switched on the source menu has one more row. Without a source that row stands alone in the button.
         bool entry = FullControlEntryShown, alone = entry && _mediaTrack is null;
         MediaSourceButton.Visibility = IsMusicPage && (_mediaTrack is not null || entry) ? Visibility.Visible : Visibility.Collapsed;
