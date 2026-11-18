@@ -332,6 +332,13 @@ public static class Dongles
         ([0x03, 0x00, 0x00, 0x00, 0x01, 0x44], "KZZI K75 Lite"),
         // KZZI's web driver's model table (its donglePassword values; names only).
         ([0x03, 0x00, 0x00, 0x00, 0x03, 0xF3], "KZZI I98"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0x68], "KZZI I75"), ([0x03, 0x00, 0x00, 0x00, 0x03, 0xBB], "KZZI Z75"),
+        // LEOBOG's ONE driver 2.0 (leobog.com) and LANGTU's F99/T99 driver ("LANGTU L18"): each model's Psd, the receiver
+        // 3554:FA09 beside it (names only; LEOBOG's wired-only Hi98, 01 22, left out).
+        ([0x03, 0x00, 0x00, 0x00, 0x00, 0xA2], "LEOBOG Hi75"), ([0x03, 0x00, 0x00, 0x00, 0x00, 0x9B], "LEOBOG Hi75 RGB"),
+        ([0x03, 0x00, 0x00, 0x00, 0x00, 0xA3], "LEOBOG Hi75C Pro"), ([0x03, 0x00, 0x00, 0x00, 0x00, 0x65], "LEOBOG A75"),
+        ([0x03, 0x00, 0x00, 0x00, 0x03, 0x3C], "LEOBOG A98"), ([0x03, 0x00, 0x00, 0x00, 0x00, 0xCA], "LEOBOG Hi8"),
+        ([0x03, 0x00, 0x00, 0x00, 0x01, 0x3F], "LEOBOG Hi8SE"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0x8D], "LEOBOG Hi86"),
+        ([0x03, 0x00, 0x00, 0x00, 0x01, 0x21], "LEOBOG Hi98"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0xAD], "LANGTU L18"),
     ];
     private static bool AulaChecked(byte[] r)
     {
@@ -828,7 +835,7 @@ public static class Dongles
     // outputIds, featureIds: the report ids the collection declares; null where they are not known (Find, which only decides
     // whether the collection is MCHOSE's to read), and then the shape alone decides.
     public static IReadOnlyList<MchoseRead> MchoseReads(int product, string name, int usagePage, int usage, int featureLength, int outputLength,
-        IReadOnlySet<byte>? outputIds = null, IReadOnlySet<byte>? featureIds = null)
+        IReadOnlySet<byte>? outputIds = null, IReadOnlySet<byte>? featureIds = null, IReadOnlySet<byte>? inputIds = null)
     {
         // The keyboards whose read the web driver gives get that read alone: their other vendor collections are for firmware
         // updates (the cables' 0xFF00) or unknown, and are sent nothing. The G98 V3 and K87 V3 keep the status read they were
@@ -846,10 +853,16 @@ public static class Dongles
             _ => []
         };
         bool Output(byte id) => outputIds is null || outputIds.Contains(id);
+        // Report 0x55 listed as an input report alone, no output report listed: the MCHOSE V9 PRO's C-Media receiver is listed so
+        // and still takes 55 65 01 as output (BrandWay.Undeclared); M HUB's other headsets may be too. Not measured on them. Only
+        // the headsets' reads (Audio, and Status on a product known to be audio): mice and keyboards keep to the listed report.
+        bool unlisted55 = outputIds is { Count: 0 } && inputIds is not null && inputIds.Contains(0x55);
+        bool audio = MchoseKind(product, name) is DeviceKind.Headphones or DeviceKind.Earbuds or DeviceKind.Speaker;
         return [.. order.Where(read => read switch
         {
             MchoseRead.Realtek => usagePage == 0xFF01 && featureLength >= 21 && (featureIds is null || featureIds.Contains(0x11) || featureIds.Contains(0x12)),
-            MchoseRead.Status or MchoseRead.Audio => usagePage >= 0xFF00 && outputLength >= 64 && Output(0x55),
+            MchoseRead.Audio => usagePage >= 0xFF00 && outputLength >= 64 && (Output(0x55) || unlisted55),
+            MchoseRead.Status => usagePage >= 0xFF00 && outputLength >= 64 && (Output(0x55) || unlisted55 && audio),
             MchoseRead.Frame4D => usagePage is 0xFF01 or 0xFF0B && usage != 0x0010 && Output(0x4D),
             MchoseRead.Gmouse => usagePage == 0xFF01 && usage == 0x0010 && outputLength >= 65 && Output(0x00),
             MchoseRead.Config => MchoseConfigProducts.Contains(product) && usagePage == 0x0001 && usage == 0x0000 && outputLength >= 65 && Output(0x00),
@@ -1044,15 +1057,24 @@ public static class Dongles
             ? new(reply[8], kind == StatusBlock.Cherry ? (reply[9] & 0x01) != 0 : reply[9] == 1) : null;
 
     // Rapoo's first generation (VT3 PRO: 24AE:1231 its receiver, 4431 on its cable), after mousectl's rapoo_vt3pro driver
-    // (MIT; measured on a 1231 receiver): output report 0xBA, 32 bytes [link (A5 the receiver, FF the cable), AA (the battery
-    // query; A4 and A5 there read and write the mouse's memory, never sent here), length 0, address 0 (4 bytes)], answered
-    // through the input report 0xBA got back: [status, state (1 discharging, 2 charging), percent]. The status reads busy (02)
-    // once the receiver has taken the request and 01 with the answer; a 01 before any busy is still the last answer. A
-    // block answer has 0 where the state goes, so a stale one is told apart. Not tried by us on a mouse.
+    // (MIT; measured on a 1231 receiver): output report 0xBA [link (A5 the receiver, FF the cable), AA (the battery query; A4
+    // and A5 there read and write the mouse's memory, never sent here), length 0, address 0 (4 bytes)], zeros to the report's
+    // length, answered through the input report 0xBA got back: [status, state (1 discharging, 2 charging), percent]. The
+    // status reads busy (02) once the receiver has taken the request and 01 with the answer; a 01 before any busy is still the
+    // last answer. A block answer has 0 where the state goes, so a stale one is told apart. Not tried by us on a mouse.
     public const int RapooVendor = 0x24AE;
     public static readonly int[] RapooGen1Products = [0x1231, 0x4431];
     public const byte RapooGen1Report = 0xBA;
-    public static byte[] RapooGen1Request(bool cable) { var frame = new byte[33]; frame[0] = RapooGen1Report; frame[1] = (byte)(cable ? 0xFF : 0xA5); frame[2] = 0xAA; return frame; }
+    public static byte[] RapooGen1Request(bool cable) { var frame = new byte[8]; frame[0] = RapooGen1Report; frame[1] = (byte)(cable ? 0xFF : 0xA5); frame[2] = 0xAA; return frame; }
+    // The same query on the rest of the brand, as one rule rather than a list of models: any other product of Rapoo's vendor id
+    // on a vendor collection that declares output report 0xBA (where the ids are not known, usage 0x0E), long enough for the
+    // request. Not the first generation (above) and not the products only listened to (Pushes). MouseDock reads its office
+    // receivers this way (186C, 1870 to 1876: usage page 0xFF00, usage 0x0E, 32-byte reports). Measured on a 1870 receiver:
+    // the input report is given once per request, the answer (01 01 2C, 44 %) when got 50 ms to 1 s after it, busy when got
+    // within about 30 ms, and every later get fails until the request is sent again.
+    public static bool RapooQueryCollection(int product, int usagePage, int usage, int outputLength, IReadOnlySet<byte>? outputIds)
+        => !RapooGen1Products.Contains(product) && !Pushes.RapooProducts.Contains(product) && !Pushes.RapooKeyboards.Contains(product)
+        && UsagePages.Vendor(usagePage) && outputLength >= 8 && (outputIds is null ? usage == 0x000E : outputIds.Contains(RapooGen1Report));
     // The status of an input report got back: true OK, false busy, null another report.
     public static bool? RapooGen1Status(byte[] reply)
     {
@@ -1108,8 +1130,6 @@ public static class Dongles
             (Devices.Hardware(RazerHeadsets.Vendor, 0x0568), Devices.Hardware(RazerHeadsets.Vendor, 0x0567)),
             (Devices.Hardware(RazerHeadsets.Vendor, 0x0588), Devices.Hardware(RazerHeadsets.Vendor, 0x0587)),
             (Devices.Hardware(NuPhy.Vendor, 0x8F01), Devices.Hardware(NuPhy.Vendor, 0xA011)),
-            (Devices.Hardware(NuPhy.Vendor, 0x8F05), Devices.Hardware(NuPhy.Vendor, 0x1043)),
-            (Devices.Hardware(NuPhy.Vendor, 0x8F06), Devices.Hardware(NuPhy.Vendor, 0x1044)),
         };
         foreach (var product in NuPhy.KnownNames.Keys)
             if (product is >= 0x1026 and <= 0x10FF)
@@ -1293,7 +1313,7 @@ public static class Dongles
     public enum Protocol
     {
         BitMouse, Compx, Vgn, Endgame, Vaxee, Inphic, Mchose, Ajazz, CompxFramed, F83, Nordic, MchoseRealtek, Gmouse, Lingbao, Nzxt, Cherry, Hecate,
-        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial
+        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial, RapooQuery
     }
 
     // The Compx receivers atkctl documents (the ATK A9 Ultra), by vendor, product and usage page.
@@ -1343,6 +1363,7 @@ public static class Dongles
         if (Asus.Find(vendor, product) is { } asus) return Asus.Collection(asus, iface, collection, usagePage, outputLength) ? Protocol.Asus : null;
         if (SteelSeriesMice.Find(vendor, product) is { } mouse) return SteelSeriesMice.Collection(mouse, iface, usagePage, outputLength) ? Protocol.SteelSeries : null;
         if (vendor == RapooVendor && RapooGen1Products.Contains(product)) return usagePage >= 0xFF00 && outputLength >= 33 ? Protocol.RapooGen1 : null;
+        if (vendor == RapooVendor && RapooQueryCollection(product, usagePage, usage, outputLength, outputIds)) return Protocol.RapooQuery;
         if (vendor == AtkVendor && usagePage == 0xFF05) return Protocol.BitMouse;
         // ATK's N9 Pro and N9 Ultra: their consumer collection (the one ATK HUB lists them by) only finds the device; nothing is
         // sent to it, the battery being read on the device's serial port (AtkHeadsets.SerialRequest).

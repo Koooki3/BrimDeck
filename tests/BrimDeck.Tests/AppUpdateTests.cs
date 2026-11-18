@@ -126,6 +126,37 @@ internal static class AppUpdateTests
             betas.NoticeVersion is null && new AppUpdates(betaBackend, betaFolder).NoticeVersion is null);
         betas.Beta = true; await betas.CheckAsync(true); await betas.DownloadAsync(); betas.Beta = false;
         check("a downloaded beta stays ready when betas are turned off", betas.Stage == AppUpdateStage.Ready && betas.Release?.Version == "0.2.0-beta.1");
+
+        foreach (var (version, stable) in new[] { ("0.2.0-beta.1", (string?)null), ("0.2.0-beta.1", "0.1.5"), ("0.2.0", null) })
+        {
+            var result = new TaskCompletionSource<AppRelease?>();
+            var checkingBackend = new UpdateFixture { CheckResult = result.Task, StableRelease = stable is null ? null : new(stable, "Update notes", 100) };
+            var checkingFolder = Path.Combine(folder, "beta-toggle-" + version + "-" + stable);
+            var checking = new AppUpdates(checkingBackend, checkingFolder) { Beta = true };
+            var pending = checking.CheckAsync(true);
+            checking.Beta = false;
+            result.SetResult(new(version, "Update notes", 100)); await pending;
+            var restored = new AppUpdates(checkingBackend, checkingFolder);
+            var expected = stable ?? (ApplicationVersion.IsPrerelease(version) ? null : version);
+            if (expected is null)
+                check("turning betas off during a check withdraws its beta and remembered notice", !checking.HasUpdate &&
+                    checking.Stage == AppUpdateStage.Idle && !checking.ShouldPrompt(true, true) &&
+                    checking.NoticeVersion is null && restored.NoticeVersion is null);
+            else
+                check($"turning betas off during a check offers stable {expected} and remembers it", checking.Release?.Version == expected &&
+                    checking.Stage == AppUpdateStage.Available && checking.ShouldPrompt(true, true) && restored.NoticeVersion == expected);
+        }
+
+        var failing = new TaskCompletionSource<AppRelease?>();
+        var recheckBackend = new UpdateFixture { Release = new("0.2.0-beta.1", "Update notes", 100) };
+        var recheck = new AppUpdates(recheckBackend, Path.Combine(folder, "beta-recheck-fails")) { Beta = true };
+        await recheck.CheckAsync(true);
+        recheckBackend.CheckResult = failing.Task;
+        var rechecking = recheck.CheckAsync(true);
+        recheck.Beta = false;
+        failing.SetException(new HttpRequestException()); await rechecking;
+        check("a failed recheck after turning betas off does not bring back the earlier beta", !recheck.HasUpdate &&
+            recheck.Release is null && recheck.Stage == AppUpdateStage.Idle && recheck.NoticeVersion is null);
     }
 }
 
@@ -153,7 +184,14 @@ internal sealed class UpdateFixture : IAppUpdateBackend
         if (Failure is not null) throw Failure;
         return CheckResult ?? Task.FromResult(Release);
     }
-    public Task<AppRelease?> CheckAsync(bool beta, CancellationToken cancellation) { LastBeta = beta; return CheckAsync(cancellation); }
+    // The newest stable release, returned when a check asks without betas; null returns the same result for both.
+    public AppRelease? StableRelease { get; set; }
+    public Task<AppRelease?> CheckAsync(bool beta, CancellationToken cancellation)
+    {
+        LastBeta = beta;
+        if (!beta && StableRelease is not null) { Checks++; return Task.FromResult<AppRelease?>(StableRelease); }
+        return CheckAsync(cancellation);
+    }
     public async Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation)
     {
         Downloads++; Report = progress;

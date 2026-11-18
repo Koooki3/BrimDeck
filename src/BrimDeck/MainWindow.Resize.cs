@@ -312,7 +312,6 @@ public partial class MainWindow
         _resizeChanged = true;
         DeckPages.SetSize(Settings, _resizePage, width, height);
         _pageWidth = width;
-        if (_resizePage == DeckPage.Usage) _usageWidth = width;
         SetExpanded(true, instant: true);
         // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
         // layout step and stretch in between, so they follow too; the model details and the media page are built again whole,

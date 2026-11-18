@@ -21,10 +21,39 @@ internal static class CaptureChecks
             WindowsHost.SetCapturable(window, true);
             check("capturable overlay drops the no-activate style", (GetWindowLongPtrW(handle, -20).ToInt64() & 0x08000000) == 0);
             check("capturable transparent overlay supports WGC", CreateItem(handle) == 0);
+            CheckForegroundDuringClick(handle, check);
             WindowsHost.SetCapturable(window, false);
             check("overlay takes the no-activate style back", (GetWindowLongPtrW(handle, -20).ToInt64() & 0x08000000) != 0);
         }
         finally { window.Close(); }
+    }
+
+    private static void CheckForegroundDuringClick(IntPtr panel, Action<string, bool> check)
+    {
+        var original = new Window { Width = 80, Height = 60, Left = -20000, Top = -20000, ShowActivated = false, ShowInTaskbar = false };
+        var next = new Window { Width = 80, Height = 60, Left = -20000, Top = -20000, ShowActivated = false, ShowInTaskbar = false };
+        bool interacting = true;
+        using var host = new WindowsHost(WindowsHost.PrimaryMonitor, () => panel, () => null,
+            interactingWithCapturePanel: () => interacting);
+        try
+        {
+            original.Show(); next.Show();
+            var first = new WindowInteropHelper(original).Handle;
+            var second = new WindowInteropHelper(next).Handle;
+            check("no foreground before the first reading stays unknown", host.ForegroundForRules(IntPtr.Zero) == IntPtr.Zero);
+            check("capture click keeps the previous window across repeated empty readings and panel activation",
+                host.ForegroundForRules(first) == first && host.ForegroundForRules(IntPtr.Zero) == first
+                && host.ForegroundForRules(panel) == first && host.ForegroundForRules(IntPtr.Zero) == first);
+            check("a real foreground switch takes effect immediately", host.ForegroundForRules(second) == second && host.ForegroundForRules(panel) == second);
+            next.Hide();
+            check("a hidden window cannot stand in for the foreground", host.ForegroundForRules(IntPtr.Zero) == IntPtr.Zero);
+            host.ForegroundForRules(first);
+            interacting = false;
+            check("outside the capturable open panel normal detection resumes", host.ForegroundForRules(panel) == panel);
+            interacting = true;
+            check("a later interaction cannot reuse the discarded window", host.ForegroundForRules(IntPtr.Zero) == IntPtr.Zero);
+        }
+        finally { next.Close(); original.Close(); }
     }
 
     private static int CreateItem(IntPtr handle)

@@ -22,8 +22,8 @@ internal sealed class HidInfo
     // The battery usages the collection's feature reports carry (HidBattery.IsBattery): report id, page, usage, link collection
     // and logical range.
     public List<(byte ReportId, ushort Page, ushort Usage, ushort Link, int Min, int Max)> FeatureBatteries = [];
-    // The ids of the output and feature reports the collection declares (0 where it numbers none).
-    public HashSet<byte> OutputIds = [], FeatureIds = [];
+    // The ids of the input, output and feature reports the collection declares (0 where it numbers none).
+    public HashSet<byte> InputIds = [], OutputIds = [], FeatureIds = [];
     // MI_xx in the path: the USB interface; -1 when the path has none. Worked out once: the readers ask for it every pass.
     public int Interface => _interface ??= Hid.Number(Hid.InterfaceIn, Path);
     // COLxx in the path: the top-level collection where the interface has several; -1 when the path has none.
@@ -112,6 +112,7 @@ internal static class Hid
                     HidP_GetCaps(preparsed, caps);
                     info.Usage = caps[0]; info.UsagePage = caps[1]; info.InputLength = caps[2]; info.OutputLength = caps[3]; info.FeatureLength = caps[4];
                     if (batteries && caps[30] > 0) info.FeatureBatteries = Batteries(preparsed, caps[30]);
+                    info.InputIds = ReportIds(preparsed, 0, caps[23], caps[24]);
                     info.OutputIds = ReportIds(preparsed, 1, caps[26], caps[27]);
                     info.FeatureIds = ReportIds(preparsed, 2, caps[29], caps[30]);
                 }
@@ -142,7 +143,7 @@ internal static class Hid
         return found;
     }
 
-    // The report ids of one report type (1 output, 2 feature), from its button and value capabilities. HIDP_BUTTON_CAPS and
+    // The report ids of one report type (0 input, 1 output, 2 feature), from its button and value capabilities. HIDP_BUTTON_CAPS and
     // HIDP_VALUE_CAPS are both 72 bytes with the report id at 2.
     private static HashSet<byte> ReportIds(IntPtr preparsed, int type, int buttons, int values)
     {

@@ -19,6 +19,10 @@ public static class Loc
     public static string T(string chinese, string english) => IsEnglish ? english : chinese;
     // An English count with its noun: "1 item", "2 items".
     public static string Count(long count, string one, string many) => $"{count} {(count == 1 ? one : many)}";
+    // Chinese text built around a name that may be Chinese or Latin ("请先在 {name} 中登录"): the spaces kept beside a Latin name are
+    // dropped where they fall between two Chinese characters.
+    public static string Joined(string chinese) => CjkSpace.Replace(chinese, "");
+    private static readonly Regex CjkSpace = new(@"(?<=\p{IsCJKUnifiedIdeographs}) (?=\p{IsCJKUnifiedIdeographs})", RegexOptions.Compiled);
 
     // The Windows display language decides the language of a first start and of "恢复默认". Every Chinese variant,
     // Traditional included, shows Simplified Chinese; any other language shows English.
@@ -34,7 +38,8 @@ public static class Loc
         ["账期"] = "Billing period", ["套餐"] = "Plan", ["其他"] = "Other",
         ["Cursor 模型"] = "Cursor models", ["其他模型"] = "Other models", ["工具调用"] = "Tool calls",
         ["账户余额"] = "Account balance", ["密钥余额"] = "Key balance", ["今日扣费"] = "Charged today", ["本月扣费"] = "Charged this month", ["预算余额"] = "Budget left", ["密钥累计"] = "Key total",
-        ["赠送余额"] = "Granted balance", ["充值余额"] = "Topped-up balance", ["冻结金额"] = "Frozen", ["现金余额"] = "Cash balance", ["代金券余额"] = "Voucher balance",["累计消费"] = "Total cost", ["加油包"] = "Extra usage", ["额外积分"] = "Extra credits", ["本月加油包"] = "Extra usage this month",
+        ["赠送余额"] = "Granted balance", ["充值余额"] = "Topped-up balance", ["冻结金额"] = "Frozen", ["现金余额"] = "Cash balance", ["代金券余额"] = "Voucher balance",["累计消费"] = "Total cost", ["加油包"] = "Extra usage", ["额外积分"] = "Extra credits", ["套餐积分"] = "Plan credits", ["加购积分"] = "Add-on credits", ["全部积分"] = "All credits", ["每日积分"] = "Daily credits", ["每月积分"] = "Monthly credits", ["长期积分"] = "Long-term credits", ["即将到期积分"] = "Credits expiring soon", ["成员积分"] = "Member credits", ["企业积分"] = "Organization credits", ["组织资源包"] = "Organization credits", ["本月加油包"] = "Extra usage this month",
+        ["个人版"] = "Personal", ["团队版"] = "Team",
         ["次"] = "calls", ["积分"] = "credits", ["令牌"] = "tokens",
         ["网易云音乐"] = "NetEase Cloud Music", ["QQ 音乐"] = "QQ Music", ["酷狗音乐"] = "KuGou Music", ["爱奇艺"] = "iQIYI",
     };

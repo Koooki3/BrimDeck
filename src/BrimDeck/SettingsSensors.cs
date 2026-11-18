@@ -16,8 +16,12 @@ public sealed partial class SettingsWindow
 {
     internal const int SensorsPage = 10;
     private Action? _refreshSensors;
-    private bool _sensorsBusy;
-    private string? _sensorsFailure;
+    // WinGet and the service setup can outlive a settings window. All operations start and finish on the UI dispatcher.
+    private enum SensorOperation { None, InstallDriver, RemoveDriver, Service }
+    private static SensorOperation _sensorOperation;
+    private static string? _installFailure, _uninstallFailure, _sensorsFailure;
+    private static event Action? SensorOperationChanged;
+    private void RefreshSensorSettings() => _refreshSensors?.Invoke();
     private int _sensorsGeneration;
 
     private void SensorsSettings()
@@ -48,21 +52,32 @@ public sealed partial class SettingsWindow
         void Fill()
         {
             int generation = ++_sensorsGeneration;
-            var state = Native.SensorSetup.State;
             string? version = Native.SensorSetup.PawnIoVersion;
-            if (version is null)
+            if (version is null) _uninstallFailure = null;
+            else _installFailure = null;
+            bool busy = _sensorOperation != SensorOperation.None;
+            bool installing = _sensorOperation == SensorOperation.InstallDriver;
+            bool removing = _sensorOperation == SensorOperation.RemoveDriver;
+            if (installing || (version is null && !removing))
             {
                 var install = ActionButton(Loc.T("安装", "Install"), InstallPawnIo, primary: true);
                 AutomationProperties.SetName(install, Loc.T("安装 PawnIO", "Install PawnIO"));
-                pawnIo.Show(Step.Off, Loc.T("未安装", "Not installed"), install);
+                install.IsEnabled = !busy;
+                pawnIo.Show(Step.Off, installing ? Loc.T("正在安装…", "Installing…") : Loc.T("未安装", "Not installed"), install, _installFailure, Step.Failed);
+                if (_installFailure is not null)
+                {
+                    pawnIo.Detail.Inlines.Add(new Run("  "));
+                    pawnIo.Detail.Inlines.Add(InlineLink(Loc.T("打开官方下载页 ↗", "Open official download ↗"), Native.SensorSetup.PawnIoDownload));
+                }
             }
             else
             {
                 var remove = ActionButton(Loc.T("卸载", "Uninstall"), UninstallPawnIo); remove.Style = (Style)FindResource("SettingsOutlineButton");
                 AutomationProperties.SetName(remove, Loc.T("卸载 PawnIO", "Uninstall PawnIO"));
-                remove.IsEnabled = !_sensorsBusy;
-                pawnIo.Show(Step.Done, Loc.T("已安装", "Installed"), remove,
-                    version.Length > 0 ? Loc.T("版本 ", "Version ") + version : null);
+                remove.IsEnabled = !busy;
+                string? detail = version is { Length: > 0 } ? Loc.T("版本 ", "Version ") + version : null;
+                pawnIo.Show(removing ? Step.Off : Step.Done, removing ? Loc.T("正在卸载…", "Uninstalling…") : Loc.T("已安装", "Installed"), remove,
+                    _uninstallFailure ?? detail, _uninstallFailure is null ? Step.Off : Step.Failed);
             }
 
             bool installed = Native.SensorSetup.ServiceInstalled;
@@ -77,14 +92,14 @@ public sealed partial class SettingsWindow
                 action = ActionButton(Loc.T("启用", "Turn on"), EnableSensors, primary: true);
                 AutomationProperties.SetName(action, Loc.T("启用传感器服务", "Turn on the sensor service"));
             }
-            action.IsEnabled = !_sensorsBusy && (installed || state != Native.SensorSetupState.NoPawnIo);
-            if (_sensorsBusy) service.Show(Step.Off, Loc.T("正在处理…", "Working…"), action);
+            action.IsEnabled = !busy && (installed || version is not null);
+            if (_sensorOperation == SensorOperation.Service) service.Show(Step.Off, Loc.T("正在处理…", "Working…"), action);
             else if (_sensorsFailure is { } failure)
                 service.Show(installed ? Step.Done : Step.Off, installed ? Loc.T("已启用", "On") : Loc.T("未启用", "Off"), action, failure, Step.Failed);
-            else if (installed && state == Native.SensorSetupState.NoPawnIo)
+            else if (installed && version is null)
                 service.Show(Step.Caution, Loc.T("无法读数", "Not reading"), action, Loc.T("PawnIO 未安装", "PawnIO is not installed"), Step.Caution);
             else if (installed) service.Show(Step.Done, Loc.T("已启用", "On"), action);
-            else if (state == Native.SensorSetupState.NoPawnIo)
+            else if (version is null)
                 service.Show(Step.Off, Loc.T("未启用", "Off"), action, Loc.T("需要先安装 PawnIO", "Install PawnIO first"));
             else service.Show(Step.Off, Loc.T("未启用", "Off"), action);
 
@@ -180,9 +195,15 @@ public sealed partial class SettingsWindow
         };
     }
 
-    private void InstallPawnIo()
+    private void InstallPawnIo() => _ = ChangePawnIoAsync(true);
+
+    private static Task ChangePawnIoAsync(bool install)
     {
-        if (!Native.SensorSetup.RunWinget(true)) UI.OpenUrl(Native.SensorSetup.PawnIoDownload);
+        return RunSensorSetupAsync(install ? SensorOperation.InstallDriver : SensorOperation.RemoveDriver, async _ =>
+        {
+            if (!await Native.SensorSetup.RunWingetAsync(install))
+                UI.OpenUrl(install ? Native.SensorSetup.PawnIoDownload : "ms-settings:appsfeatures");
+        });
     }
 
     private void UninstallPawnIo()
@@ -190,27 +211,37 @@ public sealed partial class SettingsWindow
         if (!Confirm(Loc.T("卸载 PawnIO", "Uninstall PawnIO"),
             Loc.T("FanControl、LibreHardwareMonitor 等软件也可能使用这个驱动，卸载后它们也会受影响。", "Other software such as FanControl or LibreHardwareMonitor may use this driver too, and will be affected."),
             Loc.T("卸载", "Uninstall"))) return;
-        if (!Native.SensorSetup.RunWinget(false)) UI.OpenUrl("ms-settings:appsfeatures");
+        _ = ChangePawnIoAsync(false);
     }
 
-    private void EnableSensors() => _ = RunSensorSetupAsync(Native.SensorSetup.EnableAsync);
+    private void EnableSensors() => _ = RunSensorSetupAsync(SensorOperation.Service, Native.SensorSetup.EnableAsync);
 
     private void DisableSensors()
     {
         if (Confirm(Loc.T("停用传感器服务", "Turn off the sensor service"),
             Loc.T("会删除传感器服务及其文件，Windows 会请求管理员确认。PawnIO 驱动不受影响。", "Removes the sensor service and its files; Windows asks an administrator to confirm. PawnIO is left as it is."),
             Loc.T("停用", "Turn off")))
-            _ = RunSensorSetupAsync(Native.SensorSetup.DisableAsync);
+            _ = RunSensorSetupAsync(SensorOperation.Service, Native.SensorSetup.DisableAsync);
     }
 
-    private async Task RunSensorSetupAsync(Func<CancellationToken, Task> step)
+    private static async Task RunSensorSetupAsync(SensorOperation operation, Func<CancellationToken, Task> step)
     {
-        if (_sensorsBusy) return;
-        _sensorsBusy = true; _sensorsFailure = null; _refreshSensors?.Invoke();
+        if (_sensorOperation != SensorOperation.None) return;
+        _sensorOperation = operation;
+        _sensorsFailure = _installFailure = _uninstallFailure = null;
+        SensorOperationChanged?.Invoke();
+        string? failure = null;
         try { await step(CancellationToken.None); }
-        catch (OperationCanceledException) { _sensorsFailure = Loc.T("操作超时", "Timed out"); }
+        catch (OperationCanceledException) { failure = Loc.T("操作超时", "Timed out"); }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException or UnauthorizedAccessException)
-        { _sensorsFailure = ex.Message; }
-        finally { _sensorsBusy = false; if (IsLoaded) _refreshSensors?.Invoke(); }
+        { failure = ex.Message; }
+        finally
+        {
+            if (operation == SensorOperation.Service) _sensorsFailure = failure;
+            else if (operation == SensorOperation.InstallDriver) _installFailure = failure;
+            else _uninstallFailure = failure;
+            _sensorOperation = SensorOperation.None;
+            SensorOperationChanged?.Invoke();
+        }
     }
 }

@@ -414,7 +414,7 @@ static class DeviceProtocolTests
     private static void RapooFirst(Action<string, bool> check)
     {
         var request = Dongles.RapooGen1Request(cable: false);
-        check("Rapoo first generation: the battery query, on the receiver and the cable", request.Length == 33 && request[..8].SequenceEqual(new byte[] { 0xBA, 0xA5, 0xAA, 0, 0, 0, 0, 0 })
+        check("Rapoo first generation: the battery query, on the receiver and the cable", request.SequenceEqual(new byte[] { 0xBA, 0xA5, 0xAA, 0, 0, 0, 0, 0 })
             && Dongles.RapooGen1Request(cable: true)[1] == 0xFF);
         check("Rapoo first generation: busy, the answer, and a stale block answer", Dongles.RapooGen1Status(Bytes("BA 02 00 00")) == false && Dongles.RapooGen1Status(Bytes("01 02 37")) == true
             && Dongles.RapooGen1Battery(Bytes("BA 01 02 37 00")) == new BatteryRead(55, true) && Dongles.RapooGen1Battery(Bytes("01 01 4B")) == new BatteryRead(75)
@@ -422,6 +422,19 @@ static class DeviceProtocolTests
         check("Rapoo first generation: only its receiver and cable, on a vendor collection with the 33-byte report",
             Dongles.Find(0x24AE, 0x1231, 0xFF00, "", 0, 1, 1, 33, 33) == Dongles.Protocol.RapooGen1 && Dongles.Find(0x24AE, 0x1231, 0x0001, "", 0, 0, 2, 8, 0) is null
             && Dongles.Find(0x24AE, 0x1412, 0xFF00, "", 0, 1, 2, 19, 33) is null);
+        var ba = new HashSet<byte> { 0xBA };
+        check("Rapoo's other receivers: any product's vendor collection declaring output report 0xBA, as on the measured 1870",
+            Dongles.Find(0x24AE, 0x1870, 0xFF00, "", 0, 1, 0x0E, 32, 32, 3, ba) == Dongles.Protocol.RapooQuery
+            && Dongles.Find(0x24AE, 0x1876, 0x00FF, "", 0, 1, 0x0E, 32, 32, -1, null) == Dongles.Protocol.RapooQuery
+            && Dongles.Find(0x24AE, 0x1999, 0xFF00, "", 0, 1, 0x05, 64, 64, -1, ba) == Dongles.Protocol.RapooQuery);
+        check("Rapoo's other receivers: not another report id, a standard page, a short report, the first generation or a listened product",
+            Dongles.Find(0x24AE, 0x1870, 0xFF00, "", 0, 1, 0x02, 7, 7, 4, new HashSet<byte> { 0x07 }) is null
+            && Dongles.Find(0x24AE, 0x1870, 0xFF01, "", 29, 2, 0x00, 29, 29, -1, null) is null
+            && Dongles.Find(0x24AE, 0x1870, 0x0001, "", 0, 1, 0x06, 9, 2, 0, ba) is null
+            && Dongles.Find(0x24AE, 0x1870, 0xFF00, "", 0, 1, 0x0E, 4, 4, 3, ba) is null
+            && Dongles.Find(0x24AE, 0x1231, 0xFF00, "", 0, 1, 0x0E, 32, 32, -1, ba) is null
+            && Dongles.Find(0x24AE, 0x14A5, 0xFF00, "", 0, 1, 0x0E, 33, 33, -1, ba) is null
+            && Dongles.Find(0x24AF, 0x1870, 0xFF00, "", 0, 1, 0x0E, 32, 32, 3, ba) is null);
     }
 
     private static void DongleFrames(Action<string, bool> check)

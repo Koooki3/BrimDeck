@@ -18,7 +18,9 @@ public static class Xiberia
 
     public static IEnumerable<BrandFamily> Families =>
     [
-        new("XIBERIA", Takes, _ => [new BrandWay("xiberia.battery", WayTransport.Output, Request(), Battery) { TimeoutMs = 800 }])
+        // Also where Windows lists report 0x55 as an input report alone, as on the MCHOSE V9 PRO's receiver, which carries the same
+        // pair of reports 0x55 and 0x41 (BrandWay.Undeclared; not measured on XIBERIA's).
+        new("XIBERIA", Takes, _ => [new BrandWay("xiberia.battery", WayTransport.Output, Request(), Battery) { TimeoutMs = 800, Undeclared = true }])
         { Kind = _ => DeviceKind.Headphones, Prefix = "xiberia" },
     ];
 }

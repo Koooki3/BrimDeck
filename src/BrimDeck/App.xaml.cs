@@ -128,6 +128,13 @@ public partial class App : Application
         Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
         Usage = new UsageService(new DesktopSources(MiMo), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
+        // A source read in the background (Qoder) that ended after its round asks for another round to show it; the first reading
+        // of a source always does, a later one only while the panel syncs by itself.
+        Usage.BackgroundReadFinished += first => Dispatcher.BeginInvoke(() =>
+        {
+            if (Exiting || Deck is not { } deck) return;
+            _ = first ? deck.RefreshAsync() : deck.RefreshAutomaticallyAsync(queueIfBusy: true);
+        });
         LastSeen = new UsageLastSeen(Path.Combine(folder, UsageLastSeen.FileName));
         WindowDrags = new WindowDrags();
         Shelf = new ShelfService(folder, Dispatcher); Shelf.Apply(Settings);

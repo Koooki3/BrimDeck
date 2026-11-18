@@ -21,6 +21,14 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     public string WorkBuddyHome { get; init; } = "";
     // WorkBuddy AI (international edition) keeps them in %USERPROFILE%\.workbuddy-ai the same way.
     public string WorkBuddyAiHome { get; init; } = "";
+    // Qoder keeps the CLI's sign-in (.auth\user) and its binary (bin\qodercli) in %USERPROFILE%\.qoder, which its desktop app shares;
+    // Qoder CN uses %USERPROFILE%\.qoder-cn the same way (QoderUsage).
+    public string QoderHome { get; init; } = "";
+    public string QoderCnHome { get; init; } = "";
+    // The QwenWork CN desktop app (千问办公) keeps its engine's records in %USERPROFILE%\.qwenworkcn and its sign-in in
+    // %APPDATA%\QwenWorkCN; the international QwenWork uses .qwenwork and QwenWork (QwenWorkUsage).
+    public string QwenWorkCnHome { get; init; } = "";
+    public string QwenWorkHome { get; init; } = "";
     // The environment variables that change which Kimi Code service is used (KIMI_CODE_BASE_URL, KIMI_CODE_OAUTH_HOST and
     // the others in KimiEnvironment); all null when unset.
     public KimiEnvironment KimiEnvironment { get; init; } = new();
@@ -58,7 +66,7 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         ConfigDirectory(codexOverride, Path.Combine(home, ".codex")),
         Path.Combine(roaming, "Cursor", "User", "globalStorage", "state.vscdb"), roaming, local)
     { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home),
-      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), CommandCodeHome = Path.Combine(home, ".commandcode"), WorkBuddyHome = Path.Combine(home, ".workbuddy"), WorkBuddyAiHome = Path.Combine(home, ".workbuddy-ai"), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null), MiMoDatabase = MiMoUsage.Database(home, null) };
+      PiSessions = PiSessionDirectory(home, piOverride, piSessionOverride), CodeAgentHome = ConfigDirectory(codeAgentOverride, Path.Combine(home, ".cac")), CommandCodeHome = Path.Combine(home, ".commandcode"), WorkBuddyHome = Path.Combine(home, ".workbuddy"), WorkBuddyAiHome = Path.Combine(home, ".workbuddy-ai"), QoderHome = Path.Combine(home, ".qoder"), QoderCnHome = Path.Combine(home, ".qoder-cn"), QwenWorkCnHome = Path.Combine(home, ".qwenworkcn"), QwenWorkHome = Path.Combine(home, ".qwenwork"), OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null), MiMoDatabase = MiMoUsage.Database(home, null) };
 
     private static string ConfigDirectory(string? value, string fallback) =>
         !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value) ? Path.GetFullPath(value) : fallback;
