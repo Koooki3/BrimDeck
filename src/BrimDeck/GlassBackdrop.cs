@@ -264,7 +264,9 @@ internal sealed class GlassBackdrop : IDisposable
 
     private void PresentAcrylicVeil(double target, bool dark, bool animate = false)
     {
-        bool enabled = Trial.Contains("flow-veil") && _shown && (Openness?.Invoke() ?? 0) >= .999 && Soft.At(_owner);
+        double openness = Openness?.Invoke() ?? 0;
+        bool settledForm = openness >= .999 || Trial.Contains("flow-compact") && openness <= .001;
+        bool enabled = Trial.Contains("flow-veil") && _shown && settledForm && Soft.At(_owner);
         bool running = _acrylicVeilMotion?.IsEnabled == true;
         if (enabled && running && target == _veilTo && dark == _veilDark) return;
         if (!enabled || !animate || Math.Abs(target - _luminosityShown) < .075)
