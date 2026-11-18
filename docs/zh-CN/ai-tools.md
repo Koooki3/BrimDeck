@@ -25,6 +25,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | WorkBuddy AI | ✓ | ✓ | 配额：在设置中通过浏览器登录 WorkBuddy 国际版官网。用量统计只需在本机使用 WorkBuddy AI 桌面应用 |
 | Xiaomi MiMo 桌面订阅 | ✓ | ✓ | 配额：在设置中通过浏览器登录小米账号。用量统计只需在本机使用 MiMo Code CLI 或 Xiaomi MiMo 桌面版 |
 | Xiaomi MiMo | ✓ | | 在 Xiaomi MiMo 桌面版或 MiMo Code CLI 中关联开放平台 API 密钥或 Token Plan |
+| 千问、QwenCloud | ✓ | | 在设置中通过浏览器登录千问 AI 平台或 QwenCloud 账户 |
 | Qoder、Qoder CN | ✓ | ✓ | 在本机登录 Qoder CLI 或 Qoder 桌面版，或打开已登录的 Qoder IDE（Qoder CN 同理）。CLI 与桌面版的 Token 统计需要在设置中开启 |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
 | Xiaomi MiMo API | ✓ | | 在设置中填写小米 MiMo 开放平台按量计费 API 密钥 |
@@ -154,6 +155,17 @@ Qoder（qoder.com）与 Qoder CN（qoder.com.cn）是两套独立的账号，在
 - **配额**：按套餐积分、加购积分、组织资源包与专属积分（例如“SOTA 专属积分”）分别显示，并显示到期时间与套餐名称。
 - **读取方式**：Qoder 的账户接口返回加密数据，BrimDeck 依次请本机的 Qoder CLI、桌面版、IDE 读取，使用它们各自的登录。CLI 与桌面版每次读取约需 20 秒，在后台进行，不影响其他列。
 - **Token 用量**：读取 Qoder IDE 与 CLI、桌面版的本机记录。CLI 与桌面版默认不记录 Token 数：在设置中把统计应用选为 Qoder 后，展开这一列，点击“CLI 与桌面版 Token”一行的“开启”，再重新打开 Qoder CLI 与桌面版，新的对话开始记录。这一操作为当前用户设置环境变量 `QODER_EXPOSE_TOKEN_USAGE=1`（Qoder CN 为 `QODERCN_EXPOSE_TOKEN_USAGE=1`），“关闭”时删除。Auto、极致、快速、经济是档位，统计中按档位显示。
+
+## 千问与 QwenCloud
+
+千问 AI 平台（platform.qianwenai.com）与它的国际版 QwenCloud（www.qwencloud.com）是两套独立的账号，在“配额来源”中分别选择，分别登录。
+
+- **为什么需要登录**：两个平台的 API 密钥只能调用模型，不能查询余额或 Token Plan 额度，所以这里不填写密钥，而是登录账户。
+- **配额**：同一列中依次显示个人版 Token Plan 的额度（Credits 已用量与重置时间）、团队版 Token Plan 所有席位合计的额度、团队加油包、账户余额与本月扣费，没有的项目不显示。名称旁显示套餐名称，例如“Lite · 团队版 标准席位”。个人版额度的周期以平台返回为准，目前为每月一次，在订阅日重置。
+- **团队版**：千问的文档说明团队用量只有团队的所有者与管理员可以查看，以成员身份登录时可能读不到团队版的额度。
+- **QwenCloud**：没有账户余额，只显示 Token Plan 与本月扣费，金额以美元计。
+- **本月扣费**：本月按量计费的消费，与两个平台的官方 CLI 一样按 UTC 的自然月统计，可能与控制台中按北京时间的账单月略有差异。
+- **登录**：在设置中展开千问或 QwenCloud 行，点击“在浏览器中登录”，在打开的授权页登录并确认授权，需在 5 分钟内完成。授权页显示的应用为 QianWen CLI 或 QwenCloud CLI，这是平台账户接口唯一提供的登录方式。BrimDeck 获得自己的登录凭据，加密保存在本机。凭据不能续期，过期后状态显示“登录已失效”，重新登录即可。点击“退出登录”删除本机保存的凭据。
 
 ## 手动填写的来源
 

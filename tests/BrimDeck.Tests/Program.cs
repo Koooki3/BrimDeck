@@ -21,6 +21,7 @@ try
     await QoderUsageTests.Run(root, Check);
     await MiMoUsageTests.Run(root, Check);
     await MiMoApiTests.Run(root, Check);
+    await QianwenUsageTests.Run(root, Check);
     MaasPricingTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);

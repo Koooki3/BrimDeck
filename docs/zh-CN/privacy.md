@@ -21,6 +21,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | Xiaomi MiMo 桌面订阅 | 使用在设置中通过浏览器登录小米账号获得的登录信息（加密保存在 BrimDeck 设置目录的 `mimo-session.dat`），向 mimo-server-cn.xiaomimimo.com 查询桌面版会员额度，过期时经 account.xiaomi.com 续期；登录时打开的浏览器窗口使用独立的临时目录，登录后删除 | 读取本地数据库（`%USERPROFILE%\.local\share\mimocode\mimocode.db`） |
 | Xiaomi MiMo | 读取 Xiaomi MiMo 桌面版与 MiMo Code CLI 保存的开放平台密钥（`%USERPROFILE%\.local\share\mimocode\auth.json`），向 api.xiaomimimo.com 查询余额与本月扣费，向对应集群的 token-plan 地址查询 Token Plan 额度；不修改这个文件 | 使用 Xiaomi MiMo 的本机记录 |
 | Qoder、Qoder CN | 在后台启动本机的 Qoder CLI，使用 CLI 的登录（`%USERPROFILE%\.qoder\.auth\user`，由 CLI 自己读取）查询积分；没有可用的 CLI 登录时，读取 Qoder 桌面版的登录（`%APPDATA%\com.qoder.app.stable\auth.v1.dat`，按 Windows 当前用户解密），交给桌面版自带的同一个程序查询；都不可用时，向正在运行的 Qoder IDE 的本机端口查询（端口记录在 `%APPDATA%\Qoder\SharedClientCache\.info.json`）。查询由 Qoder 自己的程序发往 Qoder 的服务器；不续期登录，不修改这些文件。Qoder CN 对应 `.qoder-cn`、`com.qodercn.app.stable` 与 `QoderCN` | 以只读方式读取 Qoder IDE 的本地数据库（`%APPDATA%\Qoder\SharedClientCache\cache\db\local.db`）与模型列表（`User\globalStorage\state.vscdb`），以及 CLI 与桌面版的会话记录（`%USERPROFILE%\.qoder\projects`）；在设置中开启“CLI 与桌面版 Token”时，为当前用户设置环境变量 `QODER_EXPOSE_TOKEN_USAGE`（Qoder CN 为 `QODERCN_EXPOSE_TOKEN_USAGE`）；设置中显示这一行时，每隔几秒读取正在运行的 Qoder CLI 与桌面版进程是否带有这个变量 |
+| 千问、QwenCloud | 使用在设置中通过浏览器登录获得的凭据（加密保存在 BrimDeck 设置目录的 `secrets.dat`）查询 Token Plan、账户余额与本月扣费。千问的凭据只发往 t.qianwenai.com、cli.qianwenai.com 与 cs-data.qianwenai.com；QwenCloud 的凭据只发往 t.qwencloud.com 与 cli.qwencloud.com。凭据不续期 | 不提供 |
 | 智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、Kimi 开放平台、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址；Kimi Code API 的密钥只发往 api.kimi.com 与 api.kimi.ai，读取的额度不写入 `kimi-quota.json`；Kimi 开放平台的密钥只发往 api.moonshot.cn 与 api.moonshot.ai；OpenCode Go 的密钥只发往 opencode.ai；Command Code API 的密钥只发往 api.commandcode.ai；Xiaomi MiMo API 的密钥只发往 api.xiaomimimo.com；Xiaomi MiMo Token Plan 的密钥只发往 token-plan-cn、token-plan-sgp 与 token-plan-ams.xiaomimimo.com；OpenRouter 的密钥只发往 openrouter.ai。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
 
 - 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ZCODE_HOME`、`DSH_HOME` 或 `KIMI_CODE_HOME`（须为绝对路径）时，从该目录读取。OpenCode 按 `XDG_DATA_HOME` 与 `OPENCODE_DB` 确定数据库位置。
@@ -34,7 +35,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | 文件 | 内容 |
 | --- | --- |
 | `settings.json` | 设置，不含任何登录令牌或 API 密钥 |
-| `secrets.dat` | 手动填写的 API 密钥与 WorkBuddy 的登录凭据，使用 Windows 的加密功能按当前用户加密 |
+| `secrets.dat` | 手动填写的 API 密钥与 WorkBuddy、千问、QwenCloud 的登录凭据，使用 Windows 的加密功能按当前用户加密 |
 | `mimo-session.dat` | Xiaomi MiMo 的小米账号登录信息，使用 Windows 的加密功能按当前用户加密 |
 | `model-prices.json`、`manual-model-prices.json` | 同步的模型单价、手动添加的单价 |
 | `official-prices.json` | 从 OpenRouter 同步的模型厂商官方渠道单价，只包含记录中用到的模型，以及 Kimi Code 计费所需的 Kimi K3、K3.1 Pro 与 K3.1 Pro Highspeed。没有这个文件时，读取旧版本保存的 `moonshot-prices.json` |

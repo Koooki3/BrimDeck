@@ -192,6 +192,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             if (grokBotOnline) sources = sources.Append(ProviderId.GrokBot);
             // Xiaomi MiMo's linked keys have no records of their own: their statistics are MiMo's.
             if (required.Contains(ProviderId.MiMoLinked)) sources = sources.Append(ProviderId.MiMoLinked);
+            // Qianwen and QwenCloud have no records either; they are read only for their quota rows.
+            sources = sources.Concat(new[] { ProviderId.Qianwen, ProviderId.QwenCloud }.Where(required.Contains));
             using var publisher = progress is not null && !_published ? new SnapshotPublisher(progress, ProgressInterval) : null;
             var finished = new Dictionary<string, ProviderSnapshot>();
             void Finished(string key, ProviderSnapshot snapshot)
@@ -407,6 +409,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 case ProviderId.Qoder or ProviderId.QoderCn:
                     await ReadQoderAsync(snapshot, now, ct, lifetime);
+                    break;
+                case ProviderId.Qianwen or ProviderId.QwenCloud:
+                    await ReadQianwenAsync(snapshot, QianwenUsage.For(id), now, ct);
                     break;
             }
         }
@@ -1504,6 +1509,64 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     }
 
     public void DisconnectWorkBuddy(ProviderId id) => secrets?.Delete(WorkBuddyUsage.For(id).SessionKey);
+
+    // Qianwen and QwenCloud (QianwenUsage), read with the sign-in BrimDeck got from the edition's account page (ConnectQianwenAsync).
+    private async Task ReadQianwenAsync(ProviderSnapshot snapshot, QianwenUsage.Edition edition, DateTimeOffset now, CancellationToken ct)
+    {
+        var name = ProviderCatalog.Name(edition.Id);
+        if (ReadQianwenSession(edition) is not { } session)
+        { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T($"请在设置中登录 {name}", $"Sign in to {name} in settings"); return; }
+        QianwenUsage.Reading reading;
+        try { reading = await QianwenUsage.ReadAsync(_http, edition, session, now, ct); }
+        catch (QianwenUsage.RejectedException)
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T($"{name} 登录已失效，请在设置中重新登录", $"The {name} sign-in has expired. Sign in again in settings.");
+            return;
+        }
+        snapshot.Scope = "account";
+        snapshot.PlanSource = name + Loc.T(" 账户", " account");
+        if (reading.Metrics.Count == 0 && reading.Warnings.Count > 0)
+        {
+            snapshot.StatusLabel = Loc.T("读取失败", "Read failed");
+            snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
+            return;
+        }
+        if (reading.Metrics.Count == 0)
+        {
+            snapshot.StatusLabel = Loc.T("无额度", "No quota");
+            snapshot.Status = Loc.T("这个账户没有生效中的 Token Plan，也没有可读取的余额或扣费", "This account has no Token Plan in force and no balance or charges to read.");
+            return;
+        }
+        snapshot.Metrics = reading.Metrics;
+        snapshot.Plan = reading.Plan;
+        Connected(snapshot, snapshot.PlanSource, now);
+        if (reading.Warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
+    }
+
+    private QianwenUsage.Session? ReadQianwenSession(QianwenUsage.Edition edition)
+    {
+        try { return QianwenUsage.Session.Parse(secrets?.Read(edition.SessionKey) ?? ""); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException or JsonException or FormatException) { return null; }
+    }
+
+    public bool QianwenConnected(ProviderId id) => ReadQianwenSession(QianwenUsage.For(id)) is not null;
+
+    // Signs in to Qianwen or QwenCloud in the browser (QianwenUsage): open receives the account page and returns false when it could
+    // not be opened. True once the sign-in is saved; false when the user did not finish before the request ran out.
+    public async Task<bool> ConnectQianwenAsync(ProviderId id, Func<string, bool> open, CancellationToken ct)
+    {
+        if (secrets is null) throw new InvalidOperationException("No secrets store");
+        var edition = QianwenUsage.For(id);
+        var login = await QianwenUsage.StartLoginAsync(_http, edition, _clock(), ct);
+        if (!open(login.Url)) throw new InvalidDataException(Loc.T("无法打开默认浏览器", "The default browser could not be opened"));
+        var session = await QianwenUsage.WaitForLoginAsync(_http, edition, login, _clock, ct);
+        if (session is null) return false;
+        secrets.Write(edition.SessionKey, session.Serialize());
+        return true;
+    }
+
+    public void DisconnectQianwen(ProviderId id) => secrets?.Delete(QianwenUsage.For(id).SessionKey);
 
     // Xiaomi MiMo: the keys Xiaomi MiMo Desktop and MiMo Code linked (MiMoUsage.ReadLinkedKeys), read again on every refresh. A Token
     // Plan key shows the plan quota, a pay-as-you-go key the balances and this month's charges; with both, one column shows them all,

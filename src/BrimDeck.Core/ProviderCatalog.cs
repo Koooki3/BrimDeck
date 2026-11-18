@@ -9,10 +9,11 @@ public static class ProviderCatalog
 {
     public static readonly ProviderId[] BuiltIns = [ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Cursor];
     // Sources read automatically from local applications; only the first four are added to new settings by default.
-    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.MiMoLinked, ProviderId.Qoder, ProviderId.QoderCn];
-    // Xiaomi MiMo is read like the automatic sources but needs a sign-in in settings, so the menu lists it with the sources entered by
-    // hand, next to Xiaomi MiMo API and Token Plan.
-    public static readonly ProviderId[] Sources = [.. AutomaticSources.Where(id => id != ProviderId.MiMo), ProviderId.GlmChina, ProviderId.GlmGlobal, ProviderId.MiMo, ProviderId.MiMoApi, ProviderId.MiMoTokenPlan, ProviderId.DeepSeek, ProviderId.KimiApi, ProviderId.KimiPlatform, ProviderId.OpenCodeGo, ProviderId.CommandCodeApi, ProviderId.OpenRouter, ProviderId.NewApi, ProviderId.Sub2Api, ProviderId.Custom];
+    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.MiMoLinked, ProviderId.Qoder, ProviderId.QoderCn, ProviderId.Qianwen, ProviderId.QwenCloud];
+    // Xiaomi MiMo, Qianwen and QwenCloud are read like the automatic sources but need a sign-in in settings, so the menu lists them with
+    // the sources entered by hand: Xiaomi MiMo next to Xiaomi MiMo API and Token Plan, Qianwen and QwenCloud after them.
+    private static bool SignsInFromSettings(ProviderId id) => id is ProviderId.MiMo or ProviderId.Qianwen or ProviderId.QwenCloud;
+    public static readonly ProviderId[] Sources = [.. AutomaticSources.Where(id => !SignsInFromSettings(id)), ProviderId.GlmChina, ProviderId.GlmGlobal, ProviderId.MiMo, ProviderId.MiMoApi, ProviderId.MiMoTokenPlan, ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.DeepSeek, ProviderId.KimiApi, ProviderId.KimiPlatform, ProviderId.OpenCodeGo, ProviderId.CommandCodeApi, ProviderId.OpenRouter, ProviderId.NewApi, ProviderId.Sub2Api, ProviderId.Custom];
     // Grok Bot is quota-only; Pi is usage-only and must never appear in the quota-source menu. Qoder's statistics are its IDE's.
     public static readonly ProviderId[] UsageSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.Pi, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.Qoder, ProviderId.QoderCn];
     public static bool IsBuiltIn(ProviderId id) => AutomaticSources.Contains(id);
@@ -62,6 +63,10 @@ public static class ProviderCatalog
             "The weekly allowance of the Xiaomi MiMo desktop membership; sign in to a Xiaomi account in Settings first. Token Plan is not included"),
         ProviderId.MiMoLinked => Loc.T("自动读取 Xiaomi MiMo 桌面版与 MiMo Code CLI 已关联的 API 密钥或 Token Plan", "Reads the API key or Token Plan linked in the Xiaomi MiMo desktop app and MiMo Code CLI"),
         ProviderId.Qoder or ProviderId.QoderCn => QoderDescription(id == ProviderId.QoderCn ? "Qoder CN" : "Qoder"),
+        ProviderId.Qianwen => Loc.T("千问 AI 平台账户的 Token Plan（个人版与团队版）、账户余额与本月扣费，需要在设置中通过浏览器登录",
+            "The Token Plans (personal and team), balance and this month's charges of a Qianwen AI platform account; sign in in the browser from Settings first"),
+        ProviderId.QwenCloud => Loc.T("QwenCloud 账户的 Token Plan（个人版与团队版）与本月扣费，需要在设置中通过浏览器登录；QwenCloud 不提供账户余额",
+            "The Token Plans (personal and team) and this month's charges of a QwenCloud account; sign in in the browser from Settings first. QwenCloud has no account balance"),
         ProviderId.MiMoApi => Loc.T("按量计费 API 密钥所属的小米 MiMo 开放平台账户", "The Xiaomi MiMo Open Platform account of the pay-as-you-go API key"),
         ProviderId.KimiApi => Loc.T("用 Kimi Code 控制台的密钥读取会员套餐额度", "The membership plan quota, read with a key from the Kimi Code console"),
         ProviderId.KimiPlatform => Loc.T("Kimi 开放平台按量计费的账户余额，与会员额度分开计算",
@@ -78,10 +83,10 @@ public static class ProviderCatalog
     public static string UsageName(ProviderId id) => id == ProviderId.MiMo ? "Xiaomi MiMo" : Name(id);
     public static string QuotaTip(ProviderId id) => Loc.T("配额来源：", "Quota source: ") + Name(id) + (QuotaDescription(id) is { Length: > 0 } text ? "\n" + text : "");
     // The quota-source menu groups sources by whether the user has to fill anything in.
-    public static string Group(ProviderId id) => IsBuiltIn(id) && id != ProviderId.MiMo ? Loc.T("自动读取", "Read automatically") : Loc.T("手动填写", "Entered by hand");
+    public static string Group(ProviderId id) => IsBuiltIn(id) && !SignsInFromSettings(id) ? Loc.T("自动读取", "Read automatically") : Loc.T("手动填写", "Entered by hand");
     public static string Name(ProviderId id) => id switch
     {
-        ProviderId.GlmChina => Loc.T("智谱 GLM", "Zhipu GLM"), ProviderId.GlmGlobal => "Z.ai GLM", ProviderId.Dsh => "DeepSeek Harness", ProviderId.GrokBot => "Grok Bot", ProviderId.Kimi => "Kimi Code", ProviderId.KimiApi => "Kimi Code API", ProviderId.KimiPlatform => Loc.T("Kimi 开放平台", "Kimi Open Platform"),ProviderId.OpenCode => "OpenCode", ProviderId.OpenCodeGo => "OpenCode Go", ProviderId.CommandCode => "Command Code", ProviderId.CommandCodeApi => "Command Code API", ProviderId.WorkBuddy => "WorkBuddy", ProviderId.WorkBuddyAi => "WorkBuddy AI", ProviderId.MiMo => Loc.T("Xiaomi MiMo 桌面订阅", "Xiaomi MiMo Desktop subscription"), ProviderId.MiMoApi => "Xiaomi MiMo API", ProviderId.MiMoLinked => "Xiaomi MiMo", ProviderId.MiMoTokenPlan => "Xiaomi MiMo Token Plan", ProviderId.Qoder => "Qoder", ProviderId.QoderCn => "Qoder CN", ProviderId.OpenRouter => "OpenRouter", ProviderId.DeepSeek => "DeepSeek", ProviderId.NewApi => "New API", ProviderId.Sub2Api => "Sub2API", ProviderId.Custom => Loc.T("自定义", "Custom"),
+        ProviderId.GlmChina => Loc.T("智谱 GLM", "Zhipu GLM"), ProviderId.GlmGlobal => "Z.ai GLM", ProviderId.Dsh => "DeepSeek Harness", ProviderId.GrokBot => "Grok Bot", ProviderId.Kimi => "Kimi Code", ProviderId.KimiApi => "Kimi Code API", ProviderId.KimiPlatform => Loc.T("Kimi 开放平台", "Kimi Open Platform"),ProviderId.OpenCode => "OpenCode", ProviderId.OpenCodeGo => "OpenCode Go", ProviderId.CommandCode => "Command Code", ProviderId.CommandCodeApi => "Command Code API", ProviderId.WorkBuddy => "WorkBuddy", ProviderId.WorkBuddyAi => "WorkBuddy AI", ProviderId.MiMo => Loc.T("Xiaomi MiMo 桌面订阅", "Xiaomi MiMo Desktop subscription"), ProviderId.MiMoApi => "Xiaomi MiMo API", ProviderId.MiMoLinked => "Xiaomi MiMo", ProviderId.MiMoTokenPlan => "Xiaomi MiMo Token Plan", ProviderId.Qoder => "Qoder", ProviderId.QoderCn => "Qoder CN", ProviderId.Qianwen => Loc.T("千问", "Qianwen"), ProviderId.QwenCloud => "QwenCloud", ProviderId.OpenRouter => "OpenRouter", ProviderId.DeepSeek => "DeepSeek", ProviderId.NewApi => "New API", ProviderId.Sub2Api => "Sub2API", ProviderId.Custom => Loc.T("自定义", "Custom"),
         _ => id.ToString()
     };
     public static string Key(ProviderId id) => id switch
@@ -96,7 +101,7 @@ public static class ProviderCatalog
     public static bool ReadsLocalQuota(AppEntry entry) => HasOnlineSwitch(entry.QuotaSource) && !entry.QuotaOnline;
     // Sources billed per API call whose account balance comes without a total; their rows can set a target balance
     // (AppEntry.BalanceTarget) that gives the balance a used share.
-    public static bool HasAccountBalance(ProviderId id) => id is ProviderId.Dsh or ProviderId.DeepSeek or ProviderId.KimiPlatform or ProviderId.MiMoApi or ProviderId.MiMoLinked or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api;
+    public static bool HasAccountBalance(ProviderId id) => id is ProviderId.Dsh or ProviderId.DeepSeek or ProviderId.KimiPlatform or ProviderId.MiMoApi or ProviderId.MiMoLinked or ProviderId.Qianwen or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api;
     public static bool IsAccountBalance(UsageMetric metric) => metric is { Kind: MetricKind.Balance, Label: "账户余额", Total: null };
     // Rows that allow HTTP are read apart from otherwise identical rows that do not; the keys of other rows stay as they were.
     public static string ConfigurationKey(AppEntry entry) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, entry.SecretRevision }))

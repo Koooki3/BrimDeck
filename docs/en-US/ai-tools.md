@@ -25,6 +25,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | WorkBuddy AI | ✓ | ✓ | Quota: sign in on the WorkBuddy AI website in the browser from settings. Usage only needs the WorkBuddy AI desktop app to be used on this PC |
 | Xiaomi MiMo Desktop subscription | ✓ | ✓ | Quota: sign in to a Xiaomi account in the browser from settings. Usage only needs MiMo Code CLI or the Xiaomi MiMo desktop app to be used on this PC |
 | Xiaomi MiMo | ✓ | | Link an Open Platform API key or Token Plan in the Xiaomi MiMo desktop app or MiMo Code CLI |
+| Qianwen, QwenCloud | ✓ | | Sign in to a Qianwen AI platform or QwenCloud account in the browser from settings |
 | Qoder, Qoder CN | ✓ | ✓ | Sign in to Qoder CLI or the Qoder desktop app on this PC, or open a signed-in Qoder IDE (likewise for Qoder CN). Token usage of the CLI and desktop app has to be switched on in settings |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
 | Xiaomi MiMo API | ✓ | | Enter a Xiaomi MiMo Open Platform pay-as-you-go API key in settings |
@@ -154,6 +155,17 @@ Qoder (qoder.com) and Qoder CN (qoder.com.cn) have separate accounts and are cho
 - **Quota**: plan credits, add-on credits, the organization's package and granted credits (such as SOTA Exclusive Credits), each on its own, with when they end and the plan name.
 - **How it is read**: Qoder's account API returns encrypted data, so BrimDeck asks this PC's Qoder CLI, desktop app or IDE, in that order, each with its own sign-in. The CLI and the desktop app take about 20 seconds per read, which runs in the background and does not hold up the other columns.
 - **Token usage**: reads the local records of Qoder IDE, the CLI and the desktop app. The CLI and the desktop app record no token counts by default: after choosing Qoder as a column's usage app in settings, expand the column, click "Switch on" in the "CLI and desktop tokens" line, and open Qoder CLI and the desktop app again; conversations from then on are recorded. This sets the user environment variable `QODER_EXPOSE_TOKEN_USAGE=1` (Qoder CN: `QODERCN_EXPOSE_TOKEN_USAGE=1`); "Switch off" removes it. Auto, Ultimate, Fast and Efficient are tiers and are shown as such.
+
+## Qianwen and QwenCloud
+
+The Qianwen AI platform (platform.qianwenai.com) and its international edition QwenCloud (www.qwencloud.com) have separate accounts. Choose each one as its own quota source and sign in to each separately.
+
+- **Why a sign-in**: on both platforms an API key can only call models. It cannot read the balance or the Token Plan quota, so no key is entered here; you sign in to the account instead.
+- **Quota**: one column shows, in this order, the personal Token Plan (credits used and the reset time), the team Token Plan with all its seats together, the team add-on packs, the account balance and this month's charges. Parts the account does not have are left out. The plan name is shown next to the name, such as "Lite · Team Standard seats". The personal quota's cycle is whatever the platform returns; at present it is monthly and resets on the subscription day.
+- **Team edition**: Qianwen's documentation says only a team's owners and administrators can see the team's usage, so a member's sign-in may not read the team quota.
+- **QwenCloud**: it has no account balance. Only the Token Plans and this month's charges are shown, in US dollars.
+- **This month's charges**: the pay-as-you-go spending of the month. Like the platforms' own CLIs, the month is the calendar month in UTC, which can differ slightly from the console's billing month in China Standard Time.
+- **Sign-in**: expand the Qianwen or QwenCloud row in settings, click "Sign in in the browser", then sign in on the authorization page that opens and allow access within 5 minutes. The page names the app QianWen CLI or QwenCloud CLI: it is the only sign-in the platforms' account API offers. BrimDeck gets a sign-in of its own and stores it encrypted on this PC. The sign-in cannot be renewed: when it expires the status shows "Sign-in expired"; sign in again. Click "Sign out" to delete the sign-in saved on this PC.
 
 ## Sources entered by hand
 

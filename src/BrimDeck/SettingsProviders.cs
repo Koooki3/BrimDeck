@@ -239,6 +239,7 @@ public sealed partial class SettingsWindow
         if (ProviderCatalog.HasOnlineSwitch(entry.QuotaSource)) return OnlineQuotaDetails(entry);
         if (entry.QuotaSource == ProviderId.MiMo) return MiMoAccountDetails();
         if (entry.QuotaSource is ProviderId.WorkBuddy or ProviderId.WorkBuddyAi) return WorkBuddyDetails(entry);
+        if (entry.QuotaSource is ProviderId.Qianwen or ProviderId.QwenCloud) return QianwenDetails(entry);
         if (ProviderCatalog.IsBuiltIn(entry.QuotaSource)) return null;
         var grid = AppColumns();
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };
