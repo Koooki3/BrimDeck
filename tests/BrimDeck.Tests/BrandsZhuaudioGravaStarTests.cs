@@ -27,11 +27,11 @@ static class BrandsZhuaudioGravaStarTests
     {
         HidShape Wired(int vendor, int product, byte report) => BrandFamilyTests.Shape(vendor, product, 0xFF02, 0x0001, -1, 64, 0, 520, null, [report]);
         (int V, int P, byte R)[] vgn = [(0x258A, 0x024E, 9), (0x258A, 0x027E, 9), (0x258A, 0x026A, 9), (0x258A, 0x010C, 6), (0x391D, 0x2003, 9), (0x391D, 0x2004, 9), (0x391D, 0x2005, 9), (0x391D, 0x2006, 9)];
-        check("Bytech 916 cables, VGN HUB's: each on its table's feature report (010C's 6, the rest 9) with 520 bytes on a vendor page, the request on that report; another report, a short one or a standard page is not taken",
+        check("Bytech 916 cables, VGN HUB's: each on its table's feature report (010C's 6, the rest 9) with 520 bytes on a vendor page, the request on that report, 010C (shared with LEOBOG and LANGTU) unnamed; another report, a short one or a standard page is not taken",
             vgn.All(p => BrandFamilies.Find(Wired(p.V, p.P, p.R)) is { Family.Brand: "VGN keyboard" } f && f.Ways.Count == 1 && f.Ways[0].Request.SequenceEqual(Bytech916.Request(p.R))
                 && f.Ways[0].Transport == WayTransport.Feature && Dongles.Find(p.V, p.P, 0xFF02, "", 520, -1, 1, 64, 0) is null
                 && BrandFamilies.Find(Wired(p.V, p.P, p.R == 9 ? (byte)6 : (byte)9)) is null)
-            && BrandFamilies.Find(Wired(0x258A, 0x010C, 6)) is { } vxe && vxe.Family.DisplayName(Wired(0x258A, 0x010C, 6)) == "VXE V87pro"
+            && BrandFamilies.Find(Wired(0x258A, 0x010C, 6)) is { } vxe && vxe.Family.DisplayName(Wired(0x258A, 0x010C, 6)) is null && vxe.Family.DisplayName(Wired(0x258A, 0x024E, 9)) == "VGN V98Pro V3"
             && BrandFamilies.Find(BrandFamilyTests.Shape(0x258A, 0x026A, 0xFF02, 1, -1, 64, 0, 519, null, [9])) is null
             && BrandFamilies.Find(BrandFamilyTests.Shape(0x258A, 0x026A, 0x0001, 6, -1, 64, 0, 520, null, [9])) is null);
         int[] gravaStar = [0x019D, 0x0293, 0x0294, 0x0295, 0x0296, 0x0297, 0x02A5, 0x02DD, 0x02E9, 0x01B9];

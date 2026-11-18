@@ -18,8 +18,11 @@ try
     await CodeAgentUsageTests.Run(root, Check);
     await CommandCodeUsageTests.Run(root, Check);
     await WorkBuddyUsageTests.Run(root, Check);
+    await QoderUsageTests.Run(root, Check);
     await MiMoUsageTests.Run(root, Check);
     await MiMoApiTests.Run(root, Check);
+    await QianwenUsageTests.Run(root, Check);
+    await QwenWorkUsageTests.Run(root, Check);
     MaasPricingTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
@@ -106,6 +109,7 @@ try
     await InstallerUpdateTests.Run(root, Check);
     await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
+    ConfigBackupTests.Run(root, Check);
     MemoryModeTests.Run(Check);
     OffPeakTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);

@@ -125,7 +125,8 @@ public partial class MainWindow : Window
     {
         _app = app; _lead = lead;
         _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
-            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove, OccupiedArea);
+            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove, OccupiedArea,
+            () => Settings.WindowCapture && _expanded && !_preview && InsideOpenPanel(WindowsHost.Cursor()));
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () =>
         {
@@ -406,7 +407,7 @@ public partial class MainWindow : Window
         NoteCollapsedWidth(shapeBefore, dipBefore);
         // Page widths are unscaled; drawn at the panel's scale they fit the work area less 12 DIP each side.
         double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
-        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
+        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width);
         // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
         // only the page that shows, which SetExpanded takes from _pageWidth; this is set again when the size is saved (ApplySettings).
         _widestPage = Fit(DeckPages.Largest(Settings).Width);
@@ -607,8 +608,6 @@ public partial class MainWindow : Window
         double height = Math.Max(0, Math.Min(wanted, (FrameHeight - (panel.Top > 0 ? 0 : 12) - panel.Top - panel.HeaderExtra) / _scale));
         return panel.Top > 0 ? Math.Max(0, Math.Min(height, (PanelBottom - panel.Top - panel.HeaderExtra) / _scale)) : height;
     }
-    // The usage page's height in the current window, while the music page is shown too.
-    private double UsagePageHeight => PageHeight(Settings.Height, PanelFor(Settings.Height));
     // pageHeight is unscaled; the panel's place depends on its height as drawn.
     // On the bottom, left and right edges the panel's top is a free side, rounded as a floating capsule panel's is, so it keeps the
     // same space above its header (CollapsedLimits.FloatingHeaderExtra) rather than the 4 DIPs under the screen edge.

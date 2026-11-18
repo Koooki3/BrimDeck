@@ -267,8 +267,7 @@ static class BrandsKeyboardTests
 
     private static void NuPhy(Action<string, bool> check)
     {
-        var u1 = Shape(0x19F5, 0x2620, 0x0001, 0x0000, 1, input: 65, output: 65, outputIds: [0x00], name: "NuPhy Halo75 V2 Dongle");
-        var v2 = u1 with { Product = 0x8F05, Name = "NuPhy Dongle" };
+        var u1 = Shape(0x19F5, 0x2620, 0x0001, 0x0000, 1, input: 65, output: 65, outputIds: [0x00], name: "NuPhy U1 Dongle");
         var wh80 = u1 with { Product = 0x8F01, Name = "WH80" };
         var lite = u1 with { Product = 0x102C, Name = "Halo75 Lite" };
         var isoCable = u1 with { Product = 0x1043, Name = "Halo75 V2" };
@@ -276,7 +275,6 @@ static class BrandsKeyboardTests
         var futureCable = u1 with { Product = 0x1050, Name = "NuPhy Future Keyboard" };
         check("NuPhy: unified 0x19F5 takes known/unlisted wireless dongles & cables on 0x0001:0x0000 65B; keyboard/consumer collections, wired-only HE and upgraders are not taken",
             BrandFamilies.Find(u1) is { Family.Brand: "NuPhy" } fu1 && Names(fu1).SequenceEqual(["nuphy.func1", "nuphy.func0"]) && fu1.Family.DisplayName(u1) is null
-            && BrandFamilies.Find(v2) is { Family.Brand: "NuPhy" } fv2 && fv2.Family.DisplayName(v2) == "NuPhy Halo75 V2"
             && BrandFamilies.Find(wh80)?.Family.DisplayName(wh80) == "NuPhy WH80"
             && BrandFamilies.Find(lite)?.Family.DisplayName(lite) == "NuPhy Halo75 Lite"
             && BrandFamilies.Find(isoCable)?.Family.DisplayName(isoCable) == "NuPhy Halo75 V2"

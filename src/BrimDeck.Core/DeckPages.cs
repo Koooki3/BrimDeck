@@ -18,10 +18,17 @@ public static class DeckPages
 
     public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => settings.PageOrder.Where(page => Shown(settings, page)).ToList();
 
+    public static DeckPage FirstVisible(DeckSettings settings)
+    {
+        foreach (var page in settings.PageOrder)
+            if (Shown(settings, page)) return page;
+        return DeckPage.Usage;
+    }
+
     // The page shown when wanted is asked for: wanted while it is shown, otherwise the first shown page in switch order.
     // With every page switched off it is the usage page, which then says that it is off.
     public static DeckPage Resolve(DeckSettings settings, DeckPage wanted)
-        => Shown(settings, wanted) ? wanted : Visible(settings) is [var first, ..] ? first : DeckPage.Usage;
+        => Shown(settings, wanted) ? wanted : FirstVisible(settings);
 
     // The page the panel opens on; null keeps the last viewed page.
     public static DeckPage? Opening(DefaultDeckPage choice) => choice switch

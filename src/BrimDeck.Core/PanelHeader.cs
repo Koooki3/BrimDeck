@@ -3,16 +3,15 @@ namespace BrimDeck.Core;
 // The row above both pages of the open panel: the page switch at the left, the clock in the centre, and the media source,
 // sync and settings buttons at the right. All values are whole DIPs.
 // Row: the height the page gives its header. The music page gives it Toolbar + Top, so its content starts right below.
-// Height: Row rounded down to an even number. The switch and the buttons are an even number of DIPs tall, so centred in it
-// they sit on whole DIPs.
-// Side: the inset of the switch's left edge and of the gear's visible right edge. It is the page's content margin, so the
-// header lines up with the content below, but at least CornerClear, which keeps the switch clear of a rounded top corner.
+// Height: the toolbar's even height. Side: the shared inset of the switch's left edge and the gear's visible right edge.
 // SwitchHeight: 28, or 24 in a row below 36. ButtonHeight: each button inside the switch. SwitchTop: from the panel's top
 // edge to the switch. RightMargin: the right group's margin that puts the gear's ink at Side. SettingsHeight: the settings
 // button, 24, or 20 in a row below 32, which keeps its hover background inside a rounded top corner.
 public sealed record PanelHeader(double Row, double Height, double Side, double SwitchHeight, double ButtonHeight, double SwitchTop,
     double RightMargin, double SettingsHeight)
 {
+    public double ContentSide { get; init; } = Side;
+
     // The open panel's corner radius. Its top corners are rounded whenever it does not start at the monitor's top edge.
     public const double PanelRadius = 24;
     // The switch's corners; the buttons inside it are concentric with them.
@@ -36,15 +35,11 @@ public sealed record PanelHeader(double Row, double Height, double Side, double 
 
     public static PanelHeader Music(MusicMetrics metrics) => For(metrics.Toolbar + metrics.Top, metrics.Side);
 
-    // The music page's header with the usage page's controls: the same band (Height), switch, buttons, settings button and
-    // switch top, so the switch, the clock and the right group keep their distance from the panel's top edge when the page
-    // changes. Row stays the music page's own row, where its content starts: a taller row leaves its extra height below the
-    // controls. Side and RightMargin stay the music page's, so the switch and the gear keep lining up with its content.
-    public PanelHeader WithControlsOf(PanelHeader usage) => this with
-    {
-        Height = usage.Height, SwitchHeight = usage.SwitchHeight, ButtonHeight = usage.ButtonHeight, SwitchTop = usage.SwitchTop,
-        SettingsHeight = usage.SettingsHeight
-    };
+    public static double ToolbarFor(double panelHeight) => panelHeight < 150 ? 28 : panelHeight >= 290 ? 40 : 36;
+    public static PanelHeader ForPanel(double height) => For(ToolbarFor(height), height < 170 ? 14 : 20);
+
+    // The body and the side grips start at this page's row. Only the toolbar uses the shared geometry.
+    public PanelHeader WithControlsOf(PanelHeader shared) => shared with { Row = Row, ContentSide = ContentSide };
 
     // The space between a rounded rectangle and the outline of a panel corner of the given radius, for a rectangle x and y
     // from the panel's edges with corners of radius r. A negative value means the panel clips the rectangle.

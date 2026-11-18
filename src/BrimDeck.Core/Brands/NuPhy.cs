@@ -23,12 +23,6 @@ public static class NuPhy
     public static readonly IReadOnlyDictionary<int, string> KnownNames = new Dictionary<int, string>
     {
         [0x8F01] = "NuPhy WH80",
-        [0x8F02] = "NuPhy Air75 V2",
-        [0x8F03] = "NuPhy Air96 V2",
-        [0x8F04] = "NuPhy Air60 V2",
-        [0x8F05] = "NuPhy Halo75 V2",
-        [0x8F06] = "NuPhy Halo96 V2",
-        [0x8F07] = "NuPhy Field75",
         [0x1026] = "NuPhy Kick75",
         [0x1027] = "NuPhy Kick75",
         [0x1028] = "NuPhy Air75 V3",

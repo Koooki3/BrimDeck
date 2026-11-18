@@ -12,8 +12,11 @@ namespace BrimDeck.Core;
 // - 0x03 charging, 0x04 full and 0x1A (26) asleep: M HUB's table for this frame (aipno/mchose-linux's HEADSET.md;
 //   wushuai0802 reads 1A as the headset off). Asleep is no level.
 // A level of 0 is what the receiver answers while the headset sleeps or is off (vigil-watt), so it is asleep too, never 0 %.
-// The request read back (55 65 01 00) is no reading (vigil-watt's echo rule), nor is any other state. A receiver firmware
-// below 0008 does not answer at all.
+// The request read back (55 65 01 00) is no reading (vigil-watt's echo rule), nor is any other state.
+// Measured on a V9 PRO (receiver firmware 0013, headset 0036, 2026-11-18): Windows lists input report 0x55 on the 0xFF90
+// collection and no output report id there, yet the collection takes output report 0x55 (64 bytes) and answers within 30 ms
+// (55 65 3C 02, the 60 % M HUB showed), so the read is sent although no output report is listed (BrandWay.Undeclared). With
+// the headset off, that receiver did not answer at all.
 [BrandFamilies]
 public static class MchoseV9Pro
 {
@@ -43,8 +46,9 @@ public static class MchoseV9Pro
 
     public static IEnumerable<BrandFamily> Families =>
     [
-        new("MCHOSE V9 Pro", Takes, shape => [new BrandWay("mchose.v9pro", WayTransport.Output, Request(),
-            shape.Name.Contains("G9 PRO", StringComparison.OrdinalIgnoreCase) ? G9Battery : Battery) { TimeoutMs = 500 }])
+        new("MCHOSE V9 Pro", Takes, shape => shape.Name.Contains("G9 PRO", StringComparison.OrdinalIgnoreCase)
+            ? [new BrandWay("mchose.v9pro", WayTransport.Output, Request(), G9Battery) { TimeoutMs = 500 }]
+            : [new BrandWay("mchose.v9pro", WayTransport.Output, Request(), Battery) { TimeoutMs = 500, Undeclared = true }])
         { Kind = _ => DeviceKind.Headphones, Prefix = "headset" },
     ];
 }

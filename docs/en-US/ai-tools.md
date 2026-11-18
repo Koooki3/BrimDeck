@@ -25,6 +25,9 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | WorkBuddy AI | ✓ | ✓ | Quota: sign in on the WorkBuddy AI website in the browser from settings. Usage only needs the WorkBuddy AI desktop app to be used on this PC |
 | Xiaomi MiMo Desktop subscription | ✓ | ✓ | Quota: sign in to a Xiaomi account in the browser from settings. Usage only needs MiMo Code CLI or the Xiaomi MiMo desktop app to be used on this PC |
 | Xiaomi MiMo | ✓ | | Link an Open Platform API key or Token Plan in the Xiaomi MiMo desktop app or MiMo Code CLI |
+| Qianwen, QwenCloud | ✓ | | Sign in to a Qianwen AI platform or QwenCloud account in the browser from settings |
+| QwenWork CN, QwenWork | ✓ | ✓ | Sign in to the QwenWork CN (千问办公) or QwenWork desktop app on this PC |
+| Qoder, Qoder CN | ✓ | ✓ | Sign in to Qoder CLI or the Qoder desktop app on this PC, or open a signed-in Qoder IDE (likewise for Qoder CN). Token usage of the CLI and desktop app has to be switched on in settings |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
 | Xiaomi MiMo API | ✓ | | Enter a Xiaomi MiMo Open Platform pay-as-you-go API key in settings |
 | Xiaomi MiMo Token Plan | ✓ | | Enter a Xiaomi MiMo Token Plan key in settings |
@@ -145,6 +148,36 @@ Reads the Open Platform API key or Token Plan linked in the Xiaomi MiMo desktop 
 - A linked Token Plan shows the plan name and its Credits quota; a linked pay-as-you-go API key shows the account balance, the topped-up and granted balances and this month's charges. With both linked, one column shows them together.
 - The file is read again on every refresh. Linking in the desktop app and signing in to the CLI both rewrite it: after signing in to the CLI again, for example, the Token Plan the desktop app linked is gone from the file and is no longer shown here.
 - Usage comes from Xiaomi MiMo's local records.
+
+## Qoder
+
+Qoder (qoder.com) and Qoder CN (qoder.com.cn) have separate accounts and are chosen apart under Quota source. Within one edition, the CLI, the desktop app and the IDE share one set of credits.
+
+- **Quota**: plan credits, add-on credits, the organization's package and granted credits (such as SOTA Exclusive Credits), each on its own, with when they end and the plan name.
+- **How it is read**: Qoder's account API returns encrypted data, so BrimDeck asks this PC's Qoder CLI, desktop app or IDE, in that order, each with its own sign-in. The CLI and the desktop app take about 20 seconds per read, which runs in the background and does not hold up the other columns.
+- **Token usage**: reads the local records of Qoder IDE, the CLI and the desktop app. The CLI and the desktop app record no token counts by default: after choosing Qoder as a column's usage app in settings, expand the column, click "Switch on" in the "CLI and desktop tokens" line, and open Qoder CLI and the desktop app again; conversations from then on are recorded. This sets the user environment variable `QODER_EXPOSE_TOKEN_USAGE=1` (Qoder CN: `QODERCN_EXPOSE_TOKEN_USAGE=1`); "Switch off" removes it. Auto, Ultimate, Fast and Efficient are tiers and are shown as such.
+
+## QwenWork CN and QwenWork
+
+QwenWork CN (千问办公, qwenwork.cn) and its international edition QwenWork (qwenwork.ai) are desktop apps published by DingTalk. They have separate accounts and are chosen apart under Quota source. Neither account is the Qianwen AI platform's.
+
+- **Quota**: shows all the credits on the account, that is, how many are left. When QwenWork CN's credits are of several kinds, the monthly credits (the plan's credits and the monthly free grant, with the plan's renewal time), long-term credits and daily credits are shown as well, and credits that expire soon. QwenWork gives no such split and shows all its credits only. The plan name is shown next to the name, such as "个人基础版" or "Free".
+- **Why there is no share used**: for a personal account the account API returns only the credits left, not a monthly or plan total, and QwenWork CN's own usage view shows only what is left too. So these rows show the number of credits left rather than a percentage; set a target for the column to see one.
+- **Sign-in**: uses the sign-in the desktop app keeps; there is nothing to sign in to in BrimDeck. The sign-in expires after about 7 days and the desktop app renews it while it runs; BrimDeck does not renew it. When it has expired the status shows "Sign-in expired": open the desktop app.
+- **Team accounts and dedicated deployments**: a team account shows the member's credits and the organization's credits. This follows how the desktop app reads them and has not been checked with a team account yet. A sign-in to a dedicated enterprise deployment is not supported yet.
+- **Token usage**: reads the local records of the desktop app's engine, one per model reply. In QwenWork CN, models picked by level are named as it names the level, such as "标准" (Standard) and "高级" (Advanced); other models keep their own names. Costs are estimates at list prices; both editions charge credits.
+- **Install folder**: either app can be installed in any folder; BrimDeck reads only the data in the current user's folders.
+
+## Qianwen and QwenCloud
+
+The Qianwen AI platform (platform.qianwenai.com) and its international edition QwenCloud (www.qwencloud.com) have separate accounts. Choose each one as its own quota source and sign in to each separately.
+
+- **Why a sign-in**: on both platforms an API key can only call models. It cannot read the balance or the Token Plan quota, so no key is entered here; you sign in to the account instead.
+- **Quota**: one column shows, in this order, the personal Token Plan (credits used and the reset time), the team Token Plan with all its seats together, the team add-on packs, the account balance and this month's charges. Parts the account does not have are left out. The plan name is shown next to the name, such as "Lite · Team Standard seats". The personal quota's cycle is whatever the platform returns; at present it is monthly and resets on the subscription day.
+- **Team edition**: Qianwen's documentation says only a team's owners and administrators can see the team's usage, so a member's sign-in may not read the team quota.
+- **QwenCloud**: it has no account balance. Only the Token Plans and this month's charges are shown, in US dollars.
+- **This month's charges**: the pay-as-you-go spending of the month. Like the platforms' own CLIs, the month is the calendar month in UTC, which can differ slightly from the console's billing month in China Standard Time.
+- **Sign-in**: expand the Qianwen or QwenCloud row in settings, click "Sign in in the browser", then sign in on the authorization page that opens and allow access within 5 minutes. The page names the app QianWen CLI or QwenCloud CLI: it is the only sign-in the platforms' account API offers. BrimDeck gets a sign-in of its own and stores it encrypted on this PC. The sign-in cannot be renewed: when it expires the status shows "Sign-in expired"; sign in again. Click "Sign out" to delete the sign-in saved on this PC.
 
 ## Sources entered by hand
 
