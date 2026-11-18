@@ -1108,8 +1108,6 @@ public static class Dongles
             (Devices.Hardware(RazerHeadsets.Vendor, 0x0568), Devices.Hardware(RazerHeadsets.Vendor, 0x0567)),
             (Devices.Hardware(RazerHeadsets.Vendor, 0x0588), Devices.Hardware(RazerHeadsets.Vendor, 0x0587)),
             (Devices.Hardware(NuPhy.Vendor, 0x8F01), Devices.Hardware(NuPhy.Vendor, 0xA011)),
-            (Devices.Hardware(NuPhy.Vendor, 0x8F05), Devices.Hardware(NuPhy.Vendor, 0x1043)),
-            (Devices.Hardware(NuPhy.Vendor, 0x8F06), Devices.Hardware(NuPhy.Vendor, 0x1044)),
         };
         foreach (var product in NuPhy.KnownNames.Keys)
             if (product is >= 0x1026 and <= 0x10FF)
