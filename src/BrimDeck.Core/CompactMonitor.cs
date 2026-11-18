@@ -291,8 +291,8 @@ public static class CompactMonitor
     public static bool UsesMatrix(CoreDisplay display, int cores, double scale) => display == CoreDisplay.Matrix || display == CoreDisplay.Auto && !CoreColumnsFit(cores, scale);
 
     // The width the core readout takes: the columns', or the matrix's.
-    public static double CoreWidth(CoreDisplay display, int cores, double scale, double dpi)
-        => UsesMatrix(display, cores, scale) ? CoreMatrix.Strip(cores, scale, dpi).Width : CoreColumns(cores, scale).Width;
+    public static double CoreWidth(CoreDisplay display, int cores, double scale, double dpi, int matrixColumns = 0)
+        => UsesMatrix(display, cores, scale) ? CoreMatrix.Strip(cores, scale, dpi, matrixColumns).Width : CoreColumns(cores, scale).Width;
 
     // The width of the items side by side with this gap between them.
     public static double Width(CompactMonitorItems items, Func<CompactMonitorItems, double> width, double gap)

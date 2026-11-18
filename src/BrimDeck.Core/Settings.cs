@@ -669,6 +669,7 @@ public sealed class DeckSettings
     public CompactSmoothing CompactSmoothing { get; set; } = CompactSmoothing.Ten;
     // How the processor's cores are drawn, collapsed and expanded: columns, a dot matrix, or by the count and the room (Auto).
     public CoreDisplay CoreDisplay { get; set; } = CoreDisplay.Auto;
+    public int CoreMatrixColumns { get; set; }
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     // The span the traffic shown beside the network's rates is summed over, from Windows' own record (TrafficPeriods).
@@ -949,6 +950,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
         if (!Enum.IsDefined(CompactSmoothing)) CompactSmoothing = CompactSmoothing.Ten;
         if (!Enum.IsDefined(CoreDisplay)) CoreDisplay = CoreDisplay.Auto;
+        CoreMatrixColumns = CoreMatrix.NormalizeColumns(CoreMatrixColumns);
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
