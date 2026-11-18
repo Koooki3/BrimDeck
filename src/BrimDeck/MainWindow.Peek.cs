@@ -74,7 +74,8 @@ public partial class MainWindow
         double scale = CompactMusicLayout.SafeScale(_scale), dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         _peekHidden = _stripAdmission.Hidden; _peekLayout = _stripAdmission.Layout;
         var strip = new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings, Look), scale, true, new StripPresence(), dpi, _peekHidden, _stripAdmission,
-            low: Settings.DeviceLowPercent, coreDisplay: Settings.CoreDisplay, free: Settings.MonitorShowFree);
+            low: Settings.DeviceLowPercent, coreDisplay: Settings.CoreDisplay, free: Settings.MonitorShowFree, matrixColumns: Settings.CoreMatrixColumns,
+            coreCount: _app.Monitor?.Latest?.Cpu.OrDefault?.Cores.Count ?? 0);
         bubble.SetStrip(strip);
         var (width, height) = bubble.Wanted;
         var indicator = _frame.ToScreen(Collapsed.Surface);

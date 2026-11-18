@@ -157,7 +157,7 @@ public partial class MainWindow
     // that room change: when the volumes are first counted, a sensor turns out to have none or first shows, or a volume comes or
     // goes past the room.
     private string MonitorKey(ExpandedPlan plan, bool small) => string.Join("|", plan.Signature, Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "",
-        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, Look.Generation, Settings.MonitorTemperatures, small, Native.BatteryProvider.SystemHasBattery, Settings.CoreDisplay, Settings.MonitorShowFree);
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, Look.Generation, Settings.MonitorTemperatures, small, Native.BatteryProvider.SystemHasBattery, Settings.CoreDisplay, Settings.MonitorShowFree, Settings.CoreMatrixColumns);
     // What the shown page was built for: its volumes' places, the small gauge's room and the lines for power and the battery.
     private (int Lines, int Columns, bool Small, int Power) _monitorSensors;
     private static (int Lines, int Columns, bool Small, int Power) BuiltSensors(ExpandedPlan plan, bool small)
@@ -225,7 +225,7 @@ public partial class MainWindow
         old?.CloseCard();
         _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings, Look), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
-            Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor(old is null && MonitorMotion && !Resizing), MonitorMessage(layout), Settings.CoreDisplay, Settings.MonitorShowFree);
+            Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor(old is null && MonitorMotion && !Resizing), MonitorMessage(layout), Settings.CoreDisplay, Settings.MonitorShowFree, Settings.CoreMatrixColumns);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         // The new page may show the power line where the old one did not, or the other way round: what is read follows
         // (UpdateMonitorDemand, which asks for the extras as well). And the frame rate's line: the frame rate is read only while a

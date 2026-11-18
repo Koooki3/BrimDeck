@@ -57,6 +57,9 @@ public sealed partial class SettingsWindow
         Refresh();
         // The options stay available while the page is off, so they can be set before it is shown.
         SectionTitle(Loc.T("通用", "General"));
+        string matrixTitle = Loc.T("点阵每行核心数", "Cores per matrix row");
+        var matrixCount = NumericControls(matrixTitle, S.CoreMatrixColumns, 0, CoreMatrix.MaxPreferredColumns, 1, "",
+            v => Resize(s => s.CoreMatrixColumns = (int)v, DeckPage.Monitor)).Number;
         Group(Row(Loc.T("各项颜色", "Reading colors"), roles),
             QuickRow(Loc.T("快捷预设", "Presets"), presets),
             GpuChoiceRow(),
@@ -65,6 +68,8 @@ public sealed partial class SettingsWindow
                 v => Change(s => s.CoreDisplay = v), keepPreview: true,
                 help: Loc.T("自动：核心较少时用柱状，柱子多到看不清时用点阵。",
                     "Auto: columns while there are few cores, the dot matrix when there are too many columns to read.")),
+            Row(matrixTitle, KeepPreview(matrixCount), TextLine(Loc.T("0 为自动", "0 for automatic"), 11, TextTertiary),
+                help: () => Loc.T("仅影响点阵。空间不足时自动排列，保留保存的设置。", "Applies to the dot matrix. Tight spaces use automatic layout and keep the saved choice.")),
             MusicChoice(Loc.T("流量统计时长", "Traffic period"), S.MonitorTrafficPeriod,
                 [(TrafficPeriod.Today, TrafficPeriods.Name(TrafficPeriod.Today)), (TrafficPeriod.Day, TrafficPeriods.Name(TrafficPeriod.Day)),
                     (TrafficPeriod.Week, TrafficPeriods.Name(TrafficPeriod.Week)), (TrafficPeriod.Month, TrafficPeriods.Name(TrafficPeriod.Month))],

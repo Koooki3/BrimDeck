@@ -291,6 +291,7 @@ internal sealed class ColumnGraph : FrameworkElement
     private readonly double _maxColumn, _label, _gap;
     private readonly bool _labels, _button;
     private readonly CoreDisplay _display;
+    private readonly int _matrixColumns;
     // The dot matrix's cells: one frozen brush per color and brightness step, made on first use.
     private readonly Dictionary<(string Color, int Step), Brush> _cellBrushes = [];
     private MatrixGrid _grid;
@@ -308,9 +309,9 @@ internal sealed class ColumnGraph : FrameworkElement
 
     // name: what the graph shows, for screen readers ("CPU 各核心占用").
     // display: columns, or a dot matrix of the cores as chosen in the settings (CoreDisplay); only the processor's graph takes it.
-    public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null, string name = "", CoreDisplay display = CoreDisplay.Columns)
+    public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null, string name = "", CoreDisplay display = CoreDisplay.Columns, int matrixColumns = 0)
     {
-        _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null; _name = name; _action = button ?? ""; _display = display;
+        _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null; _name = name; _action = button ?? ""; _display = display; _matrixColumns = matrixColumns;
         ClipToBounds = true; SnapsToDevicePixels = true;
         if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); KeyboardPress.Take(this, true); }
         else ToolTipService.SetPlacement(this, System.Windows.Controls.Primitives.PlacementMode.Mouse);
@@ -377,7 +378,7 @@ internal sealed class ColumnGraph : FrameworkElement
     private MatrixGrid Grid(double width, double height, double ppd)
     {
         var key = (_columns.Count, width, height, ppd);
-        if (_grid.Count != _columns.Count || key != _gridKey) { _grid = CoreMatrix.Fit(_columns.Count, width, height, ppd, MaxCell); _gridKey = key; }
+        if (_grid.Count != _columns.Count || key != _gridKey) { _grid = CoreMatrix.Fit(_columns.Count, width, height, ppd, MaxCell, preferredColumns: _matrixColumns); _gridKey = key; }
         return _grid;
     }
     // A few cores in a wide graph stay squares of a sensible size.
