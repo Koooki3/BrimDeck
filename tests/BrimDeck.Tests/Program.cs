@@ -18,6 +18,7 @@ try
     await CodeAgentUsageTests.Run(root, Check);
     await CommandCodeUsageTests.Run(root, Check);
     await WorkBuddyUsageTests.Run(root, Check);
+    await QoderUsageTests.Run(root, Check);
     await MiMoUsageTests.Run(root, Check);
     await MiMoApiTests.Run(root, Check);
     MaasPricingTests.Run(root, Check);

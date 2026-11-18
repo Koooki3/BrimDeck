@@ -25,6 +25,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | WorkBuddy AI | ✓ | ✓ | Quota: sign in on the WorkBuddy AI website in the browser from settings. Usage only needs the WorkBuddy AI desktop app to be used on this PC |
 | Xiaomi MiMo Desktop subscription | ✓ | ✓ | Quota: sign in to a Xiaomi account in the browser from settings. Usage only needs MiMo Code CLI or the Xiaomi MiMo desktop app to be used on this PC |
 | Xiaomi MiMo | ✓ | | Link an Open Platform API key or Token Plan in the Xiaomi MiMo desktop app or MiMo Code CLI |
+| Qoder, Qoder CN | ✓ | ✓ | Sign in to Qoder CLI or the Qoder desktop app on this PC, or open a signed-in Qoder IDE (likewise for Qoder CN). Token usage of the CLI and desktop app has to be switched on in settings |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
 | Xiaomi MiMo API | ✓ | | Enter a Xiaomi MiMo Open Platform pay-as-you-go API key in settings |
 | Xiaomi MiMo Token Plan | ✓ | | Enter a Xiaomi MiMo Token Plan key in settings |
@@ -145,6 +146,14 @@ Reads the Open Platform API key or Token Plan linked in the Xiaomi MiMo desktop 
 - A linked Token Plan shows the plan name and its Credits quota; a linked pay-as-you-go API key shows the account balance, the topped-up and granted balances and this month's charges. With both linked, one column shows them together.
 - The file is read again on every refresh. Linking in the desktop app and signing in to the CLI both rewrite it: after signing in to the CLI again, for example, the Token Plan the desktop app linked is gone from the file and is no longer shown here.
 - Usage comes from Xiaomi MiMo's local records.
+
+## Qoder
+
+Qoder (qoder.com) and Qoder CN (qoder.com.cn) have separate accounts and are chosen apart under Quota source. Within one edition, the CLI, the desktop app and the IDE share one set of credits.
+
+- **Quota**: plan credits, add-on credits, the organization's package and granted credits (such as SOTA Exclusive Credits), each on its own, with when they end and the plan name.
+- **How it is read**: Qoder's account API returns encrypted data, so BrimDeck asks this PC's Qoder CLI, desktop app or IDE, in that order, each with its own sign-in. The CLI and the desktop app take about 20 seconds per read, which runs in the background and does not hold up the other columns.
+- **Token usage**: reads the local records of Qoder IDE, the CLI and the desktop app. The CLI and the desktop app record no token counts by default: after choosing Qoder as a column's usage app in settings, expand the column, click "Switch on" in the "CLI and desktop tokens" line, and open Qoder CLI and the desktop app again; conversations from then on are recorded. This sets the user environment variable `QODER_EXPOSE_TOKEN_USAGE=1` (Qoder CN: `QODERCN_EXPOSE_TOKEN_USAGE=1`); "Switch off" removes it. Auto, Ultimate, Fast and Efficient are tiers and are shown as such.
 
 ## Sources entered by hand
 

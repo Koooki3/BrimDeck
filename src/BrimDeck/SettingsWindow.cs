@@ -951,6 +951,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     else current.UsageSource = id;
                 });
                 if (quota && !ProviderCatalog.IsBuiltIn(id)) { CollapseSourceRows(); _expandedSource = entry.InstanceId; }
+                // Choosing Qoder for the statistics opens the row on its token switch while that is off.
+                if (!quota && id is ProviderId.Qoder or ProviderId.QoderCn && QoderUsage.UserSwitch(QoderUsage.For(id)) != true) { CollapseSourceRows(); _expandedSource = entry.InstanceId; }
                 RefreshAppRow(entry.InstanceId);
             }
             AutomationProperties.SetName(item, Loc.T("选择 ", "Select ") + Label(id)); items.Children.Add(item);

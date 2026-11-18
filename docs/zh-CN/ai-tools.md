@@ -25,6 +25,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | WorkBuddy AI | ✓ | ✓ | 配额：在设置中通过浏览器登录 WorkBuddy 国际版官网。用量统计只需在本机使用 WorkBuddy AI 桌面应用 |
 | Xiaomi MiMo 桌面订阅 | ✓ | ✓ | 配额：在设置中通过浏览器登录小米账号。用量统计只需在本机使用 MiMo Code CLI 或 Xiaomi MiMo 桌面版 |
 | Xiaomi MiMo | ✓ | | 在 Xiaomi MiMo 桌面版或 MiMo Code CLI 中关联开放平台 API 密钥或 Token Plan |
+| Qoder、Qoder CN | ✓ | ✓ | 在本机登录 Qoder CLI 或 Qoder 桌面版，或打开已登录的 Qoder IDE（Qoder CN 同理）。CLI 与桌面版的 Token 统计需要在设置中开启 |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
 | Xiaomi MiMo API | ✓ | | 在设置中填写小米 MiMo 开放平台按量计费 API 密钥 |
 | Xiaomi MiMo Token Plan | ✓ | | 在设置中填写小米 MiMo Token Plan 密钥 |
@@ -145,6 +146,14 @@ MiMo Code CLI 与 Xiaomi MiMo 桌面版共用同一个数据库（`%USERPROFILE%
 - 关联了 Token Plan 时显示套餐名称与 Credits 额度；关联了按量计费 API 密钥时显示账户余额、充值余额、赠送余额与本月扣费。两者都关联时，在同一列中一起显示。
 - 每次刷新都重新读取这个文件。桌面版关联和 CLI 登录都会改写它，例如在 CLI 中重新登录后，桌面版关联的 Token Plan 会从文件中消失，这里也随之不再显示。
 - 用量统计使用 Xiaomi MiMo 的本机记录。
+
+## Qoder
+
+Qoder（qoder.com）与 Qoder CN（qoder.com.cn）是两套独立的账号，在“配额来源”中分别选择。同一版本的 CLI、桌面版与 IDE 共用一份积分。
+
+- **配额**：按套餐积分、加购积分、组织资源包与专属积分（例如“SOTA 专属积分”）分别显示，并显示到期时间与套餐名称。
+- **读取方式**：Qoder 的账户接口返回加密数据，BrimDeck 依次请本机的 Qoder CLI、桌面版、IDE 读取，使用它们各自的登录。CLI 与桌面版每次读取约需 20 秒，在后台进行，不影响其他列。
+- **Token 用量**：读取 Qoder IDE 与 CLI、桌面版的本机记录。CLI 与桌面版默认不记录 Token 数：在设置中把统计应用选为 Qoder 后，展开这一列，点击“CLI 与桌面版 Token”一行的“开启”，再重新打开 Qoder CLI 与桌面版，新的对话开始记录。这一操作为当前用户设置环境变量 `QODER_EXPOSE_TOKEN_USAGE=1`（Qoder CN 为 `QODERCN_EXPOSE_TOKEN_USAGE=1`），“关闭”时删除。Auto、极致、快速、经济是档位，统计中按档位显示。
 
 ## 手动填写的来源
 
