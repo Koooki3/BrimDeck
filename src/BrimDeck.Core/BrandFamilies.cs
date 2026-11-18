@@ -6,10 +6,19 @@ namespace BrimDeck.Core;
 public readonly record struct HidShape(int Vendor, int Product, int UsagePage, int Usage, int Interface, int InputLength, int OutputLength,
     int FeatureLength, IReadOnlySet<byte> OutputIds, IReadOnlySet<byte> FeatureIds, string Name)
 {
+    private static readonly IReadOnlySet<byte> NoIds = new HashSet<byte>();
+    // The ids of the input reports the collection declares.
+    public IReadOnlySet<byte> InputIds { get; init; } = NoIds;
+
+    // A report id the collection lists as an input report while it lists no output report at all: a collection that may still
+    // take that report as output (BrandWay.Undeclared).
+    public bool Unlisted(byte id) => OutputIds.Count == 0 && InputIds is { } ids && ids.Contains(id);
+
     public bool Declares(BrandWay way) => way.Transport switch
     {
         WayTransport.Output or WayTransport.OutputListen or WayTransport.OutputGetInput or WayTransport.Converse
-            => OutputIds.Contains(way.Request.Length > 0 ? way.Request[0] : (byte)0),
+            => OutputIds.Contains(way.Request.Length > 0 ? way.Request[0] : (byte)0)
+                || way.Undeclared && way.Request.Length > 0 && Unlisted(way.Request[0]) && OutputLength >= way.Request.Length,
         WayTransport.Feature or WayTransport.FeatureListen or WayTransport.FeatureGet => FeatureIds.Contains(way.Request.Length > 0 ? way.Request[0] : (byte)0),
         WayTransport.Listen => InputLength > 0,
         _ => false
@@ -54,6 +63,11 @@ public sealed record BrandWay(string Name, WayTransport Transport, byte[] Reques
     public IReadOnlyList<byte[]> Before { get; init; } = [];
     public IReadOnlyList<byte[]> After { get; init; } = [];
     public bool StripZero { get; init; }
+    // An output read also sent to a collection that lists no output report id at all but lists the request's id as an input
+    // report (HidShape.Unlisted), long enough for the request. Measured on the MCHOSE V9 PRO's receiver: Windows lists report
+    // 0x55 there as input only, and the collection takes it as output and answers. Never where other output report ids are
+    // listed.
+    public bool Undeclared { get; init; }
     // OutputGetInput: the input report fetched for the answer.
     public byte ReplyId { get; init; }
     // A question asked first, the same way, whose answer says whether the device can answer the read at all (a headset
@@ -128,7 +142,8 @@ public static class GetInputExchange
 
 // A brand's devices and their reads. Takes: whether a collection is the brand's to read (its vendor, and for a vendor id
 // other brands share, its products), from its shape alone, never by sending anything. Ways: the reads that collection takes,
-// best first; a way is only sent to a collection that declares its report id (HidShape.Declares). Kind: what the device is
+// best first; a way is only sent to a collection that declares its report id, or for an Undeclared output read one that lists
+// it as an input report alone (HidShape.Declares). Kind: what the device is
 // when its name does not say. Prefix: the device key's prefix (stable: user choices are kept under the key). DisplayName: a
 // better name than the product string, if any.
 public sealed record BrandFamily(string Brand, Func<HidShape, bool> Takes, Func<HidShape, IReadOnlyList<BrandWay>> Ways)

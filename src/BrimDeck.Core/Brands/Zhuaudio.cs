@@ -118,7 +118,9 @@ public static class Zhuaudio
         return new(level, state == 0x03);
     }
 
-    private static bool TakesCmedia(HidShape s) => CmediaHeadsets.Contains((s.Vendor, s.Product)) && HeadsetPages.Vendor(s) && s.OutputIds.Contains(0x55)
+    // Report 0x55 as output, or as an input report alone, as Windows lists it on the MCHOSE V9 PRO's C-Media receiver, which
+    // takes it as output all the same (BrandWay.Undeclared; not measured on these).
+    private static bool TakesCmedia(HidShape s) => CmediaHeadsets.Contains((s.Vendor, s.Product)) && HeadsetPages.Vendor(s) && (s.OutputIds.Contains(0x55) || s.Unlisted(0x55))
         && s.OutputLength >= 64 && s.InputLength >= 4;
 
     private static bool Takes(HidShape s) => s.Vendor == Vendor && s.Product == ZhubDongle && HeadsetPages.Vendor(s) && s.OutputIds.Contains(Report)
@@ -134,7 +136,7 @@ public static class Zhuaudio
             },
         ])
         { Kind = _ => DeviceKind.Headphones, Prefix = "zhuaudio" },
-        new("ZhuAudio C-Media", TakesCmedia, _ => [new BrandWay("zhuaudio.cmedia", WayTransport.Output, CmediaRequest(), CmediaBattery) { TimeoutMs = 800 }])
+        new("ZhuAudio C-Media", TakesCmedia, _ => [new BrandWay("zhuaudio.cmedia", WayTransport.Output, CmediaRequest(), CmediaBattery) { TimeoutMs = 800, Undeclared = true }])
         { Kind = _ => DeviceKind.Headphones, Prefix = "zhuaudio" },
     ];
 }

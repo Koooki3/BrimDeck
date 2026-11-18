@@ -18,7 +18,9 @@ public static class Fifine
 
     public static IEnumerable<BrandFamily> Families =>
     [
-        new("FIFINE", Takes, _ => [new BrandWay("fifine.state", WayTransport.Output, Request(), Battery) { TimeoutMs = 1000 }])
+        // Also where Windows lists report 0x55 as an input report alone, as on the MCHOSE V9 PRO's receiver (BrandWay.Undeclared;
+        // not measured on FIFINE's).
+        new("FIFINE", Takes, _ => [new BrandWay("fifine.state", WayTransport.Output, Request(), Battery) { TimeoutMs = 1000, Undeclared = true }])
         { Kind = _ => DeviceKind.Headphones, Prefix = "fifine" },
     ];
 }

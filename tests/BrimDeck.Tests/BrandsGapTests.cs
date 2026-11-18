@@ -90,9 +90,11 @@ static class BrandsGapTests
             Dongles.Find(0x2023, 0xF024, 0xFFFF, "", 65, 2, 0x0001, 0, 0) == Dongles.Protocol.F83 && Dongles.Find(0x2023, 0xF024, 0xFFFF, "", 65, 1, 0x0001, 0, 0) is null
             && Dongles.Find(0x2023, 0xF017, 0xFFFF, "", 65, 2) == Dongles.Protocol.F83 && Dongles.Find(0x2023, 0xF022, 0xFFFF, "", 65, 2) == Dongles.Protocol.F83
             && Dongles.Twins.Contains(("2023:F024", "2023:F026")));
-        var v9 = Shape(0x291D, 0x385D, 0xFF90, 1, 64, 64, [0x55], "MCHOSE V9 PRO");
+        // As Windows lists the collection on a V9 PRO (receiver 0013): input report 0x55, no output report id, 64 bytes each way.
+        var v9 = Shape(0x291D, 0x385D, 0xFF90, 1, 64, 64, [], "MCHOSE V9 PRO") with { InputIds = new HashSet<byte> { 0x55 } };
         check("MCHOSE V9 Pro: the status read on C-Media's 291D:385D, only its 0xFF90 usage 1 collection and only where the product names it",
             BrandFamilies.Find(v9) is { Family.Brand: "MCHOSE V9 Pro" } found && found.Ways.Select(way => way.Name).SequenceEqual(["mchose.v9pro"])
+            && BrandFamilies.Find(Shape(0x291D, 0x385D, 0xFF90, 1, 64, 64, [0x55], "MCHOSE V9 PRO")) is { Ways.Count: 1 }
             && BrandFamilies.Find(Shape(0x291D, 0x385D, 0x90FF, 1, 64, 64, [0x55], "V9 PRO")) is { Family.Brand: "MCHOSE V9 Pro" }
             && BrandFamilies.Find(Shape(0x291D, 0x385D, 0xFF90, 1, 64, 64, [0x55], "MCHOSE S9 PRO")) is null
             && BrandFamilies.Find(Shape(0x291D, 0x385D, 0xFF00, 1, 64, 64, [0x55], "MCHOSE V9 PRO")) is null
@@ -100,6 +102,35 @@ static class BrandsGapTests
             && BrandFamilies.Find(Shape(0x291D, 0x385D, 0xFF90, 2, 64, 64, [0x55], "MCHOSE V9 PRO")) is null
             && BrandFamilies.Find(Shape(0x291D, 0x385D, 0x000C, 1, 64, 64, [0x55], "MCHOSE V9 PRO")) is null
             && MchoseV9Pro.Request().Length == 64 && MchoseV9Pro.Request().Take(3).SequenceEqual(new byte[] { 0x55, 0x65, 0x01 }));
+        var input55 = new HashSet<byte> { 0x55 };
+        check("MCHOSE V9 Pro: sent where 0x55 is listed as input alone, never where no report or another output report is; the G9 PRO only where 0x55 is output",
+            BrandFamilies.Find(v9 with { InputIds = new HashSet<byte>() }) is { Ways.Count: 0 }
+            && BrandFamilies.Find(v9 with { OutputIds = new HashSet<byte> { 0x41 } }) is { Ways.Count: 0 }
+            && BrandFamilies.Find(v9 with { Name = "MCHOSE G9 PRO" }) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Shape(0x291D, 0x385D, 0xFF90, 1, 64, 64, [0x55], "MCHOSE G9 PRO")) is { Ways.Count: 1 });
+        // The same 55 65 frame on other headsets: also sent where Windows lists report 0x55 as input alone, as on the V9 PRO.
+        check("Report 0x55 listed as input alone: ATK, FIFINE, XIBERIA, AULA A9, ZhuAudio's C-Media pairs and MCHOSE 3837 send their 55 65 read; never with another output report or without 0x55 as input",
+            BrandFamilies.Find(Shape(0x373B, 0x1262, 0xFF90, 1, 64, 64, []) with { InputIds = input55 }) is { Family.Brand: "ATK Headset", Ways.Count: 1 }
+            && BrandFamilies.Find(Shape(0x3142, 0x00C3, 0xFF90, 1, 64, 64, []) with { InputIds = input55 }) is { Family.Brand: "FIFINE", Ways.Count: 1 }
+            && BrandFamilies.Find(Shape(0x36F9, 0xF008, 0xFF90, 1, 64, 64, []) with { InputIds = input55 }) is { Family.Brand: "XIBERIA", Ways.Count: 1 }
+            && BrandFamilies.Find(Shape(0x38A6, 0x001D, 0xFF90, 1, 64, 64, [], "AULA-A9") with { InputIds = input55 }) is { Family.Brand: "AULA headset", Ways.Count: 1 }
+            && BrandFamilies.Find(Shape(0x0D8C, 0x0334, 0xFF90, 1, 64, 64, []) with { InputIds = input55 }) is { Family.Brand: "ZhuAudio C-Media", Ways.Count: 1 }
+            && BrandFamilies.Find(Shape(0x0D8C, 0x0334, 0xFF90, 1, 64, 64, [])) is null
+            && BrandFamilies.Find(Shape(0x36F9, 0xF008, 0xFF90, 1, 64, 64, [0x41]) with { InputIds = input55 }) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Shape(0x36F9, 0xF008, 0xFF90, 1, 64, 64, [])) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Shape(0x3142, 0x00C3, 0xFF90, 1, 64, 64, []) with { InputIds = new HashSet<byte> { 0x41 } }) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Shape(0x373B, 0x1262, 0xFF90, 1, 64, 64, [0x41]) with { InputIds = input55 }) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Shape(0x373B, 0x1262, 0xFF90, 1, 64, 64, [])) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Shape(0x38A6, 0x001D, 0xFF90, 1, 64, 64, [0x41], "AULA-A9") with { InputIds = input55 }) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Shape(0x38A6, 0x001D, 0xFF90, 1, 64, 64, [], "AULA-A9")) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Shape(0x0D8C, 0x0334, 0xFF90, 1, 64, 64, [0x41]) with { InputIds = input55 }) is null
+            && Dongles.MchoseReads(0x6008, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).SequenceEqual([Dongles.MchoseRead.Audio, Dongles.MchoseRead.Status])
+            && Dongles.MchoseReads(0x6008, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), new HashSet<byte>()).Count == 0
+            && Dongles.MchoseReads(0x6008, "V9 Turbo", 0xFF00, 1, 0, 64, new HashSet<byte> { 0x41 }, new HashSet<byte>(), input55).Count == 0);
+        check("MCHOSE 3837: report 0x55 listed as input alone opens the status read to headsets only, never to a mouse or a keyboard",
+            Dongles.MchoseReads(0x4011, "MCHOSE K99 Keyboard", 0xFF70, 0x71, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).Count == 0
+            && Dongles.MchoseReads(0x100B, "MCHOSE A7 V2 Ultra Mouse", 0xFF01, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).Count == 0
+            && Dongles.MchoseReads(0x100B, "2.4G Receiver", 0xFF01, 1, 0, 64, new HashSet<byte>(), new HashSet<byte>(), input55).SequenceEqual([Dongles.MchoseRead.Audio]));
         // HaloBattery's 60 % on the cable (00) and rafagfran's 20 % on battery (02); vigil-watt's 100 % (55 65 64 02); M HUB's 03
         // charging, 04 full and 1A asleep (aipno/mchose-linux); 0 the receiver's answer while the headset sleeps (vigil-watt).
         check("MCHOSE V9 Pro: every state: on the cable, on battery, charging, full; asleep (1A) and level 0 asleep, never a level",

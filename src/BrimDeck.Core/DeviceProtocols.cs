@@ -835,7 +835,7 @@ public static class Dongles
     // outputIds, featureIds: the report ids the collection declares; null where they are not known (Find, which only decides
     // whether the collection is MCHOSE's to read), and then the shape alone decides.
     public static IReadOnlyList<MchoseRead> MchoseReads(int product, string name, int usagePage, int usage, int featureLength, int outputLength,
-        IReadOnlySet<byte>? outputIds = null, IReadOnlySet<byte>? featureIds = null)
+        IReadOnlySet<byte>? outputIds = null, IReadOnlySet<byte>? featureIds = null, IReadOnlySet<byte>? inputIds = null)
     {
         // The keyboards whose read the web driver gives get that read alone: their other vendor collections are for firmware
         // updates (the cables' 0xFF00) or unknown, and are sent nothing. The G98 V3 and K87 V3 keep the status read they were
@@ -853,10 +853,16 @@ public static class Dongles
             _ => []
         };
         bool Output(byte id) => outputIds is null || outputIds.Contains(id);
+        // Report 0x55 listed as an input report alone, no output report listed: the MCHOSE V9 PRO's C-Media receiver is listed so
+        // and still takes 55 65 01 as output (BrandWay.Undeclared); M HUB's other headsets may be too. Not measured on them. Only
+        // the headsets' reads (Audio, and Status on a product known to be audio): mice and keyboards keep to the listed report.
+        bool unlisted55 = outputIds is { Count: 0 } && inputIds is not null && inputIds.Contains(0x55);
+        bool audio = MchoseKind(product, name) is DeviceKind.Headphones or DeviceKind.Earbuds or DeviceKind.Speaker;
         return [.. order.Where(read => read switch
         {
             MchoseRead.Realtek => usagePage == 0xFF01 && featureLength >= 21 && (featureIds is null || featureIds.Contains(0x11) || featureIds.Contains(0x12)),
-            MchoseRead.Status or MchoseRead.Audio => usagePage >= 0xFF00 && outputLength >= 64 && Output(0x55),
+            MchoseRead.Audio => usagePage >= 0xFF00 && outputLength >= 64 && (Output(0x55) || unlisted55),
+            MchoseRead.Status => usagePage >= 0xFF00 && outputLength >= 64 && (Output(0x55) || unlisted55 && audio),
             MchoseRead.Frame4D => usagePage is 0xFF01 or 0xFF0B && usage != 0x0010 && Output(0x4D),
             MchoseRead.Gmouse => usagePage == 0xFF01 && usage == 0x0010 && outputLength >= 65 && Output(0x00),
             MchoseRead.Config => MchoseConfigProducts.Contains(product) && usagePage == 0x0001 && usage == 0x0000 && outputLength >= 65 && Output(0x00),
