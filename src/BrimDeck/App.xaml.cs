@@ -385,7 +385,11 @@ public partial class App : Application
                 ApplyPanelTheme(systemChanged: true);
             // Automatic liquid glass with nothing to measure follows the Windows app theme too. Otherwise the theme page's
             // "System" card shows the Windows mode whichever theme is chosen.
-            else if (!FollowWindowsGlass()) _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
+            else
+            {
+                FollowWindowsGlass();
+                _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
+            }
         });
     }
     // Makes the chosen panel theme current (reading the theme folder again when asked) and repaints every panel if it changed.

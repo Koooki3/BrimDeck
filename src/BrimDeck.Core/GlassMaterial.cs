@@ -23,6 +23,15 @@ public static class GlassMaterial
         return (.85 + .30 * amount) * (1 - .20 * Math.Clamp(openness, 0, 1));
     }
 
+    // Respond on the existing probe cadence. Two adverse readings permit a faster attack;
+    // the stronger of the last two readings governs release, so alternating frames cannot pump the veil.
+    public static double FollowBackdrop(double shown, double required, double previous)
+    {
+        if (required > shown)
+            return Math.Min(required, shown + (previous > shown ? .10 : .025));
+        return Math.Max(shown - .025, Math.Min(shown, Math.Max(required, previous)));
+    }
+
 
     public static double LuminosityOpacity(double required, double openness, int transparency)
     {

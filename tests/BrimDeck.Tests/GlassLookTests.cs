@@ -98,6 +98,18 @@ internal static class GlassLookTests
             check($"Automatic liquid glass holds its look over a flashing video ({(appDark ? "dark" : "light")} app mode: {turns} turns a minute; {plainTurns} without the video detected)",
                 turns == 0 && video.Video && plainTurns <= 12);
         }
+        // The acrylic route observes a changing desktop every 500 ms, slower than the renderer's video gap.
+        var acrylicVideo = new GlassAppearance(true, true, videoGap: 1000);
+        acrylicVideo.Reset(true, 0);
+        for (long now = 0; now <= 2000; now += 500)
+        {
+            acrylicVideo.Changed(.9, now);
+            acrylicVideo.Feed(.9, now);
+        }
+        check("The acrylic probe recognizes consecutive video frames on its own cadence", acrylicVideo.Video && acrylicVideo.Dark);
+        acrylicVideo.Feed(.9, 3100);
+        check("The acrylic probe clears motion when adjacent frames stop changing", !acrylicVideo.Video);
+
         // A video that becomes bright for good turns the look once it has stayed past the threshold for VideoEscape; the video
         // stopping ends the video state after VideoGap.
         var escape = new GlassAppearance(true, true);

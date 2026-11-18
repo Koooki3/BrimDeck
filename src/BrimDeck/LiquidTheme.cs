@@ -1,5 +1,4 @@
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Threading;
 using BrimDeck.Core;
 
@@ -114,7 +113,6 @@ public partial class App
         if (!changed) { LiquidTheme.NoChange(); return; }
         PanelThemes.CarryOnGlassTurn(previous, PanelTheme.Current, Settings);
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
-        _settingsWindow?.GlassTurned();
     }
 
     // Whether automatic liquid glass can measure what lies behind the island: liquid glass can be shown on the main island
@@ -145,8 +143,8 @@ public partial class App
         {
             if (Exiting || Deck is null || !LiquidTheme.IsAuto(Settings.PanelTheme)) return;
             bool measures = GlassMeasures;
-            bool turned = FollowWindowsGlass();
-            if (measures != _glassMeasured) { bool known = _glassMeasured is not null; _glassMeasured = measures; if (known && !turned) _settingsWindow?.PanelThemeChanged(onlyThemePage: true); }
+            FollowWindowsGlass();
+            if (measures != _glassMeasured) { bool known = _glassMeasured is not null; _glassMeasured = measures; if (known) _settingsWindow?.PanelThemeChanged(onlyThemePage: true); }
         });
     }
     // Automatic liquid glass shown at start or just chosen: a clock gradient that is a preset of its other look (the look saved
@@ -162,37 +160,23 @@ public partial class App
 // Automatic liquid glass on the theme page: its card among the base themes and its rows in "当前主题".
 public sealed partial class SettingsWindow
 {
-    // Automatic liquid glass's name with the look it shows now, in the "当前主题" section: a turn of the look only renames it
-    // (GlassTurned), as it can come every few seconds over a video.
-    private TextBlock? _glassNow;
-
-    // Automatic liquid glass comes first among the glass themes, its fixed light and dark looks after it.
     private static List<(string Id, string Name, PanelThemeInfo Theme)> WithGlassAuto(List<(string Id, string Name, PanelThemeInfo Theme)> basics)
     {
         int glass = basics.FindIndex(card => card.Id == PanelThemes.GlassLight);
-        basics.Insert(glass < 0 ? basics.Count : glass, (LiquidTheme.Auto, Loc.T("液态玻璃（自动）", "Liquid Glass (auto)"), PanelTheme.Find(LiquidTheme.Auto)));
+        basics.RemoveAll(card => PanelThemes.IsLiquid(card.Id));
+        basics.Insert(glass < 0 ? basics.Count : glass, (LiquidTheme.Auto, GlassTitle, PanelTheme.Find(LiquidTheme.Auto)));
         return basics;
     }
 
-    private static string GlassTitle(PanelThemeInfo theme) => Loc.T("液态玻璃（自动），当前：", "Liquid Glass (auto), now: ") + theme.DisplayName;
-    private static string GlassDescription => Loc.T("清透的液态玻璃，按岛后方内容的明暗自动换成浅色或深色玻璃，文字随之切换，始终清晰可读。部分录屏方式可能无法捕捉岛或玻璃效果。",
-        "Clear liquid glass that turns light or dark with what lies behind the island, its text following, so it always reads. Some capture methods may omit the island or its glass effect.");
+    private static string GlassTitle => Loc.T("液态玻璃", "Liquid Glass");
+    private static string GlassDescription => Loc.T("根据背景细微调整衬底，展开时增加层次，按压时从触点泛起光亮。部分录屏方式可能无法捕捉玻璃。",
+        "Glass subtly adjusts to the backdrop, gains depth as it opens, and lights up at the point of contact. Some capture methods may omit the glass.");
 
-    // The "当前主题" rows for automatic liquid glass: its name with the look shown now (renamed by GlassTurned), and, with
-    // nothing to measure (App.GlassMeasures), a note that it takes the Windows app theme's look meanwhile.
-    private void GlassAutoDetails(string chosen, TextBlock name, List<FrameworkElement> rows)
+    private void GlassAutoDetails(string chosen, List<FrameworkElement> rows)
     {
-        _glassNow = LiquidTheme.IsAuto(chosen) ? name : null;
         if (LiquidTheme.IsAuto(chosen) && !_app.GlassMeasures)
             rows.Add(Row(Loc.T("提示", "Note"), Wrapped(Loc.T("现在无法测量岛后方的明暗（节电模式、远程会话、透明效果关闭、高对比度或无法捕获屏幕），自动外观暂时跟随 Windows 的应用主题。",
                 "What lies behind the island cannot be measured now (battery saver, a remote session, transparency effects off, high contrast, or no screen capture), so the auto look follows the Windows app theme meanwhile."), false)));
     }
 
-    // Automatic liquid glass took its other look: only the name of the look shown changes on the theme page. The rest of the
-    // settings shows the look of when it was built until it is built again, as a turn can come every few seconds.
-    internal void GlassTurned()
-    {
-        if (IsLoaded && _page == ThemePage && _glassNow is not null && LiquidTheme.IsAuto(S.PanelTheme))
-            _glassNow.Text = GlassTitle(PanelTheme.Find(LiquidTheme.Auto));
-    }
 }

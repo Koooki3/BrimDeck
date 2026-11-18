@@ -150,14 +150,14 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("当前主题", "Current theme"));
         var rows = new List<FrameworkElement>();
         string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")")
-            : LiquidTheme.IsAuto(chosen) ? GlassTitle(theme) : theme.DisplayName;
+            : LiquidTheme.IsAuto(chosen) ? GlassTitle : theme.DisplayName;
         var name = TextLine(title, TextSize.Body, TextSecondary);
         rows.Add(Row(Loc.T("名称", "Name"), name));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.")
             : LiquidTheme.IsAuto(chosen) ? GlassDescription : theme.DisplayDescription;
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
         if (theme.File.Night is not null) rows.AddRange(DaylightRows(theme.File));
-        GlassAutoDetails(chosen, name, rows);
+        GlassAutoDetails(chosen, rows);
         if (theme.BuiltIn && PanelThemes.IsLiquid(PanelThemes.Resolve(theme)) && GlassBackdrop.AcrylicSettingsApply)
         {
             var clarity = SliderRow(Loc.T("玻璃透明度", "Glass transparency"), S.GlassTransparency, 0, 100, 1, "%",
@@ -166,8 +166,8 @@ public sealed partial class SettingsWindow
             rows.Add(clarity);
             if (clarity.IsEnabled)
                 rows.Add(Row(Loc.T("透明度说明", "About transparency"),
-                    Wrapped(Loc.T("数值越高，玻璃越清透。玻璃会按背景自动保留足够的文字衬底，例如浅色玻璃遇到深色背景时，调高后也可能看不出变化。",
-                        "Higher values make the glass clearer. Glass keeps enough tint for readable text, so raising the setting may look the same, especially with light glass over a dark background."), false)));
+                    Wrapped(Loc.T("数值越高，玻璃越清透。背景复杂时，玻璃会保留文字所需的衬底，透明度变化可能较小。",
+                        "Higher values make the glass clearer. On busy backgrounds, glass retains a veil for readable text, so the visible change may be smaller."), false)));
         }
         // Glass needs Windows' transparency effects; without them it is drawn opaque, and the page says why.
         if (PanelThemes.Resolve(theme).IsGlass && (!MotionEnvironment.Transparency || SystemParameters.HighContrast))

@@ -20,6 +20,13 @@ internal static class GlassMaterialTests
         check("Glass transparency: the rim softens through expansion and stays visible",
             GlassMaterial.RimStrength(50, 0) == 1 && GlassMaterial.RimStrength(50, 1) == .8
             && GlassMaterial.RimStrength(0, 1) > 0);
+        double flash = GlassMaterial.FollowBackdrop(.40, .90, .40);
+        double steady = GlassMaterial.FollowBackdrop(flash, .90, .90);
+        double firstCalm = GlassMaterial.FollowBackdrop(steady, .30, .90);
+        check("Glass veil responds gently to one frame and strengthens faster on sustained demand",
+            Math.Abs(flash - .425) < 1e-9 && Math.Abs(steady - .525) < 1e-9);
+        check("Glass veil holds through an alternating frame and releases on consecutive calmer frames",
+            firstCalm == steady && Math.Abs(GlassMaterial.FollowBackdrop(firstCalm, .30, .30) - .50) < 1e-9);
         check("Liquid glass advertises Beta separately from the stable theme name",
             new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id =>
                 PanelThemes.BuiltIn(id) is { File.Stage: "Beta" } theme
@@ -31,5 +38,19 @@ internal static class GlassMaterialTests
         settings.Normalize();
         var copy = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(settings))!;
         check("Glass transparency: settings are clamped and survive a save", copy.GlassTransparency == 100);
+        foreach (var id in new[] { PanelThemes.GlassLight, PanelThemes.GlassDark })
+        {
+            var previous = new ThemeChoices();
+            var legacy = new DeckSettings { PanelTheme = id, GlassTransparency = 67, ThemeChoices = new() { [id] = previous } };
+            legacy.Normalize();
+            legacy.ThemeChoices.TryGetValue(PanelThemes.GlassAuto, out var migrated);
+            check($"Legacy glass selection {id} becomes unified and preserves its preferences",
+                legacy.PanelTheme == PanelThemes.GlassAuto && legacy.GlassTransparency == 67
+                && legacy.ThemeChoices.ContainsKey(id) && migrated is not null
+                && !ReferenceEquals(previous, migrated));
+            legacy.Normalize();
+            check($"Unified glass settings migration is idempotent for {id}",
+                legacy.ThemeChoices.TryGetValue(PanelThemes.GlassAuto, out var repeated) && ReferenceEquals(repeated, migrated));
+        }
     }
 }

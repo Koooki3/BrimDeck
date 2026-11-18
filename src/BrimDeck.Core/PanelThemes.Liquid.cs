@@ -12,6 +12,13 @@ public static partial class PanelThemes
     // "system", it is a choice rather than a theme file, and no theme file can take its id (LoadFolder).
     public const string GlassAuto = "liquid-glass";
 
+    // The light and dark ids remain palettes and valid bases for existing custom themes.
+    public static string NormalizeSelection(string? id) => NormalizeId(id) switch
+    {
+        GlassLight or GlassDark => GlassAuto,
+        var normalized => normalized
+    };
+
     // The backdrop's brightness (sRGB luma, before the glass's own tint) where the liquid glass themes' text keeps 4.5:1 with a
     // little to spare: dark text (#101217) over at least LiquidTextLight, light text (#F6F7F9) over at most LiquidTextDark (with
     // the tints, about .56 and .33). The renderer holds the backdrop to these (LiquidFrame.Preset, Liquid.hlsl's Legibility).

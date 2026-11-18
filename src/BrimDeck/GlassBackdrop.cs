@@ -171,19 +171,18 @@ internal sealed class GlassBackdrop : IDisposable
     private CompositionRadialGradientBrush? _glowBrush;
     private CompositionColorGradientStop? _glowCentre;
     // The acrylic body's luminosity opacity now (GlassEffect.LuminosityFor) and the probe that sets it (AcrylicProbe): a couple
-    // of looks a second at what lies around the island, never in the frame's path. It rises at once when the text needs more
-    // and comes down only after the backdrop stayed calmer for ProbeDwellMs (a video's flashes never make it pump); automatic
+    // of looks a second at what lies around the island, never in the frame's path. The veil follows the backdrop with
+    // a faster attack and a slower release; automatic
     // liquid glass's look takes the same reading through GlassAppearance (its prior, hysteresis, dwell and video hold).
     private double _luminosity = GlassEffect.LuminosityCapsule, _luminosityShown = GlassEffect.LuminosityBase;
-    private long _lowerSince = -1;
-    private bool _riseSeen;
+    private double _previousVeil;
     // The look the luminosity was settled for; null when the glass was shown again or the look turned (user 10-27: the light
     // glass came up very dark at first, at the dark look's or the floor's luminosity for the half second or more the rise
     // rule waited for a second reading): the first reading then sets it at once, up or down, in the frame it is shown.
     private bool? _luminosityLook;
     private DispatcherTimer? _probe;
     private GlassAppearance? _probeLook;
-    private const int ProbeMs = 500, ProbeDwellMs = 2500;
+    private const int ProbeMs = 500;
     private LiquidHost? _host;
     private SpriteVisual? _liquid;
     private CompositionRoundedRectangleGeometry? _liquidClip;
@@ -1038,7 +1037,8 @@ internal sealed class GlassBackdrop : IDisposable
     }
 
     // The glow at the pointer: hover and press as GlassFeedback eases them (calmed on the open panel), its place in the glass's
-    // device pixels from the island's corner (Answer), some 90 DIPs wide; soft on the dark look, a little more on the light.
+    // device pixels from the island's corner (Answer). Press energy spreads farther than hover, using the same eased input
+    // that drives the glass shape. The veil damps the highlight when the background already demands more separation.
     private void Glow(Frame shown, double opacity)
     {
         if (_glow is null || _glowBrush is null || _glowCentre is null) return;
@@ -1050,8 +1050,8 @@ internal sealed class GlassBackdrop : IDisposable
         bool dark = PanelTheme.Current.IsDark;
         _glowCentre.Color = Windows.UI.Color.FromArgb((byte)(dark ? 34 : 70), 255, 255, 255);
         _glowBrush.EllipseCenter = new Vector2((float)(shown.Left + x), (float)(shown.Top + y));
-        _glowBrush.EllipseRadius = new Vector2((float)((90 + 12 * press) * scale));
-        _glow.Opacity = (float)(strength * opacity);
+        _glowBrush.EllipseRadius = new Vector2((float)((76 + 36 * press) * scale));
+        _glow.Opacity = (float)(strength * opacity * (1 - .25 * _luminosityShown));
         _glow.IsVisible = true;
     }
 
@@ -1172,22 +1172,14 @@ internal sealed class GlassBackdrop : IDisposable
         // over a plain light one), as it took it from the refraction renderer's measure.
         Measured?.Invoke((float)reading.Dark, (float)reading.Bright);
         double wanted = GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness));
-        // Up after two readings in a row ask for it (a second: one flash of a video or a window passing never lifts it), down
-        // after the backdrop stayed calmer for ProbeDwellMs.
-        if (_luminosityLook != dark) { _luminosityLook = dark; _luminosity = wanted; _lowerSince = -1; _riseSeen = false; Redress(); }
-        else if (wanted > _luminosity && _riseSeen) { _luminosity = wanted; _lowerSince = -1; _riseSeen = false; Redress(); }
-        else if (wanted > _luminosity) { _lowerSince = -1; _riseSeen = true; }
-        else if (wanted < _luminosity)
-        {
-            _riseSeen = false;
-            if (_lowerSince < 0) _lowerSince = now;
-            else if (now - _lowerSince >= ProbeDwellMs) { _luminosity = Math.Max(wanted, _luminosity - .05); _lowerSince = now; Redress(); }
-        }
-        else { _lowerSince = -1; _riseSeen = false; }
+        _luminosity = _luminosityLook == dark ? GlassMaterial.FollowBackdrop(_luminosity, wanted, _previousVeil) : wanted;
+        _luminosityLook = dark;
+        _previousVeil = wanted;
+        Redress();
         // Automatic liquid glass: its look from the same reading, held while the panel is open or pressed.
         if (AutoLook?.Invoke() == true)
         {
-            _probeLook ??= new GlassAppearance(dark, LiquidTheme.AppDark);
+            _probeLook ??= new GlassAppearance(dark, LiquidTheme.AppDark, videoGap: 2 * ProbeMs);
             _probeLook.Prior(LiquidTheme.AppDark);
             if (_probeLook.Dark != dark) _probeLook.Reset(dark, now);
             _probeLook.Changed(reading.Changed, now);
