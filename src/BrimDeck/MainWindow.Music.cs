@@ -207,6 +207,7 @@ public partial class MainWindow
     private PanelHeader _header = PanelHeader.For(36, 20);
     private void ApplyHeader(PanelHeader header)
     {
+        bool gripBoundaryChanged = _header.Row != header.Row;
         _header = header;
         ToolbarRow.Height = new GridLength(header.Row);
         Toolbar.Height = header.Height;
@@ -222,6 +223,8 @@ public partial class MainWindow
         SettingsButton.Height = header.SettingsHeight;
         if (SettingsButton.Parent is FrameworkElement right) right.Margin = new Thickness(0, 0, header.RightMargin, 0);
         ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(header.Side), 0, 0, 0);
+        // A same-size page switch can change the grip boundary without raising Island.SizeChanged.
+        if (gripBoundaryChanged) UpdateGrips();
     }
     private void RenderPageSwitch()
     {
