@@ -60,9 +60,10 @@ internal sealed class MonitorStrip : FrameworkElement
     // glyph, its letter shown even when it is the only one. free: memory and the drives show what is free (DeckSettings.MonitorShowFree).
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi,
         CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null, DriveParts parts = DriveParts.All,
-        CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false)
+        CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false, int matrixColumns = 0, int coreCount = 0)
     {
-        _driveParts = parts; _coreDisplay = coreDisplay; _free = free;
+        _driveParts = parts; _coreDisplay = coreDisplay; _free = free; _matrixColumns = matrixColumns;
+        _reservedCores = coreCount > 0 ? coreCount : Environment.ProcessorCount;
         AddVisualChild(_moving);
         _easing = new PromptTimer(Dispatcher, EaseStep);
         _presence = presence; _dpi = dpi; _colors = colors; _centered = centered; _powerStyle = PowerStyle.For(colors.Palette);
@@ -110,7 +111,7 @@ internal sealed class MonitorStrip : FrameworkElement
         // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings. A rate has
         // three digits and a letter, with a point below 100 (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, Look.Primary, 1).WidthIncludingTrailingWhitespace;
-        var widths = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
+        var widths = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(_reservedCores),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
             FramesSlot + Math.Round(3 * _scale) + FigureWidth(WidestFrames) + Math.Round(2 * _scale) + SmallWidth(FramesUnit),
@@ -152,7 +153,8 @@ internal sealed class MonitorStrip : FrameworkElement
 
     // The cores' room: the columns', or, as chosen or once the columns no longer fit, the dot matrix's.
     private readonly CoreDisplay _coreDisplay;
-    private double ColumnsWidth(int cores) => CompactMonitor.CoreWidth(_coreDisplay, cores, _scale, _dpi);
+    private readonly int _matrixColumns, _reservedCores;
+    private double ColumnsWidth(int cores) => CompactMonitor.CoreWidth(_coreDisplay, cores, _scale, _dpi, _matrixColumns);
 
     private CompactMonitorItems Shown => _shown;
     // Rounded up to whole device pixels: the row rounds the region it gives down to them, which must not drop a reading.
@@ -363,7 +365,7 @@ internal sealed class MonitorStrip : FrameworkElement
         double height = Math.Round(14 * _scale), top = Math.Round(center - height / 2);
         if (cpu is null || cpu.Cores.Count == 0) { drawing.DrawRoundedRectangle(UI.Brush(Look.Fill), null, new Rect(x, top, width, height), 2, 2); return; }
         int count = cpu.Cores.Count, groups = Math.Max(1, cpu.GroupCount);
-        if (CompactMonitor.UsesMatrix(_coreDisplay, count, _scale)) { Matrix(drawing, x, top, height, cpu, groups, now); return; }
+        if (CompactMonitor.UsesMatrix(_coreDisplay, count, _scale)) { Matrix(drawing, x, top, width, height, cpu, groups, now); return; }
         var (column, gap, _) = CompactMonitor.CoreColumns(count, _scale);
         for (int i = 0; i < count; i++)
         {
@@ -378,10 +380,18 @@ internal sealed class MonitorStrip : FrameworkElement
     // of its eased load over an empty cell. The placement and the brushes are kept: a frame allocates nothing.
     private MatrixGrid _matrix;
     private readonly Dictionary<(string Color, int Step), Brush> _cellBrushes = [];
-    private void Matrix(DrawingContext drawing, double x, double top, double height, CpuSample cpu, int groups, double now)
+    private void Matrix(DrawingContext drawing, double x, double top, double width, double height, CpuSample cpu, int groups, double now)
     {
         int count = cpu.Cores.Count;
-        if (_matrix.Count != count) _matrix = CoreMatrix.Strip(count, _scale, _dpi);
+        if (_matrix.Count != count)
+        {
+            _matrix = count == _reservedCores
+                ? CoreMatrix.Strip(count, _scale, _dpi, _matrixColumns)
+                : CoreMatrix.Fit(count, width, height, _dpi, minPitch: 2, preferredColumns: _matrixColumns);
+            if (!_matrix.Fits && _matrix.Width > width)
+                _matrix = CoreMatrix.Fit(count, width, height, _dpi, preferredColumns: _matrixColumns);
+        }
+        if (!_matrix.Fits && _matrix.Width > width) return;
         var grid = _matrix;
         double radius = grid.Cell >= 5 ? grid.Cell * .18 : 0;
         var track = UI.Brush(Look.Fill);
@@ -423,7 +433,7 @@ internal sealed class MonitorStrip : FrameworkElement
     private void Gauge(DrawingContext drawing, DialParts parts, double x, double center, CompactMonitorItems item, double? dial, double? share, string color, MemoryLevel level, string letter, MonitorSnapshot? s, double ppd)
     {
         // As thick as a quota ring and on the same track, so its whole outline shows even at a low share.
-        MonitorDraw.Dial(drawing, new Point(x + _dial / 2, center), _dial, Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), Math.Max(1, 7 * _scale), dial, color, letter, ppd, parts, look: Look);
+        MonitorDraw.Dial(drawing, new Point(x + _dial / 2, center), _dial, Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), Math.Max(1, 7 * _scale), dial, color, letter, ppd, parts, look: Look, centerVisibleBounds: true);
         if ((_values & item) == 0 || (parts & DialParts.Face) == 0) return;
         var heat = (_heat & item) != 0 ? CompactFigures.Heat(item, s) : null;
         bool vram = (_vram & item) != 0;
