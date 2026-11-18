@@ -148,7 +148,7 @@ For how to use it and its settings, see [Clipboard and file transfer](docs/en-US
 - Built-in themes include Dark, Light, One Dark Pro, GitHub Dark, GitHub Light, Dracula, Night Owl, Island Holiday, Pixel Blocks and Cyberpunk: Edgerunners; the Island Holiday themes change between a day and a night look by the local time.
 - On the Panel theme page in settings, you can change the background, foreground, accent and other colors and save them as a custom theme, or write a theme file by following the [theme guide](docs/en-US/themes.md).
 - The interface font can be any font installed on the PC, and the panel's background transparency can be adjusted (Settings › General › Appearance and language).
-- The built-in liquid glass themes (Beta) offer a glass transparency slider in Settings › Themes. Higher values lighten the grain while keeping the glass outline visible. The glass keeps enough tint for readable text, so changing the slider may have little visible effect when a light theme sits over a dark background.
+- Choose **Liquid Glass** in Settings › Themes. This theme adapts its tint and text colors to the backdrop. Its transparency slider lets more of the backdrop through while retaining the veil needed for readable text.
 
 ### More settings
 

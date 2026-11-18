@@ -4,7 +4,7 @@ The Notch, Capsule and Indicator, the quota notice, the expanded panel and its p
 
 | Kind | Themes |
 | --- | --- |
-| Basics | System, Dark (the default: the original pure black look), Light, Liquid Glass (light), Liquid Glass (dark) |
+| Basics | System, Dark (the original black look and the default), Light, Liquid Glass |
 | More themes | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Island Holiday 2, Pixel Blocks, Cyberpunk: Edgerunners (the demo), Arknights: Endfield |
 | Custom | The theme files in the themes folder, which can be created, edited and deleted in settings |
 
@@ -200,9 +200,9 @@ The demo theme was made in these five steps.
 
 ## The newer themes
 
-The built-in Liquid Glass themes have a transparency slider under **Settings › Panel theme › Current theme**. The default of 50 keeps the existing appearance. At 0 the veil is stronger. At 100 the glass is clearer and keeps its rim. The backdrop can still increase the veil for readable text. High contrast and Windows transparency settings retain their existing fallback behavior.
+The built-in Liquid Glass theme has a transparency slider under **Settings › Panel theme › Current theme**. The default is 50. At 0 the veil is stronger. At 100 the glass is clearer and keeps its rim. The veil can strengthen over a busy backdrop to keep text legible. High contrast and turning off Windows transparency use the opaque surface.
 
-**Liquid Glass (light / dark)**: after Apple's Liquid Glass, liquid-glass-react and the "transparent island" concept, and the clear mode leaked for Xiaomi HyperOS 4. The desktop under the island is blurred (see "Glass" above). The light glass is a milky tint (`#C2F7F9FC`), the dark one graphite (`#C8121419`), just dense enough for body text to keep 7:1 over a black or a white desktop. The specular rim is brightest at the top left and catches again at the bottom right, and travels around the edge in about half a minute (`drift`); the inner edge light makes the edge read as thick glass. Hover is `lens`, press `jelly` (after the jelly press of xiaofangstudio/liquid-glass-web: squashed 1.05 x 0.93, shaded only at the bottom, springing back); no particles.
+**Liquid Glass** adapts the veil over the blurred desktop and can switch text palettes as the backdrop changes. The expanded panel keeps its text palette stable while adjusting the veil. A press spreads light from the point of contact as the glass flexes. The design draws on Apple's Liquid Glass, liquid-glass-react, and the jelly press in xiaofangstudio/liquid-glass-web.
 
 **Island Holiday**: by day, warm sand (`#FFF6E8`) fading into sea foam, deep-sea text, a lagoon accent, a coral serif clock and a shoreline rim (turquoise, sky, sand). By night, a moonlit sea from navy into teal, a lantern-gold clock and a soft glow under the island. The rim breathes like a swell and its colors flow like water; a glint of sun crosses now and then by day, a rarer moonlight by night. A small wave rolls in along a hovered control; a press leaves sun glints by day (`sparkle` + `star`) and lets glowing plankton rise at night (`ember` + `firefly`).
 
