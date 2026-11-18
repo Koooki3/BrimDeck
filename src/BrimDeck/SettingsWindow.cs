@@ -102,6 +102,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         Deactivated += (_, _) => { EndAppDrag(false); QueuePreviewDismissal(); };
         // Back from PawnIO's installer or uninstaller: the enhanced sensors page shows what changed.
         Activated += (_, _) => _refreshSensors?.Invoke();
+        SensorOperationChanged += RefreshSensorSettings;
+        Closed += (_, _) => SensorOperationChanged -= RefreshSensorSettings;
         PreviewMouseDown += (_, e) => DismissPreviewOutsideControl(e.OriginalSource);
         DismissPreviewOnCaptionPress();
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape && _appDrag is not null) { EndAppDrag(false); e.Handled = true; } };
