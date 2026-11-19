@@ -27,7 +27,7 @@ public partial class MainWindow
     // Pointing at the surface does not open the panel while it waits out of sight for its boot, or until the boot has played
     // (TrackPointer): a pointer already resting there would open an invisible panel, or cut the swell short.
     private long _bootEnds;
-    private bool BootHoldsPointer => _bootWaiting || Environment.TickCount64 < _bootEnds;
+    private bool BootHoldsPointer => _bootWaiting || _bootDot || Environment.TickCount64 < _bootEnds;
     // The swell from the dot into the shape (SetExpanded), and the surface drawing back into the dot, as multiples of the
     // duration set for the panel: these change the panel's shape as opening and closing do. The dot's own motion keeps its
     // pace (DotMotion).
@@ -139,7 +139,6 @@ public partial class MainWindow
             SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk);
         }
         const double swell = DotMotion.SwellStart;
-        _bootEnds = Environment.TickCount64 + (long)(swell + Settings.AnimationDuration * BootSwell);
         SetImmediate(HoverZone, OpacityProperty, 0d);
         PoseDot(DotMotion.Boot, swell, completed: () =>
         {

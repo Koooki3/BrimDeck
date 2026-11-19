@@ -1096,7 +1096,12 @@ public partial class MainWindow : Window
         // once the form has nearly settled.
         bool reshaping = expanded && wasExpanded, booting = _booting && !expanded && duration > 0, morphing = _morphingShape && !expanded && duration > 0;
         _booting = false; _morphingShape = false;
-        if (booting) duration = (int)(duration * BootSwell);
+        if (booting)
+        {
+            duration = (int)(duration * BootSwell);
+            // Start the hover hold when the swell is scheduled, even if the dot's completion was delayed.
+            _bootEnds = Environment.TickCount64 + duration;
+        }
         if (morphing) duration = (int)(duration * 1.3);
         // How long the panel's closing runs: a notice that arrives meanwhile waits for it (MainWindow.Notices.cs). A closing
         // carried on to a new collapsed width runs until the carried move ends.
