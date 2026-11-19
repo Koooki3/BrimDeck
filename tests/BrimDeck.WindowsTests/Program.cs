@@ -29,6 +29,7 @@ internal static class Program
             if (args is ["--only", "popup"]) { PopupGhostChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themecards"]) { ThemeCardChecks.Run(Check); return Finish(); }
             if (args is ["--only", "fonts"]) { FontFollowTests.Run(Check); return Finish(); }
+            if (args is ["--only", "inklabel"]) { InkLabelSettleTests.Run(Check); return Finish(); }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
             // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
             // says something about the machine, not the code. Without the flag every check runs.
@@ -41,6 +42,7 @@ internal static class Program
             CheckSettledClip();
             CheckPageToolTips();
             LayoutRetryTests.Run(Check);
+            InkLabelSettleTests.Run(Check);
             RightDragChecks.Run(Check);
             DrawnAutomationTests.Run(Check);
             RingLetterChecks.Run(Check);
