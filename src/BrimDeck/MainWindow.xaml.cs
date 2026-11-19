@@ -1096,13 +1096,16 @@ public partial class MainWindow : Window
         if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) return;
         var cursor = WindowsHost.Cursor();
         // Move mode: the panel does not open (MainWindow.Move.cs).
-        if (_moveArmed) { TrackMove(cursor); return; }
+        if (_moveArmed) { PassAroundSurface(false); TrackMove(cursor); return; }
         // Mouse pass-through: hovering does nothing (MainWindow.ClickThrough.cs).
-        if (IgnorePointer()) return;
+        if (IgnorePointer()) { PassAroundSurface(false); return; }
         var area = CompactHoverScreenRect();
         if (area.IsEmpty) return;
         // The surface's ends resize it (MainWindow.Resize.cs); pointing there does not open the panel.
         var grip = TrackGrips(cursor);
+        // Collapsed, clicks outside the area and the armed grip go to the window beneath (MainWindow.ClickThrough.cs); a press
+        // that took the mouse keeps the window as it is until released.
+        if (Mouse.Captured is null) PassAroundSurface(!_expanded && grip == ResizeEdges.None && !area.Contains(cursor));
         // An ordinary panel under another window is out of the pointer's reach (DeckSettings.AlwaysOnTop); asked only where
         // the pointer would otherwise count as inside.
         bool Covered() => !KeepsAbove && WindowsHost.CoveredAt(this, cursor);

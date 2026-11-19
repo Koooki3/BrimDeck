@@ -11,7 +11,7 @@ namespace BrimDeck;
 // keeps its keys. A preview from the settings window behaves as usual.
 public partial class MainWindow
 {
-    private bool _passingClicks;
+    private bool _passingClicks, _passingAround;
 
     internal bool ClickThrough => Settings.ClickThrough && !_preview;
     // The open panel neither takes clicks nor closes when the pointer leaves.
@@ -39,7 +39,23 @@ public partial class MainWindow
     {
         if (!PanelTakesKeyboard) ReleaseKeyboard(giveBack: true);
         _escapeDismissal?.SetEnabled(HoldsEscape);
-        bool passing = ClickThrough && !(_expanded && Settings.ClickThroughPanel);
+        if (_expanded) _passingAround = false;
+        UpdatePassing();
+    }
+
+    // From TrackPointer: collapsed, the window lets clicks through while the pointer is outside the surface's pointer area. The
+    // shadow around the surface is drawn in this layered window, and Windows lets clicks through only fully transparent pixels,
+    // so the faint shadow below the capsule would otherwise take clicks meant for the window beneath.
+    private void PassAroundSurface(bool on)
+    {
+        if (on == _passingAround) return;
+        _passingAround = on;
+        UpdatePassing();
+    }
+
+    private void UpdatePassing()
+    {
+        bool passing = ClickThrough && !(_expanded && Settings.ClickThroughPanel) || _passingAround;
         if (passing == _passingClicks) return;
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == IntPtr.Zero) return;
