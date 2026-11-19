@@ -225,7 +225,7 @@ internal sealed class GlassBackdrop : IDisposable
     public event Action? Crossed;
     private bool? _lead;
     private bool _crossed;
-    private LiquidGlass.AcrylicProbe.Reading? _lastAcrylicReading;
+    private (ProbeTarget Target, int Run, LiquidGlass.AcrylicProbe.Reading Reading)? _lastAcrylicReading;
     private readonly record struct AcrylicLookTurn(GlassEffect.AcrylicLook From, GlassEffect.AcrylicLook To,
         double Required, double Background, bool Dark, long Start);
     private AcrylicLookTurn? _acrylicTurn;
@@ -235,12 +235,14 @@ internal sealed class GlassBackdrop : IDisposable
     {
         _lead = dark; _crossed = false;
         if (Trial.Contains("compact-look-turn") && AcrylicBody && _shown && (Openness?.Invoke() ?? 0) <= .001
-            && dark is { } next && Soft.At(_owner) && _lastAcrylicReading is { } reading)
+            && dark is { } next && Soft.At(_owner))
         {
+            var reading = _lastAcrylicReading is { } last && last.Run == _probeRun && last.Target == CurrentProbeTarget()
+                ? (LiquidGlass.AcrylicProbe.Reading?)last.Reading : null;
             var from = _acrylicTurningLook ?? AcrylicLookFor(PanelTheme.Current.IsDark, _luminosityShown);
-            double required = GlassEffect.LuminosityFor(next, reading.Median, reading.Median, AcrylicDarkLumaLimit);
+            double required = GlassEffect.LuminosityFor(next, reading?.Median ?? 1, reading?.Median ?? 0, AcrylicDarkLumaLimit);
             double opacity = GlassMaterial.LuminosityOpacity(required, 0, RequestedAcrylicTransparency);
-            _acrylicTurn = new(from, AcrylicLookFor(next, opacity), required, reading.MiddleMean, next, Environment.TickCount64);
+            _acrylicTurn = new(from, AcrylicLookFor(next, opacity), required, reading?.MiddleMean ?? (next ? 1 : 0), next, Environment.TickCount64);
             _acrylicVeilMotion?.Stop();
         }
         else ClearAcrylicTurn();
@@ -1243,17 +1245,21 @@ internal sealed class GlassBackdrop : IDisposable
     private bool _probing;
     private bool? _lastProbeDark;
     private int _probeRun;
-    private readonly record struct ProbeTarget(Int32Rect Island, Int32Rect Display, int Gap, int Band, bool Dark);
+    private readonly record struct ProbeTarget(Int32Rect Island, Int32Rect Display, int Gap, int Band, bool Dark)
+    {
+        public nint Monitor { get; init; }
+    }
 
     private ProbeTarget? CurrentProbeTarget()
     {
         if (_disposed || !_shown || !AcrylicBody || !Available || _last is not { } frame || _windowRect is not { } window) return null;
         double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
-        var bounds = Native.WindowsHost.WindowScreen(_owner).Bounds;
+        var monitor = Native.WindowsHost.WindowScreen(_owner);
+        var bounds = monitor.Bounds;
         var display = new Int32Rect((int)bounds.Left, (int)bounds.Top, (int)bounds.Width, (int)bounds.Height);
         var island = new Int32Rect(window.X + (int)frame.Left, window.Y + (int)frame.Top,
             (int)frame.Right - (int)frame.Left, (int)frame.Bottom - (int)frame.Top);
-        return new ProbeTarget(island, display, (int)(24 * scale), (int)(40 * scale), PanelTheme.Current.IsDark);
+        return new ProbeTarget(island, display, (int)(24 * scale), (int)(40 * scale), PanelTheme.Current.IsDark) { Monitor = monitor.Monitor };
     }
 
     private void ProbeTick()
@@ -1278,13 +1284,16 @@ internal sealed class GlassBackdrop : IDisposable
         // A completed read describes the old material or screen region if the window moved, changed DPI or was hidden.
         // Discard it and let the periodic timer sample the settled geometry instead of chasing every animation frame.
         // A failed read cannot settle the appearance. The first successful read applies in full.
-        if (run == _probeRun && target == current && reading is { } valid) ProbeApply(valid);
+        if (run == _probeRun && target == current && reading is { } valid)
+        {
+            _lastAcrylicReading = (target, run, valid);
+            ProbeApply(valid);
+        }
         else if (again) ProbeTick();
     }
 
     private void ProbeApply(LiquidGlass.AcrylicProbe.Reading reading)
     {
-        _lastAcrylicReading = reading;
         bool dark = PanelTheme.Current.IsDark;
         long now = Environment.TickCount64;
         double openness = Openness?.Invoke() ?? 0;

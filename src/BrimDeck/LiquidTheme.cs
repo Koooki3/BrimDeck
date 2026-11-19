@@ -65,7 +65,12 @@ public partial class App
     // ease (GlassBackdrop.DarkFadeMs), at whose end the text turns at the latest.
     private const int TurnByMs = (int)GlassBackdrop.DarkFadeMs + 150;
     private DispatcherTimer? _turnBy;
-    internal bool AutoLookFrom(MainWindow deck) => !Exiting && deck == Deck && LiquidTheme.IsAuto(Settings.PanelTheme);
+    private MainWindow? _glassTurnSource;
+    private MainWindow? VisibleGlassPublisher => Decks.FirstOrDefault(deck =>
+        deck is { IsVisible: true, LiquidVisible: true } && CanMeasureGlass(deck));
+    private static bool CanMeasureGlass(MainWindow deck) => deck.LiquidUsable && deck.Look.IsMain && LiquidTheme.IsAuto(deck.PanelSettings.PanelTheme);
+    internal bool AutoLookFrom(MainWindow deck) => !Exiting && LiquidTheme.IsAuto(Settings.PanelTheme)
+        && ReferenceEquals(VisibleGlassPublisher, deck);
     internal void TurnGlass(MainWindow deck, bool dark, bool instant)
     {
         // With nothing to measure, the Windows app theme decides (FollowWindowsGlass); a last measure still under way is let go.
@@ -73,10 +78,12 @@ public partial class App
         LiquidTheme.Dark = dark;
         if (instant || !Soft.Enabled)
         {
+            _glassTurnSource = null;
             _turnBy?.Stop();
             ApplyGlassTurn(snap: true);
             return;
         }
+        _glassTurnSource = deck;
         foreach (var each in Decks.ToList()) each.LeadGlass(dark);
         if (_turnBy is null)
         {
@@ -87,10 +94,11 @@ public partial class App
     }
     internal void GlassCrossed(MainWindow deck)
     {
-        if (deck == Deck) TurnTheme();
+        if (ReferenceEquals(_glassTurnSource, deck)) TurnTheme();
     }
     private void TurnTheme()
     {
+        _glassTurnSource = null;
         _turnBy?.Stop();
         if (Exiting) return;
         // Automatic liquid glass given up meanwhile: the glass, led toward a look the theme will not take, follows the theme again.
@@ -118,7 +126,7 @@ public partial class App
     // Whether automatic liquid glass can measure what lies behind the island: liquid glass can be shown on the main island
     // (transparency effects on, no high contrast, no battery saver, a local session, and the capture has not failed there).
     // Otherwise it follows the Windows app theme, as "system" does, and the theme page says so.
-    internal bool GlassMeasures => GlassBackdrop.Available && MainLiquidUsable;
+    internal bool GlassMeasures => GlassBackdrop.Available && (VisibleGlassPublisher is not null || Deck is null || CanMeasureGlass(Deck));
     private bool MainLiquidUsable => Deck?.LiquidUsable != false;
     // Automatic liquid glass with nothing to measure takes the Windows app theme's look. True when that turned the theme.
     private bool FollowWindowsGlass()
@@ -127,6 +135,7 @@ public partial class App
         bool dark = SettingsPalette.IsDark(SettingsTheme.System);
         if (LiquidTheme.Dark == dark && PanelTheme.Current.IsDark == dark) return false;
         LiquidTheme.Dark = dark;
+        _glassTurnSource = null;
         _turnBy?.Stop();
         foreach (var each in Decks.ToList()) each.LeadGlass(null);
         // As "system" turns: with the theme's fade.

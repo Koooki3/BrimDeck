@@ -202,14 +202,40 @@ internal static class GlassEffect
     {
         Tables();
         var unknown = MarshalInspectable<object>.FromManaged(source);
-        int hr = Marshal.QueryInterface(unknown, in IidSource, out var sourcePointer);
-        Marshal.Release(unknown);
-        Marshal.ThrowExceptionForHR(hr);
-        var block = Marshal.AllocHGlobal(2 * IntPtr.Size);
-        Marshal.WriteIntPtr(block, _effectTable);
-        Marshal.WriteIntPtr(block, IntPtr.Size, _interopTable);
-        States[block] = new State { Matrix = matrix, Source = sourcePointer };
-        return MarshalInterface<IGraphicsEffect>.FromAbi(block);
+        IntPtr sourcePointer = IntPtr.Zero, block = IntPtr.Zero;
+        bool registered = false;
+        try
+        {
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(unknown, in IidSource, out sourcePointer));
+            block = Marshal.AllocHGlobal(2 * IntPtr.Size);
+            Marshal.WriteIntPtr(block, _effectTable);
+            Marshal.WriteIntPtr(block, IntPtr.Size, _interopTable);
+            if (!States.TryAdd(block, new State { Matrix = matrix, Source = sourcePointer }))
+                throw new InvalidOperationException("A newly allocated glass effect identity was already registered.");
+            registered = true;
+            sourcePointer = IntPtr.Zero; // The state now owns the QueryInterface reference.
+
+            // FromAbi creates a projection from this borrowed pointer. Drop the initial reference
+            // created here after the projection has taken its own reference.
+            return MarshalInterface<IGraphicsEffect>.FromAbi(block);
+        }
+        finally
+        {
+            try
+            {
+                if (registered)
+                    Marshal.Release(block);
+                else
+                {
+                    if (sourcePointer != IntPtr.Zero) Marshal.Release(sourcePointer);
+                    if (block != IntPtr.Zero) Marshal.FreeHGlobal(block);
+                }
+            }
+            finally
+            {
+                if (unknown != IntPtr.Zero) Marshal.Release(unknown);
+            }
+        }
     }
 
     private static IntPtr Identity(IntPtr self) => States.ContainsKey(self) ? self : self - IntPtr.Size;
@@ -220,8 +246,7 @@ internal static class GlassEffect
         if (_effectTable != IntPtr.Zero) return;
         QueryFn query = Query;
         RefFn addRef = self => (uint)Interlocked.Increment(ref Of(self).Refs);
-        // Never below one: the object is the brush's for good.
-        RefFn release = self => (uint)Math.Max(1, Interlocked.Decrement(ref Of(self).Refs));
+        RefFn release = Release;
         Delegate[] effect =
         [
             query, addRef, release,
@@ -242,6 +267,19 @@ internal static class GlassEffect
             new CountFn((IntPtr _, out uint count) => { count = 1; return 0; })
         ];
         _effectTable = Table(effect); _interopTable = Table(interop);
+    }
+
+    private static uint Release(IntPtr self)
+    {
+        var identity = Identity(self);
+        var state = States[identity];
+        int remaining = Interlocked.Decrement(ref state.Refs);
+        if (remaining == 0 && States.TryRemove(identity, out _))
+        {
+            try { Marshal.Release(state.Source); }
+            finally { Marshal.FreeHGlobal(identity); }
+        }
+        return (uint)Math.Max(remaining, 0);
     }
 
     private static IntPtr Table(Delegate[] methods)
