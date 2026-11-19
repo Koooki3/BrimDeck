@@ -1348,8 +1348,8 @@ internal sealed class GlassBackdrop : IDisposable
             var parameters = new HwndSourceParameters("BrimDeck glass")
             {
                 WindowStyle = unchecked((int)0x80000000), // WS_POPUP
-                // A tool window that never takes focus or a taskbar button, with no redirection surface: composition draws it.
-                ExtendedWindowStyle = 0x80 | 0x08000000 | 0x00200000 | 0x08, // TOOLWINDOW | NOACTIVATE | NOREDIRECTIONBITMAP | TOPMOST
+                // A decorative tool window. Its owner handles pointer input and focus.
+                ExtendedWindowStyle = 0x80 | 0x08000000 | 0x00200000 | 0x08 | 0x20, // TOOLWINDOW | NOACTIVATE | NOREDIRECTIONBITMAP | TOPMOST | TRANSPARENT
                 Width = Math.Max(1, rect.Right - rect.Left), Height = Math.Max(1, rect.Bottom - rect.Top), PositionX = rect.Left, PositionY = rect.Top
             };
             _window = new HwndSource(parameters);
@@ -1380,6 +1380,16 @@ internal sealed class GlassBackdrop : IDisposable
     // the blur ending short of a notice on a second monitor at 125 %). It is placed again for the panel as it is now.
     private IntPtr OwnMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (message == 0x0084) // WM_NCHITTEST
+        {
+            handled = true;
+            return new IntPtr(-1); // HTTRANSPARENT
+        }
+        if (message == 0x0021) // WM_MOUSEACTIVATE
+        {
+            handled = true;
+            return new IntPtr(3); // MA_NOACTIVATE
+        }
         const int DpiChanged = 0x02E0;
         if (message != DpiChanged) return IntPtr.Zero;
         handled = true;
