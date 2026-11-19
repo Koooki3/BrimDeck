@@ -392,7 +392,10 @@ internal sealed class GlassBackdrop : IDisposable
     // moves only when the layout says so); noregion: the glass window's region is set once and not cut again on every frame;
     // nobody: the acrylic body and its shoulders not drawn (no host backdrop, no noise); norim: no rim and pointer glow;
     // noprobe: no luminosity probe.
-    private static readonly HashSet<string> Trial = (Environment.GetEnvironmentVariable("BRIMDECK_GLASS_TRIAL") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+    // Local preview build: exercise the same material path at normal application startup.
+    private const string LocalPreviewMaterial = "early-confirm,flow-veil,flow-compact,compact-look-turn,early-compact-confirm";
+    private static readonly HashSet<string> Trial = (Environment.GetEnvironmentVariable("BRIMDECK_GLASS_TRIAL") ?? LocalPreviewMaterial)
+        .Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
 
     // Follows the island frame by frame for at least the given milliseconds, and after that until it holds still: for motion
     // that changes no layout (a render transform, an opacity), which Update does not see.
