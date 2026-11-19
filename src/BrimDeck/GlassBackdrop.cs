@@ -1280,7 +1280,8 @@ internal sealed class GlassBackdrop : IDisposable
         // over a plain light one), as it took it from the refraction renderer's measure.
         Measured?.Invoke((float)reading.Dark, (float)reading.Bright);
         double wanted = GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness));
-        if (Trial.Contains("early-confirm") && openness >= .999 && _luminosityLook == dark
+        bool canConfirmEarly = openness >= .999 || openness <= .001 && Trial.Contains("early-compact-confirm");
+        if (Trial.Contains("early-confirm") && canConfirmEarly && _luminosityLook == dark
             && GlassMaterial.ConfirmBackdropSoon(_luminosity, wanted, _previousVeil, reading.Changed)
             && _probe?.IsEnabled == true)
         {
