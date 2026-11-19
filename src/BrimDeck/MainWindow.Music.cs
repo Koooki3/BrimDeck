@@ -39,9 +39,11 @@ public partial class MainWindow
     // The color the cover gave, if it gave one; _musicAccent is the theme's equalizer color otherwise.
     private Color? _coverAccent;
     private Lyrics _lyrics = Lyrics.Empty;
+    // The track _lyrics were found for.
+    private MediaTrack? _lyricsTrack;
     private CancellationTokenSource? _lyricsRequest;
-    // Completed when Apple Music writes a lyric file while the current Apple Music song has no lyrics of Apple's.
-    private TaskCompletionSource? _appleLyricsWritten;
+    // Completed when Apple Music or KuGou writes a lyric file while the current song has none of its player's own.
+    private TaskCompletionSource? _localLyricsWritten;
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
     // Drives the equalizer, which must keep moving while the cursor moves; see PromptTimer.
     private PromptTimer _musicTick = null!;
@@ -96,7 +98,7 @@ public partial class MainWindow
         _musicTick = new(Dispatcher, TickMusic) { Interval = TimeSpan.FromMilliseconds(33) };
         IsVisibleChanged += (_, _) => UpdateMusicTimer();
         _app.MediaChanged += MediaChanged;
-        _app.Lyrics.AppleLyricsWritten += AppleLyricsWritten;
+        _app.Lyrics.AppleLyricsWritten += LocalLyricsWritten; _app.Lyrics.KugouLyricsWritten += LocalLyricsWritten;
         DisplayPower.Changed += DisplayPowerChanged;
     }
     private void StartMusic()
@@ -312,31 +314,28 @@ public partial class MainWindow
         string key = LyricsKey(_mediaTrack);
         if (_lyricsKey == key) return;
         _lyricsKey = key; _lyricsRequest?.Cancel(); _lyricsRequest?.Dispose(); _lyricsRequest = null;
-        _lyrics = Lyrics.Empty; _compactLyric = ""; _musicRenderKey = "";
-        if (key.Length == 0) return;
-        var requested = _mediaTrack!;
+        var requested = _mediaTrack;
+        // A player announces a song in a few updates (its title, then its length or its song ID), each of which looks the lyrics
+        // up again. Lyrics found for the same song stay shown until the next ones are found: cleared, the lyrics of KuGou's own
+        // file, found at once, went and came back.
+        if (key.Length == 0 || requested is null || _lyricsTrack is not { } shown || shown.Id != requested.Id || !SameMediaSong(shown, requested))
+        { _lyrics = Lyrics.Empty; _lyricsTrack = null; _compactLyric = ""; _musicRenderKey = ""; }
+        if (key.Length == 0 || requested is null) return;
         if (!requested.IsQqMusic && !string.IsNullOrWhiteSpace(requested.EmbeddedLyrics))
-        {
-            _lyrics = Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source);
-            if (IsMusicPage) RenderMusic(); RenderCompact(); return;
-        }
+        { ShowLyrics(Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source), requested); return; }
         var request = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token); _lyricsRequest = request;
         try
         {
-            // Apple Music writes a song's lyrics to its cache as the song starts, which can be after the song changes here, or later
-            // still: they are looked for again 3 and 15 seconds later and whenever Apple Music writes a lyric file, keeping any
-            // lyrics already shown.
+            // Apple Music and KuGou write a song's lyrics as the song starts, which can be after the song changes here, or later
+            // still: until the player's own are found they are looked for again 3 and 15 seconds later and whenever the player
+            // writes a lyric file, keeping any lyrics already shown.
             for (int attempt = 0; ; attempt++)
             {
                 var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
                 if (request.IsCancellationRequested || _lyricsKey != key) return;
-                if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0)
-                {
-                    _lyrics = lyrics; _musicRenderKey = "";
-                    if (IsMusicPage) RenderMusic(); RenderCompact();
-                }
-                if (!requested.IsAppleMusic || lyrics.Source == LyricsService.AppleSource) break;
-                var written = (_appleLyricsWritten = new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+                if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0) ShowLyrics(lyrics, requested);
+                if (requested.IsAppleMusic ? lyrics.Source == LyricsService.AppleSource : !requested.IsKugou || lyrics.Source == LyricsService.KugouLocalSource) break;
+                var written = (_localLyricsWritten = new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
                 await (attempt < 2 ? Task.WhenAny(written, Task.Delay(TimeSpan.FromSeconds(attempt == 0 ? 3 : 15), request.Token)) : written.WaitAsync(request.Token));
                 request.Token.ThrowIfCancellationRequested();
                 // The file is read once Apple Music has finished writing it.
@@ -346,7 +345,20 @@ public partial class MainWindow
         catch (OperationCanceledException) { }
         catch (Exception) { /* Lyrics are optional; provider failures keep the no-lyrics layout. */ }
     }
-    private void AppleLyricsWritten() => Dispatcher.BeginInvoke(() => _appleLyricsWritten?.TrySetResult());
+    // Timed lyrics in place of timed lyrics (found again, or the player's own in place of a provider's) change only the lines
+    // shown, as the song plays; the page and the collapsed row are built again only when the lyrics take another form.
+    private void ShowLyrics(Lyrics lyrics, MediaTrack track)
+    {
+        bool sameForm = ReferenceEquals(lyrics, _lyrics) || LyricsForm(lyrics).Equals(LyricsForm(_lyrics)) && lyrics.Synced && lyrics.Lines.Count > 0;
+        _lyrics = lyrics; _lyricsTrack = track;
+        if (sameForm) { UpdateMusicPosition(); return; }
+        _musicRenderKey = "";
+        if (IsMusicPage) RenderMusic(); RenderCompact();
+    }
+    // What of the lyrics the page is built from (RenderMusic): timed lyrics fill its lines as the song plays, so other timed
+    // lyrics build no new page; untimed lyrics are shown whole.
+    private static object LyricsForm(Lyrics lyrics) => lyrics.Synced && lyrics.Lines.Count > 0 ? "timed" : lyrics;
+    private void LocalLyricsWritten() => Dispatcher.BeginInvoke(() => _localLyricsWritten?.TrySetResult());
     private void ToggleSourcePin(ContextMenu menu, MenuItem item, string id)
     {
         bool pin = !Equals(item.Tag, "pinned");
@@ -484,7 +496,7 @@ public partial class MainWindow
         bool bare = !Settings.MusicPageCover && !Settings.LyricsEnabled;
         bool splitLyrics = Settings.MusicLyricsLayout == MusicLyricsLayout.Columns && !bare;
         bool lyricColumn = splitLyrics && (hasLyrics || message.Length > 0);
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{LyricsForm(_lyrics).GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
@@ -1487,5 +1499,5 @@ public partial class MainWindow
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
-    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= AppleLyricsWritten; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false, false); }
+    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= LocalLyricsWritten; _app.Lyrics.KugouLyricsWritten -= LocalLyricsWritten; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false, false); }
 }

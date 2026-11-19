@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
@@ -140,17 +138,6 @@ public sealed partial class LyricsService
             if (plain.Lines.Count == 0 && !plain.Instrumental && (lyrics.Lines.Count > 0 || lyrics.Instrumental)) plain = lyrics;
         }
         return plain;
-    }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int LCMapStringEx(string locale, uint flags, string source, int sourceLength,
-        StringBuilder destination, int destinationLength, IntPtr version, IntPtr reserved, IntPtr sortHandle);
-    private const uint SimplifiedChinese = 0x02000000;
-    private static string SimplifyAppleText(string value)
-    {
-        if (value.Length == 0) return value;
-        var result = new StringBuilder(value.Length + 1);
-        return LCMapStringEx("zh-CN", SimplifiedChinese, value, -1, result, result.Capacity, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero) > 0 ? result.ToString() : value;
     }
 
     private static IEnumerable<string> AppleCacheRoots()

@@ -110,6 +110,7 @@ internal static class MusicTests
         var bom = await Served(_ => new(HttpStatusCode.OK) { Content = new ByteArrayContent([0xEF, 0xBB, 0xBF, .. System.Text.Encoding.UTF8.GetBytes(LrclibReply)]) });
         check("A lyrics reply under the limit is still read, byte order mark included", bom.Lyrics.Lines.Count == 1);
         await QqLyricsTests.Run(check);
+        await LyricMatchTests.Run(check);
     }
     private sealed class ReplyHandler(Func<Uri, HttpResponseMessage> reply) : HttpMessageHandler
     {
