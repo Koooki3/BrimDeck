@@ -69,7 +69,7 @@
               <!-- Keep the toolbar outside the fixed page layout so neither resize direction clips its controls. -->
               <Grid x:Name="Toolbar" Height="{Binding Height.Value, ElementName=ToolbarRow}" VerticalAlignment="Top">
                 <!-- The clock is centered on the whole panel; the switches and the settings button sit inside their own insets. -->
-                <TextBlock x:Name="ClockLabel" FontFamily="{DynamicResource FontPanel}" FontSize="12" Foreground="{DynamicResource PanelTertiary}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                <TextBlock x:Name="ClockLabel" FontFamily="{DynamicResource FontPanel}" FontSize="12" Foreground="{DynamicResource PanelHeaderClock}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
                 <Border x:Name="PageSwitch" Background="{DynamicResource PanelSwitchFill}" CornerRadius="{DynamicResource PanelR8}" Padding="2" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,0,0,0">
                  <Grid>
                  <!-- The chosen page's fill glides between the buttons, as the monitor page's sort pill does (MainWindow.PlacePageCapsule). -->

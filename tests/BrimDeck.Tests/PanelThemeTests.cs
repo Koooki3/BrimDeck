@@ -449,7 +449,8 @@ internal static class PanelThemeTests
         var brushes = Regex.Matches(xaml, @"<SolidColorBrush x:Key=""Panel(\w+)"" Color=""(#\w+)""/>");
         string Token(string name) => name switch
         {
-            "Primary" or "Secondary" or "Tertiary" => "text" + name, "ToolTip" => "tooltip", "ToolTipBorder" => "tooltipBorder",
+            "Primary" or "Secondary" or "Tertiary" => "text" + name, "HeaderClock" => "textTertiary",
+            "ToolTip" => "tooltip", "ToolTipBorder" => "tooltipBorder",
             _ => char.ToLowerInvariant(name[0]) + name[1..]
         };
         check("The XAML fallback brushes are the dark theme's colors", brushes.Count >= 15
