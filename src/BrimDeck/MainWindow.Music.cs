@@ -1173,8 +1173,8 @@ public partial class MainWindow
 
     // The page a part of the collapsed row opens the panel on when the pointer rests over it. It follows the part's meaning, not
     // its place, so the row may reorder or resize without the mapping going stale; the clock and a part the settings leave out
-    // name none and the page choice keeps its own rules. The readings and the devices carry their own tag all the same, since
-    // both are single elements the row places itself (RenderCompactMusic).
+    // name none and the page choice keeps its own rules. The transfer count names none on purpose: opening from it already turns
+    // the page to the clipboard and puts the files' card in front (OpensOnTransfer), which a page chosen here would skip.
     private static DeckPage? CompactPartPage(object part) => part switch
     {
         "cover" => DeckPage.Music,
@@ -1182,7 +1182,6 @@ public partial class MainWindow
         CompactPart.Monitor => DeckPage.Monitor,
         CompactPart.Devices => DeckPage.Devices,
         CompactPart.Rings => DeckPage.Usage,
-        CompactPart.Transfer => DeckPage.Clipboard,
         _ => null,
     };
     private void RenderCompactMusic()
