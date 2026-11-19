@@ -338,11 +338,16 @@ public partial class App : Application
         // A panel that shows another profile has a look of its own, which changes on its own.
         var own = Decks.Where(deck => deck.UseLook(reload, systemChanged)).ToList();
         ScheduleDaylight();
-        if (!changed && own.Count == 0) return;
+        if (!changed && own.Count == 0)
+        {
+            if (systemChanged) _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
+            return;
+        }
         // Into or out of high contrast the theme itself has not changed, so the clock's gradient stays as the user left it.
         if (changed && systemChanged && !wasHigh && !PanelTheme.HighContrast && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) if (changed || own.Contains(deck)) deck.ApplySettings();
         if (changed && !reload) _settingsWindow?.PanelThemeChanged();
+        else if (systemChanged) _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
     }
     // A theme with a night look changes look at its hours (PanelThemes.LookAt): the timer is set for the next change, and at
     // most ten minutes ahead, so a clock changed by hand or a machine that slept past the hour catches up soon after. The switch

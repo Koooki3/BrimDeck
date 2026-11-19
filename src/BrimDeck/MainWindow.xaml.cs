@@ -240,6 +240,7 @@ public partial class MainWindow : Window
         {
             const int DisplayChange = 0x007E, SettingChange = 0x001A, SetWorkArea = 0x002F, Wheel = 0x020A, SideWheel = 0x020E;
             if (message == DisplayChange || message == SettingChange && wParam == SetWorkArea) _app.DisplaysChanged();
+            else if (message == 0x0047) QueueGlass(); // WM_WINDOWPOSCHANGED also carries z-order changes.
             // WPF has no event for the horizontal wheel; the vertical one is only noted, and WPF still handles it.
             else if (message == Wheel) { _swipe.Vertical(DateTimeOffset.UtcNow); if (!Native.PasteInput.KeyDown(0x10)) _shelfSwipe.Vertical(DateTimeOffset.UtcNow); }
             else if (message == SideWheel) { int delta = unchecked((short)((long)wParam >> 16)); handled = MusicWheelSwipe(delta) || ShelfSideWheel(delta); }

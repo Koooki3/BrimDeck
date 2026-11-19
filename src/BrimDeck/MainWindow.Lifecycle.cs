@@ -230,6 +230,9 @@ public partial class MainWindow
     // Hides the round island and draws the dot sinking into the water in its place (DropMerge).
     private void MergeIntoWater(CollapsedShape shape, int boot)
     {
+        // The sinking dot has its own solid fill. The glass HWND ends with the island's motion.
+        bool glass = _glassActive;
+        CloseGlass();
         ResetDotPose();
         SetImmediate(Island, OpacityProperty, 0d);
         SetImmediate(HoverZone, OpacityProperty, 1d);
@@ -240,7 +243,7 @@ public partial class MainWindow
         _merge.Width = width; _merge.Height = height;
         _merge.Margin = new Thickness(DotLeft(shape) + DotMotion.Size / 2 - width / 2, floor - (height - DropMerge.WaterBelow), 0, 0);
         // As see-through as the surface (DeckSettings.SurfaceTransparency).
-        var fill = _surface.Color; fill.A = (byte)Math.Round(fill.A * Island.SurfaceOpacity);
+        var fill = _surface.Color; fill.A = (byte)Math.Round(fill.A * (glass ? 1 : Island.SurfaceOpacity));
         _merge.Fill = fill;
         _merge.Visibility = Visibility.Visible;
         SetImmediate(_merge, DropMerge.ProgressProperty, 0d);

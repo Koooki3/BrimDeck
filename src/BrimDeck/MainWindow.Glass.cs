@@ -28,7 +28,8 @@ public partial class MainWindow
     private DispatcherTimer? _glassVeilTimer;
     private bool _glassSampleChanged;
     private GlassPaletteTurn? _glassPaletteTurn;
-    private AcrylicProbe.Reading? _glassLatestSample;
+    private (GlassSampleArea Area, long Generation, AcrylicProbe.Reading Reading)? _glassLatestSample;
+    private readonly record struct GlassSampleArea(nint Monitor, Rect Screen, Int32Rect Bounds, double Scale, PanelLook Look);
     private sealed record GlassPaletteTurn(PanelLook Look, GlassEffect.AcrylicLook From, GlassEffect.AcrylicLook To,
         long Start, double Backdrop, double Required, bool Dark, bool Leads);
     private (Size Size, double Shoulder, CornerRadius Corners, Point Origin, Point Along, Point Depth)? _glassOutline;
@@ -51,12 +52,18 @@ public partial class MainWindow
         _glassProbe = new DispatcherTimer(TimeSpan.FromMilliseconds(GlassProbeInterval), DispatcherPriority.Background, SampleGlass, Dispatcher);
         _glassProbe.Stop();
         LayoutUpdated += GlassLayout;
-        LocationChanged += GlassLayout;
+        LocationChanged += GlassLocation;
         IsVisibleChanged += GlassVisibility;
         QueueGlass();
     }
 
     private void GlassLayout(object? sender, EventArgs e) => QueueGlass();
+    private void GlassLocation(object? sender, EventArgs e)
+    {
+        _glassLatestSample = null;
+        _glassGeneration++;
+        QueueGlass();
+    }
     private double GlassOpenness()
     {
         double compact = Collapsed.Surface.Height, height = Island.ActualHeight;
@@ -183,28 +190,31 @@ public partial class MainWindow
         }
     }
 
-    private async void SampleGlass(object? sender, EventArgs e)
+    private GlassSampleArea? CurrentGlassSampleArea()
     {
         var monitorHandle = MonitorHandle;
+        return WindowsHost.MonitorScreen(monitorHandle) is { Bounds: var screen }
+            ? new(monitorHandle, screen, _glassBounds, VisualTreeHelper.GetDpi(Island).DpiScaleX, Look)
+            : null;
+    }
+
+    private async void SampleGlass(object? sender, EventArgs e)
+    {
         if (!_glassActive || _glassReading || _glassPaletteTurn is not null || _glassDark is not { } dark
-            || WindowsHost.MonitorScreen(monitorHandle) is not { Bounds: var monitor }) return;
+            || CurrentGlassSampleArea() is not { } area) return;
         _glassReading = true;
         long generation = _glassGeneration;
-        var bounds = _glassBounds;
-        var sourceLook = Look;
+        var monitor = area.Screen;
         var screen = new Int32Rect((int)monitor.X, (int)monitor.Y, (int)monitor.Width, (int)monitor.Height);
         var probe = _acrylicProbe;
         try
         {
-            double scale = VisualTreeHelper.GetDpi(Island).DpiScaleX;
-            var reading = await Task.Run(() => probe.Read(bounds, screen, (int)(24 * scale), (int)(40 * scale)));
+            var reading = await Task.Run(() => probe.Read(area.Bounds, screen, (int)(24 * area.Scale), (int)(40 * area.Scale)));
             if (reading is not { } sample || !_glassActive || generation != _glassGeneration
-                || !ReferenceEquals(sourceLook, Look) || sourceLook.Current.IsDark != dark || _glassBounds != bounds
-                || MonitorHandle != monitorHandle || WindowsHost.MonitorScreen(monitorHandle)?.Bounds != monitor
-                || VisualTreeHelper.GetDpi(Island).DpiScaleX != scale) return;
+                || area != CurrentGlassSampleArea() || area.Look.Current.IsDark != dark) return;
             double openness = GlassOpenness();
             long now = Environment.TickCount64;
-            _glassLatestSample = sample;
+            _glassLatestSample = (area, generation, sample);
             if (UpdateAutomaticGlass(sample, now)) return;
             double wanted = GlassEffect.LuminosityFor(dark, sample.BrightFor(openness), sample.DarkFor(openness), Settings.GlassTransparency);
             double next = _glassFirstSample ? wanted : GlassMaterial.FollowBackdrop(_glassRequired, wanted, _glassPreviousVeil);
@@ -220,9 +230,12 @@ public partial class MainWindow
 
     private bool UpdateAutomaticGlass(AcrylicProbe.Reading sample, long now)
     {
-        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto || Look.IsMain && this != _app.Deck) return false;
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) return false;
+        var publisher = _app.Decks.FirstOrDefault(deck => deck._glassActive && deck.IsVisible && ReferenceEquals(deck.Look, Look)
+            && PanelThemes.NormalizeId(deck.Settings.PanelTheme) == PanelThemes.GlassAuto);
+        if (!ReferenceEquals(publisher, this)) return false;
         bool appDark = SettingsPalette.IsDark(SettingsTheme.System);
-        if (_glassAppearance is null || !ReferenceEquals(_glassAppearanceLook, Look))
+        if (_glassAppearance is null || !ReferenceEquals(_glassAppearanceLook, Look) || _glassAppearance.Dark != Look.Current.IsDark)
         {
             _glassAppearanceLook = Look;
             _glassAppearance = new GlassAppearance(Look.Current.IsDark, appDark, videoGap: 2 * GlassProbeInterval);
@@ -242,18 +255,20 @@ public partial class MainWindow
         {
             if (!ReferenceEquals(deck.Look, Look) || PanelThemes.NormalizeId(deck.Settings.PanelTheme) != PanelThemes.GlassAuto
                 || !deck.Animates || deck._glassSurface?.DisplayedLook is not { } from) continue;
-            deck.BeginGlassPaletteTurn(from, deck._glassLatestSample ?? sample, dark, now, leads: ReferenceEquals(deck, this));
+            deck.BeginGlassPaletteTurn(from, dark, now, leads: ReferenceEquals(deck, this));
         }
         return true;
     }
 
-    private void BeginGlassPaletteTurn(GlassEffect.AcrylicLook from, AcrylicProbe.Reading sample, bool dark, long now, bool leads)
+    private void BeginGlassPaletteTurn(GlassEffect.AcrylicLook from, bool dark, long now, bool leads)
     {
+        var sample = _glassLatestSample is { } current && current.Generation == _glassGeneration && current.Area == CurrentGlassSampleArea()
+            ? (AcrylicProbe.Reading?)current.Reading : null;
         int transparency = Settings.GlassTransparency;
-        double required = GlassEffect.LuminosityFor(dark, sample.Median, sample.Median, transparency);
+        double required = GlassEffect.LuminosityFor(dark, sample?.Median ?? 1, sample?.Median ?? 0, transparency);
         var palette = dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight;
         var to = palette with { LuminosityOpacity = GlassMaterial.LuminosityOpacity(required, 0, transparency) };
-        _glassPaletteTurn = new(Look, from, to, now, sample.MiddleMean, required, dark, leads);
+        _glassPaletteTurn = new(Look, from, to, now, sample?.MiddleMean ?? (dark ? 1 : 0), required, dark, leads);
         _glassGeneration++;
         QueueGlass();
     }
@@ -293,7 +308,7 @@ public partial class MainWindow
     {
         if (_glassSurface is null) return;
         LayoutUpdated -= GlassLayout;
-        LocationChanged -= GlassLayout;
+        LocationChanged -= GlassLocation;
         IsVisibleChanged -= GlassVisibility;
         HideGlass();
         _glassSurface.Dispose();

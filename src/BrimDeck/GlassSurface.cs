@@ -80,14 +80,19 @@ internal sealed class GlassSurface : IDisposable
                 _contour = contour;
             }
             sprite.Opacity = (float)Math.Clamp(opacity, 0, 1);
-            if (!_visible || _bounds != bounds)
+            const uint NoSize = 0x01, NoMove = 0x02, NoActivate = 0x10, ShowWindowFlag = 0x40, NoOwnerZOrder = 0x200;
+            const uint PositionOnly = NoSize | NoMove | NoActivate | NoOwnerZOrder;
+            bool ownerTopmost = IsTopmost(owner);
+            bool tierChanged = IsTopmost(handle) != ownerTopmost;
+            if (tierChanged || !_visible || _bounds != bounds || GetWindow(owner, 2) != handle) // GW_HWNDNEXT
             {
-                if (!SetWindowPos(handle, owner, bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x10 | 0x40 | 0x200))
+                if ((tierChanged && !SetWindowPos(handle, new IntPtr(ownerTopmost ? -1 : -2), 0, 0, 0, 0, PositionOnly))
+                    || !SetWindowPos(handle, owner, bounds.X, bounds.Y, bounds.Width, bounds.Height, NoActivate | ShowWindowFlag | NoOwnerZOrder))
                 {
                     Hide();
                     return false;
                 }
-                if (!_visible) SetWindowPos(handle, owner, 0, 0, 0, 0, 0x01 | 0x02 | 0x10 | 0x200);
+                if (!_visible) SetWindowPos(handle, owner, 0, 0, 0, 0, PositionOnly);
                 _visible = true;
                 _bounds = bounds;
             }
@@ -99,6 +104,8 @@ internal sealed class GlassSurface : IDisposable
             return false;
         }
     }
+
+    private static bool IsTopmost(IntPtr window) => (GetWindowLong(window, -20) & 0x08) != 0;
 
     private static IntPtr PassPointer(IntPtr handle, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
@@ -141,6 +148,8 @@ internal sealed class GlassSurface : IDisposable
 
     [DllImport("dwmapi")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
     [DllImport("user32")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32")] private static extern IntPtr GetWindow(IntPtr window, uint relation);
+    [DllImport("user32", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32")] private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
     [DllImport("user32")] private static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("gdi32")] private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int ellipseWidth, int ellipseHeight);
