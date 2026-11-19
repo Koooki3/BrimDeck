@@ -102,6 +102,11 @@ internal sealed class GlassSurface : IDisposable
 
     private static IntPtr PassPointer(IntPtr handle, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (message == 0x0021) // WM_MOUSEACTIVATE
+        {
+            handled = true;
+            return new IntPtr(3); // MA_NOACTIVATE
+        }
         if (message != 0x0084) return IntPtr.Zero; // WM_NCHITTEST
         handled = true;
         return new IntPtr(-1); // HTTRANSPARENT
