@@ -238,7 +238,7 @@ internal sealed class GlassBackdrop : IDisposable
             && dark is { } next && Soft.At(_owner) && _lastAcrylicReading is { } reading)
         {
             var from = _acrylicTurningLook ?? AcrylicLookFor(PanelTheme.Current.IsDark, _luminosityShown);
-            double required = GlassEffect.LuminosityFor(next, reading.Median, reading.Median);
+            double required = GlassEffect.LuminosityFor(next, reading.Median, reading.Median, AcrylicDarkLumaLimit);
             double opacity = GlassMaterial.LuminosityOpacity(required, 0, RequestedAcrylicTransparency);
             _acrylicTurn = new(from, AcrylicLookFor(next, opacity), required, reading.MiddleMean, next, Environment.TickCount64);
             _acrylicVeilMotion?.Stop();
@@ -297,6 +297,9 @@ internal sealed class GlassBackdrop : IDisposable
 
     private int _acrylicTransparencyShown = GlassMaterial.DefaultTransparency;
     private int RequestedAcrylicTransparency => AcrylicTransparency?.Invoke() ?? GlassMaterial.DefaultTransparency;
+    private double AcrylicDarkLumaLimit => Trial.Contains("clear-mixed")
+        ? GlassEffect.DarkMost + .06 * Math.Max(0, GlassMaterial.NormalizeTransparency(RequestedAcrylicTransparency) - 50) / 50
+        : GlassEffect.DarkMost;
     private double AcrylicLuminosity() => GlassMaterial.LuminosityOpacity(_luminosity, Openness?.Invoke() ?? 0, RequestedAcrylicTransparency);
     private bool AcrylicAppearanceChanged => AcrylicBody &&
         (_acrylicTransparencyShown != RequestedAcrylicTransparency || AcrylicLuminosity() !=
@@ -309,12 +312,12 @@ internal sealed class GlassBackdrop : IDisposable
 
     private void PresentAcrylicVeil(double target, bool dark, bool animate = false)
     {
-        double openness = Openness?.Invoke() ?? 0;
-        bool settledForm = openness >= .999 || Trial.Contains("flow-compact") && openness <= .001;
-        bool enabled = Trial.Contains("flow-veil") && _shown && settledForm && Soft.At(_owner);
-        bool running = _acrylicVeilMotion?.IsEnabled == true;
-        if (enabled && running && target == _veilTo && dark == _veilDark) return;
-        if (!enabled || !animate || Math.Abs(target - _luminosityShown) < .075)
+        bool enabled = Trial.Contains("flow-veil") && _shown && Soft.At(_owner);
+        bool running = _acrylicVeilMotion?.IsEnabled == true && dark == _veilDark;
+        // Geometry frames must preserve an in-flight probe transition. If their
+        // thickness floor changes its target, continue from the displayed value.
+        if (enabled && running && target == _veilTo) return;
+        if (!enabled || !running && (!animate || Math.Abs(target - _luminosityShown) < .075))
         {
             _acrylicVeilMotion?.Stop();
             SetAcrylicVeil(target);
@@ -393,7 +396,7 @@ internal sealed class GlassBackdrop : IDisposable
     // nobody: the acrylic body and its shoulders not drawn (no host backdrop, no noise); norim: no rim and pointer glow;
     // noprobe: no luminosity probe.
     // Local preview build: exercise the same material path at normal application startup.
-    private const string LocalPreviewMaterial = "early-confirm,flow-veil,flow-compact,compact-look-turn,early-compact-confirm";
+    private const string LocalPreviewMaterial = "early-confirm,flow-veil,compact-look-turn,early-compact-confirm,clear-mixed";
     private static readonly HashSet<string> Trial = (Environment.GetEnvironmentVariable("BRIMDECK_GLASS_TRIAL") ?? LocalPreviewMaterial)
         .Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
 
@@ -1282,7 +1285,7 @@ internal sealed class GlassBackdrop : IDisposable
         // The island's shadow takes its tone from the same reading (MainWindow.ShadowLook: deeper over a busy backdrop, lighter
         // over a plain light one), as it took it from the refraction renderer's measure.
         Measured?.Invoke((float)reading.Dark, (float)reading.Bright);
-        double wanted = GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness));
+        double wanted = GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness), AcrylicDarkLumaLimit);
         bool canConfirmEarly = openness >= .999 || openness <= .001 && Trial.Contains("early-compact-confirm");
         if (Trial.Contains("early-confirm") && canConfirmEarly && _luminosityLook == dark
             && GlassMaterial.ConfirmBackdropSoon(_luminosity, wanted, _previousVeil, reading.Changed)
@@ -1292,10 +1295,11 @@ internal sealed class GlassBackdrop : IDisposable
             _probe.Interval = TimeSpan.FromMilliseconds(ProbeConfirmMs);
         }
         bool sameLook = _luminosityLook == dark;
+        bool animate = _luminosityLook is null || sameLook;
         _luminosity = sameLook ? GlassMaterial.FollowBackdrop(_luminosity, wanted, _previousVeil) : wanted;
         _luminosityLook = dark;
         _previousVeil = wanted;
-        PresentAcrylicVeil(AcrylicLuminosity(), dark, animate: sameLook);
+        PresentAcrylicVeil(AcrylicLuminosity(), dark, animate);
         Dress();
         // Automatic liquid glass: its look from the same reading, held while the panel is open or pressed.
         if (AutoLook?.Invoke() == true)

@@ -84,12 +84,12 @@ internal static class GlassEffect
     // The luminosity opacity the text needs over a backdrop whose brightest tenth reaches bright (the dark look) or whose
     // darkest tenth reaches dark (the light look), from the recipe's lightness ((1 - L) b + L t)(1 - k) + k t: never under
     // zero, at most LuminosityMost. The appearance then applies its own floor, in steps of .05.
-    public static double LuminosityFor(bool darkLook, double bright, double dark)
+    public static double LuminosityFor(bool darkLook, double bright, double dark, double darkLimit = DarkMost)
     {
         var look = darkLook ? AcrylicDark : AcrylicLight;
         double t = look.TintOpacity, target = look.Luminosity, b = darkLook ? bright : dark;
         double need = darkLook
-            ? (b - target) * (1 - t) <= 1e-4 ? 0 : ((1 - t) * b + t * target - DarkMost) / ((1 - t) * (b - target))
+            ? (b - target) * (1 - t) <= 1e-4 ? 0 : ((1 - t) * b + t * target - darkLimit) / ((1 - t) * (b - target))
             : (target - b) * (1 - t) <= 1e-4 ? 0 : (LightLeast - (1 - t) * b - t * target) / ((1 - t) * (target - b));
         return Math.Ceiling(Math.Clamp(need, 0, LuminosityMost) * 20 - 1e-9) / 20;
     }
