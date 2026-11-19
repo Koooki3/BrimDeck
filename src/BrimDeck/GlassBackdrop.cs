@@ -90,7 +90,16 @@ internal sealed class GlassBackdrop : IDisposable
         surface.LayoutUpdated += (_, _) => Update();
         owner.IsVisibleChanged += (_, _) => Update();
         owner.Closed += (_, _) => Dispose();
-        if (PresentationSource.FromVisual(owner) is HwndSource main) main.AddHook(OwnerMessage); else owner.SourceInitialized += (_, _) => (PresentationSource.FromVisual(owner) as HwndSource)?.AddHook(OwnerMessage);
+        if (new WindowInteropHelper(owner).Handle != IntPtr.Zero) AttachOwnerHook();
+        else owner.SourceInitialized += OwnerSourceInitialized;
+    }
+
+    private HwndSource? _ownerSource;
+    private void OwnerSourceInitialized(object? sender, EventArgs args) => AttachOwnerHook();
+    private void AttachOwnerHook()
+    {
+        _ownerSource = HwndSource.FromHwnd(new WindowInteropHelper(_owner).Handle);
+        _ownerSource?.AddHook(OwnerMessage);
     }
 
     // The pointer over the island (DIP, the island's own coordinates; null when away) and whether its button is down: liquid
@@ -1420,15 +1429,22 @@ internal sealed class GlassBackdrop : IDisposable
 
     // The panel's window moved in the z-order (it is put back on top now and then): the blur goes back just under it; moved or
     // resized, the blur follows.
+    private bool _ownerOrderQueued;
     private IntPtr OwnerMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         const int WindowPosChanged = 0x0047;
-        if (message == WindowPosChanged && _shown && _window is not null)
+        if (message == WindowPosChanged && _shown && _window is not null && !_ownerOrderQueued)
         {
-            MatchOwnerTier(_window.Handle, hwnd);
-            SetWindowPos(_window.Handle, hwnd, 0, 0, 0, 0, NoActivate | NoMove | NoSize | NoOwnerZOrder);
-            GetWindowRect(hwnd, out var rect);
-            if ((rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top) != _windowRect) _owner.Dispatcher.BeginInvoke(DispatcherPriority.Render, () => Follow(0));
+            _ownerOrderQueued = true;
+            _owner.Dispatcher.BeginInvoke(DispatcherPriority.Render, () =>
+            {
+                _ownerOrderQueued = false;
+                if (!_shown || _window is not { } window) return;
+                MatchOwnerTier(window.Handle, hwnd);
+                SetWindowPos(window.Handle, hwnd, 0, 0, 0, 0, NoActivate | NoMove | NoSize | NoOwnerZOrder);
+                GetWindowRect(hwnd, out var rect);
+                if ((rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top) != _windowRect) Follow(0);
+            });
         }
         return IntPtr.Zero;
     }
@@ -1445,6 +1461,9 @@ internal sealed class GlassBackdrop : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _owner.SourceInitialized -= OwnerSourceInitialized;
+        if (_ownerSource is { IsDisposed: false }) _ownerSource.RemoveHook(OwnerMessage);
+        _ownerSource = null;
         Stop();
         Release();
     }
