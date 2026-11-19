@@ -69,6 +69,7 @@ try
     DevicesTests.Run(Check);
     PhoneLinkCardTests.Run(Check);
     PhoneLinkMergeTests.Run(Check);
+    EncoDeckBatteryTests.Run(Check);
     DeviceProtocolTests.Run(Check);
     DeviceSafetyTests.Run(Check);
     DeviceReadTests.Run(Check);

@@ -10,7 +10,7 @@ public enum DeviceKind { Mouse, Keyboard, Headphones, Earbuds, Controller, Pen, 
 
 // Where a reading comes from, roughly from the most to the least exact. A device seen by more than one source keeps the
 // reading of the first in this order that has a percentage (DeviceRoster.Merge).
-public enum DeviceSource { PhoneLink, Logitech, Razer, SteelSeries, HyperX, Sony, Apple, Gatt, Gaming, Hid, Bluetooth }
+public enum DeviceSource { PhoneLink, Logitech, Razer, SteelSeries, HyperX, Sony, Apple, EncoDeck, Gatt, Gaming, Hid, Bluetooth }
 
 // The parts of earbuds that report their own charge.
 public enum BatteryPart { Left, Right, Case }
@@ -313,6 +313,7 @@ public static class Devices
         DeviceSource.Logitech => Loc.T("罗技接收器", "Logitech receiver"), DeviceSource.Razer => "Razer", DeviceSource.SteelSeries => "SteelSeries",
         DeviceSource.HyperX => "HyperX", DeviceSource.Sony => "PlayStation", DeviceSource.Gatt => Loc.T("蓝牙电池服务", "Bluetooth battery service"),
         DeviceSource.Gaming => Loc.T("游戏控制器", "Game controller"), DeviceSource.Hid => Loc.T("HID 电量", "HID battery"), DeviceSource.Apple => Loc.T("Apple 广播", "Apple broadcast"),
+        DeviceSource.EncoDeck => "EncoDeck",
         _ => Loc.T("蓝牙", "Bluetooth")
     };
 

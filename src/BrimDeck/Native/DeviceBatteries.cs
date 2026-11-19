@@ -33,6 +33,7 @@ internal sealed class DeviceBatteries : IDisposable
     private readonly List<IDeviceSource> _sources = [];
     private readonly DispatcherTimer _linger;
     private readonly AppleBatteries _apple;
+    private readonly EncoDeckBatteries _encoDeck;
     private DeviceDemand _demand = DeviceDemand.None, _running = DeviceDemand.None;
     private bool _disposed;
 
@@ -45,22 +46,24 @@ internal sealed class DeviceBatteries : IDisposable
         _linger = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = MemoryPlan.For(MemoryMode.Balanced).ReadingsLinger };
         _linger.Tick += (_, _) => { _linger.Stop(); Run(_demand); };
         _apple = new AppleBatteries(dispatcher, Report);
+        _encoDeck = new EncoDeckBatteries(dispatcher, Report);
         // Phone Link first: it is the primary reading for a phone, and the Bluetooth source stands in only without it.
         _sources.Add(new PhoneLinkBatteries(dispatcher, Report));
         _sources.Add(new BluetoothBatteries(dispatcher, Report));
         _sources.Add(new HidBatteries(dispatcher, Report));
         _sources.Add(new GamingBatteries(dispatcher, Report));
         _sources.Add(_apple);
+        _sources.Add(_encoDeck);
     }
 
     // A source's whole list, on the UI thread. The AirPods scan follows what is connected (AppleBatteries.Consider), on every
     // Bluetooth list whether or not the merged one changed: AirPods that disconnect leave it unchanged while the Apple source
-    // still holds their entry.
+    // still holds their entry. A device that connects is also when EncoDeck is looked for (EncoDeckBatteries.Consider).
     private void Report(DeviceSource source, IReadOnlyList<DeviceBattery> devices)
     {
         if (_disposed || _running == DeviceDemand.None) return;
         bool changed = _roster.Set(source, devices);
-        if (source == DeviceSource.Bluetooth) _apple.Consider(_roster.Of(DeviceSource.Bluetooth));
+        if (source == DeviceSource.Bluetooth) { _apple.Consider(_roster.Of(DeviceSource.Bluetooth)); _encoDeck.Consider(_roster.Of(DeviceSource.Bluetooth)); }
         if (changed) Changed?.Invoke();
     }
 
