@@ -137,11 +137,11 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("当前主题", "Current theme"));
         var rows = new List<FrameworkElement>();
         string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")") : theme.DisplayName;
-        if (automaticGlass) title = Loc.T("液态玻璃 Beta", "Liquid Glass Beta");
+        if (automaticGlass) title = Loc.T("液态玻璃", "Liquid Glass");
         rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
-        if (automaticGlass) description = Loc.T("随背景调整玻璃衬底。面板展开时，文字配色保持稳定。",
-            "Adapts the glass veil to the backdrop and keeps the text palette stable while expanded.");
+        if (automaticGlass) description = Loc.T("随背景调整玻璃材质。展开过程中会完成已经开始的换色，展开后保持文字配色稳定。",
+            "Adapts the glass to the backdrop. A palette change already in progress completes as the panel opens, then text colors stay stable.");
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
         if (theme.BuiltIn && PanelThemes.Resolve(theme).Effects.Glass is not null)
         {
