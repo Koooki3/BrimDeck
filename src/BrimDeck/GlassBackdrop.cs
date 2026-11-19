@@ -259,8 +259,8 @@ internal sealed class GlassBackdrop : IDisposable
 
     private bool AdvanceAcrylicTurn(AcrylicLookTurn turn, long now)
     {
-        double progress = Soft.At(_owner) && (Openness?.Invoke() ?? 0) <= .001
-            ? Math.Clamp((now - turn.Start) / DarkFadeMs, 0, 1) : 1;
+        // The compact shape starts the turn, but opening it must not cut straight to the new palette.
+        double progress = Soft.At(_owner) ? Math.Clamp((now - turn.Start) / DarkFadeMs, 0, 1) : 1;
         double share = Math.Round(Soft.InOut.Ease(progress) * 12) / 12;
         var look = GlassEffect.BlendAcrylic(turn.From, turn.To, share);
         if (_acrylicTurningLook != look) { _acrylicTurningLook = look; _brushFor = null; }
@@ -270,10 +270,14 @@ internal sealed class GlassBackdrop : IDisposable
             _crossed = true;
             _luminosityLook = turn.Dark;
             _luminosity = _previousVeil = turn.Required;
-            SetAcrylicVeil(turn.To.LuminosityOpacity);
             Crossed?.Invoke();
         }
-        if (progress >= 1) ClearAcrylicTurn();
+        if (progress >= 1)
+        {
+            ClearAcrylicTurn();
+            SetAcrylicVeil(turn.To.LuminosityOpacity);
+            PresentAcrylicVeil(AcrylicLuminosity(), turn.Dark, animate: true);
+        }
         return progress < 1;
     }
     private readonly BackdropLook _look = new();
@@ -312,6 +316,8 @@ internal sealed class GlassBackdrop : IDisposable
 
     private void PresentAcrylicVeil(double target, bool dark, bool animate = false)
     {
+        // The palette blend owns the brush until it finishes. Probes may update the required veil meanwhile.
+        if (_acrylicTurn is not null) return;
         bool enabled = Trial.Contains("flow-veil") && _shown && Soft.At(_owner);
         bool running = _acrylicVeilMotion?.IsEnabled == true && dark == _veilDark;
         // Geometry frames must preserve an in-flight probe transition. If their
