@@ -13,7 +13,6 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
     public void SaveMiMoSession(string session) => mimo?.Save(session);
     public ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => ClaudeDesktopReader.Read(locations);
     public GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => GrokBotDesktopReader.Read(locations);
-    public string? FindQoderDesktop(bool china) => QoderDesktopReader.Find(china);
     public string? ReadQoderDesktopSignIn(string folder) => QoderDesktopReader.ReadSignIn(folder);
     public string? ReadQwenWorkSignIn(string folder) => QoderDesktopReader.ReadSignIn(folder, QwenWorkUsage.SignInFile);
 

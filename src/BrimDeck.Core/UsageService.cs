@@ -26,8 +26,6 @@ public interface IDesktopSources
     string? ReadMiMoSession() => null;
     // Replaces it with a renewed one.
     void SaveMiMoSession(string session) { }
-    // The folder the Qoder desktop app (Qoder CN when china) is installed in, from its uninstall entry; null when it is not installed.
-    string? FindQoderDesktop(bool china) => null;
     // The sign-in the Qoder desktop app keeps in its data folder (auth.v1.dat, encrypted with the app's os_crypt key), decrypted;
     // null when there is none or it cannot be decrypted.
     string? ReadQoderDesktopSignIn(string folder) => null;
@@ -1773,21 +1771,22 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
     }
 
-    // Qoder's credits (QoderUsage), from the first of its programs that answers: the CLI, the desktop app, the IDE. Starting the
-    // daemon of the CLI or the desktop app takes about 20 seconds, so it is read in the background, apart from the refresh: a
-    // round starts a read unless one is still under way, waits for it at most QoderWait (long enough for the IDE, which answers at
-    // once) and otherwise shows the last reading, so a slow or stuck Qoder never holds up the other sources. When the read ends
-    // after its round did, BackgroundReadFinished asks for another round to show it. A program that failed is not asked again for
-    // QoderRetry, so a failing daemon is not started every minute; one whose sign-in has expired is named in the status meanwhile.
+    // Qoder's credits (QoderUsage), from the first source that answers: the desktop app's sign-in, asked of Qoder's API at once;
+    // the CLI, whose daemon takes about 20 seconds to start; the IDE. It is read in the background, apart from the refresh: a
+    // round starts a read unless one is still under way, waits for it at most QoderWait (long enough for the API and the IDE)
+    // and otherwise shows the last reading, so a slow or stuck Qoder never holds up the other sources. When the read ends
+    // after its round did, BackgroundReadFinished asks for another round to show it. A daemon that failed is not started again for
+    // QoderRetry, while the API is asked on every read, so a sign-in the desktop app renews is read at once; a source whose sign-in
+    // has expired is named in the status meanwhile.
     private sealed class QoderKept
     {
         public QoderUsage.Reading? Reading;
         public QoderUsage.Route Route;
         public DateTimeOffset Time;
         public readonly Dictionary<QoderUsage.Route, (DateTimeOffset Time, bool SignIn)> Failed = [];
-        // How the last read ended when it gave nothing: whether any program was there, whose sign-ins had expired, and whether
-        // something else failed.
-        public bool Found = true, OtherFailure;
+        // How the last read ended when it gave nothing: whether any program was there, whose sign-ins had expired, whether the
+        // account's credits are laid out in a way not read (an enterprise account), and whether something else failed.
+        public bool Found = true, Unsupported, OtherFailure;
         public List<string> Expired = [];
         public bool Ended;
         public Task? Pending;
@@ -1802,8 +1801,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     public TimeSpan QoderGap { get; init; } = TimeSpan.FromSeconds(30);
     // Raised on a pool thread when a read in the background ended after its round did; true when it brought the first reading.
     public event Action<bool>? BackgroundReadFinished;
-    // Stand-ins for starting the daemon (command, arguments, electron, the desktop app's sign-in) and asking the IDE (port); tests set them.
-    internal Func<string, IReadOnlyList<string>, bool, QoderUsage.DesktopSignIn?, CancellationToken, Task<QoderUsage.Reading>>? QoderDaemon { get; init; }
+    // Stand-ins for starting the CLI's daemon (command, arguments) and asking the IDE (port); tests set them.
+    internal Func<string, IReadOnlyList<string>, CancellationToken, Task<QoderUsage.Reading>>? QoderDaemon { get; init; }
     internal Func<int, CancellationToken, Task<QoderUsage.Reading>>? QoderIde { get; init; }
     internal Func<QoderUsage.Edition, bool?>? QoderSwitch { get; init; }
 
@@ -1842,11 +1841,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             if (reading)
             {
                 snapshot.StatusLabel = Loc.T("等待更新", "Waiting for update");
-                snapshot.Status = Loc.T($"正在读取 {edition.Name} 积分，约需 20 秒", $"Reading the {edition.Name} credits; this takes about 20 seconds");
+                snapshot.Status = Loc.T($"正在读取 {edition.Name} 积分", $"Reading the {edition.Name} credits");
                 return;
             }
             snapshot.StatusLabel = !kept.Found ? Loc.T("未连接", "Not connected")
-                : kept.Expired.Count > 0 && !kept.OtherFailure ? Loc.T("登录已过期", "Sign-in expired") : Loc.T("暂不可用", "Unavailable");
+                : kept.Expired.Count > 0 && !kept.OtherFailure && !kept.Unsupported ? Loc.T("登录已过期", "Sign-in expired")
+                : kept.Unsupported && !kept.OtherFailure ? Loc.T("暂不支持", "Not supported") : Loc.T("暂不可用", "Unavailable");
             snapshot.Status = QoderReason(edition, kept) ?? "";
         }
     }
@@ -1855,58 +1855,77 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private static string? QoderReason(QoderUsage.Edition edition, QoderKept kept) =>
         !kept.Ended ? null
         : !kept.Found ? Loc.T($"请先登录 {edition.Name} CLI 或 {edition.Name} 桌面版，或打开 {edition.Name} IDE", $"Sign in to {edition.Name} CLI or the {edition.Name} desktop app, or open {edition.Name} IDE")
-        : kept.Expired.Count > 0 && !kept.OtherFailure
+        : kept.Expired.Count > 0 && !kept.OtherFailure && !kept.Unsupported
             ? Loc.T($"{string.Join("、", kept.Expired)} 的登录已过期，使用一次后自动恢复；打开 {edition.Name} IDE 也可以读取",
                 $"The sign-in of {string.Join(" and ", kept.Expired)} has expired and recovers after the next use; opening {edition.Name} IDE also lets it be read")
+        : kept.Unsupported && !kept.OtherFailure
+            ? Loc.T($"暂不支持读取 {edition.Name} 企业版账户的积分", $"The credits of a {edition.Name} enterprise account cannot be read yet")
             : Loc.T("暂时无法读取积分，稍后自动重试", "The credits cannot be read right now. Retrying automatically later.");
 
-    // Asks the CLI, then the desktop app, then the IDE, and keeps what the first one that answers gives. Runs apart from any round.
+    // Asks the API with the desktop app's sign-in, then the CLI, then the IDE, and keeps what the first one that answers gives.
+    // Runs apart from any round.
     private async Task ReadQoderInBackgroundAsync(QoderUsage.Edition edition, QoderKept kept, DateTimeOffset now, CancellationToken lifetime)
     {
         var home = edition.China ? _locations.QoderCnHome : _locations.QoderHome;
-        bool found = false, other = false, first;
+        bool found = false, other = false, unsupported = false, first;
         var expired = new List<string>();
         Dictionary<QoderUsage.Route, (DateTimeOffset Time, bool SignIn)> failed;
         lock (kept) { failed = new(kept.Failed); first = kept.Reading is null; }
         QoderUsage.Reading? result = null;
         var route = QoderUsage.Route.Cli;
-        Task<QoderUsage.Reading> Daemon(string command, IReadOnlyList<string> arguments, bool electron, QoderUsage.DesktopSignIn? signIn) =>
-            QoderDaemon?.Invoke(command, arguments, electron, signIn, lifetime) ?? QoderUsage.ReadDaemonAsync(command, arguments, electron, signIn, QoderTimeout, lifetime);
-        async Task<bool> Try(QoderUsage.Route at, Func<Task<QoderUsage.Reading>> read)
+        Task<QoderUsage.Reading> Daemon(string command, IReadOnlyList<string> arguments) =>
+            QoderDaemon?.Invoke(command, arguments, lifetime) ?? QoderUsage.ReadDaemonAsync(command, arguments, QoderTimeout, lifetime);
+        async Task<QoderUsage.Reading> Api(QoderUsage.DesktopSignIn signIn)
+        {
+            async Task<JsonDocument> Get(string path)
+            {
+                using var request = Bearer(HttpMethod.Get, signIn.Api + path, signIn.Token);
+                return await SendAsync(_http, request, lifetime);
+            }
+            using var usage = await Get(QoderUsage.UsagePath);
+            // The plan only names the column; without it the credits still show.
+            var plan = "";
+            try { using var answer = await Get(QoderUsage.PlanPath); plan = QoderUsage.PlanName(answer.RootElement); }
+            catch (Exception ex) when (ex is HttpRequestException { StatusCode: not HttpStatusCode.Unauthorized } or JsonException
+                or OperationCanceledException && !lifetime.IsCancellationRequested) { }
+            return QoderUsage.ParsePresentation(usage.RootElement, plan) ?? throw new NotSupportedException();
+        }
+        // remember: a failure keeps the source from being asked again for QoderRetry.
+        async Task<bool> Try(QoderUsage.Route at, Func<Task<QoderUsage.Reading>> read, bool remember = true)
         {
             found = true;
-            if (failed.TryGetValue(at, out var last) && now - last.Time < QoderRetry)
+            if (remember && failed.TryGetValue(at, out var last) && now - last.Time < QoderRetry)
             {
                 if (last.SignIn) expired.Add(QoderUsage.RouteName(edition, at));
                 return false;
             }
+            bool signIn = false;
             try
             {
                 result = await read(); route = at; failed.Remove(at);
                 return true;
             }
-            catch (QoderUsage.DaemonException ex)
-            {
-                failed[at] = (now, ex.SignIn);
-                if (ex.SignIn) expired.Add(QoderUsage.RouteName(edition, at)); else other = true;
-            }
+            catch (QoderUsage.DaemonException ex) { signIn = ex.SignIn; }
+            catch (HttpRequestException ex) { signIn = ex.StatusCode == HttpStatusCode.Unauthorized; }
+            catch (NotSupportedException) { unsupported = true; return false; }
             catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or System.ComponentModel.Win32Exception
-                or OperationCanceledException && !lifetime.IsCancellationRequested)
-            { failed[at] = (now, false); other = true; }
+                or OperationCanceledException && !lifetime.IsCancellationRequested) { }
+            if (remember) failed[at] = (now, signIn);
+            if (signIn) expired.Add(QoderUsage.RouteName(edition, at)); else other = true;
             return false;
         }
         try
         {
-            var cli = QoderUsage.CliPath(home, edition);
-            bool read = File.Exists(cli) && File.Exists(QoderUsage.CliSignIn(home))
-                && await Try(QoderUsage.Route.Cli, () => Daemon(cli, ["--sdk"], false, null));
-            if (!read && QoderUsage.ParseDesktopSignIn(desktop.ReadQoderDesktopSignIn(QoderUsage.DesktopData(_locations.Roaming, edition))) is { } signIn)
+            bool read = false;
+            if (QoderUsage.ParseDesktopSignIn(desktop.ReadQoderDesktopSignIn(QoderUsage.DesktopData(_locations.Roaming, edition)), edition) is { } signIn)
             {
                 found = true;
                 if (signIn.Expired(now)) expired.Add(QoderUsage.RouteName(edition, QoderUsage.Route.Desktop));
-                else if (desktop.FindQoderDesktop(edition.China) is { } folder && QoderUsage.FindRuntime(folder) is { } runtime)
-                    read = await Try(QoderUsage.Route.Desktop, () => Daemon(Path.Combine(folder, edition.DesktopExe), [runtime, "--sdk"], true, signIn));
+                else read = await Try(QoderUsage.Route.Desktop, () => Api(signIn), remember: false);
             }
+            var cli = QoderUsage.CliPath(home, edition);
+            if (!read && File.Exists(cli) && File.Exists(QoderUsage.CliSignIn(home)))
+                read = await Try(QoderUsage.Route.Cli, () => Daemon(cli, ["--sdk"]));
             if (!read && QoderUsage.ReadIdePort(QoderUsage.IdeInfo(_locations.Roaming, edition)) is { } port)
             {
                 try
@@ -1928,7 +1947,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             kept.Failed.Clear();
             foreach (var (at, last) in failed) kept.Failed[at] = last;
             if (result is not null) { kept.Reading = result; kept.Route = route; kept.Time = now; }
-            kept.Found = result is not null || found; kept.Expired = expired; kept.OtherFailure = other;
+            kept.Found = result is not null || found; kept.Expired = expired; kept.OtherFailure = other; kept.Unsupported = unsupported;
             kept.Ended = result is null;
             notify = kept.Unshown;
         }

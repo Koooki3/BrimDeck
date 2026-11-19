@@ -80,8 +80,8 @@ public static class ProviderCatalog
         _ => ""
     };
     // Qoder's programs are asked in this order, each when the one before cannot answer.
-    private static string QoderDescription(string name) => Loc.T($"{name} 登录账户的积分额度，依次从 {name} CLI、桌面版、IDE 读取",
-        $"The credits of the account signed in to {name}, read from {name} CLI, the desktop app or the IDE, in that order");
+    private static string QoderDescription(string name) => Loc.T($"{name} 登录账户的积分额度，依次使用 {name} 桌面版、CLI、IDE 的登录读取",
+        $"The credits of the account signed in to {name}, read with the sign-in of the {name} desktop app, CLI or IDE, in that order");
     // The statistics-app menu names Xiaomi MiMo without "Desktop subscription": its records are MiMo Code's and the desktop app's.
     public static string UsageName(ProviderId id) => id == ProviderId.MiMo ? "Xiaomi MiMo" : Name(id);
     public static string QuotaTip(ProviderId id) => Loc.T("配额来源：", "Quota source: ") + Name(id) + (QuotaDescription(id) is { Length: > 0 } text ? "\n" + text : "");
