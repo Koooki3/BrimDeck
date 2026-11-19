@@ -154,7 +154,7 @@ MiMo Code CLI 与 Xiaomi MiMo 桌面版共用同一个数据库（`%USERPROFILE%
 Qoder（qoder.com）与 Qoder CN（qoder.com.cn）是两套独立的账号，在“配额来源”中分别选择。同一版本的 CLI、桌面版与 IDE 共用一份积分。
 
 - **配额**：按套餐积分、加购积分、组织资源包与专属积分（例如“SOTA 专属积分”）分别显示，并显示到期时间与套餐名称。
-- **读取方式**：Qoder 的账户接口返回加密数据，BrimDeck 依次请本机的 Qoder CLI、桌面版、IDE 读取，使用它们各自的登录。CLI 与桌面版每次读取约需 20 秒，在后台进行，不影响其他列。
+- **读取方式**：BrimDeck 依次尝试三种方式，前一种可用就不再尝试后面的：用 Qoder 桌面版的登录直接向 Qoder 查询，通常一两秒完成；请本机的 Qoder CLI 读取，每次约需 20 秒，在后台进行，不影响其他列；向正在运行的 Qoder IDE 查询。个人账户与团队（Teams）账户都可读取。企业版账户的积分暂时无法通过桌面版的登录读取。
 - **Token 用量**：读取 Qoder IDE 与 CLI、桌面版的本机记录。CLI 与桌面版默认不记录 Token 数：在设置中把统计应用选为 Qoder 后，展开这一列，点击“CLI 与桌面版 Token”一行的“开启”，再重新打开 Qoder CLI 与桌面版，新的对话开始记录。这一操作为当前用户设置环境变量 `QODER_EXPOSE_TOKEN_USAGE=1`（Qoder CN 为 `QODERCN_EXPOSE_TOKEN_USAGE=1`），“关闭”时删除。Auto、极致、快速、经济是档位，统计中按档位显示。
 
 ## 千问办公与 QwenWork
