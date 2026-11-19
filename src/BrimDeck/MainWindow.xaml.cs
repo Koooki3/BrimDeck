@@ -938,7 +938,12 @@ public partial class MainWindow : Window
         // once the form has nearly settled.
         bool reshaping = expanded && wasExpanded, booting = _booting && !expanded && duration > 0, morphing = _morphingShape && !expanded && duration > 0;
         _booting = false; _morphingShape = false;
-        if (booting) duration = (int)(duration * BootSwell);
+        if (booting)
+        {
+            duration = (int)(duration * BootSwell);
+            // Start the hold with the actual swell, even if the dot's completion was delayed.
+            _bootEnds = Environment.TickCount64 + duration;
+        }
         if (morphing) duration = (int)(duration * 1.3);
         if (turning || carried > 0) _turn.Started(now, duration, expanded, width, height);
         // The surface at rest taking the width its content asks for (a lyric line of another length with MusicLyricAutoWidth):
