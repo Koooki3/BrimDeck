@@ -608,7 +608,7 @@ public sealed class DeckSettings
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
     // A window that overlaps the place of the collapsed panel in its own style, such as one dragged under it. Maximized and
     // full-screen windows follow the rules above; the app rules do not choose for this one.
-    public WindowBehavior Occupied { get; set; } = WindowBehavior.Normal;
+    public WindowBehavior Occupied { get; set; } = WindowBehavior.Line;
     // Whether a window behind the foreground one counts too: maximized or borderless across the panel's monitor, it calls for
     // the same rule as if it were in front. Off, only the foreground window is read, as before the background was looked at.
     public bool BackgroundWindows { get; set; } = true;
@@ -1014,7 +1014,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
-        if (!Enum.IsDefined(Occupied)) Occupied = WindowBehavior.Normal;
+        if (!Enum.IsDefined(Occupied)) Occupied = WindowBehavior.Line;
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
         // A file saved before MouseWheel had the page switch turned off as MouseWheelPages = false.
         if (MouseWheelPages is false) MouseWheel = MouseWheelAction.None;
