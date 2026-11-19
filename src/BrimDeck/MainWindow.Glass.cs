@@ -22,6 +22,10 @@ public partial class MainWindow
     private bool _glassFirstSample;
     private Int32Rect _glassBounds;
     private double _glassRequired, _glassPreviousVeil;
+    private double _glassOpenHeight;
+    private GlassVeilTransition _glassVeil;
+    private DispatcherTimer? _glassVeilTimer;
+    private bool _glassSampleChanged;
     private (Size Size, double Shoulder, CornerRadius Corners, Point Origin, Point Along, Point Depth)? _glassOutline;
     private GlassSurface.PixelPoint[]? _glassContour;
 
@@ -43,6 +47,12 @@ public partial class MainWindow
     }
 
     private void GlassLayout(object? sender, EventArgs e) => QueueGlass();
+    private double GlassOpenness()
+    {
+        double compact = Collapsed.Surface.Height, height = Island.ActualHeight;
+        return _glassOpenHeight > compact + 1 && double.IsFinite(height)
+            ? Math.Clamp((height - compact) / (_glassOpenHeight - compact), 0, 1) : _expanded ? 1 : 0;
+    }
     private void GlassVisibility(object sender, DependencyPropertyChangedEventArgs e)
     {
         if (!IsVisible) HideGlass();
@@ -100,16 +110,20 @@ public partial class MainWindow
             _glassContour = points.Count >= 3 ? points.ToArray() : null;
         }
         bool dark = Look.Current.IsDark;
-        if (_glassDark != dark)
+        bool paletteChanged = _glassDark != dark;
+        int transparency = Settings.GlassTransparency;
+        if (paletteChanged)
         {
             _glassDark = dark;
-            _glassRequired = GlassEffect.LuminosityFor(dark, 1, 0);
+            _glassRequired = GlassEffect.LuminosityFor(dark, 1, 0, transparency);
             _glassFirstSample = true;
             _glassGeneration++;
         }
         var look = dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight;
-        double openness = _expanded ? 1 : 0;
-        look = look with { LuminosityOpacity = GlassMaterial.LuminosityOpacity(_glassRequired, openness, Settings.GlassTransparency) };
+        double target = GlassMaterial.LuminosityOpacity(_glassRequired, GlassOpenness(), transparency);
+        double opacity = _glassVeil.Update(target, Environment.TickCount64, _glassActive && !paletteChanged && Animates, _glassSampleChanged);
+        _glassSampleChanged = false;
+        look = look with { LuminosityOpacity = opacity };
         var owner = new WindowInteropHelper(this).Handle;
         if (_glassContour is null)
         {
@@ -123,6 +137,12 @@ public partial class MainWindow
             return;
         }
         if (!_glassActive) { _glassActive = true; ApplySurface(); }
+        if (_glassVeil.Active)
+        {
+            _glassVeilTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(24), DispatcherPriority.Render, (_, _) => QueueGlass(), Dispatcher);
+            _glassVeilTimer.Start();
+        }
+        else _glassVeilTimer?.Stop();
         Island.Pattern = AcrylicNoise.Brush(VisualTreeHelper.GetDpi(Island).DpiScaleX, GlassMaterial.GrainStrength(Settings.GlassTransparency));
         if (_glassProbe is { IsEnabled: false } probe)
         {
@@ -150,15 +170,16 @@ public partial class MainWindow
                 || !ReferenceEquals(sourceLook, Look) || sourceLook.Current.IsDark != dark || _glassBounds != bounds
                 || MonitorHandle != monitorHandle || WindowsHost.MonitorScreen(monitorHandle)?.Bounds != monitor
                 || VisualTreeHelper.GetDpi(Island).DpiScaleX != scale) return;
-            double openness = _expanded ? 1 : 0;
+            double openness = GlassOpenness();
             long now = Environment.TickCount64;
             if (UpdateAutomaticGlass(sample, now)) return;
-            double wanted = GlassEffect.LuminosityFor(dark, sample.BrightFor(openness), sample.DarkFor(openness));
+            double wanted = GlassEffect.LuminosityFor(dark, sample.BrightFor(openness), sample.DarkFor(openness), Settings.GlassTransparency);
             double next = _glassFirstSample ? wanted : GlassMaterial.FollowBackdrop(_glassRequired, wanted, _glassPreviousVeil);
             _glassFirstSample = false;
             _glassPreviousVeil = wanted;
             if (next == _glassRequired) return;
             _glassRequired = next;
+            _glassSampleChanged = true;
             QueueGlass();
         }
         finally { _glassReading = false; }
@@ -185,6 +206,8 @@ public partial class MainWindow
     private void HideGlass()
     {
         _glassProbe?.Stop();
+        _glassVeilTimer?.Stop();
+        _glassSampleChanged = false;
         _glassSurface?.Hide();
         if (!_glassActive) return;
         _glassActive = false;

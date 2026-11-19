@@ -14,6 +14,10 @@ internal static class GlassMaterialTests
         check("Glass transparency: the veil never thickens as the slider moves toward clear",
             Enumerable.Range(0, 100).All(level => GlassMaterial.LuminosityOpacity(.25, .35, level + 1)
                 <= GlassMaterial.LuminosityOpacity(.25, .35, level)));
+        check("Clearer glass relaxes the dark limit only above the default preference",
+            GlassMaterial.DarkBackdropLimit(-1) == .26 && GlassMaterial.DarkBackdropLimit(50) == .26
+            && Math.Abs(GlassMaterial.DarkBackdropLimit(75) - .29) < 1e-9
+            && Math.Abs(GlassMaterial.DarkBackdropLimit(101) - .32) < 1e-9);
         check("Glass transparency: clearer glass softens the grain and retains the rim",
             GlassMaterial.GrainStrength(0) == 1.5 && GlassMaterial.GrainStrength(50) == 1
             && GlassMaterial.GrainStrength(100) == .5 && GlassMaterial.RimStrength(100, 0) > 1);
@@ -30,6 +34,14 @@ internal static class GlassMaterialTests
             && GlassMaterial.FollowBackdrop(flash, .90, .50) == .50);
         check("Glass veil holds through an alternating frame and releases on consecutive calmer frames",
             firstCalm == steady && Math.Abs(GlassMaterial.FollowBackdrop(firstCalm, .30, .30) - .875) < 1e-9);
+        var veil = new GlassVeilTransition();
+        check("A newly shown surface starts at the safe veil without an active transition", veil.Update(.25, 0, animate: false) == .25 && !veil.Active);
+        check("The first valid reading starts from the displayed veil", veil.Update(.75, 10, animate: true, sampleChanged: true) == .25 && veil.Active);
+        double halfway = veil.Update(.75, 100, animate: true);
+        check("Geometry redraws keep the in-flight probe transition", halfway == .50 && veil.Active);
+        check("A new thickness target starts from the same displayed step", veil.Update(.80, 100, animate: true) == halfway && veil.Active);
+        check("After reaching the target the animation has stopped", veil.Update(.80, 280, animate: true) == .80 && !veil.Active);
+        check("Reduced motion applies the new sampling target on the same frame", veil.Update(.35, 300, animate: false, sampleChanged: true) == .35 && !veil.Active);
         foreach (string id in new[] { PanelThemes.GlassLight, PanelThemes.GlassDark })
         {
             var theme = PanelThemes.BuiltIn(id)!;

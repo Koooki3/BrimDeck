@@ -71,7 +71,7 @@ internal static class GlassEffect
     public static double Shown(double needed, double openness, bool dark) => Math.Ceiling(Math.Max(needed, Thickness(openness, dark)) * 20 - 1e-9) / 20;
     public static readonly AcrylicLook AcrylicDark = new(1.3, LuminosityBase, .1373, .1373, .1373, .1373, .20);
     public static readonly AcrylicLook AcrylicLight = new(1.3, LuminosityBase, .953, .953, .953, .953, .20);
-    // The lightness the body may reach for the looks' text: the dark look's light text over at most DarkMost, the light look's
+    // The lightness the body may reach for the looks' text: the dark look's light text over at most DarkBackdropLimit, the light look's
     // dark text over at least LightLeast (sRGB luma; 4.5:1 and more with the text's own colours, #F6F7F9 and #101217).
     // (DarkMost .27 to .26 with the lower floors of 10-27: a moving wallpaper's frame at 100 % left the dark look's open panel at
     // 89.9 % of the opaque theme's masked contrast.)
@@ -79,17 +79,17 @@ internal static class GlassEffect
     // at .82, which the recipe reaches only at a luminosity of about .85 - the light look over a dark desktop is near solid by
     // its nature. .78 left the light look's masked contrast at 72 % of the opaque theme's (Lc 73.6) over a plain mid-grey or
     // blue backdrop, short of 75 % and Lc 75. Over a dark desktop the dark look, or automatic, is the clear one.)
-    public const double DarkMost = .26, LightLeast = .82;
+    public const double LightLeast = .82;
 
     // The luminosity opacity the text needs over a backdrop whose brightest tenth reaches bright (the dark look) or whose
     // darkest tenth reaches dark (the light look), from the recipe's lightness ((1 - L) b + L t)(1 - k) + k t: never under
     // zero, at most LuminosityMost. The appearance then applies its own floor, in steps of .05.
-    public static double LuminosityFor(bool darkLook, double bright, double dark)
+    public static double LuminosityFor(bool darkLook, double bright, double dark, int transparency = GlassMaterial.DefaultTransparency)
     {
         var look = darkLook ? AcrylicDark : AcrylicLight;
         double t = look.TintOpacity, target = look.Luminosity, b = darkLook ? bright : dark;
         double need = darkLook
-            ? (b - target) * (1 - t) <= 1e-4 ? 0 : ((1 - t) * b + t * target - DarkMost) / ((1 - t) * (b - target))
+            ? (b - target) * (1 - t) <= 1e-4 ? 0 : ((1 - t) * b + t * target - GlassMaterial.DarkBackdropLimit(transparency)) / ((1 - t) * (b - target))
             : (target - b) * (1 - t) <= 1e-4 ? 0 : (LightLeast - (1 - t) * b - t * target) / ((1 - t) * (target - b));
         return Math.Ceiling(Math.Clamp(need, 0, LuminosityMost) * 20 - 1e-9) / 20;
     }

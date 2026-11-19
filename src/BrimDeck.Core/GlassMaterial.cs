@@ -10,6 +10,8 @@ public static class GlassMaterial
 
     public static int NormalizeTransparency(int percent) => Math.Clamp(percent, 0, 100);
 
+    public static double DarkBackdropLimit(int transparency) => .26 + .06 * Math.Max(0, NormalizeTransparency(transparency) - 50) / 50;
+
     // Quantize the grain so a whole slider drag uses a small set of frozen WPF brushes.
     public static double GrainStrength(int transparency)
     {
@@ -40,5 +42,35 @@ public static class GlassMaterial
             : DefaultCollapsedVeil - (amount - .5) * .20;
         double openingVeil = (DefaultExpandedVeil - DefaultCollapsedVeil) * Math.Clamp(openness, 0, 1);
         return Math.Ceiling(Math.Clamp(Math.Max(required, baseVeil + openingVeil), 0, MaximumVeil) * 20 - 1e-9) / 20;
+    }
+}
+
+// The opacity actually presented to the compositor, distinct from the sampler's readability target.
+public struct GlassVeilTransition
+{
+    private double _shown, _from, _target;
+    private long _start;
+
+    public bool Active => _shown != _target;
+
+    public double Update(double target, long now, bool animate, bool sampleChanged = false)
+    {
+        if (!animate || (!Active && (!sampleChanged || Math.Abs(target - _shown) < .075)))
+            return _shown = _target = target;
+
+        if (target != _target)
+        {
+            _from = _shown;
+            _target = target;
+            _start = now;
+            return _shown;
+        }
+
+        double duration = _target > _from ? 180 : 260;
+        double progress = Math.Clamp((now - _start) / duration, 0, 1);
+        double weight = progress * progress * (3 - 2 * progress);
+        // Use the same .05 opacity steps as the brush cache. A retarget starts at the last displayed step.
+        _shown = progress >= 1 ? _target : Math.Round((_from + (_target - _from) * weight) * 20) / 20;
+        return _shown;
     }
 }
