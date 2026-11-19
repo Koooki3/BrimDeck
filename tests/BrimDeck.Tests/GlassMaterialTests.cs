@@ -46,10 +46,10 @@ internal static class GlassMaterialTests
         {
             var theme = PanelThemes.BuiltIn(id)!;
             var palette = PanelThemes.Resolve(theme);
-            check($"Glass Beta: {id} declares the material and keeps its opaque fallback",
-                theme.File.Stage == "Beta" && palette.Effects.Glass is { Held: true }
+            check($"Liquid Glass: {id} declares the material and keeps its opaque fallback",
+                string.IsNullOrEmpty(theme.File.Stage) && palette.Effects.Glass is { Held: true }
                 && palette.Colors["surface"].A == 255);
-            check($"Glass Beta: arbitrary theme files cannot opt into {id}'s glass material",
+            check($"Liquid Glass: arbitrary theme files cannot opt into {id}'s glass material",
                 PanelThemes.Build(id, theme.File).Effects.Glass is null);
         }
         var settings = JsonSerializer.Deserialize<DeckSettings>("{}")!;
