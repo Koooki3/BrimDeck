@@ -315,6 +315,7 @@ internal sealed class PanelLook
     {
         var next = new ResourceDictionary();
         foreach (var (resource, token) in Resources) next[resource] = UI.Brush(Hex(token));
+        next["PanelHeaderClock"] = PanelThemes.IsLiquid(Current) ? UI.Brush(Hex("clock")) : next["PanelTertiary"];
         next["PanelScrollThumbRest"] = Current.ThumbRestOpacity;
         // Corners in the panel's XAML (App.xaml has the defaults): square in a pixel theme.
         foreach (var (name, radius) in new[] { ("Xs", Radius.Xs), ("Sm", Radius.Sm), ("Md", Radius.Md), ("Lg", Radius.Lg), ("Xl", Radius.Xl), ("Full", Radius.Full) })

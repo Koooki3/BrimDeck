@@ -245,7 +245,8 @@ internal static partial class LiquidPages
 
         // The XAML's theme brushes (DynamicResource) follow the theme on the stage as in the window: the toolbar's clock.
         var clock = (deck.ClockLabel.Foreground as SolidColorBrush)?.Color;
-        Report(clock == PanelTheme.ColorOf("textTertiary"), $"{PanelTheme.Current.Id} {page}: the panel's XAML follows the theme (clock {clock}, theme's tertiary text {PanelTheme.ColorOf("textTertiary")})");
+        var clockColor = PanelTheme.ColorOf(PanelThemes.IsLiquid(PanelTheme.Current) ? "clock" : "textTertiary");
+        Report(clock == clockColor, $"{PanelTheme.Current.Id} {page}: the panel's XAML follows the theme (clock {clock}, expected {clockColor})");
         // The glass's own decision (GlassBackdrop through its stand-in host, as on screen): liquid glass shown, the island's surface
         // aside and clear, the shadow's caster opaque. An island painted over the glass (the surface not stepping aside) fails here
         // and in the pixel checks below.
