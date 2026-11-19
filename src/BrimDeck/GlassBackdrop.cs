@@ -1202,6 +1202,7 @@ internal sealed class GlassBackdrop : IDisposable
         {
             ClearAcrylicTurn();
             _lastAcrylicReading = null;
+            _lastProbeDark = null;
             _acrylicVeilMotion?.Stop();
             if (_probe?.IsEnabled == true)
             {
@@ -1223,7 +1224,7 @@ internal sealed class GlassBackdrop : IDisposable
         }
         if (!_probe.IsEnabled) { _luminosityLook = null; _probe.Start(); ProbeTick(); }
         // The look turned while shown: read at once, so the new look's first frame is settled too.
-        else if (_luminosityLook is { } look && look != PanelTheme.Current.IsDark) ProbeTick();
+        else if (_lastProbeDark != PanelTheme.Current.IsDark) ProbeTick();
     }
 
     // The reading copies strips of the panel display through GDI, which waits for the desktop compositor: 20 to 30 ms each time
@@ -1231,6 +1232,7 @@ internal sealed class GlassBackdrop : IDisposable
     // the copy runs on the thread pool and only what it found is applied here. A tick while one is still out is skipped.
     private readonly LiquidGlass.AcrylicProbe _acrylicProbe = new();
     private bool _probing;
+    private bool? _lastProbeDark;
     private int _probeRun;
     private readonly record struct ProbeTarget(Int32Rect Island, Int32Rect Display, int Gap, int Band, bool Dark);
 
@@ -1248,8 +1250,9 @@ internal sealed class GlassBackdrop : IDisposable
     private void ProbeTick()
     {
         if (CurrentProbeTarget() is not { } target) { Probe(false); return; }
-        if (_probing) { _probeAgain |= _luminosityLook != target.Dark; return; }
+        if (_probing) { _probeAgain |= _lastProbeDark != target.Dark; return; }
         _probing = true;
+        _lastProbeDark = target.Dark;
         int run = _probeRun;
         Task.Run(() => _acrylicProbe.Read(target.Island, target.Display, target.Gap, target.Band)).ContinueWith(task =>
             ProbeCompleted(target, run, task.Status == TaskStatus.RanToCompletion ? task.Result : null),
@@ -1265,11 +1268,8 @@ internal sealed class GlassBackdrop : IDisposable
         _probeAgain = false;
         // A completed read describes the old material or screen region if the window moved, changed DPI or was hidden.
         // Discard it and let the periodic timer sample the settled geometry instead of chasing every animation frame.
-        if (run == _probeRun && target == current)
-        {
-            if (reading is null) _luminosityLook = current.Dark;
-            else ProbeApply(reading.Value);
-        }
+        // A failed read cannot settle the appearance. The first successful read applies in full.
+        if (run == _probeRun && target == current && reading is { } valid) ProbeApply(valid);
         else if (again) ProbeTick();
     }
 
