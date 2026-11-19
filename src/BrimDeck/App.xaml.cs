@@ -514,9 +514,13 @@ public partial class App : Application
 
     private LiquidGlass.RECT? GlanceRegion(out Rect bounds)
     {
-        var plan = DisplayLayout.Arrange(Settings.Display, Settings.DisplayMonitors.Select(d => d.Id).ToList(), Displays.Select(d => (d.Id, d.Primary)).ToList());
+        var plan = DisplayLayout.Arrange(Settings.Display, Settings.DisplayMonitors, HoldingRule, Displays.Select(d => (d.Id, d.Primary)).ToList());
         bounds = Rect.Empty;
-        if ((Displays.FirstOrDefault(d => d.Id == plan.Main) ?? Displays.FirstOrDefault()) is not { } display) return null;
+        if (plan.Hidden) return null;
+        string? monitor = LiquidTheme.IsAuto(Settings.PanelTheme)
+            ? plan.Others.Prepend(plan.Main).FirstOrDefault(id => DisplayProfile(plan, id) is null)
+            : plan.Main;
+        if (Displays.FirstOrDefault(d => d.Id == monitor) is not { } display) return null;
         bounds = display.Bounds;
         var region = LiquidGlass.BackdropLook.Region(display.Bounds, display.Handle);
         return region.IsEmpty ? null : region;
@@ -558,13 +562,16 @@ public partial class App : Application
             _settingsWindow?.DisplaysChanged();
         });
     }
+    private Guid? DisplayProfile(DisplayLayout.Plan plan, string monitor) =>
+        plan.ProfileOf(monitor) is { } id && id != Settings.CurrentProfile && Profiles.Find(Settings, id) is not null ? id : null;
+
     // Gives the main panel its monitor and opens or closes the panels of the other monitors. A panel that keeps its
     // monitor is kept, with its state.
     // Each panel shows the profile chosen for its monitor, or one a holding rule gives it (DisplayLayout.Plan.Profiles).
     internal void AssignDisplays()
     {
         var plan = DisplayLayout.Arrange(Settings.Display, Settings.DisplayMonitors, HoldingRule, Displays.Select(d => (d.Id, d.Primary)).ToList());
-        Guid? Shown(string monitor) => plan.ProfileOf(monitor) is { } id && id != Settings.CurrentProfile && Profiles.Find(Settings, id) is not null ? id : null;
+        Guid? Shown(string monitor) => DisplayProfile(plan, monitor);
         Deck.Display = Displays.FirstOrDefault(d => d.Id == plan.Main);
         Deck.Profile = Shown(plan.Main); Deck.UseLook();
         if (plan.Hidden != RuleHidesAll) { RuleHidesAll = plan.Hidden; if (Deck.IsLoaded) Deck.UserHiddenChanged(); }

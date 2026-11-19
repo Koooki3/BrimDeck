@@ -552,6 +552,7 @@ internal sealed class GlassBackdrop : IDisposable
             // Just below the panel's window: above whatever the panel stands over, never above the panel itself. Shown for
             // the first time, a topmost window goes to the top whatever it was placed after (seen on Windows 11): a second
             // call, z-order only, puts it under the panel.
+            MatchOwnerTier(handle, owner);
             SetWindowPos(handle, owner, place.Left, place.Top, Math.Max(1, place.Item3), Math.Max(1, place.Item4), NoActivate | ShowWindow | NoOwnerZOrder);
             if (!_shown) SetWindowPos(handle, owner, 0, 0, 0, 0, NoActivate | NoMove | NoSize | NoOwnerZOrder);
             _windowRect = place; _shown = true;
@@ -1424,11 +1425,20 @@ internal sealed class GlassBackdrop : IDisposable
         const int WindowPosChanged = 0x0047;
         if (message == WindowPosChanged && _shown && _window is not null)
         {
+            MatchOwnerTier(_window.Handle, hwnd);
             SetWindowPos(_window.Handle, hwnd, 0, 0, 0, 0, NoActivate | NoMove | NoSize | NoOwnerZOrder);
             GetWindowRect(hwnd, out var rect);
             if ((rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top) != _windowRect) _owner.Dispatcher.BeginInvoke(DispatcherPriority.Render, () => Follow(0));
         }
         return IntPtr.Zero;
+    }
+
+    private static void MatchOwnerTier(IntPtr backplate, IntPtr owner)
+    {
+        const int extendedStyle = -20, topmostStyle = 0x08;
+        bool topmost = (GetWindowLong(owner, extendedStyle) & topmostStyle) != 0;
+        if (((GetWindowLong(backplate, extendedStyle) & topmostStyle) != 0) != topmost)
+            SetWindowPos(backplate, new IntPtr(topmost ? -1 : -2), 0, 0, 0, 0, NoActivate | NoMove | NoSize | NoOwnerZOrder);
     }
 
     public void Dispose()
@@ -1513,6 +1523,7 @@ internal sealed class GlassBackdrop : IDisposable
     [DllImport("dwmapi")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
     [DllImport("user32")] private static extern int GetSystemMetrics(int index);
     [DllImport("user32")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32", EntryPoint = "ShowWindow")] private static extern bool ShowWindowNative(IntPtr window, int command);
     [DllImport("user32")] private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
     [DllImport("gdi32")] private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
