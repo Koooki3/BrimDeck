@@ -455,7 +455,8 @@ public partial class MainWindow : Window
             _hiding = false;
             if (!IsVisible) Show();
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
-            SetExpanded(_expanded, !animatePage || !wasVisible || newEdge);
+            if (!Look.GlassTurnPublishing || _glassPaletteTurn is null || appearing || newEdge)
+                SetExpanded(_expanded, !animatePage || !wasVisible || newEdge);
             bool cleared = _edgeCleared;
             _edgeCleared = false;
             if ((newEdge || cleared) && wasVisible && !appearing) FadeInOnNewEdge(cleared);

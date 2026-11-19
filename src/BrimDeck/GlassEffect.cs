@@ -95,13 +95,34 @@ internal static class GlassEffect
     }
     private static readonly Dictionary<AcrylicLook, CompositionEffectFactory> AcrylicFactories = [];
 
-    public static CompositionBrush Acrylic(Compositor compositor, AcrylicLook look)
+    // Both palettes use the same saturation and tint strength. Blend the effective coverage and offset.
+    internal static AcrylicLook BlendAcrylic(AcrylicLook start, AcrylicLook to, double share)
     {
-        if (!AcrylicFactories.TryGetValue(look, out var factory))
-            AcrylicFactories[look] = factory = compositor.CreateEffectFactory(Create(AcrylicMatrix(look), new CompositionEffectSourceParameter("backdrop")));
-        var brush = factory.CreateBrush();
+        if (share <= 0) return start;
+        if (share >= 1) return to;
+        double veil = start.LuminosityOpacity + (to.LuminosityOpacity - start.LuminosityOpacity) * share;
+        double oldCover = Coverage(start), newCover = Coverage(to);
+        double neutral = (oldCover * start.Luminosity * (1 - share) + newCover * to.Luminosity * share)
+            / (oldCover * (1 - share) + newCover * share);
+        return start with { LuminosityOpacity = veil, Luminosity = neutral, TintR = neutral, TintG = neutral, TintB = neutral };
+    }
+
+    internal static double AcrylicLuma(AcrylicLook look, double backdrop)
+        => backdrop * (1 - Coverage(look)) + look.Luminosity * Coverage(look);
+
+    private static double Coverage(AcrylicLook look) => look.TintOpacity + (1 - look.TintOpacity) * look.LuminosityOpacity;
+
+    public static CompositionBrush Acrylic(Compositor compositor, AcrylicLook look, bool transient = false)
+    {
+        using var temporary = transient ? Compile() : null;
+        var factory = temporary;
+        if (factory is null && !AcrylicFactories.TryGetValue(look, out factory))
+            AcrylicFactories[look] = factory = Compile();
+        var brush = factory!.CreateBrush();
         brush.SetSourceParameter("backdrop", compositor.CreateHostBackdropBrush());
         return brush;
+
+        CompositionEffectFactory Compile() => compositor.CreateEffectFactory(Create(AcrylicMatrix(look), new CompositionEffectSourceParameter("backdrop")));
     }
 
     // The recipe as one D2D1_MATRIX_5X4_F (rows by input channel, the fifth the offset): saturation about the luma (Rec. 709),

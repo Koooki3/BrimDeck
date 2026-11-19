@@ -35,6 +35,7 @@ public partial class MainWindow
     // drawn on the frames that follow.
     private void BeginThemeFade(bool daylight)
     {
+        if (Look.GlassTurnPublishing && _glassPaletteTurn is not null) return;
         // Pictures still fading are left to finish on their own, under the new ones.
         _themeFade = null; _materialFade = null;
         if (!IsVisible || !Animates || _preview || Island.ActualWidth < 1 || Island.ActualHeight < 1 || PresentationSource.FromVisual(Island) is null) return;

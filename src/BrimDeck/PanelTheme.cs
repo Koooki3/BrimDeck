@@ -174,6 +174,7 @@ internal sealed class PanelLook
     private string _signature = "";
     private string? _chosen;
     internal bool? AutomaticGlassDark { get; set; }
+    internal bool GlassTurnPublishing { get; set; }
 
     // Every token's text form and the default app colors as drawn, made once per theme: they are read hundreds of times per render.
     private Dictionary<string, string> _hex;

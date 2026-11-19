@@ -22,8 +22,10 @@ internal sealed class GlassSurface : IDisposable
     internal readonly record struct PixelPoint(int X, int Y);
     private GlassEffect.AcrylicLook? _look;
     private bool _visible, _disposed;
+    internal GlassEffect.AcrylicLook? DisplayedLook => _visible ? _look : null;
 
-    public bool Show(IntPtr owner, Int32Rect bounds, int radius, double opacity, GlassEffect.AcrylicLook look, PixelPoint[]? contour = null)
+    public bool Show(IntPtr owner, Int32Rect bounds, int radius, double opacity, GlassEffect.AcrylicLook look,
+        PixelPoint[]? contour = null, bool transient = false)
     {
         if (_disposed || owner == IntPtr.Zero || bounds.Width < 2 || bounds.Height < 2 || opacity <= 0)
         {
@@ -56,7 +58,7 @@ internal sealed class GlassSurface : IDisposable
             if (_look != look)
             {
                 var previous = sprite.Brush;
-                sprite.Brush = GlassEffect.Acrylic(compositor, look);
+                sprite.Brush = GlassEffect.Acrylic(compositor, look, transient);
                 GlassEffect.Release(previous);
                 _look = look;
             }

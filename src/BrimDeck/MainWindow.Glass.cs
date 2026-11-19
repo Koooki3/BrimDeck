@@ -11,6 +11,7 @@ namespace BrimDeck;
 public partial class MainWindow
 {
     private const int GlassProbeInterval = 500;
+    private const double GlassPaletteTurnMs = 500, GlassTextCrossover = .48;
     private AcrylicProbe _acrylicProbe = new();
     private GlassSurface? _glassSurface;
     private GlassAppearance? _glassAppearance;
@@ -26,6 +27,10 @@ public partial class MainWindow
     private GlassVeilTransition _glassVeil;
     private DispatcherTimer? _glassVeilTimer;
     private bool _glassSampleChanged;
+    private GlassPaletteTurn? _glassPaletteTurn;
+    private AcrylicProbe.Reading? _glassLatestSample;
+    private sealed record GlassPaletteTurn(PanelLook Look, GlassEffect.AcrylicLook From, GlassEffect.AcrylicLook To,
+        long Start, double Backdrop, double Required, bool Dark, bool Leads);
     private (Size Size, double Shoulder, CornerRadius Corners, Point Origin, Point Along, Point Depth)? _glassOutline;
     private GlassSurface.PixelPoint[]? _glassContour;
 
@@ -33,7 +38,12 @@ public partial class MainWindow
 
     internal void UpdateGlassTheme()
     {
-        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) _glassAppearance = null;
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto)
+        {
+            _glassAppearance = null;
+            _glassPaletteTurn = null;
+        }
+        else if (_glassPaletteTurn is { } turn && !ReferenceEquals(turn.Look, Look)) _glassPaletteTurn = null;
         bool enabled = Look.Current.Effects.Glass is not null && !Look.HighContrast && GlassAvailable && !_retiring;
         if (enabled == (_glassSurface is not null)) { QueueGlass(); return; }
         if (!enabled) { CloseGlass(); return; }
@@ -109,10 +119,13 @@ public partial class MainWindow
             }
             _glassContour = points.Count >= 3 ? points.ToArray() : null;
         }
+        var turn = _glassPaletteTurn;
+        long now = Environment.TickCount64;
+        double turnProgress = turn is null || !Animates ? 1 : Math.Clamp((now - turn.Start) / GlassPaletteTurnMs, 0, 1);
         bool dark = Look.Current.IsDark;
         bool paletteChanged = _glassDark != dark;
         int transparency = Settings.GlassTransparency;
-        if (paletteChanged)
+        if (paletteChanged && turn is null)
         {
             _glassDark = dark;
             _glassRequired = GlassEffect.LuminosityFor(dark, 1, 0, transparency);
@@ -121,23 +134,42 @@ public partial class MainWindow
         }
         var look = dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight;
         double target = GlassMaterial.LuminosityOpacity(_glassRequired, GlassOpenness(), transparency);
-        double opacity = _glassVeil.Update(target, Environment.TickCount64, _glassActive && !paletteChanged && Animates, _glassSampleChanged);
+        double opacity = _glassVeil.Update(target, now, _glassActive && !paletteChanged && Animates, _glassSampleChanged);
         _glassSampleChanged = false;
         look = look with { LuminosityOpacity = opacity };
+        if (turn is not null)
+            look = GlassEffect.BlendAcrylic(turn.From, turn.To, Math.Round(Soft.InOut.Ease(turnProgress) * 12) / 12);
         var owner = new WindowInteropHelper(this).Handle;
         if (_glassContour is null)
         {
             HideGlass();
             return;
         }
-        if (!_glassSurface.Show(owner, _glassBounds, 0, HoverZone.Opacity * Island.MaterialOpacity, look, _glassContour))
+        if (!_glassSurface.Show(owner, _glassBounds, 0, HoverZone.Opacity * Island.MaterialOpacity, look, _glassContour,
+            transient: turn is not null && look != turn.From && look != turn.To))
         {
             // Retry on a later settings or environment update instead of every layout pass.
             CloseGlass();
             return;
         }
         if (!_glassActive) { _glassActive = true; ApplySurface(); }
-        if (_glassVeil.Active)
+        if (turn is not null)
+        {
+            double luma = GlassEffect.AcrylicLuma(look, turn.Backdrop);
+            bool crossed = turn.Dark ? luma <= GlassTextCrossover : luma >= GlassTextCrossover;
+            if (Look.Current.IsDark != turn.Dark && (turnProgress >= 1 || turn.Leads && crossed)) PublishGlassPalette(turn.Dark, coordinated: true);
+            if (turnProgress >= 1)
+            {
+                _glassPaletteTurn = null;
+                _glassDark = turn.Dark;
+                _glassRequired = _glassPreviousVeil = turn.Required;
+                _glassFirstSample = true;
+                _glassVeil.Update(look.LuminosityOpacity, now, animate: false);
+                _glassSampleChanged = true;
+                QueueGlass();
+            }
+        }
+        if (_glassVeil.Active || _glassPaletteTurn is not null)
         {
             _glassVeilTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(24), DispatcherPriority.Render, (_, _) => QueueGlass(), Dispatcher);
             _glassVeilTimer.Start();
@@ -154,7 +186,7 @@ public partial class MainWindow
     private async void SampleGlass(object? sender, EventArgs e)
     {
         var monitorHandle = MonitorHandle;
-        if (!_glassActive || _glassReading || _glassDark is not { } dark
+        if (!_glassActive || _glassReading || _glassPaletteTurn is not null || _glassDark is not { } dark
             || WindowsHost.MonitorScreen(monitorHandle) is not { Bounds: var monitor }) return;
         _glassReading = true;
         long generation = _glassGeneration;
@@ -172,6 +204,7 @@ public partial class MainWindow
                 || VisualTreeHelper.GetDpi(Island).DpiScaleX != scale) return;
             double openness = GlassOpenness();
             long now = Environment.TickCount64;
+            _glassLatestSample = sample;
             if (UpdateAutomaticGlass(sample, now)) return;
             double wanted = GlassEffect.LuminosityFor(dark, sample.BrightFor(openness), sample.DarkFor(openness), Settings.GlassTransparency);
             double next = _glassFirstSample ? wanted : GlassMaterial.FollowBackdrop(_glassRequired, wanted, _glassPreviousVeil);
@@ -196,11 +229,42 @@ public partial class MainWindow
         }
         _glassAppearance.Prior(appDark);
         _glassAppearance.Changed(sample.Changed, now);
-        bool held = _expanded || _app.Decks.Any(deck => ReferenceEquals(deck.Look, Look) && deck._expanded);
+        bool held = _expanded || _app.Decks.Any(deck => ReferenceEquals(deck.Look, Look) && (deck._expanded || deck._glassPaletteTurn is not null
+            || deck._glassActive && deck.GlassOpenness() > .001));
         if (!_glassAppearance.Feed(sample.MiddleMean, now, held: held)) return false;
-        Look.AutomaticGlassDark = _glassAppearance.Dark;
-        _app.ApplyPanelTheme();
+        bool dark = _glassAppearance.Dark;
+        if (!Animates || _glassSurface?.DisplayedLook is null)
+        {
+            PublishGlassPalette(dark, coordinated: false);
+            return true;
+        }
+        foreach (var deck in _app.Decks.ToList())
+        {
+            if (!ReferenceEquals(deck.Look, Look) || PanelThemes.NormalizeId(deck.Settings.PanelTheme) != PanelThemes.GlassAuto
+                || !deck.Animates || deck._glassSurface?.DisplayedLook is not { } from) continue;
+            deck.BeginGlassPaletteTurn(from, deck._glassLatestSample ?? sample, dark, now, leads: ReferenceEquals(deck, this));
+        }
         return true;
+    }
+
+    private void BeginGlassPaletteTurn(GlassEffect.AcrylicLook from, AcrylicProbe.Reading sample, bool dark, long now, bool leads)
+    {
+        int transparency = Settings.GlassTransparency;
+        double required = GlassEffect.LuminosityFor(dark, sample.Median, sample.Median, transparency);
+        var palette = dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight;
+        var to = palette with { LuminosityOpacity = GlassMaterial.LuminosityOpacity(required, 0, transparency) };
+        _glassPaletteTurn = new(Look, from, to, now, sample.MiddleMean, required, dark, leads);
+        _glassGeneration++;
+        QueueGlass();
+    }
+
+    private void PublishGlassPalette(bool dark, bool coordinated)
+    {
+        var look = Look;
+        look.AutomaticGlassDark = dark;
+        look.GlassTurnPublishing = coordinated;
+        try { _app.ApplyPanelTheme(); }
+        finally { look.GlassTurnPublishing = false; }
     }
 
     private void HideGlass()
@@ -208,9 +272,12 @@ public partial class MainWindow
         _glassProbe?.Stop();
         _glassVeilTimer?.Stop();
         _glassSampleChanged = false;
+        _glassPaletteTurn = null;
+        _glassLatestSample = null;
         _glassSurface?.Hide();
         if (!_glassActive) return;
         _glassActive = false;
+        _glassAppearance = null;
         _acrylicProbe = new AcrylicProbe();
         _glassDark = null;
         _glassGeneration++;
