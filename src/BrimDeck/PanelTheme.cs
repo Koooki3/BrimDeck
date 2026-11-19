@@ -280,6 +280,7 @@ internal sealed class PanelLook
     private static readonly (string Resource, string Token)[] Resources =
     [
         ("PanelSurface", "surface"), ("PanelPrimary", "textPrimary"), ("PanelSecondary", "textSecondary"), ("PanelTertiary", "textTertiary"),
+        ("PanelHeaderClock", "textTertiary"),
         ("PanelAccent", "accent"), ("PanelTrack", "track"), ("PanelRingTrack", "ringTrack"), ("PanelFill", "fill"), ("PanelFillSelected", "fillSelected"),
         ("PanelHover", "hover"), ("PanelPressed", "pressed"), ("PanelPopup", "popup"), ("PanelPopupBorder", "popupBorder"), ("PanelScrollThumb", "scrollThumb"),
         ("PanelSwitchFill", "switchFill"), ("PanelSeekRail", "seekRail"), ("PanelToolTip", "tooltip"), ("PanelToolTipBorder", "tooltipBorder"),
@@ -315,7 +316,7 @@ internal sealed class PanelLook
     {
         var next = new ResourceDictionary();
         foreach (var (resource, token) in Resources) next[resource] = UI.Brush(Hex(token));
-        next["PanelHeaderClock"] = PanelThemes.IsLiquid(Current) ? UI.Brush(Hex("clock")) : next["PanelTertiary"];
+        if (PanelThemes.IsLiquid(Current)) next["PanelHeaderClock"] = UI.Brush(Hex("clock"));
         next["PanelScrollThumbRest"] = Current.ThumbRestOpacity;
         // Corners in the panel's XAML (App.xaml has the defaults): square in a pixel theme.
         foreach (var (name, radius) in new[] { ("Xs", Radius.Xs), ("Sm", Radius.Sm), ("Md", Radius.Md), ("Lg", Radius.Lg), ("Xl", Radius.Xl), ("Full", Radius.Full) })
