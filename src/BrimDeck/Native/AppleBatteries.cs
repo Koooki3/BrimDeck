@@ -9,7 +9,7 @@ namespace BrimDeck.Native;
 // AirPods and Beats: each bud's and the case's charge, from Apple's proximity pairing advertisement (AppleAdvert), which they
 // send while out of the case or with its lid open. A passive scan (no requests sent) runs only while the page or the collapsed
 // reading shows and an AirPods or Beats device is connected over Bluetooth; only a strong signal (the buds next to the PC)
-// whose family (AirPods or Beats) matches the connected device's name counts. The advertisement carries no address to match
+// whose family (AirPods or Beats, when the model is known) matches the connected device's name counts. The advertisement carries no address to match
 // (it rotates), so a neighbour's AirPods of the same family right next to the PC could be read instead; the signal threshold
 // keeps that to arm's length. Its entry takes the connected device's key, replacing the single level Windows has for it.
 internal sealed class AppleBatteries(Dispatcher dispatcher, Action<DeviceSource, IReadOnlyList<DeviceBattery>> report) : IDeviceSource
@@ -109,16 +109,20 @@ internal sealed class AppleBatteries(Dispatcher dispatcher, Action<DeviceSource,
         {
             if (data.CompanyId != AppleAdvert.Company) continue;
             var bytes = data.Data.ToArray();
-            if (AppleAdvert.Parts(bytes) is not { } parts || AppleAdvert.Model(bytes) is not { } model) continue;
+            if (AppleAdvert.Parts(bytes) is not { } parts) continue;
+            // A model not in the table (a newer one) is read all the same, as earbuds, the layout every known model shares.
+            var model = AppleAdvert.Model(bytes);
             var single = AppleAdvert.Single(bytes);
             if (parts.Count == 0 && single is null) continue;
             dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
             {
                 // A scan that hears again has recovered: a later abort starts the back-off from the beginning.
                 _backOff = FirstRetry;
-                // The family must be the connected device's: AirPods for "Koooki's AirPods Pro", Beats for "Powerbeats Pro".
-                string family = model.Contains("Beats", StringComparison.OrdinalIgnoreCase) || model.Contains("beats", StringComparison.Ordinal) ? "beats" : "AirPods";
-                if (_target is not { } target || !target.Name.Contains(family, StringComparison.OrdinalIgnoreCase)) return;
+                if (_target is not { } target) return;
+                // A known model's family must be the connected device's: AirPods for "Koooki's AirPods Pro", Beats for
+                // "Powerbeats Pro". An unknown model's family is not known, so any AirPods or Beats device takes it.
+                string? family = model is null ? null : model.Contains("Beats", StringComparison.OrdinalIgnoreCase) ? "Beats" : "AirPods";
+                if (family is not null && !target.Name.Contains(family, StringComparison.OrdinalIgnoreCase)) return;
                 bool same = _last is { } last && last.Parts.SequenceEqual(parts) && last.Single == single;
                 _last = (parts, single, DateTimeOffset.UtcNow);
                 if (!same) Publish();

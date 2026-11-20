@@ -2064,7 +2064,7 @@ public static class AppleAdvert
         => IsProximity(data) && IsSingle(data) && Level(data[6] & 0x0F) is { } level ? new(level, (data[7] & 0x10) != 0, Accuracy: BatteryAccuracy.Steps) : null;
 
     // The parts' levels: left, right and the case; empty for a single-unit model (Single), null when this is not a proximity
-    // pairing advertisement.
+    // pairing advertisement. A model not in the table (Model is null) is read as earbuds.
     public static IReadOnlyList<PartBattery>? Parts(byte[] data)
     {
         if (!IsProximity(data)) return null;

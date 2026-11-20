@@ -655,6 +655,11 @@ static class DeviceProtocolTests
         byte[] maxUsbC = [0x07, 0x19, 0x01, 0x1F, 0x20, 0x2B, 0x07, 0x1F, 0, 0], fitPro = [0x07, 0x19, 0x01, 0x12, 0x20, 0x2B, 0x86, 0x43, 0, 0];
         check("AirPods Max with USB-C: one level; Beats Fit Pro: earbuds", AppleAdvert.Model(maxUsbC) == "AirPods Max" && AppleAdvert.Single(maxUsbC) == new BatteryRead(70, true, BatteryAccuracy.Steps)
             && AppleAdvert.Model(fitPro) == "Beats Fit Pro" && AppleAdvert.Parts(fitPro) is { Count: 3 });
+        // A model not in the table (a newer one): no name, its parts read as earbuds all the same.
+        byte[] unknown = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0x86, 0x43, 0, 0];
+        var unknownParts = AppleAdvert.Parts(unknown)!;
+        check("AirPods: a model not in the table is read as earbuds", AppleAdvert.Model(unknown) is null && AppleAdvert.Single(unknown) is null
+            && unknownParts.Count == 3 && unknownParts[0] == new PartBattery(BatteryPart.Left, 60, false) && unknownParts[2] == new PartBattery(BatteryPart.Case, 30, true));
         check("AirPods: another advertisement is none", AppleAdvert.Parts([0x10, 0x05, 0, 0, 0, 0, 0, 0]) is null && AppleAdvert.Model([0x07, 0x19, 0x01, 0x99, 0x99]) is null);
     }
 }
