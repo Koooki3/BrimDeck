@@ -8,7 +8,7 @@ using BrimDeck.Core;
 // scale: whether each reading is drawn whole, which is where the row is wider than its region. Prints the strip's region, what it
 // asks for (PreferredWidth) and the width of each reading; with a folder, saves the row. Not a test: numbers and a picture.
 //   dotnet run -c Release --no-build --project tests/BrimDeck.FxPreview -- --strip-fit [<output folder>] [--scale 150] [--fixed <capsule width in DIPs>]
-internal static partial class LiquidPages
+internal static partial class PageSheets
 {
     private static T? Find<T>(DependencyObject node) where T : DependencyObject
     {
@@ -53,7 +53,7 @@ internal static partial class LiquidPages
         if (folder is not null)
         {
             Directory.CreateDirectory(folder);
-            LiquidPreview.Save(Tile(deck, root, palette.IsDark), Path.Combine(folder, $"strip-fit-{Scale * 100:0}{(fixedWidth is null ? "" : "-fixed")}.png"));
+            PageSheets.Save(Tile(deck, root, palette.IsDark), Path.Combine(folder, $"strip-fit-{Scale * 100:0}{(fixedWidth is null ? "" : "-fixed")}.png"));
         }
         return fits ? 0 : 1;
     }

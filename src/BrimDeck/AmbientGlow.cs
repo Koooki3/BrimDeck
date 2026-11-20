@@ -37,8 +37,8 @@ internal sealed class AmbientGlow : IMotionClient
     // When the light was paused (Eased time), so it goes on from the same moment of its cycle when it runs again.
     private double? _pausedAt;
 
-    // liquid: whether liquid glass is shown under the island, which draws its own rim light (following the pointer): the
-    // island's painted rim steps aside then (MainWindow.LiquidEdge), and its drift would only redraw the window for nothing.
+    // liquid: whether liquid glass is shown under the island, which draws its own rim light (MainWindow.Glass sets the island's
+    // rim from the light around it), so a drift of the theme's rim would only redraw the window for nothing.
     private readonly Func<bool> _liquid;
     public AmbientGlow(IslandBorder island, Panel content, Func<MotionConditions> conditions, Func<bool> open, Func<bool>? liquid = null)
     {
@@ -76,7 +76,7 @@ internal sealed class AmbientGlow : IMotionClient
     public void Update()
     {
         var conditions = _conditions();
-        bool run = _rim is not null && MotionGate.Ambient(conditions, _motion) && !HeldForBlur;
+        bool run = _rim is not null && MotionGate.Ambient(conditions, _motion) && !HeldForGlass;
         if (run == _running)
         {
             // Paused, and now motion is not allowed at all (animations turned off, high contrast): at rest at once.
@@ -94,7 +94,7 @@ internal sealed class AmbientGlow : IMotionClient
         else Halt(conditions);
     }
 
-    // Motion still allowed (the panel opening over glass, the indicator line, a locked session, battery saver, the display off):
+    // Motion still allowed (liquid glass shown, the indicator line, a locked session, battery saver, the display off):
     // the light holds where it is rather than jumping back to rest, and a passing scan line fades out. With motion not allowed
     // (animations off, high contrast) it is put at rest at once.
     private void Halt(in MotionConditions conditions)
@@ -123,7 +123,7 @@ internal sealed class AmbientGlow : IMotionClient
     {
         if (!_running) return 0;
         var conditions = _conditions();
-        if (_rim is null || !MotionGate.Ambient(conditions, _motion) || HeldForBlur) { Halt(conditions); return 0; }
+        if (_rim is null || !MotionGate.Ambient(conditions, _motion) || HeldForGlass) { Halt(conditions); return 0; }
         var frame = _motion.Ambient.At(now - _origin);
         // Changes the screen cannot show yet (under a device pixel of movement, under a step of opacity) are left for a later
         // tick, so a tick that would change nothing visible redraws nothing: the drift is in widths of the rim, the scan line
@@ -143,11 +143,8 @@ internal sealed class AmbientGlow : IMotionClient
         return Interval(frame.Sweep);
     }
 
-    // Over a live blur (GlassBackdrop) each frame of the open panel's large layered window costs more, and the drifting light
-    // alone kept the open panel at 7.5 % of a core against 2.7 % with it at rest (measured). There the light rests while the
-    // panel is open and moves on the small collapsed island only. Over liquid glass it rests always: the glass draws its own
-    // rim light, and the painted rim it would move is not drawn.
-    private bool HeldForBlur => _open() && GlassBackdrop.Available || _liquid();
+    // Over liquid glass the light rests always: the glass draws its own rim light, and the painted rim it would move is not drawn.
+    private bool HeldForGlass => _liquid();
 
     // Slow light needs few frames: fewer still on the small collapsed island, a few more while a scan line moves.
     private int Interval(double sweep) => _open() ? sweep >= 0 ? SweepMs : OpenMs : sweep >= 0 ? CollapsedSweepMs : CollapsedMs;

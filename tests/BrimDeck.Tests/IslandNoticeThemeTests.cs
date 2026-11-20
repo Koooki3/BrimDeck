@@ -3,7 +3,7 @@ using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 
 // A notice on the island dressed for the theme (B8, 2026-11-01): how it arrives (the notice's weight on the theme's way of moving),
-// the light it throws, what lies under it over glass, the countdown's ring and the source guard that keeps IslandNotice on the
+// the light it throws, the countdown's ring and the source guard that keeps IslandNotice on the
 // theme's tokens. The window itself is drawn by the app; what is checked here is what decides it.
 internal static class IslandNoticeThemeTests
 {
@@ -22,7 +22,6 @@ internal static class IslandNoticeThemeTests
         Weight(check);
         Theme(check);
         Light(check);
-        Backdrop(check);
         Ring(check);
         Guards(check);
     }
@@ -143,21 +142,6 @@ internal static class IslandNoticeThemeTests
             NoticeLight.Of(paper, false, NoticeTone.Theme) == paper.Readable(paper["accent"]) && NoticeLight.Of(paper, false, NoticeTone.Theme).MinimumContrast(paper.SurfaceStops) >= 3);
     }
 
-    private static void Backdrop(Action<string, bool> check)
-    {
-        check("Notice backdrop: a theme without glass shows its opaque surface, blur available or not",
-            NoticeBackdrops.Of(IslandForm.Notch, false, true) == NoticeBackdrop.Opaque && NoticeBackdrops.Of(IslandForm.Capsule, false, false) == NoticeBackdrop.Opaque);
-        check("Notice backdrop: glass shown and Windows able to blur: the blur lies under the tint, on the notch and the capsule",
-            NoticeBackdrops.Of(IslandForm.Notch, true, true) == NoticeBackdrop.Blur && NoticeBackdrops.Of(IslandForm.Capsule, true, true) == NoticeBackdrop.Blur);
-        check("Notice backdrop: glass shown but no blur (battery saver, a remote session, composition not available): the clear tint over the desktop",
-            NoticeBackdrops.Of(IslandForm.Notch, true, false) == NoticeBackdrop.Clear && NoticeBackdrops.Of(IslandForm.Capsule, true, false) == NoticeBackdrop.Clear);
-        check("Notice backdrop: the thin indicator has no surface, glass or not",
-            NoticeBackdrops.Of(IslandForm.Line, true, true) == NoticeBackdrop.Opaque && NoticeBackdrops.Of(IslandForm.Line, false, false) == NoticeBackdrop.Opaque);
-        // The glass itself is not drawn when its gate says no: the gate is GlassBackdrop.Available's first condition, the theme's glass.
-        check("Notice backdrop: glass is shown only for a glass theme (the liquid glass pair) and never on the others",
-            PanelThemes.BuiltIns.Where(t => PanelThemes.Resolve(t).IsGlass).Select(t => t.Id).OrderBy(id => id).SequenceEqual([PanelThemes.GlassDark, PanelThemes.GlassLight]));
-    }
-
     private static void Ring(Action<string, bool> check)
     {
         var start = new DateTimeOffset(2026, 11, 1, 8, 0, 0, TimeSpan.Zero);
@@ -200,8 +184,8 @@ internal static class IslandNoticeThemeTests
 
     private static T Also<T>(this T value, Action<T> change) { change(value); return value; }
 
-    // The source: the island notice reads its colors, its text sizes and its spacings from the theme's tokens, its glass from
-    // GlassBackdrop, its arrival from the plan, and no longer carries the constants B8 replaced.
+    // The source: the island notice reads its colors, its text sizes and its spacings from the theme's tokens, its arrival from
+    // the plan, and no longer carries the constants B8 replaced.
     private static void Guards(Action<string, bool> check)
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
@@ -220,9 +204,6 @@ internal static class IslandNoticeThemeTests
         check("Island notice source: the arrival is the notice's plan on the theme (the old Pace and Fury constants, the near-white flash and glow are gone)",
             !Regex.IsMatch(code, @"\bconst double Pace\b") && !Regex.IsMatch(code, @"\bFury\s*=\s*5") && !code.Contains("LineFlash =") && !code.Contains("GlowColor") && code.Contains("_arrival.Fury") && code.Contains("_arrival.Pace")
             && code.Contains("_arrival.Separation") && code.Contains("_arrival.Flashes") && code.Contains("_look.ArrivalOf(") && code.Contains("_look.Light(") && code.Contains("_look.LineFlash("));
-        check("Island notice source: over glass it has the island's blur (GlassBackdrop, decided by NoticeBackdrops) and follows what the glass reports (Held)",
-            code.Contains("new GlassBackdrop(") && code.Contains("NoticeBackdrops.Of(") && code.Contains("GlassBackdrop.Available") && code.Contains("_glass.Held +=") && code.Contains("GlassBackdrop.SurfaceOpacity(") && code.Contains("_glass.LiquidTint")
-            && code.Contains("_glass.Dispose()"));
         check("Island notice source: the theme's marks are drawn at the notice's height around the words, and the countdown's ring is followed by the shared tick and let go with it",
             code.Contains("decor.Draw(") && code.Contains("Words()") && code.Contains("new CountdownRing(") && code.Contains("NoticeClock.RingFraction(") && code.Contains("Center.LiveTick += LiveStep") && code.Contains("Center.LiveTick -= LiveStep"));
         // No new standing timer or frame subscription: the only timers are the hover timer and the shared tick.

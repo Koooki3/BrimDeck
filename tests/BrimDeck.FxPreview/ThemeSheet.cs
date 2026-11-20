@@ -107,14 +107,13 @@ internal static class ThemeSheet
         return new DrawingBrush(group) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top, Viewbox = new Rect(0, 0, Width, Height), ViewboxUnits = BrushMappingMode.Absolute };
     }
 
-    // The island as the panel dresses it, with its shadow or glow drawn from a copy outside the island only (as MainWindow does
-    // for glass, where the copy would show through).
+    // The island as the panel dresses it, with its shadow or glow drawn from a copy under it.
     internal static Grid Island(PanelPalette palette, double width, double height, CornerRadius corners, double shoulder, UIElement content)
     {
         IslandBorder Shape(double inset) => new()
         {
             Width = width, Height = height, CornerRadius = corners, ShoulderRadius = shoulder, Inset = inset, MaterialOpacity = 1,
-            Background = new SolidColorBrush(PanelTheme.SurfaceColor), Pixel = palette.Effects.Pixel, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top
+            Background = new SolidColorBrush(PanelTheme.ColorOf("surface")), Pixel = palette.Effects.Pixel, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top
         };
         var shadow = new DropShadowEffect { Direction = 270 };
         PanelTheme.Dress(shadow, palette);
@@ -122,11 +121,6 @@ internal static class ThemeSheet
         caster.Children.Add(Shape(1));
         var holder = new Grid();
         var shadowHost = new Grid { Children = { caster } };
-        if (PanelTheme.GlassShown)
-        {
-            var outline = IslandBorder.BuildOutline(width, height, shoulder, corners, 0, palette.Effects.Pixel);
-            shadowHost.Clip = new CombinedGeometry(GeometryCombineMode.Exclude, new RectangleGeometry(new Rect(-200, -200, width + 400, height + 400)), outline);
-        }
         holder.Children.Add(shadowHost);
         var island = Shape(0);
         PanelTheme.Dress(island, palette);

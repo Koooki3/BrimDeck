@@ -1,7 +1,7 @@
 using BrimDeck.Core;
 
-// A test harness never reaches the user's BrimDeck: once it takes its own scope (AppInstance.ForTest, as FxPreview --liquid-pages
-// does before it makes BrimDeck's App), the instance lock and the settings signal are its process's own. Run last: the scope
+// A test harness never reaches the user's BrimDeck: once it takes its own scope (AppInstance.ForTest, as FxPreview does for its
+// page sheets before it makes BrimDeck's App), the instance lock and the settings signal are its process's own. Run last: the scope
 // stays for the process.
 internal static class AppInstanceTests
 {

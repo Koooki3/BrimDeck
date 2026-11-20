@@ -32,8 +32,9 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 // hue, just far enough to reach it (PanelThemes.Build.cs).
 public static partial class PanelThemes
 {
-    public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners";
-    public const string GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2", PixelBlocks = "pixel-blocks", Endfield = "endfield-industrial";
+    public const string GlassAuto = "liquid-glass";
+    public const string SystemId = "system", Dark = "dark", Light = "light", GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", Demo = "cyberpunk-edgerunners", PixelBlocks = "pixel-blocks";
+    public const string IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2", Endfield = "endfield-industrial";
     public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2, ThumbContrast = 2;
     // The warning and critical colors, the theme's and those chosen for an application or the collapsed readings: they color a
     // quota's number and a reading's value as well as bars and rings, so they are held to the body-text minimum everywhere,
@@ -130,8 +131,7 @@ public static partial class PanelThemes
     // Built-in themes are read on demand: startup reads only the chosen theme and its base themes. The id of each is its resource
     // name, which a test keeps equal to the id inside the file.
     private const string ThemeResources = ".Themes.";
-    // Dark and light first, then the ported editor themes, then the custom demo.
-    // The base glass themes come right after dark and light: like them they are materials rather than palettes.
+    // Dark and light first, then the ported editor themes, then BrimDeck's own extensions with the custom demo and Endfield last.
     private static readonly string[] BuiltInOrder = [Dark, Light, GlassLight, GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, IslandHoliday2, PixelBlocks, Demo, Endfield];
     private static (string Id, string Resource)[]? _builtInIndex;
     private static (string Id, string Resource)[] BuiltInIndex => _builtInIndex ??= [.. typeof(PanelThemes).Assembly.GetManifestResourceNames()
@@ -174,6 +174,7 @@ public static partial class PanelThemes
     {
         id = NormalizeId(id);
         if (id == SystemId) id = systemDark ? Dark : Light;
+        if (id == GlassAuto) id = systemDark ? GlassDark : GlassLight;
         return BuiltIn(id) ?? user.FirstOrDefault(theme => theme.Usable && theme.Id == id) ?? BuiltIn(Dark)!;
     }
 }

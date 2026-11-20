@@ -39,28 +39,27 @@ internal static class EndfieldTests
         check("It moves mechanically and costs nothing at rest: no ambient light, no particles, no steps, firm springs, brackets on focus",
             day.Motion is { Hover: HoverFx.Caret, Press: PressFx.Shade, Particles: ParticleFx.None, Steps: 0, Spring: SpringTier.Firm, Focus: FocusFx.Brackets } m && !m.Ambient.Any && night.Motion == day.Motion);
 
-        // The cut effect: a range, an effect by name, ruled out by pixel art and by glass.
+        // The cut effect: a range, an effect by name, ruled out by pixel art. A user's glass is ignored (only the built-in liquid
+        // glass themes have the material), so it never takes the cuts away.
         PanelThemeEffectValues Cut(double? size, double? pixel = null, PanelThemeGlass? glass = null) => PanelThemes.Build("c", new PanelThemeFile { Effects = new() { Cut = size, Pixel = pixel, Glass = glass } }).Effects;
         check("The cut is 0 to 16 DIP, unset or not a number is none",
             Cut(8).Cut == 8 && Cut(99).Cut == 16 && Cut(-3).Cut == 0 && Cut(double.NaN).Cut == 0 && Cut(null).Cut == 0 && PanelThemes.EffectRange("cut") == (0, 16, 0));
-        check("Pixel art wins over cut corners, and glass gives way to them",
+        check("Pixel art wins over cut corners, and a user's glass is ignored beside them",
             Cut(8, pixel: 2).Cut == 0 && Cut(8, pixel: 2).Pixel == 2
             && Cut(8, glass: new PanelThemeGlass { Tint = "#80FFFFFF" }) is { Cut: 8, Glass: null });
         var folder = Path.Combine(root, "endfield-files");
         Directory.CreateDirectory(folder);
         foreach (var (name, json) in new[]
         {
-            ("both.json", """{ "formatVersion": 1, "id": "both", "effects": { "cut": 6, "glass": { "tint": "#80FFFFFF" } } }"""),
             ("cut-on-glass.json", """{ "formatVersion": 1, "id": "cut-on-glass", "base": "liquid-glass-dark", "effects": { "cut": 6 } }"""),
-            ("glass-on-cut.json", """{ "formatVersion": 1, "id": "glass-on-cut", "base": "endfield-industrial", "effects": { "glass": { "tint": "#80FFFFFF" } } }"""),
             ("fine.json", """{ "formatVersion": 1, "id": "fine", "base": "endfield-industrial", "effects": { "cut": 4 } }"""),
             ("flat-on-glass.json", """{ "formatVersion": 1, "id": "flat-on-glass", "base": "liquid-glass-dark", "effects": { "cut": 0 } }"""),
             ("bad.json", """{ "formatVersion": 1, "id": "bad", "effects": { "decor": { "hatch": { "color": "red" } } } }"""),
         }) System.IO.File.WriteAllText(Path.Combine(folder, name), json);
         var files = PanelThemes.LoadFolder(folder);
         PanelThemeInfo Loaded(string name) => files.Single(theme => Path.GetFileName(theme.Path) == name);
-        check("A file asking for glass and cut corners is refused, from the file or its base; cut 0 on glass is fine, as with pixel art",
-            new[] { "both.json", "cut-on-glass.json", "glass-on-cut.json" }.All(name => Loaded(name).Error is not null) && Loaded("both.json").Error!.Contains("cut")
+        check("Cut corners on a liquid glass base are a usable theme with its cuts and no glass, and cut 0 there is fine",
+            Loaded("cut-on-glass.json").Error is null && PanelThemes.Resolve(Loaded("cut-on-glass.json")).Effects is { Cut: 6, Glass: null }
             && Loaded("fine.json").Error is null && Loaded("flat-on-glass.json").Error is null);
         check("A theme built on Endfield keeps its cuts and marks, drops or changes them one by one",
             PanelThemes.Build("kid", new PanelThemeFile { Base = PanelThemes.Endfield }).Effects is { Cut: 10, Decor: { Tab: not null, Hatch: not null } }

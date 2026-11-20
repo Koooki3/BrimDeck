@@ -10,6 +10,8 @@ public static class GlassMaterial
 
     public static int NormalizeTransparency(int percent) => Math.Clamp(percent, 0, 100);
 
+    public static double DarkBackdropLimit(int transparency) => .26 + .06 * Math.Max(0, NormalizeTransparency(transparency) - 50) / 50;
+
     // Quantize the grain so a whole slider drag uses a small set of frozen WPF brushes.
     public static double GrainStrength(int transparency)
     {
@@ -23,26 +25,15 @@ public static class GlassMaterial
         return (.85 + .30 * amount) * (1 - .20 * Math.Clamp(openness, 0, 1));
     }
 
-    // A lone demanding sample gets a small response. When two readings agree, apply the
-    // shared readability floor promptly. Release slowly after both readings require less.
-    public static double FollowBackdrop(double shown, double required, double previous)
-    {
-        if (required > shown)
-            return Math.Min(required, Math.Max(shown + .025, previous));
-        return Math.Max(shown - .025, Math.Min(shown, Math.Max(required, previous)));
-    }
 
-    // Move up the next reading only when a broad change creates a substantially new readability demand.
-    public static bool ConfirmBackdropSoon(double shown, double required, double previous, double changed)
-        => changed > GlassAppearance.VideoShare && required - Math.Max(shown, previous) >= .25;
-
-    public static double TransitionVeil(double from, double to, double progress)
+    // The readability floor a new reading leaves: a reading that asks for more thickens the glass to it at once (the spring
+    // then carries the material there); one that asks for less thins it only as far as the reading before also allows, so one
+    // dark frame of a video or a scroll does not clear the glass. Continuous: no fixed step per reading.
+    public static double Settle(double wanted, double previousWanted, double current)
     {
-        if (progress <= 0) return from;
-        if (progress >= 1) return to;
-        double weight = progress * progress * (3 - 2 * progress);
-        // Reuse the acrylic factories kept for the existing .05 levels.
-        return Math.Round((from + (to - from) * weight) * 20) / 20;
+        if (!double.IsFinite(wanted)) return current;
+        if (wanted >= current || !double.IsFinite(current)) return wanted;
+        return Math.Min(current, Math.Max(wanted, double.IsFinite(previousWanted) ? previousWanted : current));
     }
 
     public static double LuminosityOpacity(double required, double openness, int transparency)
@@ -51,6 +42,6 @@ public static class GlassMaterial
         double baseVeil = amount <= .5 ? DefaultCollapsedVeil + (.5 - amount) * .50
             : DefaultCollapsedVeil - (amount - .5) * .20;
         double openingVeil = (DefaultExpandedVeil - DefaultCollapsedVeil) * Math.Clamp(openness, 0, 1);
-        return Math.Ceiling(Math.Clamp(Math.Max(required, baseVeil + openingVeil), 0, MaximumVeil) * 20 - 1e-9) / 20;
+        return Math.Clamp(Math.Max(required, baseVeil + openingVeil), 0, MaximumVeil);
     }
 }

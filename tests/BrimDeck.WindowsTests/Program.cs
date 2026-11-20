@@ -29,6 +29,7 @@ internal static class Program
             if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return Finish(); }
             if (args is ["--only", "popup"]) { PopupGhostChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themecards"]) { ThemeCardChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "glass"]) { GlassChecks.Run(Check); return Finish(); }
             if (args is ["--only", "fonts"]) { FontFollowTests.Run(Check); return Finish(); }
             // "--only notices": the notice checks alone. They lay out panels and call Windows; none sends input or captures the screen.
             if (args is ["--only", "notices"]) { NoticeChecks(); return Finish(); }
@@ -45,16 +46,7 @@ internal static class Program
             IslandNoticeDecorTests.Run(Check);
             CheckIslandTakesClicks();
             NoticeProtectionTests.Run(Check);
-            ShaderTests.Run(Check, hosted);
-            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: desktop capture and the liquid glass on a live desktop, and the notification banners' registry and Start menu.");
-            else
-            {
-                DesktopSourceTests.Run(Check);
-                GlanceTests.Run(Check);
-                CaptureExclusionTests.Run(Check);
-                SourceStartTests.Run(Check);
-                LiquidIdleTests.Run(Check);
-            }
+            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: the notification banners' registry and Start menu.");
             CheckPageToolTips();
             NoticeFlashWatchTests.Run(Check);
             NoticeChatRestoreWindowsTests.Run(Check);
@@ -73,6 +65,7 @@ internal static class Program
             NoticePanelTests.Run(Check);
             ThemeCardChecks.Run(Check);
             PopupGhostChecks.Run(Check);
+            GlassChecks.Run(Check);
             PanelKeyboardTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
@@ -148,7 +141,7 @@ internal static class Program
     private static void CheckSettledClip()
     {
         foreach (var (name, corners, shoulder) in new[] { ("notch", new CornerRadius(0, 0, 12, 12), 16d), ("capsule", new CornerRadius(18), 0d) })
-            foreach (string look in new[] { "", "edge light", "pixel bevel" })
+            foreach (string look in new[] { "", "pixel bevel" })
                 foreach (double scale in new[] { 1d, 1.5 })
                 {
                     byte[] Draw(bool settled)
@@ -156,7 +149,6 @@ internal static class Program
                         var island = new BrimDeck.IslandBorder { Width = 300, Height = 36, Background = System.Windows.Media.Brushes.Black, CornerRadius = corners,
                             ShoulderRadius = shoulder, MaterialOpacity = 1, RimWidth = 1, RimBrush = System.Windows.Media.Brushes.White, ClipToBounds = true,
                             SettledClip = settled };
-                        if (look == "edge light") island.EdgeBrush = System.Windows.Media.Brushes.White;
                         // The pixel theme's stepped outline, whose rim is a bevel (light on the edges facing up and left).
                         if (look == "pixel bevel") { island.Pixel = 2; island.BevelBrush = System.Windows.Media.Brushes.Gray; }
                         island.Measure(new Size(300, 36)); island.Arrange(new Rect(0, 0, 300, 36)); island.UpdateLayout();

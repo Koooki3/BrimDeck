@@ -16,7 +16,7 @@ Settings › Live notices › Turn on live notices (off by default). Then:
 
 Once a notice has grown to size, its surface moves like a viscous liquid for a moment and settles back to its shape:
 
-- **Capsule**: both ends throw droplets and take them back as they refill; the glow along the top and bottom edges lights twice. The necks and droplets still joined to the body share its one continuous boundary (the rim, the gradient and the glass edge all follow it, with no line inside); a droplet that has parted has a boundary of its own.
+- **Capsule**: both ends throw droplets and take them back as they refill; the glow along the top and bottom edges lights twice. The necks and droplets still joined to the body share its one continuous boundary (the rim and the gradient both follow it, with no line inside); a droplet that has parted has a boundary of its own.
 - **Notch**: the two lower corners swell and the bulges run round the outline (always within 5 DIPs of it); the bulges are part of the body's outline, and the glow lights twice along that outline, thinning towards the shoulders.
 - **Indicator bar**: no extra layer. The line first draws back a little (at most 5 DIPs), like a spring being loaded, and then grows into the card on the panel's opening spring; on the way back, once the card has returned to the line's place, it carries on a little past the line's length (at most 7 DIPs) and settles back. The size of the draw-back and the carry follows the weight of the notice.
 
@@ -24,7 +24,7 @@ How much of the motion plays follows the notice's level; see "Notice levels" bel
 
 The arrival motion is not quite the same on every theme: the liquid of a theme whose springs are "firm" (Endfield, Cyberpunk) swells less, the glow of a theme that glows (Cyberpunk) and of the pixel theme lights only once, and the pixel theme's outline does not deform (only the glow and the words move); the pace is adjusted only between 0.9 and 1.05 times the design's (a faster one looked worse). The glow's and the indicator's light take the theme's colors: a dark theme uses its primary text color, light, glowing and pixel themes their accent, Endfield's dark look the indicator's yellow, and a warning or an error the matching state color, all kept visible on the surface.
 
-On a glass theme (liquid glass, dark and light) a notice lies on the system blur as the island does: liquid glass uses the system acrylic and draws its own rim light, the other glass themes a blur under a tint. With battery saver, a remote desktop or a system that cannot blur, the notice falls back to "clear glass", the tint straight over the desktop; with transparency effects off or in high contrast it uses the theme's solid surface.
+On the liquid glass themes a notice is drawn on the theme's solid surface, without glass.
 
 On the Endfield theme a notice draws the signal bar, the hatching and the frame along its bottom edge, and Cyberpunk's corner marks are drawn for the notice's height; these are drawn only where they leave the icon and the words alone, and left out where there is no room.
 

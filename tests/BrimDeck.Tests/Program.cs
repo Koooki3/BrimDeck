@@ -129,9 +129,15 @@ try
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
     ExpandBounceTests.Run(Check);
-    GlassFeedbackTests.Run(Check);
-    GlassMaterialTests.Run(Check);
     SurfaceTransparencyTests.Run(Check);
+    GlassMaterialTests.Run(Check);
+    GlassLookTests.Run(Check);
+    FluidMotionTests.Run(Check);
+    GlassGraphTests.Run(Check);
+    GlassLightTests.Run(Check);
+    Check("Automatic liquid glass resolves to a built-in variant with the supplied system mode",
+        PanelThemes.Find(PanelThemes.GlassAuto, true, []).Id == PanelThemes.GlassDark
+        && PanelThemes.Find(PanelThemes.GlassAuto, false, []).Id == PanelThemes.GlassLight);
     ExpandSnapTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);

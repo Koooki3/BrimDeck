@@ -57,14 +57,10 @@ public static partial class PanelThemes
         var effects = start.Effects;
         text = Regex.Replace(text, @"""surfaceGradient"": \[\]", "\"surfaceGradient\": " + ColorList(effects.SurfaceGradient));
         text = Regex.Replace(text, @"""rimGradient"": \[\]", "\"rimGradient\": " + ColorList(effects.RimGradient));
-        // Glass is written out in place of the template's commented example.
-        if (effects.Glass is { } glass)
-            text = Regex.Replace(text, @"// , ""glass"": \{[^}]*\}", GlassJson(glass))
-                .Replace("\"texture\": 0 ", "\"texture\": 0,", StringComparison.Ordinal);
         // Every numeric effect, those the settings page cannot edit (pixel, texture) included, so a copy keeps them.
         foreach (var key in EffectKeys)
             text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {Effect(effects, key).ToString("0.###", CultureInfo.InvariantCulture)}");
-        // The motifs follow the last numeric effect, before the glass when there is one.
+        // The motifs follow the last numeric effect.
         if (effects.Decor is { } decor)
             text = new Regex(@"(""texture"": [0-9.]+)(,?)").Replace(text, match => match.Groups[1].Value + ", \"decor\": " + DecorJson(decor) + match.Groups[2].Value, 1);
         text = FillMotion(text, start.Motion);
@@ -125,14 +121,6 @@ public static partial class PanelThemes
             Cross = decor.Cross is { } cross ? new PanelThemeMotif { Color = cross.ToString() } : null
         };
         return JsonSerializer.Serialize(file, Json);
-    }
-
-    private static string GlassJson(PanelGlass glass)
-    {
-        static string N(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
-        var text = $"\"glass\": {{ \"tint\": \"{glass.Tint}\", \"edge\": {N(glass.Edge)}, \"highlight\": \"{glass.Highlight}\"";
-        if (glass.Held) text += $", \"blurOpacity\": {N(glass.BlurOpacity)}, \"backdrop\": [{N(glass.Low)}, {N(glass.High)}], \"saturation\": {N(glass.Saturation)}";
-        return text + " }";
     }
 
     // Every palette has every token and, from the dark theme it is built on, every app color.

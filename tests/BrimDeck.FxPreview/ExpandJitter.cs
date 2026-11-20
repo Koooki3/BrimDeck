@@ -14,7 +14,7 @@ using BrimDeck.Core;
 // opacity. The summary counts how often the content's place changed by whole device pixels after it had first appeared, the
 // largest distance from where it ends up, and the frames in which it moved against the island's centre.
 //   dotnet run -c Release --project tests/BrimDeck.FxPreview -- --expand-jitter [--scale 150] [--theme dark] [--page usage|music|monitor] [--verbose]
-internal static partial class LiquidPages
+internal static partial class PageSheets
 {
     internal static int RunExpandJitter(string[] args)
     {

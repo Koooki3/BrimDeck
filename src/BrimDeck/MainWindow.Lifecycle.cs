@@ -67,8 +67,6 @@ public partial class MainWindow
         _dotSquash.BeginAnimation(ScaleTransform.ScaleXProperty, Part(p => p.ScaleX), HandoffBehavior.SnapshotAndReplace);
         _dotSquash.BeginAnimation(ScaleTransform.ScaleYProperty, Part(p => p.ScaleY), HandoffBehavior.SnapshotAndReplace);
         HoverZone.BeginAnimation(OpacityProperty, Part(p => p.Opacity), HandoffBehavior.SnapshotAndReplace);
-        // The pose moves no layout: the blur under glass is told to follow it.
-        _glass?.Follow(delay + length);
     }
 
     // Whether the island can pass a size of width x height at left and gap (window coordinates) by the opening spring's give
@@ -86,22 +84,12 @@ public partial class MainWindow
     // Starts the boot. The panel stays out of sight until the dispatcher is idle: on BrimDeck's start the first frames come
     // late while the panel is built and the data read, which ate the dot and the first half of the swell. A panel that is busy
     // longer than BootWait boots anyway. The panel is out of sight from the start (the constructor), so the window is never
-    // seen before it has its place on the monitor. While automatic liquid glass measures its first look (App.Glancing, at most
-    // SourceStart.BoundMs) it waits out of sight too, so the look it boots in is the measured one, never cut to on screen.
+    // seen before it has its place on the monitor.
     private void Boot()
     {
         if (_poweringOff || _app.Exiting || _retiring) return;
         // Made in place of another panel (App.RebuildPanels), the island is simply there again, as it was.
-        if (_expanded || IsSuppressed || !CanAnimateLifecycle || _rebuilt)
-        {
-            if (_expanded || IsSuppressed || !_app.Glancing) { SetImmediate(HoverZone, OpacityProperty, 1d); return; }
-            // No boot to play: the island appears once the first look is decided (a hotkey opening it meanwhile, EndBoot, sooner).
-            SetImmediate(HoverZone, OpacityProperty, 0d);
-            _bootWaiting = true;
-            int held = ++_boot;
-            _app.AfterGlance(() => { if (held != _boot) return; _bootWaiting = false; SetImmediate(HoverZone, OpacityProperty, 1d); });
-            return;
-        }
+        if (_expanded || IsSuppressed || !CanAnimateLifecycle || _rebuilt) { SetImmediate(HoverZone, OpacityProperty, 1d); return; }
         SetImmediate(HoverZone, OpacityProperty, 0d);
         _bootWaiting = true;
         int boot = ++_boot;
@@ -112,7 +100,7 @@ public partial class MainWindow
             wait.Stop();
             if (started || boot != _boot) return;
             started = true;
-            _app.AfterGlance(() => { if (boot == _boot) BeginBoot(); });
+            BeginBoot();
         }
         wait.Tick += (_, _) => Start();
         wait.Start();
@@ -194,7 +182,7 @@ public partial class MainWindow
         SetImmediate(Island, IslandBorder.ShoulderRadiusProperty, 0d);
         SetImmediate(Island, IslandBorder.MaterialOpacityProperty, 1d);
         SetImmediate(Island, OpacityProperty, 1d);
-        SetImmediate(_surface, SolidColorBrush.ColorProperty, Look.SurfaceColor);
+        SetImmediate(_surface, SolidColorBrush.ColorProperty, Look.ColorOf("surface"));
         // The line's playback progress lies inside the surface: it is not part of the dot (SetExpanded brings it back).
         SetImmediate(MusicIndicator, OpacityProperty, 0d);
         ResetDotPose();
@@ -228,7 +216,7 @@ public partial class MainWindow
         Animate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk, shrink, compact, Soft.Out);
         Animate(ShadowHost, OpacityProperty, 0, shrink, shadow, Soft.Out);
         Animate(Island, IslandBorder.MaterialOpacityProperty, 1, shrink, tone, Soft.Out);
-        _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = Look.SurfaceColor, EasingFunction = Soft.InOut }, shrink, tone), HandoffBehavior.SnapshotAndReplace);
+        _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = Look.ColorOf("surface"), EasingFunction = Soft.InOut }, shrink, tone), HandoffBehavior.SnapshotAndReplace);
         Animate(Island, IslandBorder.ShoulderRadiusProperty, 0, shrink, corners, Soft.InOut);
         Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = new CornerRadius(dot / 2), EasingFunction = Soft.Out }, shrink, corners), HandoffBehavior.SnapshotAndReplace);
         Island.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { To = new Thickness(0, DotTop(shape), 0, 0), EasingFunction = Soft.Settle }, shrink, surface), HandoffBehavior.SnapshotAndReplace);
@@ -271,6 +259,9 @@ public partial class MainWindow
     // Hides the round island and draws the dot sinking into the water in its place (DropMerge).
     private void MergeIntoWater(CollapsedShape shape, int boot)
     {
+        // The sinking dot has its own solid fill. The glass HWND ends with the island's motion.
+        bool glass = _glassActive;
+        CloseGlass();
         ResetDotPose();
         SetImmediate(Island, OpacityProperty, 0d);
         SetImmediate(HoverZone, OpacityProperty, 1d);
@@ -281,7 +272,7 @@ public partial class MainWindow
         _merge.Width = width; _merge.Height = height;
         _merge.Margin = new Thickness(DotLeft(shape) + DotMotion.Size / 2 - width / 2, floor - (height - DropMerge.WaterBelow), 0, 0);
         // As see-through as the surface (DeckSettings.SurfaceTransparency).
-        var fill = _surface.Color; fill.A = (byte)Math.Round(fill.A * Island.SurfaceOpacity);
+        var fill = _surface.Color; fill.A = (byte)Math.Round(fill.A * (glass ? 1 : Island.SurfaceOpacity));
         _merge.Fill = fill;
         _merge.Visibility = Visibility.Visible;
         SetImmediate(_merge, DropMerge.ProgressProperty, 0d);

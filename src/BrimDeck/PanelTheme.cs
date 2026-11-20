@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
@@ -13,6 +14,10 @@ namespace BrimDeck;
 // the settings window and anything not on a panel; a panel's code asks its own look.
 internal static class PanelTheme
 {
+    internal static bool GlassAvailable => !SystemParameters.HighContrast && GetSystemMetrics(0x1000) == 0
+        && Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "EnableTransparency", 1) is not 0;
+    [DllImport("user32")] private static extern int GetSystemMetrics(int index);
+
     public static string Folder { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "themes");
     // Every look's Generation is drawn from this one count, so a cache keyed on a generation never mistakes one look for another.
     // Declared before Main, which takes the first.
@@ -41,8 +46,8 @@ internal static class PanelTheme
         Loaded = true;
     }
 
-    // The theme an id stands for now, "system" following the Windows app theme (automatic liquid glass its look, LiquidTheme.Look).
-    public static PanelThemeInfo Find(string id) => PanelThemes.Find(LiquidTheme.Look(id), PanelThemes.NormalizeId(id) == PanelThemes.SystemId && SettingsPalette.IsDark(SettingsTheme.System), UserThemes);
+    // The theme an id stands for now, "system" following the Windows app theme.
+    public static PanelThemeInfo Find(string id) => PanelThemes.Find(id, PanelThemes.NormalizeId(id) is (PanelThemes.SystemId or PanelThemes.GlassAuto) && SettingsPalette.IsDark(SettingsTheme.System), UserThemes);
 
     // Another interface font (Fonts.Use) makes everything built from the old one out of date, as another palette does: every page and
     // cache that compares Generation is built again, with no fade, since no color changes.
@@ -125,12 +130,6 @@ internal static class PanelTheme
     public static bool InkFade => Main.InkFade;
     public static bool Plated => Main.Plated;
     public static ThemeMotion Motion => Main.Motion;
-    public static bool GlassShown => Main.GlassShown;
-    public static Color SurfaceColor => Main.SurfaceColor;
-    public static Color PanelSurfaceColor => Main.PanelSurfaceColor;
-    public static double HeldOpacity(double alpha) => Main.HeldOpacity(alpha);
-    public static ClearTypeHint ClearType => Main.ClearType;
-    public static Brush? EdgeBrush(PanelPalette? palette = null) => Main.EdgeBrush(palette);
 }
 
 // A panel theme as one profile's settings draw it: the palette, its day or night look, high contrast and the see-through surface.
@@ -178,6 +177,9 @@ internal sealed class PanelLook
 
     private string _signature = "";
     private string? _chosen;
+    internal bool? AutomaticGlassDark { get; set; }
+    internal bool GlassTurnPublishing { get; set; }
+
     // Every token's text form and the default app colors as drawn, made once per theme: they are read hundreds of times per render.
     private Dictionary<string, string> _hex;
     private readonly Dictionary<ProviderId, string> _appColors = [];
@@ -196,12 +198,15 @@ internal sealed class PanelLook
         bool translucent = settings.SurfaceTransparency > 0;
         if (translucent != Translucent) { Translucent = translucent; Outdate(); }
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
+        bool automaticGlass = chosen == PanelThemes.GlassAuto;
+        if (!automaticGlass || !PanelTheme.GlassAvailable) AutomaticGlassDark = null;
+        string? glassVariant = automaticGlass ? ((AutomaticGlassDark ?? SettingsPalette.IsDark(SettingsTheme.System)) ? PanelThemes.GlassDark : PanelThemes.GlassLight) : null;
         // New hours or a new mode for the day and night looks count as a change too.
         bool high = SystemParameters.HighContrast;
-        if (!reload && !systemChanged && PanelTheme.Loaded && _signature.Length > 0 && chosen == _chosen && LookOf(ShownTheme.File, settings) == Look && high == HighContrast) return false;
+        if (!reload && !systemChanged && PanelTheme.Loaded && _signature.Length > 0 && chosen == _chosen && (glassVariant is null || ShownTheme.Id == glassVariant) && LookOf(ShownTheme.File, settings) == Look && high == HighContrast) return false;
         if (reload || !PanelTheme.Loaded) PanelTheme.Reload();
         _chosen = chosen;
-        var theme = PanelTheme.Find(chosen);
+        var theme = PanelTheme.Find(glassVariant ?? chosen);
         // A theme file that is being saved can be locked or half written for a moment. While the chosen file theme is listed
         // but unusable, the last good version stays on screen instead of the dark fallback; the settings page shows the error.
         bool keepLastGood = theme.Id != chosen && !ShownTheme.BuiltIn && ShownTheme.Id == chosen
@@ -311,7 +316,8 @@ internal sealed class PanelLook
     {
         var next = new ResourceDictionary();
         foreach (var (resource, token) in Resources) next[resource] = UI.Brush(Hex(token));
-        if (PanelThemes.IsLiquid(Current)) next["PanelHeaderClock"] = UI.Brush(Hex("clock"));
+        if (Current.Id is PanelThemes.GlassLight or PanelThemes.GlassDark)
+            next["PanelHeaderClock"] = UI.Brush(Hex("clock"));
         next["PanelScrollThumbRest"] = Current.ThumbRestOpacity;
         // Corners in the panel's XAML (App.xaml has the defaults): square in a pixel theme.
         foreach (var (name, radius) in new[] { ("Xs", Radius.Xs), ("Sm", Radius.Sm), ("Md", Radius.Md), ("Lg", Radius.Lg), ("Xl", Radius.Xl), ("Full", Radius.Full) })
@@ -368,7 +374,6 @@ internal sealed class PanelLook
         island.Decor = IslandDecor.For(palette);
         island.RimBrush = RimBrush(palette); island.RimWidth = palette.Effects.RimWidth;
         island.Pixel = palette.Effects.Pixel; island.Cut = palette.Effects.Cut; island.BevelBrush = BevelBrush(palette);
-        island.EdgeBrush = GlassShownFor(palette) ? EdgeBrush(palette) : null;
     }
 
     // The text of a window of the panel's own (the date picker, the app filter): unsmoothed in a pixel theme, as on the island,
@@ -393,58 +398,12 @@ internal sealed class PanelLook
     // layer dresses itself, FxSurface.EnsureDressed).
     public ThemeMotion Motion => _chosen == PanelThemes.SystemId ? Current.Motion.ForSystem() : Current.Motion;
 
-    // Glass shows as glass only where Windows' transparency effects are on and high contrast is off; otherwise its surface
-    // color is drawn, opaque, like any other theme's.
-    public bool GlassShown => GlassShownFor(Current);
-    private static bool GlassShownFor(PanelPalette palette) => palette.IsGlass && MotionEnvironment.Transparency && !SystemParameters.HighContrast;
-    // The island's base color: the glass tint over the desktop, or the surface. The indicator line keeps its own color.
-    public Color SurfaceColor => GlassShown ? PanelTheme.ToColor(Current.Effects.Glass!.Tint) : ColorOf("surface");
-    // The open panel's base color: glass a little thicker than on the small island, as a large sheet of glass is (Apple's
-    // materials thicken with their size). Only denser, so every contrast the tint keeps still holds.
-    public Color PanelSurfaceColor
-    {
-        get
-        {
-            var color = SurfaceColor;
-            if (GlassShown) color.A = (byte)Math.Min(255, color.A + (255 - color.A) * Thicker);
-            return color;
-        }
-    }
-    private const double Thicker = .35;
-    // Over a held blur (GlassBackdrop.Held) the tint thins to the theme's blur opacity: the opacity of the brush drawing glass
-    // of the given alpha (the tint, thickened toward PanelSurfaceColor as the panel opens) that gives the thinner tint thickened
-    // alike. 1 for a theme without a held blur.
-    public double HeldOpacity(double alpha)
-    {
-        if (!GlassShown || Current.Effects.Glass is not { Held: true } glass || alpha <= 0) return 1;
-        double whole = glass.Tint.A / 255d, thin = glass.BlurTint.A / 255d;
-        double thickened = whole < 1 ? Math.Clamp((alpha - whole) / (1 - whole), 0, 1) : 0;
-        return Math.Min(1, (thin + thickened * (1 - thin)) / alpha);
-    }
-    // What the panel's text asks for: ClearType over an opaque surface; over glass, where the layered window has no opaque
-    // pixels under the text, ClearType would wash the text out, so WPF chooses (grayscale there).
-    public ClearTypeHint ClearType => GlassShown ? ClearTypeHint.Auto : ClearTypeHint.Enabled;
-
     // A pixel theme's bevel: the rim's last gradient color shades the edges that face down and right (IslandBorder.Pixel).
     public Brush? BevelBrush(PanelPalette? palette = null)
     {
         var effects = (palette ?? Current).Effects;
         if (effects.Pixel <= 0 || effects.RimGradient.Count < 2) return null;
         var brush = new SolidColorBrush(PanelTheme.ToColor(effects.RimGradient[^1]));
-        brush.Freeze();
-        return brush;
-    }
-    // The light a glass surface gathers along its edge: brightest along the top, where light falls on it, gone through the
-    // middle and back faintly along the bottom, in the glass's highlight color.
-    public Brush? EdgeBrush(PanelPalette? palette = null)
-    {
-        if ((palette ?? Current).Effects.Glass is not { Edge: > 0 } glass) return null;
-        var light = PanelTheme.ToColor(glass.Highlight);
-        Color At(double alpha) => Color.FromArgb((byte)Math.Round(255 * Math.Clamp(alpha * glass.Edge, 0, 1)), light.R, light.G, light.B);
-        var brush = new LinearGradientBrush(new GradientStopCollection
-        {
-            new(At(.9), 0), new(At(.35), .22), new(At(0), .5), new(At(.12), .8), new(At(.4), 1)
-        }, new Point(0, 0), new Point(0, 1));
         brush.Freeze();
         return brush;
     }

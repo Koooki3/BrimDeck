@@ -127,44 +127,22 @@ internal static class PanelThemeTests
         check("The demo theme carries its effects", demo.HasOverlay && demo.Effects.RimGradient.Count == 4 && demo.Effects.ShadowDepth == 0 && demo.Effects.Scanlines > 0 && demo.Effects.Decor is { Hud: not null });
         check("System follows the Windows app theme", PanelThemes.Find("system", true, []).Id == "dark" && PanelThemes.Find("SYSTEM", false, []).Id == "light");
         check("An unknown theme shows as dark", PanelThemes.Find("gone", false, []).Id == "dark");
-        check("Automatic liquid glass shows the glass look its backdrop asks for", PanelThemes.Find(PanelThemes.LiquidLook(PanelThemes.GlassAuto, glassDark: false), true, []).Id == PanelThemes.GlassLight
-            && PanelThemes.Find(PanelThemes.LiquidLook("Liquid Glass", glassDark: true), false, []).Id == PanelThemes.GlassDark && PanelThemes.LiquidLook("system", true) == "system");
-        GlassLookTests.Run(check);
         {
-            // A turn of automatic liquid glass carries a preset clock gradient to the other look's, in memory only; Windows
-            // switching "system" carries it and saves.
-            var lightLook = BuiltIn(PanelThemes.GlassLight);
-            var darkLook = BuiltIn(PanelThemes.GlassDark);
-            var turned = new DeckSettings { ClockGradient = [.. lightLook.ClockGradients[1].Stops] };
-            var system = new DeckSettings { ClockGradient = [.. lightLook.ClockGradients[1].Stops] };
-            PanelThemes.CarryOnGlassTurn(lightLook, darkLook, turned);
-            bool systemSaves = PanelThemes.CarryGradient(lightLook, darkLook, system);
-            check("A turn of automatic liquid glass carries the clock gradient as Windows switching \"system\" does",
-                turned.ClockGradient.SequenceEqual(darkLook.ClockGradients[1].Stops) && systemSaves && system.ClockGradient.SequenceEqual(darkLook.ClockGradients[1].Stops));
-        }
-        {
-            // Liquid glass is a base theme of its own (#55): only the built-in liquid glass themes are drawn by the liquid renderer;
-            // a theme's "glass" effect is the plain blur for any theme, and a user's file cannot claim the renderer or the ids.
+            // Liquid glass is a base theme of its own (#55): only the built-in liquid glass themes have the glass material; a user's
+            // file can neither ask for it (its "glass" is ignored, also on a liquid glass base) nor take the ids.
             var liquidFolder = Folder("liquid-themes",
                 ("glassy.json", """{ "id": "glassy", "name": "Glassy", "base": "dark", "effects": { "glass": { "tint": "#C8121419", "edge": 0.4 } } }"""),
-                ("claims.json", """{ "id": "claims", "name": "Claims", "base": "liquid-glass-light", "renderer": "liquid", "effects": { "glass": { "tint": "#E0F8FAFD" } } }"""),
-                ("thief.json", """{ "id": "liquid-glass-light", "name": "Thief", "renderer": "liquid", "effects": { "glass": { "tint": "#E0F8FAFD" } } }"""),
-                ("auto.json", """{ "id": "liquid-glass", "name": "Auto", "renderer": "LIQUID" }"""));
+                ("claims.json", """{ "id": "claims", "name": "Claims", "base": "liquid-glass-light", "effects": { "glass": { "tint": "#E0F8FAFD" } } }"""),
+                ("thief.json", """{ "id": "liquid-glass-light", "name": "Thief", "effects": { "glass": { "tint": "#E0F8FAFD" } } }"""),
+                ("auto.json", """{ "id": "liquid-glass", "name": "Auto" }"""));
             var found = PanelThemes.LoadFolder(liquidFolder);
-            var glassy = PanelThemes.Resolve(ByFile(found, "glassy.json"));
-            check("A custom theme with effects.glass is glass drawn as the blur, never by the liquid renderer",
-                ByFile(found, "glassy.json").Usable && glassy.IsGlass && !PanelThemes.IsLiquid(glassy) && !PanelThemes.IsLiquid("glassy"));
-            var claims = ByFile(found, "claims.json");
-            var claimedPalette = PanelThemes.Resolve(claims);
-            check("A user's theme declaring the liquid renderer, based on liquid glass, is usable glass but never drawn as liquid glass",
-                claims.Usable && claimedPalette.IsGlass && !PanelThemes.IsLiquid(claimedPalette) && !PanelThemes.IsLiquid(claims.Id));
+            check("A custom theme's effects.glass is ignored, also on a liquid glass base",
+                ByFile(found, "glassy.json").Usable && !PanelThemes.Resolve(ByFile(found, "glassy.json")).IsGlass
+                && ByFile(found, "claims.json").Usable && !PanelThemes.Resolve(ByFile(found, "claims.json")).IsGlass);
             check("A user's file can take neither a liquid glass theme's id nor automatic liquid glass's",
-                !ByFile(found, "thief.json").Usable && !ByFile(found, "auto.json").Usable
-                && PanelThemes.Find(PanelThemes.GlassLight, false, found).BuiltIn && found.All(theme => !theme.Usable || !PanelThemes.IsLiquid(PanelThemes.Resolve(theme))));
-            var liquid = PanelThemes.BuiltIns.Where(theme => PanelThemes.IsLiquid(PanelThemes.Resolve(theme))).Select(theme => theme.Id).Order(StringComparer.Ordinal).ToList();
-            check("Only the built-in liquid glass themes, and automatic liquid glass's looks, are drawn as liquid glass",
-                liquid.SequenceEqual([PanelThemes.GlassDark, PanelThemes.GlassLight]) && PanelThemes.IsLiquid(PanelThemes.LiquidLook(PanelThemes.GlassAuto, true))
-                && PanelThemes.IsLiquid(PanelThemes.LiquidLook(PanelThemes.GlassAuto, false)) && !PanelThemes.IsLiquid(PanelThemes.Dark) && !PanelThemes.IsLiquid(PanelThemes.GlassAuto));
+                !ByFile(found, "thief.json").Usable && !ByFile(found, "auto.json").Usable && PanelThemes.Find(PanelThemes.GlassLight, false, found).BuiltIn);
+            var glass = PanelThemes.BuiltIns.Where(theme => PanelThemes.Resolve(theme).IsGlass).Select(theme => theme.Id).Order(StringComparer.Ordinal).ToList();
+            check("Only the built-in liquid glass themes have the glass material", glass.SequenceEqual([PanelThemes.GlassDark, PanelThemes.GlassLight]));
         }
 
         // Theme files and ids.
@@ -268,40 +246,19 @@ internal static class PanelThemeTests
             var copy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", original, theme.Id)));
             reproduced &= original.Colors.All(pair => copy[pair.Key] == pair.Value) && copy.Adjustments.Count == 0
                 && original.Effects.SurfaceGradient.SequenceEqual(copy.Effects.SurfaceGradient) && original.Effects.RimGradient.SequenceEqual(copy.Effects.RimGradient)
-                && original.Effects with { SurfaceGradient = [], RimGradient = [] } == copy.Effects with { SurfaceGradient = [], RimGradient = [] }
+                && original.Effects with { SurfaceGradient = [], RimGradient = [], Glass = null } == copy.Effects with { SurfaceGradient = [], RimGradient = [] }
                 && Enum.GetValues<ProviderId>().All(id => original.AppDefault(id) == copy.AppDefault(id))
                 && original.Clock is { } clock && copy.Clock is { } copyClock && clock.Style == copyClock.Style && clock.Color == copyClock.Color
                 && ClockColors.Swatches.All(color => original.ClockPreset(color) == copy.ClockPreset(color))
                 && original.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops)).SequenceEqual(copy.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops)))
                 && original.HasOwnSwatches == copy.HasOwnSwatches && original.Swatches.SequenceEqual(copy.Swatches);
         }
-        check("A theme made from another starts out identical: colors, effects, apps, clock and swatches", reproduced);
-        // Glass over a held blur: the band and saturation are fitted, the thinner tint is the tint's color at part of its alpha,
-        // and text is held to its minimums over that tint on the band's grays as well as over black and white.
-        PanelGlass? Held(string glass) => PanelThemes.Build("held", PanelThemes.Parse($$"""{ "formatVersion": 1, "id": "held", "base": "light", "effects": { "glass": {{glass}} } }""")).Effects.Glass;
+        check("A theme copy preserves colors, shareable effects, apps, clock and swatches", reproduced);
+        // The built-in liquid glass themes hold their blur to a band; text is held to its minimums over the thinner tint on the
+        // band's grays as well as over black and white.
         check("The built-in glass themes hold their blur",
             BuiltIn(PanelThemes.GlassLight).Effects.Glass is { Held: true, Low: .85, High: 1 } light && light.Extremes.Count == 4
             && BuiltIn(PanelThemes.GlassDark).Effects.Glass is { Held: true, Low: 0, High: .28 });
-        check("A held blur's tint is the tint at part of its alpha",
-            Held("""{ "tint": "#E0F8FAFD", "blurOpacity": 0.5, "backdrop": [0.6, 1] }""") is { BlurTint: var thin } glass && thin == glass.Tint with { A = 0x70 });
-        check("A held blur's band is at least a tenth and its saturation 1 to 2",
-            Held("""{ "tint": "#E0F8FAFD", "blurOpacity": 0.5, "backdrop": [0.95, 0.2], "saturation": 9 }""") is { Low: .9, High: 1, Saturation: 2 });
-        check("Glass without a band or with an opacity of 1 is not held",
-            Held("""{ "tint": "#E0F8FAFD", "blurOpacity": 0.5 }""") is { Held: false, Extremes.Count: 2 } && Held("""{ "tint": "#E0F8FAFD", "blurOpacity": 1, "backdrop": [0.6, 1] }""") is { Held: false });
-        var badBand = PanelThemes.LoadFolder(Folder("held-bad", ("band.json", """{ "formatVersion": 1, "id": "band", "effects": { "glass": { "tint": "#E0F8FAFD", "backdrop": [0.5] } } }"""),
-            ("opacity.json", """{ "formatVersion": 1, "id": "opacity", "effects": { "glass": { "tint": "#E0F8FAFD", "blurOpacity": 2 } } }""")));
-        check("A glass band that is not two numbers from 0 to 1, or an opacity outside 0 to 1, is refused", badBand.Count == 2 && badBand.All(theme => theme.Error is not null));
-        // Pixel art and glass together would have the blur and the shadow cut follow the smooth outline past the steps.
-        var pixelGlass = PanelThemes.LoadFolder(Folder("pixel-glass",
-            ("both.json", """{ "formatVersion": 1, "id": "both", "effects": { "pixel": 2, "glass": { "tint": "#E0F8FAFD" } } }"""),
-            ("glass-on-pixel.json", """{ "formatVersion": 1, "id": "glass-on-pixel", "base": "pixel-blocks", "effects": { "glass": { "tint": "#E0F8FAFD" } } }"""),
-            ("pixel-on-glass.json", """{ "formatVersion": 1, "id": "pixel-on-glass", "base": "liquid-glass-light", "effects": { "pixel": 2 } }"""),
-            ("flat-on-glass.json", """{ "formatVersion": 1, "id": "flat-on-glass", "base": "liquid-glass-light", "effects": { "pixel": 0 } }""")));
-        check("Pixel art with glass is refused, from the file or its base; pixel 0 on glass is fine",
-            pixelGlass.Count == 4 && new[] { "both.json", "glass-on-pixel.json", "pixel-on-glass.json" }.All(name => ByFile(pixelGlass, name).Error is not null)
-            && ByFile(pixelGlass, "flat-on-glass.json").Error is null);
-        check("A theme that gets both anyway is pixel art without glass",
-            PanelThemes.Build("both", PanelThemes.Parse("""{ "formatVersion": 1, "id": "both", "effects": { "pixel": 2, "glass": { "tint": "#E0F8FAFD" } } }""")).Effects is { Pixel: 2, Glass: null });
         // Motifs: fitted into their ranges, inherited part by part, held under the text and carried by a copy.
         PanelPalette Decor(string decor, string? baseId = null) => PanelThemes.Build("decor", PanelThemes.Parse(
             $$"""{ "formatVersion": 1, "id": "decor", "base": "{{baseId ?? "light"}}", "effects": { "decor": {{decor}} } }"""));

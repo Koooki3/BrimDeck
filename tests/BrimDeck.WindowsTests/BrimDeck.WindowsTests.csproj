@@ -12,10 +12,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
-    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
-    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
-    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+    <Compile Include="..\..\src\BrimDeck\GlassComposition.cs" Link="GlassComposition.cs" />
+    <Compile Include="..\..\src\BrimDeck\GlassEffect.cs" Link="GlassEffect.cs" />
+    <Compile Include="..\..\src\BrimDeck\GlassSurface.cs" Link="GlassSurface.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PdhQuery.cs" Link="PdhQuery.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\CpuProvider.cs" Link="CpuProvider.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\MonitorLog.cs" Link="MonitorLog.cs" />
@@ -26,19 +26,6 @@
     <Compile Include="..\..\src\BrimDeck\Native\SettingsChrome.cs" Link="SettingsChrome.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeProtection.cs" Link="NoticeProtection.cs" />
-    <Compile Include="..\..\src\BrimDeck\LiquidGlass\*.cs" LinkBase="LiquidGlass" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.hlsl" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.vs.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.vs.cso" />
-    <!-- WithCulture: as in BrimDeck.csproj, ".ps." is not the Pashto culture. -->
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.ps.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.ps.cso" WithCulture="false" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.zoned.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.zoned.cso" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl.sha256" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.hlsl" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.down.cso" LogicalName="BrimDeck.LiquidGlass.Frost.down.cso" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.up.cso" LogicalName="BrimDeck.LiquidGlass.Frost.up.cso" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.band.cso" LogicalName="BrimDeck.LiquidGlass.Frost.band.cso" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.stats.cso" LogicalName="BrimDeck.LiquidGlass.Frost.stats.cso" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl.sha256" />
     <Compile Include="..\..\src\BrimDeck\Native\PasteInput.cs" Link="PasteInput.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\RightFileDrag.cs" Link="RightFileDrag.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PointerPressObserver.cs" Link="PointerPressObserver.cs" />

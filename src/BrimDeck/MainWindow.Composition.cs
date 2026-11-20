@@ -27,7 +27,7 @@ public partial class MainWindow
     internal static bool DrawsWithCard => !SoftwareForTest && RenderCapability.Tier >> 16 >= 2;
     internal static bool RemoteSession => SystemParameters.IsRemoteSession || GetSystemMetrics(0x1000) != 0; // SM_REMOTESESSION
     // What a panel window made now would be.
-    internal static WindowSurface WantedSurface => WindowComposition.Choose(ForcedComposition, PanelThemes.IsLiquid(PanelTheme.Current), DrawsWithCard, RemoteSession);
+    internal static WindowSurface WantedSurface => WindowComposition.Choose(ForcedComposition, PanelTheme.Current.IsGlass, DrawsWithCard, RemoteSession);
     // What this window is.
     internal bool DwmComposed { get; private set; }
     private bool _regionQueued;
@@ -55,12 +55,12 @@ public partial class MainWindow
             FitRegion();
         };
         // Whatever moves or changes size lays the window out again; the region follows once per frame at most. The shadow's
-        // reach changes without a layout: as it fades in or out, and as its look follows the backdrop (MainWindow.ShadowLook).
+        // reach changes without a layout: as it fades in or out.
         LayoutUpdated += (_, _) => QueueRegion();
         var opacity = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(OpacityProperty, typeof(System.Windows.Controls.Grid));
         void ShadowShown(object? sender, EventArgs e) => QueueRegion();
         opacity.AddValueChanged(ShadowHost, ShadowShown);
-        foreach (var layer in new FrameworkElement[] { IslandShadow, IslandContact }) if (layer.Effect is { IsFrozen: false } effect) effect.Changed += ShadowShown;
+        if (IslandShadow.Effect is { IsFrozen: false } effect) effect.Changed += ShadowShown;
         Closed += (_, _) => opacity.RemoveValueChanged(ShadowHost, ShadowShown);
     }
 
@@ -117,16 +117,15 @@ public partial class MainWindow
     private Rect Shadowed(Rect island)
     {
         var drawn = island;
-        if (ShadowHost.Visibility == Visibility.Visible && ShadowHost.Opacity > .01)
-            foreach (var layer in new FrameworkElement[] { IslandShadow, IslandContact })
-            {
-                if (layer.Visibility != Visibility.Visible || layer.Effect is not System.Windows.Media.Effects.DropShadowEffect shadow) continue;
-                double angle = shadow.Direction * Math.PI / 180;
-                var cast = island;
-                cast.Offset(shadow.ShadowDepth * Math.Cos(angle), -shadow.ShadowDepth * Math.Sin(angle));
-                cast.Inflate(shadow.BlurRadius * ShadowSeen + 1, shadow.BlurRadius * ShadowSeen + 1);
-                drawn.Union(cast);
-            }
+        if (ShadowHost.Visibility == Visibility.Visible && ShadowHost.Opacity > .01 && IslandShadow.Visibility == Visibility.Visible
+            && IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow)
+        {
+            double angle = shadow.Direction * Math.PI / 180;
+            var cast = island;
+            cast.Offset(shadow.ShadowDepth * Math.Cos(angle), -shadow.ShadowDepth * Math.Sin(angle));
+            cast.Inflate(shadow.BlurRadius * ShadowSeen + 1, shadow.BlurRadius * ShadowSeen + 1);
+            drawn.Union(cast);
+        }
         return drawn;
     }
 

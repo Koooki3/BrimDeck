@@ -110,9 +110,9 @@
     "scanlines": 0,                 // 0 to 0.12: horizontal lines in the primary text color at this opacity
     "pixel": 0,                     // 0, or 1 to 4: pixel art. Corners become steps of this many DIP, text is drawn unsmoothed,
                                     // and with a rimGradient the rim is a bevel: its first color lights the edges facing up and
-                                    // left, its last shades the others. Not with glass: a theme with both is refused
+                                    // left, its last shades the others
     "cut": 0,                       // 0 to 16 DIP: cut corners. The outline's curves become 45-degree cuts (a corner never cuts more
-                                    // than its own radius; a capsule stays a pill) and a notch's shoulders straight slants. Not with glass or pixel art
+                                    // than its own radius; a capsule stays a pill) and a notch's shoulders straight slants. Not with pixel art
     "texture": 0                    // 0 to 0.12, with pixel art: squares a little lighter or darker than the surface, a block's grain
     // Motifs: remove the "//" to draw quiet pictures into the surface, under the content. horizon: a sea below "at" (0.3 to 0.9
     // of the height, 0.62 when not set) and a line of light along it; caustics: a net of soft light lines on the sea (alpha at
@@ -123,13 +123,6 @@
     // {"color": "#RRGGBB"} (alpha is kept). Each value is inherited on its own, a fully
     // transparent color turns a part off, and text is held to its minimums over the sea, the line and the motifs too.
     // , "decor": { "horizon": { "at": 0.62, "sea": "#4000A6A6", "line": "#80FFFFFF" }, "caustics": { "color": "#1AFFFFFF" } }
-    // Glass: remove the "//" to make the surface a tint over the desktop instead of a solid color. Text is held to its minimums
-    // over the tint on both a black and a white desktop, so a light tint needs to be fairly dense (about 75 %). "surface" above
-    // is drawn instead where Windows' transparency effects are off. edge: 0 to 1, the light along the inner edge.
-    // Over Windows' blur the glass can be clearer: "backdrop": [low, high] (0 to 1) holds the blurred desktop to that band of
-    // brightness, "saturation" (1 to 2) deepens its colors, and "blurOpacity" (0 to 1) is the part of the tint's alpha kept
-    // over it. Text is held to its minimums over that thinner tint on the band too, so a light glass wants a high band.
-    // , "glass": { "tint": "#C2F7F9FC", "edge": 0.6, "highlight": "#FFFFFF" }
   },
 
   // How the theme moves. Everything here follows Settings › Animations and Windows' "Animation effects": with either off, or in

@@ -54,23 +54,24 @@ public sealed class IslandBorder : Border
         nameof(Cut), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsArrange));
     public static readonly DependencyProperty BevelBrushProperty = DependencyProperty.Register(
         nameof(BevelBrush), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
-    // Glass (a theme's "glass" effect): light gathered along the inside of the outline, strongest at the edge and fading over a
-    // few DIP, as a thick lens gathers it. Null draws none.
-    public static readonly DependencyProperty EdgeBrushProperty = DependencyProperty.Register(
-        nameof(EdgeBrush), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._edge = null));
-
-    // The edge light's bands: widths in DIP inside the outline, each adding an equal share of the light, so it fades inward.
-    private static readonly double[] EdgeBands = [1.5, 3.5, 7];
+    // Liquid glass's inner optical edge: a soft glow inside the outline, brightest where the rim catches the light, fading inward
+    // over BevelGlowWidth (MainWindow.Glass sets both; null elsewhere).
+    public static readonly DependencyProperty BevelGlowProperty = DependencyProperty.Register(
+        nameof(BevelGlow), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._glowPens = null));
+    public static readonly DependencyProperty BevelGlowWidthProperty = DependencyProperty.Register(
+        nameof(BevelGlowWidth), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._glowPens = null));
+    public Brush? BevelGlow { get => (Brush?)GetValue(BevelGlowProperty); set => SetValue(BevelGlowProperty, value); }
+    public double BevelGlowWidth { get => (double)GetValue(BevelGlowWidthProperty); set => SetValue(BevelGlowWidthProperty, value); }
+    private Pen[]? _glowPens;
     // Windows sends a click on this layered window to whatever lies below wherever its pixels are fully transparent. Under
-    // liquid glass the surface steps aside (opacity 0) and the glass is drawn by a window of its own beneath, so without this
-    // the open panel took clicks only on its text and glyphs: elsewhere they fell through to the glass window or to the
-    // application under the panel (live check X-01). The faintest fill under the surface keeps the whole outline the
-    // panel's own, as an opaque surface does; at 1/255 black it changes no visible pixel.
+    // liquid glass the surface steps aside (opacity 0) and the glass is drawn by a window of its own beneath (GlassSurface), so
+    // without this the open panel took clicks only on its text and glyphs: elsewhere they fell through to the glass window or
+    // to the application under the panel. The faintest fill under the surface keeps the whole outline the panel's own, as an
+    // opaque surface does; at 1/255 black it changes no visible pixel.
     private static readonly Brush InputCatch = CreateCatch();
     private static Brush CreateCatch() { var brush = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)); brush.Freeze(); return brush; }
 
     private Pen? _rim;
-    private Pen[]? _edge;
     private (Size Size, double Shoulder, CornerRadius Corners, double Inset, double Step, double Rim, double Cut)? _outlineKey;
     private Geometry _outline = Geometry.Empty;
     private (Geometry Light, Geometry Shade)? _bevel;
@@ -99,7 +100,6 @@ public sealed class IslandBorder : Border
     public double Pixel { get => (double)GetValue(PixelProperty); set => SetValue(PixelProperty, value); }
     public double Cut { get => (double)GetValue(CutProperty); set => SetValue(CutProperty, value); }
     public Brush? BevelBrush { get => (Brush?)GetValue(BevelBrushProperty); set => SetValue(BevelBrushProperty, value); }
-    public Brush? EdgeBrush { get => (Brush?)GetValue(EdgeBrushProperty); set => SetValue(EdgeBrushProperty, value); }
 
     protected override void OnRender(DrawingContext drawingContext)
     {
@@ -141,25 +141,11 @@ public sealed class IslandBorder : Border
         if (Gradient is { } gradient) drawingContext.DrawGeometry(gradient, null, outline);
         Decor?.Draw(drawingContext, RenderSize, CornerRadius, ShoulderRadius, outline);
         if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
-        if (EdgeBrush is { } edge)
-        {
-            // At rest (SettledClip) no clip takes the pens' outer halves, so each band is its inner half alone, as a ring.
-            if (_settledClip)
-            {
-                drawingContext.PushOpacity(1d / EdgeBands.Length);
-                foreach (var band in EdgeBands) drawingContext.DrawGeometry(edge, null, Ring(outline, band));
-                drawingContext.Pop();
-            }
-            else
-            {
-                _edge ??= EdgePens(edge);
-                DrawEdge(drawingContext, _edge, outline);
-            }
-        }
     }
 
     private void Rim(DrawingContext drawingContext, Geometry outline)
     {
+        Glow(drawingContext, outline);
         if (RimWidth <= 0) return;
         if (_bevel is { } bevel && BevelBrush is { } shade)
         {
@@ -171,13 +157,29 @@ public sealed class IslandBorder : Border
             // A rim brush the ambient light animates (AmbientGlow) stays unfrozen, and so does its pen: freezing the pen would
             // freeze the brush. Its changes then reach the screen without this method running again.
             // The pen is twice the rim and the layout clip takes its outer half; at rest the rim is that inner half as a ring.
-            if (_settledClip) drawingContext.DrawGeometry(RimBrush, null, Ring(outline, RimWidth));
+            if (_settledClip) drawingContext.DrawGeometry(RimBrush, null, Ring(outline));
             else
             {
                 if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); if (RimBrush.IsFrozen) _rim.Freeze(); }
                 drawingContext.DrawGeometry(null, _rim, outline);
             }
         }
+    }
+
+    // The inner glow as three nested strokes along the outline (only their inner halves show, inside the outline): together a falloff
+    // from the edge inward, without making a widened geometry on an animation's frames.
+    private void Glow(DrawingContext drawingContext, Geometry outline)
+    {
+        if (BevelGlow is not { } glow || BevelGlowWidth <= 0 || Pixel > 0) return;
+        if (_glowPens is null)
+        {
+            _glowPens = new Pen[3];
+            for (int i = 0; i < 3; i++) { _glowPens[i] = new Pen(glow, 2 * BevelGlowWidth * (3 - i) / 3); _glowPens[i].Freeze(); }
+        }
+        // At rest the layout clip is the bounds (SettledClip), so the strokes' outer halves are clipped here.
+        drawingContext.PushClip(outline);
+        foreach (var pen in _glowPens) drawingContext.DrawGeometry(null, pen, outline);
+        drawingContext.Pop();
     }
 
     // The visible surface owns input; its decorative shadow is a separate, non-interactive sibling.
@@ -191,17 +193,17 @@ public sealed class IslandBorder : Border
         get => _settledClip;
         set { if (_settledClip == value) return; _settledClip = value; InvalidateArrange(); InvalidateVisual(); }
     }
-    // A band's inner half along the outline as a filled ring, per width, for the outline they were made from: made only at rest,
-    // so never on an animation's frames.
-    private readonly Dictionary<double, Geometry> _rings = [];
-    private Geometry? _ringsOutline;
-    private Geometry Ring(Geometry outline, double width)
+    // The rim's inner half as a filled ring, for the outline it was made from; made only at rest, so never on an animation's frames.
+    private Geometry? _ring, _ringOutline;
+    private double _ringWidth;
+    private Geometry Ring(Geometry outline)
     {
-        if (!ReferenceEquals(_ringsOutline, outline)) { _rings.Clear(); _ringsOutline = outline; }
-        if (_rings.TryGetValue(width, out var ring)) return ring;
-        ring = Geometry.Combine(outline, outline.GetWidenedPathGeometry(new Pen(Brushes.Black, width * 2)), GeometryCombineMode.Intersect, null);
+        if (_ring is not null && ReferenceEquals(_ringOutline, outline) && _ringWidth == RimWidth) return _ring;
+        var widened = outline.GetWidenedPathGeometry(new Pen(Brushes.Black, RimWidth * 2));
+        var ring = Geometry.Combine(outline, widened, GeometryCombineMode.Intersect, null);
         ring.Freeze();
-        return _rings[width] = ring;
+        _ring = ring; _ringOutline = outline; _ringWidth = RimWidth;
+        return ring;
     }
     private RectangleGeometry? _bounds;
     private Geometry Bounds()
@@ -245,23 +247,6 @@ public sealed class IslandBorder : Border
         var stairs = BuildStairs(w, h, shoulder, corners, inset, step);
         return (Polygon(stairs), rimWidth > 0 && stairs.Count >= 3 ? Bevel(stairs, PixelStairs.Step(rimWidth, dpi)) : null);
     }
-
-    // The glass's edge light (EdgeBrush): pens twice each band's width, as the rim's, since the clip removes the outer half; each
-    // band adds an equal share of the light.
-    internal static Pen[] EdgePens(Brush edge) => [.. EdgeBands.Select(band => { var pen = new Pen(edge, band * 2); if (edge.IsFrozen) pen.Freeze(); return pen; })];
-    internal static void DrawEdge(DrawingContext dc, Pen[] pens, Geometry outline)
-    {
-        dc.PushOpacity(1d / pens.Length);
-        foreach (var pen in pens) dc.DrawGeometry(null, pen, outline);
-        dc.Pop();
-    }
-
-    // A pixel size in DIP as whole device pixels (at least one) on the visual's display, or 0 for none (PixelStairs.Step).
-    internal static double PixelStep(double pixel, Visual visual) => PixelStairs.Step(pixel, VisualTreeHelper.GetDpi(visual).PixelsPerDip);
-
-    // The outline as the island draws it: stepped for a pixel theme (BuildStairs), smooth otherwise. Notices draw the same.
-    internal static Geometry BuildOutline(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy, double step)
-        => step > 0 ? Polygon(BuildStairs(w, h, shoulderRadius, corners, insetBy, step)) : BuildOutline(w, h, shoulderRadius, corners, insetBy);
 
     // The smooth outline flattened into straight edges, turned into steps (PixelStairs.Build).
     internal static IReadOnlyList<Point> BuildStairs(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy, double step)

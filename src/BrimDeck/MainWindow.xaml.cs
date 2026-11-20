@@ -37,9 +37,6 @@ public partial class MainWindow : Window
     // TrackFar: the longest pause while the pointer is far away, which the memory mode sets (MemoryPlan.PointerFarMilliseconds).
     private const double TrackNear = 40, ApproachSpeed = 10;
     private double TrackFar => _app.MemoryPlan.PointerFarMilliseconds;
-    // How far into the opening the content may start over liquid glass: five frames, the glass's lag and its drawing (live
-    // check 10-26: at 50 ms the first frames of a fast opening still showed the content below the glass).
-    private const double LiquidLeadMs = 80;
     private readonly WindowsHost _host;
     // Null for the main panel. The panels of other monitors take their usage data from it instead of reading their own.
     private readonly MainWindow? _lead;
@@ -66,8 +63,6 @@ public partial class MainWindow : Window
     // The panel theme generation this window's surface and cached content were built for; see ApplyTheme.
     private int _themeGeneration = -1;
     private double _themeDpi;
-    // Whether the theme's glass was shown when the surface was last dressed (PanelTheme.GlassShown).
-    private bool _glassShown;
     private VirtualDesktopPresence? _virtualDesktops;
     private EscapeDismissal? _escapeDismissal;
     private bool _expanded, _refreshing, _syncAsked, _preview, _refreshRequested, _pointerInside;
@@ -269,12 +264,13 @@ public partial class MainWindow : Window
         {
             const int DisplayChange = 0x007E, SettingChange = 0x001A, SetWorkArea = 0x002F, Wheel = 0x020A, SideWheel = 0x020E;
             if (message == DisplayChange || message == SettingChange && wParam == SetWorkArea) _app.DisplaysChanged();
+            else if (message == 0x0047) QueueGlass(); // WM_WINDOWPOSCHANGED also carries z-order changes.
             // WPF has no event for the horizontal wheel; the vertical one is only noted, and WPF still handles it.
             else if (message == Wheel) { _swipe.Vertical(DateTimeOffset.UtcNow); if (!Native.PasteInput.KeyDown(0x10)) _shelfSwipe.Vertical(DateTimeOffset.UtcNow); }
             else if (message == SideWheel) { int delta = unchecked((short)((long)wParam >> 16)); handled = MusicWheelSwipe(delta) || ShelfSideWheel(delta); }
             return IntPtr.Zero;
         });
-        Closed += (_, _) => DisposeMusic();
+        Closed += (_, _) => { CloseGlass(); DisposeMusic(); };
         Closed += (_, _) => CloseNotices();
     }
 
@@ -423,6 +419,7 @@ public partial class MainWindow : Window
         if (_fontSeen != Fonts.Version) { _fontSeen = Fonts.Version; _musicRenderKey = ""; _monitorKey = ""; }
         ApplyTheme();
         ApplySurface();
+        UpdateGlassTheme();
         // A panel holding the keyboard stays one that can be active, whatever the setting (PanelKeyboard).
         WindowsHost.SetCapturable(this, Settings.WindowCapture || PanelKeys.Holding);
         if (_noticeWindow is not null) WindowsHost.SetCapturable(_noticeWindow, Settings.WindowCapture);
@@ -496,9 +493,10 @@ public partial class MainWindow : Window
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
             // Settings apply at once, except over a closing still under way: a change that gives the collapsed surface a new
             // width (a reading switched on or off) carries the closing on to it (MoveTurn.Carried) rather than ending it in one
-            // frame.
+            // frame. A liquid glass palette turn publishing its text leaves the shape as it is (MainWindow.Glass).
             bool closing = !_expanded && _turn.Underway(Environment.TickCount64, opening: false);
-            SetExpanded(_expanded, !wasVisible || newEdge || !animatePage && !closing);
+            if (!Look.GlassTurnPublishing || !GlassPaletteTurning || appearing || newEdge)
+                SetExpanded(_expanded, !wasVisible || newEdge || !animatePage && !closing);
             bool cleared = _edgeCleared;
             _edgeCleared = false;
             if ((newEdge || cleared) && wasVisible && !appearing) FadeInOnNewEdge(cleared);
@@ -522,7 +520,6 @@ public partial class MainWindow : Window
         if (!IsVisible || _hiding) return;
         _hiding = true;
         SetImmediate(HoverZone, OpacityProperty, 0d);
-        // Out of sight for the glass too, which follows the island: the blank frames are not drawn under a glass sheet.
         ShowZone();
         int frames = 0;
         void Rendered(object? sender, EventArgs e)
@@ -704,10 +701,10 @@ public partial class MainWindow : Window
     {
         // The stage's scale is the window's; drawn offscreen, the stage lies in a source of its own (MainWindow.Offscreen.cs).
         double dpi = PresentationSource.FromVisual(Stage) is null ? 1 : VisualTreeHelper.GetDpi(Stage).DpiScaleX;
-        if (_themeGeneration == Look.Generation && _themeDpi == dpi && _glassShown == Look.GlassShown) return;
+        if (_themeGeneration == Look.Generation && _themeDpi == dpi) return;
         // A new scale alone only redraws the scan lines or texture, which are laid out in device pixels.
-        bool sameTheme = _themeGeneration == Look.Generation && _glassShown == Look.GlassShown;
-        _themeGeneration = Look.Generation; _themeDpi = dpi; _glassShown = Look.GlassShown;
+        bool sameTheme = _themeGeneration == Look.Generation;
+        _themeGeneration = Look.Generation; _themeDpi = dpi;
         // The resize hints take the theme's colors when they are drawn.
         _grips?.InvalidateVisual();
         if (sameTheme) { Island.Pattern = Look.Texture(dpiScale: dpi) ?? Look.Scanlines(dpiScale: dpi); FitShadowCache(dpi); return; }
@@ -722,8 +719,7 @@ public partial class MainWindow : Window
         // A theme whose scan line crosses the whole surface keeps the rounded clip (SettleClip).
         if (ThemeSweeps) Island.SettledClip = false;
         MusicIndicator.Background = UI.Brush(Look.Hex("indicatorProgress"));
-        SetImmediate(_surface, SolidColorBrush.ColorProperty, !_expanded && Collapsed.Style == CompactStyle.Line ? Look.ColorOf("indicator") : _expanded ? Look.PanelSurfaceColor : Look.SurfaceColor);
-        ApplyMaterial();
+        SetImmediate(_surface, SolidColorBrush.ColorProperty, Look.ColorOf(!_expanded && Collapsed.Style == CompactStyle.Line ? "indicator" : "surface"));
         _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent, Look);
         _musicRenderKey = ""; _compactRendered = null; _alertRendered = null;
         if (_detailPopup is { } popup) Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_detailPopup, popup)) popup.Close(); });
@@ -734,7 +730,7 @@ public partial class MainWindow : Window
     // shadow is cast by an opaque copy of the surface that would show through it, so a see-through surface casts none.
     private void ApplySurface()
     {
-        double opacity = 1 - Settings.SurfaceTransparency / 100d;
+        double opacity = _glassActive ? 0 : 1 - Settings.SurfaceTransparency / 100d;
         bool clear = opacity < 1;
         Island.SurfaceOpacity = opacity;
         if (Look.Current.Effects.Pixel <= 0)
@@ -948,7 +944,6 @@ public partial class MainWindow : Window
         // host's own state, as a new screen context closes the panel without passing here.
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
-        if (expanded && !wasExpanded) ResetJelly();
         // The coordinator hears of it after this call: it may start a waiting alert, which lays the island out again. A notice
         // that arrives before it does already waits for the closing (DeckLeaving).
         if (wasExpanded && !expanded && !_preview) _app.Notices?.DeckLeaving(this, true);
@@ -1120,9 +1115,6 @@ public partial class MainWindow : Window
         IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out
             : resizing ? resizeUnderWay ? Soft.Out : Soft.InOut : Soft.Drawer;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
-        // Over liquid glass the content never leads the glass: the glass follows the island's shape a couple of frames late
-        // (GlassBackdrop.Lag), so opening, the content starts no earlier than LiquidLeadMs in (live check 10-26, LG-02).
-        if (expanded && duration > 0 && LiquidTheme.Shown(_glass)) content = content with { Start = Math.Max(content.Start, Math.Min(.5, LiquidLeadMs / duration)) };
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         // The content only fades, in and out on the same track and curve (motion-review F13: what leaves eases out as what arrives
         // does). It used to scale between .96 and 1 as well; text under a scale that is not exactly 1 is drawn unhinted at fractional
@@ -1172,15 +1164,10 @@ public partial class MainWindow : Window
         Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
-        // Liquid glass keeps its shadow open too, as the glass it is ported from does: over a flat page it is what lifts it.
-        // While it opens or closes the shadow is out, as without liquid glass: it comes back once the open panel is at rest, or as
-        // the island lands (ShadowAtRest).
-        bool shadowShown = (!expanded || LiquidGlassShown) && !line;
-        if (shadowShown && turning && LiquidGlassShown && duration > 0) ShadowAtRest(expanded, duration, shadow, easeOut);
-        else Animate(ShadowHost, OpacityProperty, shadowShown ? 1 : 0, duration, shadow, easeOut);
+        Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
-        var tone = indicator ? Look.ColorOf("indicator") : expanded ? Look.PanelSurfaceColor : Look.SurfaceColor;
+        var tone = Look.ColorOf(indicator ? "indicator" : "surface");
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
         // indicator's color.

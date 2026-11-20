@@ -20,7 +20,7 @@ public partial class MainWindow
     private void InitializeMotion()
     {
         var content = (Panel)Island.Child;
-        _ambient = new AmbientGlow(Island, content, MotionState, () => _expanded, () => LiquidGlassShown);
+        _ambient = new AmbientGlow(Island, content, MotionState, () => _expanded, () => _glassActive);
         _fx = InteractionFx.Island(this, Island, content, () => _expanded && !_preview);
         IsVisibleChanged += (_, _) => _ambient.Update();
         MotionEnvironment.Changed += EnvironmentChanged;
@@ -28,12 +28,8 @@ public partial class MainWindow
     }
 
     // Windows changed something motion depends on (lock, display, battery saver, animation effects, high contrast).
-    // Transparency effects or high contrast turning glass on or off dresses the surface again.
     private void EnvironmentChanged()
     {
-        if (_glassShown != PanelTheme.GlassShown && _themeGeneration >= 0) ApplySettings();
-        // Battery saver, a remote session: the blur under glass may come or go.
-        _glass?.Update();
         UpdateAmbient(); UpdateMusicTimer(); UpdateMonitorDemand();
     }
 

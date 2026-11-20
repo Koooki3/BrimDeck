@@ -7,12 +7,6 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// PanelTheme.Find only maps an id through the automatic liquid glass; the theme cards here use fixed built-in themes, so the id stands as it is.
-internal static class LiquidTheme
-{
-    public static string Look(string id) => id;
-}
-
 // Soft reads only this property. No real App startup, accounts or user settings are involved.
 public sealed partial class App : Application
 {

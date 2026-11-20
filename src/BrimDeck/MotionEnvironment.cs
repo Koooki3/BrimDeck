@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -19,15 +18,6 @@ internal static class MotionEnvironment
     // The power plan turned the display off; the session need not be locked (many turn the screen off after minutes and never
     // lock), and nothing on it can be seen.
     public static bool DisplayOff { get; private set; }
-    // Windows' "transparency effects" (Settings › Personalization › Colors). A glass theme is drawn opaque while it is off.
-    public static bool Transparency { get; private set; } = ReadTransparency();
-    // For the offscreen checks only (tests/BrimDeck.FxPreview --glass-access): transparency effects as Windows would report
-    // them, without touching the setting itself.
-    internal static void SimulateTransparency(bool on)
-    {
-        if (Transparency == on) return;
-        Transparency = on; Changed?.Invoke();
-    }
     public static event Action? Changed;
     private static Dispatcher? _dispatcher;
     private static HwndSource? _power;
@@ -44,9 +34,7 @@ internal static class MotionEnvironment
         BatterySaver = _powerSaving = ReadBatterySaver();
         SystemEvents.SessionSwitch += SessionSwitch;
         SystemEvents.PowerModeChanged += PowerModeChanged;
-        SystemEvents.UserPreferenceChanged += PreferenceChanged;
         SystemParameters.StaticPropertyChanged += SystemParameterChanged;
-        Transparency = ReadTransparency();
         WatchDisplay();
     }
 
@@ -55,7 +43,6 @@ internal static class MotionEnvironment
         if (_dispatcher is null) return;
         SystemEvents.SessionSwitch -= SessionSwitch;
         SystemEvents.PowerModeChanged -= PowerModeChanged;
-        SystemEvents.UserPreferenceChanged -= PreferenceChanged;
         SystemParameters.StaticPropertyChanged -= SystemParameterChanged;
         if (_displayNotification != IntPtr.Zero) { UnregisterPowerSettingNotification(_displayNotification); _displayNotification = IntPtr.Zero; }
         if (_saverNotification != IntPtr.Zero) { UnregisterPowerSettingNotification(_saverNotification); _saverNotification = IntPtr.Zero; }
@@ -108,24 +95,6 @@ internal static class MotionEnvironment
     private static void SystemParameterChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(SystemParameters.HighContrast) or nameof(SystemParameters.ClientAreaAnimation)) _dispatcher?.BeginInvoke(() => Changed?.Invoke());
-    }
-
-    // Turning transparency effects on or off comes as a change of the general preferences, with many others.
-    private static void PreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
-    {
-        if (e.Category != UserPreferenceCategory.General) return;
-        _dispatcher?.BeginInvoke(() => { bool on = ReadTransparency(); if (on == Transparency) return; Transparency = on; Changed?.Invoke(); });
-    }
-
-    // On unless the setting says 0: Windows has it on by default and the value may be missing.
-    private static bool ReadTransparency()
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            return key?.GetValue("EnableTransparency") is not int value || value != 0;
-        }
-        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException) { return true; }
     }
 
     private static void Set(bool? locked, bool? displayOff)

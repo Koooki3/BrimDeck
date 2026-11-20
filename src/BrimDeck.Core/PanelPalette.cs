@@ -21,8 +21,8 @@ public sealed record PanelThemeAdjustment(string Key, string Before, string Afte
 }
 
 public sealed record PanelThemeEffectValues(IReadOnlyList<ThemeColor> SurfaceGradient, IReadOnlyList<ThemeColor> RimGradient, double RimWidth,
-    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, PanelGlass? Glass = null, double Pixel = 0, double Texture = 0,
-    PanelDecor? Decor = null, double Cut = 0);
+    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, double Pixel = 0, double Texture = 0, PanelDecor? Decor = null,
+    double Cut = 0, PanelGlass? Glass = null);
 
 // A theme's motifs (PanelThemeDecor, fitted); null parts are not drawn.
 public sealed record PanelDecor(PanelHorizon? Horizon, ThemeColor? Caustics, ThemeColor? Palm, PanelHud? Hud, ThemeColor? Hatch = null, ThemeColor? Tab = null, ThemeColor? Frame = null, ThemeColor? Diamond = null, ThemeColor? Cross = null)
@@ -77,9 +77,9 @@ public sealed class PanelPalette
     {
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
         WrittenColors = writtenColors; WrittenApps = writtenApps;
-        List<ThemeColor> plain = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. effects.Glass?.Extremes ?? [], .. PanelThemes.TextureStops(effects, colors, Surface)];
-        SurfaceStops = [.. plain, .. PanelThemes.DecoratedStops(effects, colors, Surface)];
-        // Dark or light by the surface itself, its gradient, the glass and its texture; the motifs drawn into it do not change which.
+        List<ThemeColor> plain = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. PanelThemes.TextureStops(effects, colors, Surface)];
+        SurfaceStops = [.. plain, .. PanelThemes.DecoratedStops(effects, colors, Surface), .. effects.Glass?.Extremes ?? []];
+        // Dark or light by the surface itself, its gradient and its texture; the motifs drawn into it do not change which.
         IsDark = plain.Average(stop => stop.Luminance) < .18;
     }
 

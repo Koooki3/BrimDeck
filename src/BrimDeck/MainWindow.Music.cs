@@ -407,7 +407,7 @@ public partial class MainWindow
                 MediaState.Stopped => Loc.T("已停止", "Stopped"), _ => Loc.T("状态未知", "Unknown state") };
             var label = $"{Loc.Label(track.Source)} · {track.Title} · {state}";
             // The menu's viewport clip would turn the row grayscale; the menu's background beneath it is opaque.
-            var row = new Grid(); RenderOptions.SetClearTypeHint(row, PanelTheme.ClearType);
+            var row = new Grid(); RenderOptions.SetClearTypeHint(row, ClearTypeHint.Enabled);
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition());
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -631,7 +631,7 @@ public partial class MainWindow
                 var lyrics = new ScrollViewer { Content = text, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                     VerticalAlignment = VerticalAlignment.Center, Height = lyricLines * c.LyricLine, CanContentScroll = false, Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible };
                 // The viewport clip would turn the lyrics grayscale; they lie over the island's opaque surface.
-                RenderOptions.SetClearTypeHint(text, PanelTheme.ClearType);
+                RenderOptions.SetClearTypeHint(text, ClearTypeHint.Enabled);
                 AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
             }
             if (lyricsArrive) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; middle.BeginAnimation(OpacityProperty, fade); }
@@ -967,7 +967,7 @@ public partial class MainWindow
             var lyrics = new ScrollViewer { Content = text, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 VerticalAlignment = VerticalAlignment.Center, Height = Math.Max(1, Math.Floor(columns.Height / c.LyricLine)) * c.LyricLine, CanContentScroll = false, Visibility = lyricsVisibility };
             // The viewport clip would turn the lyrics grayscale; they lie over the island's opaque surface.
-            RenderOptions.SetClearTypeHint(text, PanelTheme.ClearType);
+            RenderOptions.SetClearTypeHint(text, ClearTypeHint.Enabled);
             if (MeetsBars((columns.Height - lyrics.Height) / 2, lyrics.Height)) lyrics.Margin = clearOfBars;
             AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
         }

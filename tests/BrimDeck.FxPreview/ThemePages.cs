@@ -10,7 +10,7 @@ using BrimDeck.Core;
 // usage page, for before-and-after comparisons of layout and type.
 //   dotnet run -c Release --no-build --project tests/BrimDeck.FxPreview -- --theme-pages <output folder> [--scale 150] [--themes dark,light]
 // The sheets are named pages-<theme>[-night|-dusk]-<percent>.png.
-internal static partial class LiquidPages
+internal static partial class PageSheets
 {
     public static int RunThemes(string folder, double scale, HashSet<string>? only)
     {
@@ -38,7 +38,7 @@ internal static partial class LiquidPages
                     tiles.Add((label, Tile(deck, root, palette.IsDark), 0, row));
                 }
                 string name = theme.Id + (look == DaylightLook.Day ? "" : "-" + look.ToString().ToLowerInvariant());
-                LiquidPreview.Save(Sheet($"{name} at {Scale * 100:0} %", tiles), Path.Combine(folder, $"pages-{name}-{Scale * 100:0}.png"));
+                PageSheets.Save(Sheet($"{name} at {Scale * 100:0} %", tiles), Path.Combine(folder, $"pages-{name}-{Scale * 100:0}.png"));
                 Console.WriteLine($"Wrote pages-{name}-{Scale * 100:0}.png");
             }
         return 0;

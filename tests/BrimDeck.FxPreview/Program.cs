@@ -30,62 +30,46 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        // The real panel's pages over liquid glass (LiquidPages): --liquid-pages <backgrounds> <output folder>. It needs BrimDeck's own
-        // App (never run) instead of a plain Application, so it starts before one is made.
-        // [--scale <percent>] (or BRIMDECK_PAGES_SCALE) draws them at another display scale than 150 percent.
-        // The real panel's pages in every built-in theme and look (LiquidPages.RunThemes): --theme-pages <output folder> [--scale 150] [--themes ids].
-        // What each theme costs to draw (LiquidPages.RunCost): --theme-cost [--scale 150] [--rounds 120] [--themes id,id,...].
+        // The real panel's page sheets (PageSheets) need BrimDeck's own App (never run) instead of a plain Application, so they
+        // start before one is made. [--scale <percent>] (or BRIMDECK_PAGES_SCALE) draws them at another display scale than 150 percent.
+        // The real panel's pages in every built-in theme and look (PageSheets.RunThemes): --theme-pages <output folder> [--scale 150] [--themes ids].
+        // What each theme costs to draw (PageSheets.RunCost): --theme-cost [--scale 150] [--rounds 120] [--themes id,id,...].
         if (args.Length > 0 && args[0] == "--theme-cost")
         {
             int at = Array.IndexOf(args, "--themes"), rounds = Array.IndexOf(args, "--rounds");
-            return LiquidPages.RunCost(LiquidPages.ScaleFrom(args) ?? 1.5, at > 0 && at + 1 < args.Length ? args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
+            return PageSheets.RunCost(PageSheets.ScaleFrom(args) ?? 1.5, at > 0 && at + 1 < args.Length ? args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
                 rounds > 0 && rounds + 1 < args.Length ? int.Parse(args[rounds + 1], CultureInfo.InvariantCulture) : 120);
         }
         // The monitor page with the machine's power and battery, and the collapsed row's readings, in every theme (PowerPages): --power-pages <folder> [--scale 150] [--themes ids] [--sizes]
-        if (args.Length > 0 && args[0] == "--expand-jitter") return LiquidPages.RunExpandJitter(args);
-        if (args.Length > 0 && args[0] == "--smi-crash") return LiquidPages.RunSmiCrash();
-        if (args.Length > 0 && args[0] == "--power-colors") return LiquidPages.RunPowerColors();
-        if (args.Length > 1 && args[0] == "--power-open") return LiquidPages.RunPowerOpen(args[1] == "on", args.Length > 2 && args[2] == "warm");
-        if (args.Length > 1 && args[0] == "--power-first") return LiquidPages.RunPowerFirst(args[1] == "on");
-        if (args.Length > 1 && args[0] == "--power-block") return LiquidPages.RunPowerBlock(args[1]);
-        if (args.Length > 0 && args[0] == "--power-appear") return LiquidPages.RunPowerAppear();
-        if (args.Length > 0 && args[0] == "--power-memory") return LiquidPages.RunPowerMemory();
-        if (args.Length > 0 && args[0] == "--power-cost") return LiquidPages.RunPowerCost(args.Length > 1 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 60);
+        if (args.Length > 0 && args[0] == "--expand-jitter") return PageSheets.RunExpandJitter(args);
+        if (args.Length > 0 && args[0] == "--smi-crash") return PageSheets.RunSmiCrash();
+        if (args.Length > 0 && args[0] == "--power-colors") return PageSheets.RunPowerColors();
+        if (args.Length > 1 && args[0] == "--power-open") return PageSheets.RunPowerOpen(args[1] == "on", args.Length > 2 && args[2] == "warm");
+        if (args.Length > 1 && args[0] == "--power-first") return PageSheets.RunPowerFirst(args[1] == "on");
+        if (args.Length > 1 && args[0] == "--power-block") return PageSheets.RunPowerBlock(args[1]);
+        if (args.Length > 0 && args[0] == "--power-appear") return PageSheets.RunPowerAppear();
+        if (args.Length > 0 && args[0] == "--power-memory") return PageSheets.RunPowerMemory();
+        if (args.Length > 0 && args[0] == "--power-cost") return PageSheets.RunPowerCost(args.Length > 1 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 60);
         if (args.Length > 1 && args[0] == "--power-pages")
         {
-            if (LiquidPages.ScaleFrom(args) is not { } powerScale) { Console.WriteLine("FAIL: --scale wants a display scale such as 100, 125, 150"); return 1; }
+            if (PageSheets.ScaleFrom(args) is not { } powerScale) { Console.WriteLine("FAIL: --scale wants a display scale such as 100, 125, 150"); return 1; }
             int named = Array.IndexOf(args, "--themes");
-            return LiquidPages.RunPower(args[1], powerScale, named > 0 && named + 1 < args.Length ? args[named + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
+            return PageSheets.RunPower(args[1], powerScale, named > 0 && named + 1 < args.Length ? args[named + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
                 args.Contains("--sizes"), args.Contains("--en"));
         }
         // The collapsed row's readings in the real capsule at one display scale (StripFit): --strip-fit [<folder>] [--scale 150] [--fixed <width>]
         if (args.Length > 0 && args[0] == "--strip-fit")
         {
             int fixedAt = Array.IndexOf(args, "--fixed");
-            return LiquidPages.RunStripFit(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, LiquidPages.ScaleFrom(args) ?? 1.5,
+            return PageSheets.RunStripFit(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, PageSheets.ScaleFrom(args) ?? 1.5,
                 fixedAt > 0 && fixedAt + 1 < args.Length ? double.Parse(args[fixedAt + 1], CultureInfo.InvariantCulture) : null);
         }
         if (args.Length > 1 && args[0] == "--theme-pages")
         {
-            if (LiquidPages.ScaleFrom(args) is not { } themeScale) { Console.WriteLine("FAIL: --scale wants a display scale such as 100, 125, 150"); return 1; }
+            if (PageSheets.ScaleFrom(args) is not { } themeScale) { Console.WriteLine("FAIL: --scale wants a display scale such as 100, 125, 150"); return 1; }
             int listed = Array.IndexOf(args, "--themes");
-            return LiquidPages.RunThemes(args[1], themeScale, listed > 0 && listed + 1 < args.Length ? args[listed + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null);
+            return PageSheets.RunThemes(args[1], themeScale, listed > 0 && listed + 1 < args.Length ? args[listed + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null);
         }
-        if (args.Length > 2 && args[0] == "--liquid-pages")
-        {
-            if (LiquidPages.ScaleFrom(args) is not { } pagesScale) { Console.WriteLine("FAIL: --scale (or BRIMDECK_PAGES_SCALE) wants a display scale such as 100, 125, 150 or 175"); return 1; }
-            // --focus: the keyboard focus pass instead of the page sheets (LiquidPages.Focus.cs).
-            return args.Contains("--focus") ? LiquidPages.RunFocus(args[1], args[2], pagesScale) : LiquidPages.Run(args[1], args[2], pagesScale);
-        }
-        // The glass's answers to the pointer and its accessibility (GlassAccess): hover and press, the content row, transparency
-        // effects off and animations off, on the real panel offscreen: --glass-access.
-        if (args.Length > 0 && args[0] == "--glass-access") return GlassAccess.Run();
-        // The acrylic body's edge as composition draws it, on an off-screen window: --edge-probe <folder>.
-        if (args.Length > 1 && args[0] == "--edge-probe") return EdgeProbe.Run(args[1]);
-        // What the island's shadow costs while the panel opens and closes over liquid glass (ShadowCost): --shadow-cost [cycles].
-        if (args.Length > 0 && args[0] == "--shadow-cost") return ShadowCost.Run(args.Length > 1 && int.TryParse(args[1], out int cycles) ? cycles : 6);
-        // What liquid glass costs against the blur, collapsed with music, open and animating (PerfCost): --perf [seconds] [rounds] [--hidden].
-        if (args.Length > 0 && args[0] == "--perf") return PerfCost.Run(args);
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         foreach (var key in new[] { "PanelKeyboardFocus", "PanelWideKeyboardFocus", "PanelOutsetKeyboardFocus" }) app.Resources[key] = new Style();
         app.Resources["AppTextFont"] = new FontFamily("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
@@ -96,49 +80,6 @@ internal static class Program
 
         // The date range picker's strips (DatePreview): --date <output folder>.
         if (args.Length > 1 && args[0] == "--date") return DatePreview.Run(args[1]) == 0 ? 0 : 1;
-        // The liquid glass sheets (LiquidPreview): --liquid <output folder>.
-        if (args.Length > 1 && args[0] == "--liquid") return LiquidPreview.Run(args[1]);
-        // The same over top-of-screen backgrounds, for the comparison with the references: --liquid-bg <backgrounds> <output folder>.
-        if (args.Length > 2 && args[0] == "--liquid-bg") return LiquidPreview.RunBackgrounds(args[1], args[2]);
-        // The port proof (the glass as liquid-glass-web draws it): --liquid-port <backgrounds> <output folder> [--island].
-        if (args.Length > 2 && args[0] == "--liquid-port") return LiquidPreview.RunPort(args[1], args[2], !args.Contains("--island"));
-        // Every state of the glass (shapes, opening frames, pressed, hovered, the pages' sizes): --liquid-states <backgrounds> <output folder>.
-        if (args.Length > 2 && args[0] == "--liquid-states") return LiquidPreview.RunStates(args[1], args[2]);
-        // The liquid glass shaders compiled ahead into src/BrimDeck/LiquidGlass (Liquid.vs.cso, Liquid.ps.cso, Liquid.hlsl.sha256):
-        // --compile-liquid <the LiquidGlass folder>. Run it after every change to Liquid.hlsl; WindowsTests checks it was.
-        if (args.Length > 1 && args[0] == "--compile-liquid")
-        {
-            var source = File.ReadAllBytes(System.IO.Path.Combine(args[1], "Liquid.hlsl"));
-            var (vertex, pixel, zoned) = BrimDeck.LiquidGlass.LiquidRenderer.Compiled(source);
-            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.vs.cso"), vertex);
-            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.ps.cso"), pixel);
-            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.zoned.cso"), zoned);
-            File.WriteAllText(System.IO.Path.Combine(args[1], "Liquid.hlsl.sha256"), BrimDeck.LiquidGlass.LiquidRenderer.SourceHash(source) + "\n");
-            Console.WriteLine($"Compiled Liquid.hlsl: vertex {vertex.Length} bytes, pixel {pixel.Length} bytes, zoned {zoned.Length} bytes");
-            // The frost's pyramid and stats (Frost.hlsl), alike.
-            var frost = File.ReadAllBytes(System.IO.Path.Combine(args[1], "Frost.hlsl"));
-            var (down, up, band, stats) = BrimDeck.LiquidGlass.LiquidRenderer.CompiledFrost(frost);
-            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.down.cso"), down);
-            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.up.cso"), up);
-            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.band.cso"), band);
-            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.stats.cso"), stats);
-            File.WriteAllText(System.IO.Path.Combine(args[1], "Frost.hlsl.sha256"), BrimDeck.LiquidGlass.LiquidRenderer.SourceHash(frost) + "\n");
-            Console.WriteLine($"Compiled Frost.hlsl: down {down.Length} bytes, up {up.Length} bytes, band {band.Length} bytes, stats {stats.Length} bytes");
-            return 0;
-        }
-        // Only the GPU timing of a liquid glass frame: --liquid-time.
-        if (args.Length > 0 && args[0] == "--liquid-time") return LiquidPreview.TimeOnly();
-        // The frost's temporal stability over a moving page (FrostCheck): --frost-check <output folder>.
-        if (args.Length > 1 && args[0] == "--frost-check") return FrostCheck.Run(args[1]);
-        // The frost's levels' deviations (LiquidRenderer.LevelSigma): --frost-calibrate.
-        if (args.Length > 0 && args[0] == "--frost-calibrate") return FrostCheck.Calibrate();
-        // The backdrop's stats per tile, as images and tables: --frost-stats <backgrounds> <output folder>.
-        if (args.Length > 2 && args[0] == "--frost-stats") return FrostCheck.Stats(args[1], args[2]);
-        // Automatic liquid glass turning light and dark over a split background: --liquid-auto <output folder>.
-        if (args.Length > 1 && args[0] == "--liquid-auto") return LiquidPreview.RunAuto(args[1]);
-        // Automatic liquid glass's decision over video-like backdrops, in both Windows app modes, against the round-11 decision:
-        // --liquid-looks.
-        if (args.Length > 0 && args[0] == "--liquid-looks") return LiquidLooks.Run();
         // The devices page in every theme (DevicesSheet): --devices <output folder>; the devices on this PC, read only: --devices-probe.
         if (args.Length > 1 && args[0] == "--devices") return DevicesSheet.Run(args[1]);
         // A device's low battery notice in every theme (DeviceNoticeSheet): --device-notice <output folder>.

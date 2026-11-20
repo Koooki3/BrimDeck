@@ -86,13 +86,6 @@ public static partial class PanelThemes
         var baseId = NormalizeId(file.Base);
         if (baseId.Length > 0 && !IsBuiltIn(baseId)) return Loc.T($"基础主题“{file.Base}”不存在", $"The base theme \"{file.Base}\" does not exist");
         if (LayerProblem(file) is { } problem) return problem;
-        // Pixel art with glass, from the file or its base: the blur and the shadow cut would not follow the steps.
-        var baseEffects = baseId.Length > 0 && BuiltIn(baseId) is { } baseTheme ? Resolve(baseTheme).Effects : null;
-        bool glass = file.Effects?.Glass?.Tint is not null || baseEffects?.Glass is not null;
-        bool pixel = file.Effects?.Pixel is { } pixelSize ? Math.Round(Math.Clamp(double.IsFinite(pixelSize) ? pixelSize : 0, 0, 4), MidpointRounding.AwayFromZero) > 0 : baseEffects?.Pixel > 0;
-        if (glass && pixel) return Loc.T("像素（pixel）不能与玻璃（glass）同时使用", "Pixel art (pixel) cannot be combined with glass");
-        bool cut = file.Effects?.Cut is { } cutSize ? Math.Clamp(double.IsFinite(cutSize) ? cutSize : 0, 0, 16) > 0 : baseEffects?.Cut > 0;
-        if (glass && cut) return Loc.T("切角（cut）不能与玻璃（glass）同时使用", "Cut corners (cut) cannot be combined with glass");
         if (file.Night is { } night && LayerProblem(night) is { } nightProblem) return Loc.T("夜间外观：", "Night look: ") + nightProblem;
         if (file.Dusk is { } dusk && LayerProblem(dusk) is { } duskProblem) return Loc.T("黄昏外观：", "Dusk look: ") + duskProblem;
         // Dusk leads into the night, so it has nothing to lead into without one.
@@ -121,15 +114,10 @@ public static partial class PanelThemes
         }
         if (file.Swatches is { } swatches && (swatches.Count > 12 || swatches.Any(value => !ThemeColor.TryParse(value, out _))))
             return Loc.T("颜色选择器预设色最多十二个，且必须是有效颜色", "The picker swatches must be at most twelve valid colors");
-        var glass = file.Effects?.Glass;
         var decor = file.Effects?.Decor;
         var decorColors = new[] { decor?.Horizon?.Sea, decor?.Horizon?.Line, decor?.Caustics?.Color, decor?.Palm?.Color, decor?.Hud?.Color, decor?.Hatch?.Color, decor?.Tab?.Color, decor?.Frame?.Color, decor?.Diamond?.Color, decor?.Cross?.Color }.OfType<string>();
-        foreach (var value in (file.Effects?.SurfaceGradient ?? []).Concat(file.Effects?.RimGradient ?? []).Concat(new[] { glass?.Tint, glass?.Highlight }.OfType<string>()).Concat(decorColors))
+        foreach (var value in (file.Effects?.SurfaceGradient ?? []).Concat(file.Effects?.RimGradient ?? []).Concat(decorColors))
             if (!ThemeColor.TryParse(value, out _)) return Loc.T($"效果中的颜色“{value}”无效", $"The effect color \"{value}\" is invalid");
-        if (glass?.Backdrop is { } band && (band.Count != 2 || band.Any(v => !double.IsFinite(v) || v < 0 || v > 1)))
-            return Loc.T("玻璃的 backdrop 必须是 0 到 1 之间的两个数", "The glass backdrop must be two numbers from 0 to 1");
-        if (glass?.BlurOpacity is { } blurOpacity && (!double.IsFinite(blurOpacity) || blurOpacity < 0 || blurOpacity > 1))
-            return Loc.T("玻璃的 blurOpacity 必须在 0 到 1 之间", "The glass blurOpacity must be from 0 to 1");
         return file.Clock is { } clock ? ClockProblem(clock) : null;
     }
 

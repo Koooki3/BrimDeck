@@ -35,16 +35,17 @@ public partial class MainWindow
     // drawn on the frames that follow.
     private void BeginThemeFade(bool daylight)
     {
+        if (Look.GlassTurnPublishing && GlassPaletteTurning) return;
         // Pictures still fading are left to finish on their own, under the new ones.
         _themeFade = null; _materialFade = null;
-        if (!IsVisible || !Animates || LiquidTheme.SkipsFade || _preview || Island.ActualWidth < 1 || Island.ActualHeight < 1 || PresentationSource.FromVisual(Island) is null) return;
+        if (!IsVisible || !Animates || _preview || Island.ActualWidth < 1 || Island.ActualHeight < 1 || PresentationSource.FromVisual(Island) is null) return;
         if (Island.Child is not Panel content) return;
         double width = Island.ActualWidth, height = Island.ActualHeight;
         // The material: a copy of the island's own shape, dressed as it is now, without its content.
         var material = new IslandBorder
         {
             Width = width, Height = height, CornerRadius = Island.CornerRadius, ShoulderRadius = Island.ShoulderRadius, MaterialOpacity = Island.MaterialOpacity, SurfaceOpacity = Island.SurfaceOpacity,
-            // The brush's opacity too, whatever it is (a held blur glass is thinner than its color, GlassBackdrop.Held), so the copy looks exactly as the surface does.
+            // The brush's opacity too, whatever it is, so the copy looks exactly as the surface does.
             Background = new SolidColorBrush(_surface.Color) { Opacity = _surface.Opacity }, Pixel = Island.Pixel, Cut = Island.Cut
         };
         Look.Dress(material, dpiScale: VisualTreeHelper.GetDpi(Island).DpiScaleX);

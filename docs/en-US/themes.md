@@ -1,5 +1,9 @@
 # Panel theme guide
 
+Choose **Liquid Glass** for a material that adapts to the backdrop in the capsule, notch, and expanded panel. If you open the panel during a color transition, the transition runs to completion. While the panel stays open, the glass keeps adapting and the text colors stay stable. Before the first sample, text colors follow the Windows app theme.
+
+Use **Settings › Panel theme › Current theme** to adjust glass transparency. The default is 50%. Higher values let more of the backdrop show through where text contrast allows. The panel uses a solid surface in high contrast or when Windows transparency effects are off.
+
 The Notch, Capsule and Indicator, the quota notice, the expanded panel and its pop-ups are colored by a "panel theme". Choose it in **Settings › Panel theme**. There are three kinds:
 
 | Kind | Themes |
@@ -100,19 +104,10 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `rimWidth` | Rim width | 0–3 |
 | `shadowBlur` `shadowDepth` `shadowOpacity` | Blur, offset and opacity of the shadow | 0–40, 0–12, 0–1 |
 | `scanlines` | Horizontal scan lines in the primary text color at this opacity | 0–0.12 |
-| `glass` | Glass: `tint` is a translucent color laid over the desktop (its opacity strictly between 0 and 1), `edge` the light gathered along the inner edge (0–1), `highlight` its color. See "Glass" below | |
 | `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels), the panel's rounded corners become square and its text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right. Not with `glass`, also from the base theme: such a file is refused | 0, or 1–4 |
 | `cut` | Cut corners: the outline's curves become 45-degree cuts, each at most `cut` long and never more than its corner's own radius, and a notch's shoulders straight slants, as on an industrial nameplate; an outline whose four corners are as round as half its height allows (a capsule) stays a pill, and turns to cuts as the corners fall short of half the height, over 8 DIP, point by point, so a capsule opening into a panel changes shape continuously. Not with `glass` (also from the base theme): such a file is refused; with `pixel` the steps win. The panel's controls keep corners of at most 2 DIP (pill-shaped switches and pagers stay pills) | 0–16 DIP |
 | `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain. Its lightest and darkest squares are checked for contrast like gradient stops; without `pixel` it has no effect | 0–0.12 |
 | `decor` | Quiet pictures drawn into the surface under the content, each value inherited on its own (a night look that names only `sea` keeps the day's `at` and `line`): `horizon` a sea (`sea`) below `at` of the height (0.62 when not set) with a line of light (`line`, any opacity, checked like the rest) along it; `caustics` a net of soft light lines below the horizon (over the whole surface without one); `palm` a palm frond's shadow in the open panel's top-right corner, above the horizon; `hud` 45-degree cuts across the bottom-left and the top-right corner (the bottom-right on an island hanging from the screen's edge, `chamfer`) with a hexagonal tick beside each; `hatch` a strip of 45-degree hatching at the right end of the open panel's bottom edge (the print of a panel that is closed up); `frame` a hairline 4 DIP inside its sides and bottom (not the top edge), following the cuts; `diamond` and `cross` a small diamond on that line's right side and a crosshair on its left, near the foot (the marks at a panel's corner on the game's screens); `tab` a short bar of the signal color at its left end (as the marker beside a current item). Each is written as `{ "color": "#AARRGGBB" }`; they are drawn on the open panel only (fading in between 56 and 80 DIP of height) and on notices, where `tab` is a bar down the left edge. A fully transparent color turns a part off, e.g. in a night look. Text is held to its minimums over the sea (at the horizon and at its deepest), the line and the motifs | `at` 0.3–0.9, caustics alpha ≤ 0.2, palm alpha ≤ 0.12, `chamfer` 0–10 |
-
-#### Glass
-
-A glass theme's surface is a translucent tint over the desktop rather than a solid color, so the desktop shows through the island. Readability is still guaranteed: text is checked over the tint on a **black** and on a **white** desktop, so a light glass needs a fairly dense tint (about 75%). The glass carries two lights along its edge: `rimGradient`, a specular rim, and `edge`, light that fades inward from the edge as in thick glass.
-
-The glass is drawn as the opaque `surface` color instead while Windows' transparency effects are off (Settings › Personalization › Colors) or in high contrast; the "Current theme" section says so. The shadow under a glass island is drawn only outside it, so it never shows through.
-
-Where Windows can, the desktop under the glass is blurred: BrimDeck puts a window that shows only the blurred backdrop right under the island (the composition engine's host backdrop brush, which DWM blurs), cut to the island's shape. The two windows cannot change shape on the same frame, so while the island opens, closes, changes page or boots, the blur steps aside and fades back in the new shape once the island has held still for about a tenth of a second; it never shows outside the island. With transparency effects off, in high contrast, on battery saver, in a remote session or on a Windows that cannot draw it, there is no blur and the glass is clear: what lies behind shows faintly, and the readability rules hold all the same.
 
 ### Motion (motion)
 
@@ -199,10 +194,6 @@ The demo theme was made in these five steps.
 5. **Check**: look at the collapsed and expanded panel, the notice and the pop-ups, and make sure "Readability" is empty or acceptable; otherwise go back to step 3.
 
 ## The newer themes
-
-The built-in Liquid Glass theme has a transparency slider under **Settings › Panel theme › Current theme**. The default is 50. At 0 the veil is stronger. At 100 the glass is clearer and keeps its rim. The veil can strengthen over a busy backdrop to keep text legible. High contrast and turning off Windows transparency use the opaque surface.
-
-**Liquid Glass** adapts the veil over the blurred desktop and can switch text palettes as the backdrop changes. The expanded panel keeps its text palette stable while adjusting the veil. A press spreads light from the point of contact as the glass flexes. The design draws on Apple's Liquid Glass, liquid-glass-react, and the jelly press in xiaofangstudio/liquid-glass-web.
 
 **Island Holiday**: by day, warm sand (`#FFF6E8`) fading into sea foam, deep-sea text, a lagoon accent, a coral serif clock and a shoreline rim (turquoise, sky, sand). By night, a moonlit sea from navy into teal, a lantern-gold clock and a soft glow under the island. The rim breathes like a swell and its colors flow like water; a glint of sun crosses now and then by day, a rarer moonlight by night. A small wave rolls in along a hovered control; a press leaves sun glints by day (`sparkle` + `star`) and lets glowing plankton rise at night (`ember` + `firefly`).
 

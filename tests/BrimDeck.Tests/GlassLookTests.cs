@@ -27,14 +27,12 @@ internal static class GlassLookTests
         // does not pull it, where the arithmetic mean (.345) would.
         int[] histogram = [0, 70, 0, 0, 0, 0, 0, 0, 0, 30];
         double middle = GlassAppearance.RangeMean(histogram);
-        var brightStrip = new double[100];
-        Array.Fill(brightStrip, 1d, 71, 29);
-        Array.Fill(brightStrip, .15, 0, 71);
-        double trimmed = GlassAppearance.SortedRangeMean(brightStrip);
-        check("A bright strip in the acrylic sample does not change the initial light-mode glass decision",
-            Math.Abs(trimmed - (51 * .15 + 9) / 60) < 1e-9
-            && GlassAppearance.FirstLook(trimmed, appDark: false)
-            && !GlassAppearance.FirstLook(brightStrip.Average(), appDark: false));
+        var split = new double[100];
+        Array.Fill(split, 1d, 49, 51);
+        double splitMean = GlassAppearance.SortedRangeMean(split);
+        check("Automatic liquid glass keeps the Windows dark look with nearly equal black and white coverage",
+            Math.Abs(splitMean - 31d / 60) < 1e-9 && GlassAppearance.FirstLook(splitMean, appDark: true)
+            && GlassAppearance.SortedRangeMean([.5]) == .5 && double.IsNaN(GlassAppearance.SortedRangeMean([])));
         check(FormattableString.Invariant($"Automatic liquid glass measures the mean of the middle of the backdrop's brightness ({middle:0.000})"),
             Math.Abs(middle - (.5 * .15 + .1 * .95) / .6) < 1e-9 && double.IsNaN(GlassAppearance.RangeMean(new int[8])) && Math.Abs(GlassAppearance.RangeMean([0, 0, 5, 0]) - .625) < 1e-9);
         check("Automatic liquid glass's first look leans toward the Windows app mode", GlassAppearance.FirstLook(.7, appDark: true) && !GlassAppearance.FirstLook(.75, appDark: true)
@@ -98,17 +96,16 @@ internal static class GlassLookTests
             check($"Automatic liquid glass holds its look over a flashing video ({(appDark ? "dark" : "light")} app mode: {turns} turns a minute; {plainTurns} without the video detected)",
                 turns == 0 && video.Video && plainTurns <= 12);
         }
-        // The acrylic route observes a changing desktop every 500 ms, slower than the renderer's video gap.
-        var acrylicVideo = new GlassAppearance(true, true, videoGap: 1000);
-        acrylicVideo.Reset(true, 0);
+        var sampled = new GlassAppearance(true, true, videoGap: 1000);
         for (long now = 0; now <= 2000; now += 500)
         {
-            acrylicVideo.Changed(.9, now);
-            acrylicVideo.Feed(.9, now);
+            sampled.Changed(.9, now);
+            sampled.Feed(.5, now);
         }
-        check("The acrylic probe recognizes consecutive video frames on its own cadence", acrylicVideo.Video && acrylicVideo.Dark);
-        acrylicVideo.Feed(.9, 3100);
-        check("The acrylic probe clears motion when adjacent frames stop changing", !acrylicVideo.Video);
+        bool movingAtProbeCadence = sampled.Video;
+        sampled.Feed(.5, 3100);
+        check("The glass detects motion at the 500 ms capture cadence and expires after a gap",
+            movingAtProbeCadence && !sampled.Video);
 
         // A video that becomes bright for good turns the look once it has stayed past the threshold for VideoEscape; the video
         // stopping ends the video state after VideoGap.
@@ -124,5 +121,21 @@ internal static class GlassLookTests
         bool stopped = !escape.Feed(.9, turned + GlassAppearance.VideoGap + 100) && !escape.Video;
         check($"Automatic liquid glass over a video turns only once it stayed bright for good ({after} ms), and the video state ends with the video",
             after >= GlassAppearance.VideoEscape && after <= GlassAppearance.VideoEscape + 1000 && stopped);
+
+        // A new scene is taken once its readings have agreed for JumpSpan, at the 2 Hz rest rate (two readings) as in a burst; a lone
+        // flash, or a page's 200 ms white flash read in a burst every 80 ms, only nudges the average.
+        var scene = Settled(dark: true, appDark: true, luma: .08);
+        bool sceneTurned = scene.Feed(.94, 3000) | scene.Feed(.94, 3500);
+        var burstScene = Settled(dark: true, appDark: true, luma: .08);
+        long burstTurn = -1;
+        for (long t = 3000; t <= 3800 && burstTurn < 0; t += 80) if (burstScene.Feed(.94, t)) burstTurn = t - 3000;
+        var flash = Settled(dark: true, appDark: true, luma: .08);
+        bool flashed = flash.Feed(.94, 3000) | flash.Feed(.08, 3500) | flash.Feed(.08, 4000);
+        var pageFlash = Settled(dark: true, appDark: true, luma: .08);
+        bool pageFlashed = false;
+        for (long t = 3000; t <= 4500; t += 80) pageFlashed |= pageFlash.Feed(t < 3200 ? .94 : .08, t);
+        check(FormattableString.Invariant($"Automatic liquid glass takes a new scene once its readings agree (burst: {burstTurn} ms), a lone or a 200 ms page flash does not turn it (smoothed {pageFlash.Smoothed:0.00})"),
+            sceneTurned && !scene.Dark && burstTurn >= GlassAppearance.JumpSpan && burstTurn <= GlassAppearance.JumpSpan + 160
+            && !flashed && flash.Dark && flash.Smoothed < .3 && !pageFlashed && pageFlash.Dark);
     }
 }

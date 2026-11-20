@@ -18,7 +18,7 @@ public static partial class PanelThemes
         look = Available(theme.File, look);
         var files = look switch { DaylightLook.Night => ResolvedNights, DaylightLook.Dusk => ResolvedDusks, _ => ResolvedFiles };
         if (theme.BuiltIn ? ResolvedBuiltIns.TryGetValue((theme.Id, look), out var cached) : files.TryGetValue(theme, out cached)) return cached;
-        var palette = Build(theme.Id, theme.File, look);
+        var palette = Build(theme.Id, theme.File, look, allowGlass: theme.BuiltIn && (theme.Id is GlassLight or GlassDark));
         if (theme.BuiltIn) ResolvedBuiltIns[(theme.Id, look)] = palette; else files.AddOrUpdate(theme, palette);
         return palette;
     }
@@ -33,7 +33,9 @@ public static partial class PanelThemes
     // night lays the file's night look over it, when it has one.
     public static PanelPalette Build(string id, PanelThemeFile file, bool night = false) => Build(id, file, night ? DaylightLook.Night : DaylightLook.Day);
     // The night or dusk look is laid over the day look, when the file has it.
-    public static PanelPalette Build(string id, PanelThemeFile file, DaylightLook look)
+    public static PanelPalette Build(string id, PanelThemeFile file, DaylightLook look) => Build(id, file, look, allowGlass: false);
+
+    private static PanelPalette Build(string id, PanelThemeFile file, DaylightLook look, bool allowGlass)
     {
         var colors = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var apps = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
@@ -61,8 +63,7 @@ public static partial class PanelThemes
         var surface = colors["surface"] = colors["surface"].Over(ThemeColor.Black);
         colors["tooltip"] = colors["tooltip"].Over(surface);
         colors["bubble"] = colors["bubble"].Over(surface);
-        var values = EffectValues(effects);
-        // Glass is read over the darkest and the lightest backdrop it can stand on; its surface color is what shows without it.
+        var values = EffectValues(effects) with { Glass = allowGlass ? GlassValues(file.Effects?.Glass) : null };
         List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? [], .. TextureStops(values, colors, surface), .. DecoratedStops(values, colors, surface)];
 
         var adjustments = new List<PanelThemeAdjustment>();
@@ -219,16 +220,6 @@ public static partial class PanelThemes
                 Cross = decor.Cross is { } x ? new PanelThemeMotif { Color = x.Color ?? below?.Cross?.Color } : below?.Cross
             };
         }
-        if (layer.Glass is { } glass)
-        {
-            merged.Glass ??= new PanelThemeGlass();
-            merged.Glass.Tint = glass.Tint ?? merged.Glass.Tint;
-            merged.Glass.Edge = glass.Edge ?? merged.Glass.Edge;
-            merged.Glass.Highlight = glass.Highlight ?? merged.Glass.Highlight;
-            merged.Glass.BlurOpacity = glass.BlurOpacity ?? merged.Glass.BlurOpacity;
-            merged.Glass.Backdrop = glass.Backdrop ?? merged.Glass.Backdrop;
-            merged.Glass.Saturation = glass.Saturation ?? merged.Glass.Saturation;
-        }
     }
 
     // The effects in their ranges; a gradient needs two stops and keeps at most eight.
@@ -236,32 +227,31 @@ public static partial class PanelThemes
     {
         var surfaceGradient = Stops(effects.SurfaceGradient);
         var rimGradient = Stops(effects.RimGradient);
-        // Glass needs a tint that lets some of the backdrop through, and is there: an opaque or an empty one is no glass. The pixel size is whole DIP.
-        PanelGlass? glass = effects.Glass is { Tint: { } tintText } glassFile && ThemeColor.TryParse(tintText, out var tint) && tint.A is > 0 and < 255
-            ? new PanelGlass(tint, Fit(glassFile.Edge, 0, 1, .5), glassFile.Highlight is { } light && ThemeColor.TryParse(light, out var highlight) ? highlight : ThemeColor.White)
-            : null;
-        // The held blur: a band of at least a tenth, and a tint thinner over it.
-        if (glass is not null && effects.Glass!.BlurOpacity is { } blurOpacity && double.IsFinite(blurOpacity) && blurOpacity < 1
-            && effects.Glass.Backdrop is [var low, var high] && double.IsFinite(low) && double.IsFinite(high))
-        {
-            low = Math.Clamp(low, 0, .9); high = Math.Clamp(high, low + .1, 1);
-            glass = glass with { BlurOpacity = Math.Clamp(blurOpacity, 0, 1), Low = low, High = high, Saturation = Fit(effects.Glass.Saturation, 1, 2, 1) };
-        }
         double Value(string key) { var (min, max, fallback) = EffectRange(key); return Fit(Effect(effects, key), min, max, fallback); }
         // The pixel size is whole DIP, a half rounding up as the device pixels do (PixelStairs.Step). The texture is part of
         // pixel art: without blocks there is nothing to mottle.
         double pixel = Math.Round(Value("pixel"), MidpointRounding.AwayFromZero);
-        // Pixel art and glass do not go together: the blur and the shadow cut follow the smooth outline, not the steps. A file
-        // asking for both is refused (FileProblem); one that gets both through its base chain anyway is pixel art.
-        if (pixel > 0) glass = null;
         double texture = pixel > 0 ? Value("texture") : 0;
-        // Cut corners are the island's third outline and give way to both: a stepped outline wins, and glass is refused for the
-        // same reason as pixel art (the blur and the shadow cut follow the curves).
+        // Cut corners are the island's third outline and give way to a stepped one.
         double cut = pixel > 0 ? 0 : Value("cut");
-        if (cut > 0) glass = null;
         return new(surfaceGradient.Count >= 2 ? surfaceGradient : [], rimGradient.Count >= 2 ? rimGradient : [],
             Value("rimWidth"), Value("shadowBlur"), Value("shadowDepth"), Value("shadowOpacity"), Value("scanlines"),
-            glass, pixel, texture, DecorValues(effects.Decor), cut);
+            pixel, texture, DecorValues(effects.Decor), cut);
+    }
+
+    private static PanelGlass? GlassValues(PanelThemeGlass? file)
+    {
+        PanelGlass? glass = file is { Tint: { } tintText } glassFile && ThemeColor.TryParse(tintText, out var tint) && tint.A is > 0 and < 255
+            ? new PanelGlass(tint, Fit(glassFile.Edge, 0, 1, .5), glassFile.Highlight is { } light && ThemeColor.TryParse(light, out var highlight) ? highlight : ThemeColor.White)
+            : null;
+        // The held blur: a band of at least a tenth, and a tint thinner over it.
+        if (glass is not null && file!.BlurOpacity is { } blurOpacity && double.IsFinite(blurOpacity) && blurOpacity < 1
+            && file.Backdrop is [var low, var high] && double.IsFinite(low) && double.IsFinite(high))
+        {
+            low = Math.Clamp(low, 0, .9); high = Math.Clamp(high, low + .1, 1);
+            glass = glass with { BlurOpacity = Math.Clamp(blurOpacity, 0, 1), Low = low, High = high, Saturation = Fit(file.Saturation, 1, 2, 1) };
+        }
+        return glass;
     }
 
     // The motifs in their ranges; a part without a color it can use is left out. The caustics and the palm stay faint (their

@@ -8,13 +8,13 @@ public sealed class PanelThemeFile
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     public string NameEn { get; set; } = "";
+    // A development stage shown as a badge on the theme's card in settings ("alpha", "beta"), so the name itself stays clean.
+    public string? Stage { get; set; }
     public string Description { get; set; } = "";
     public string DescriptionEn { get; set; } = "";
     public string Author { get; set; } = "";
     public string License { get; set; } = "";
     public string Homepage { get; set; } = "";
-    // A development stage shown as a badge on the theme's card in settings ("alpha", "beta"), so the name itself stays clean.
-    public string Stage { get; set; } = "";
     // A built-in theme id. Unset means "dark".
     public string Base { get; set; } = "";
     public Dictionary<string, string>? Colors { get; set; }
@@ -84,18 +84,31 @@ public sealed class PanelThemeEffects
     public double? ShadowOpacity { get; set; }
     // Horizontal scan lines over the surface, as an opacity of the primary text color.
     public double? Scanlines { get; set; }
-    // Glass: the surface is a translucent tint over the desktop behind the island (PanelThemeGlass).
-    public PanelThemeGlass? Glass { get; set; }
     // Pixel art: corners become steps of this many DIP (1 to 4), the rim a bevel and the text unsmoothed. 0 turns it off.
     public double? Pixel { get; set; }
     // A pixel theme's block texture: squares of the pixel size a little lighter or darker than the surface, at most this opacity
     // (0 to 0.12), as a stone or dirt block is mottled. Without pixel art there are no blocks to mottle, so it is ignored.
     public double? Texture { get; set; }
     // Cut corners: the outline's curves become 45-degree cuts of at most this many DIP (a corner never cuts more than its own radius),
-    // a notch's shoulders straight slants, as on an industrial nameplate. 0 keeps the curves. Not with glass or pixel art.
+    // a notch's shoulders straight slants, as on an industrial nameplate. 0 keeps the curves. Not with pixel art.
     public double? Cut { get; set; }
     // Quiet pictures drawn into the surface, under the content (PanelThemeDecor). Each value is inherited on its own.
     public PanelThemeDecor? Decor { get; set; }
+    public PanelThemeGlass? Glass { get; set; }
+}
+
+public sealed class PanelThemeGlass
+{
+    public string? Tint { get; set; }
+    public double? Edge { get; set; }
+    public string? Highlight { get; set; }
+    // Over Windows' blur the backdrop can be held to a band of brightness, so the glass can be clearer there: the blur's colors
+    // are saturated by Saturation (1 to 2) and its brightness brought into Backdrop [low, high] (0 to 1), and the tint over it
+    // keeps BlurOpacity (0 to 1) of its alpha. Text is held to its minimums over that thinner tint on that band too. Without
+    // these the blur is used as it comes, under the whole tint.
+    public double? BlurOpacity { get; set; }
+    public List<double>? Backdrop { get; set; }
+    public double? Saturation { get; set; }
 }
 
 // A theme's motifs, drawn into the surface under the content and as faint as a texture, so they never compete with it:
@@ -142,22 +155,4 @@ public sealed class PanelThemeHud
 {
     public string? Color { get; set; }
     public double? Chamfer { get; set; }
-}
-
-// The glass material (PanelGlass once fitted). Tint is the color laid over the desktop; text is held to its minimums
-// over the tint on a black and on a white backdrop alike, so the glass reads over any desktop. Edge (0 to 1) is the light the
-// glass gathers along its inner edge, as a thick lens does; Highlight the color of that light and of the rim's specular glint.
-// With Windows' transparency effects off or in high contrast the surface color is drawn instead (PanelTheme.GlassShown).
-public sealed class PanelThemeGlass
-{
-    public string? Tint { get; set; }
-    public double? Edge { get; set; }
-    public string? Highlight { get; set; }
-    // Over Windows' blur the backdrop can be held to a band of brightness, so the glass can be clearer there: the blur's colors
-    // are saturated by Saturation (1 to 2) and its brightness brought into Backdrop [low, high] (0 to 1), and the tint over it
-    // keeps BlurOpacity (0 to 1) of its alpha. Text is held to its minimums over that thinner tint on that band too. Without
-    // these the blur is used as it comes, under the whole tint.
-    public double? BlurOpacity { get; set; }
-    public List<double>? Backdrop { get; set; }
-    public double? Saturation { get; set; }
 }

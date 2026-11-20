@@ -235,7 +235,7 @@ internal sealed class MusicMarquee : FrameworkElement
             _backdrop = value;
             if (value is not { } color) return;
             _left.Color = _right.Color = Color.FromArgb(0, color.R, color.G, color.B);
-            _glyphs = new Glyphs(this); RenderOptions.SetClearTypeHint(_glyphs, PanelTheme.ClearType);
+            _glyphs = new Glyphs(this); RenderOptions.SetClearTypeHint(_glyphs, ClearTypeHint.Enabled);
             AddVisualChild(_glyphs); ClipToBounds = true;
         }
     }

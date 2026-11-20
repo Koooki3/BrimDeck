@@ -44,15 +44,22 @@ public sealed partial class SettingsWindow
         var users = PanelTheme.UserThemes;
         ThemeSection(Loc.T("基础", "Basics"));
         ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
-            .. WithGlassAuto([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)])], chosen);
+            .. WithGlassAuto(PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card).ToList())], chosen);
         ThemeSection(Loc.T("更多主题", "More themes"));
         ThemeCards([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Extension).Select(Card)], chosen);
         CustomSection(users, chosen);
         _themeDetails = Collect(() => ThemeDetails(chosen, users)); _content.Children.Add(_themeDetails);
         // Miniatures of cards no longer on the page (a theme file renamed or removed) are let go.
-        var cards = new[] { PanelThemes.SystemId, LiquidTheme.Auto }.Concat(PanelThemes.BuiltIns.Select(t => t.Id)).Concat(users.Where(t => t.Usable).Select(t => t.Id)).ToHashSet();
+        var cards = new[] { PanelThemes.SystemId, PanelThemes.GlassAuto }.Concat(PanelThemes.BuiltIns.Select(t => t.Id)).Concat(users.Where(t => t.Usable).Select(t => t.Id)).ToHashSet();
         foreach (var key in _themePreviews.Keys.Where(key => !cards.Contains(key.Card) || key.Language != Loc.Language).ToList()) _themePreviews.Remove(key);
         static (string Id, string Name, PanelThemeInfo Theme) Card(PanelThemeInfo theme) => (theme.Id, theme.DisplayName, theme);
+    }
+
+    private static List<(string Id, string Name, PanelThemeInfo Theme)> WithGlassAuto(List<(string Id, string Name, PanelThemeInfo Theme)> basics)
+    {
+        basics.RemoveAll(card => card.Id is PanelThemes.GlassLight or PanelThemes.GlassDark);
+        basics.Add((PanelThemes.GlassAuto, Loc.T("液态玻璃", "Liquid Glass"), PanelTheme.Find(PanelThemes.GlassAuto)));
+        return basics;
     }
 
     // A section title with a divider under it, as the other pages' groups start.
@@ -145,36 +152,28 @@ public sealed partial class SettingsWindow
     private void ThemeDetails(string chosen, IReadOnlyList<PanelThemeInfo> users)
     {
         bool kept = PanelTheme.KeptLastGood;
-        var theme = kept ? PanelTheme.ShownTheme : PanelTheme.Find(chosen);
-        bool missing = !kept && chosen != PanelThemes.SystemId && !LiquidTheme.IsAuto(chosen) && !PanelThemes.IsBuiltIn(chosen) && users.All(t => !t.Usable || t.Id != chosen);
+        bool automaticGlass = chosen == PanelThemes.GlassAuto;
+        var theme = kept || automaticGlass ? PanelTheme.ShownTheme : PanelTheme.Find(chosen);
+        bool missing = !kept && !automaticGlass && chosen != PanelThemes.SystemId && !PanelThemes.IsBuiltIn(chosen) && users.All(t => !t.Usable || t.Id != chosen);
         SectionTitle(Loc.T("当前主题", "Current theme"));
         var rows = new List<FrameworkElement>();
-        string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")")
-            : LiquidTheme.IsAuto(chosen) ? GlassTitle : theme.DisplayName;
-        var name = TextLine(title, TextSize.Body, TextSecondary);
-        rows.Add(Row(Loc.T("名称", "Name"), name));
-        string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.")
-            : LiquidTheme.IsAuto(chosen) ? GlassDescription : theme.DisplayDescription;
+        string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")") : theme.DisplayName;
+        if (automaticGlass) title = Loc.T("液态玻璃", "Liquid Glass");
+        rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, TextSize.Body, TextSecondary)));
+        string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
+        if (automaticGlass) description = Loc.T("随背景调整玻璃材质。展开过程中会完成已经开始的换色，展开后保持文字配色稳定。",
+            "Adapts the glass to the backdrop. A palette change already in progress completes as the panel opens, then text colors stay stable.");
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
-        if (theme.File.Night is not null) rows.AddRange(DaylightRows(theme.File));
-        GlassAutoDetails(chosen, rows);
-        if (theme.BuiltIn && PanelThemes.IsLiquid(PanelThemes.Resolve(theme)) && GlassBackdrop.AcrylicSettingsApply)
+        if (theme.BuiltIn && PanelThemes.Resolve(theme).Effects.Glass is not null)
         {
-            var clarity = SliderRow(Loc.T("玻璃透明度", "Glass transparency"), S.GlassTransparency, 0, 100, 1, "%",
-                value => Change(s => s.GlassTransparency = (int)value));
-            clarity.IsEnabled = GlassBackdrop.Available;
-            rows.Add(clarity);
-            if (clarity.IsEnabled)
-                rows.Add(Row(Loc.T("透明度说明", "About transparency"),
-                    Wrapped(Loc.T("数值越高，玻璃越清透。背景复杂时，玻璃会保留文字所需的衬底，透明度变化可能较小。",
-                        "Higher values make the glass clearer. On busy backgrounds, glass retains a veil for readable text, so the visible change may be smaller."), false)));
+            var glass = SliderRow(Loc.T("玻璃透明度", "Glass transparency"), S.GlassTransparency, 0, 100, 1, "%",
+                value => Change(settings => settings.GlassTransparency = (int)value),
+                help: Loc.T("数值越高，玻璃越清透。为保持文字清晰，某些背景上的变化可能不明显。",
+                    "Higher values make the glass clearer. The backdrop may limit the visible change to keep text readable."));
+            glass.IsEnabled = MainWindow.GlassAvailable;
+            rows.Add(glass);
         }
-        // Glass needs Windows' transparency effects; without them it is drawn opaque, and the page says why.
-        if (PanelThemes.Resolve(theme).IsGlass && (!MotionEnvironment.Transparency || SystemParameters.HighContrast))
-            rows.Add(Row(Loc.T("提示", "Note"), Wrapped(SystemParameters.HighContrast
-                ? Loc.T("高对比度下玻璃改为不透明底色显示。", "In high contrast the glass is drawn opaque.")
-                : Loc.T("Windows 的透明效果已关闭，玻璃改为不透明底色显示；在“个性化 › 颜色”中打开透明效果即可恢复。",
-                    "Windows' transparency effects are off, so the glass is drawn opaque. Turn them on in Personalization › Colors to bring it back."), false)));
+        if (theme.File.Night is not null) rows.AddRange(DaylightRows(theme.File));
         // A file that carries the chosen id (or is named after it) but cannot be used is there, with its error listed below.
         bool broken = missing && users.Any(t => !t.Usable && (PanelThemes.NormalizeId(t.File.Id) == chosen || t.Path is { } file && PanelThemes.NormalizeId(PanelThemes.FileName(file)) == chosen));
         if (missing)

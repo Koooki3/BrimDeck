@@ -11,7 +11,7 @@ using BrimDeck.Native;
 // with no power reading at all; several page sizes, and the narrowest the page and the row allow. Not a test: pictures to look at.
 //   dotnet run -c Release --no-build --project tests/BrimDeck.FxPreview -- --power-pages <output folder> [--scale 150] [--themes dark,light]
 //   [--sizes] adds the page at its smallest and largest.
-internal static partial class LiquidPages
+internal static partial class PageSheets
 {
     private sealed record PowerScene(string Label, double Width, double Height, bool Laptop, MonitorSnapshot Snapshot);
     // The collapsed row's own device reading is gone (the devices are a part of the row: DeviceStrip); the scenes keep the label.
@@ -124,7 +124,7 @@ internal static partial class LiquidPages
                     tiles.Add(("collapsed capsule: " + strips[i].Label, Tile(deck, root, palette.IsDark), i % 2, row + i / 2));
                 }
                 string name = theme.Id + (look == DaylightLook.Day ? "" : "-" + look.ToString().ToLowerInvariant());
-                LiquidPreview.Save(Sheet($"{name} — power and battery at {Scale * 100:0} %", tiles), Path.Combine(folder, $"power-{name}-{Scale * 100:0}{(english ? "-en" : "")}.png"));
+                PageSheets.Save(Sheet($"{name} — power and battery at {Scale * 100:0} %", tiles), Path.Combine(folder, $"power-{name}-{Scale * 100:0}{(english ? "-en" : "")}.png"));
                 Console.WriteLine($"Wrote power-{name}-{Scale * 100:0}{(english ? "-en" : "")}.png");
             }
         BatteryProvider.ForceBattery = null;

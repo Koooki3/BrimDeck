@@ -24,8 +24,8 @@ namespace BrimDeck;
 // one moves as well, and one that stays until handled plays the lively motion again every few seconds.
 //
 // The window lies over the island with room around it for the bubbles and the backlight, and is shown only while a notice is.
-// While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material:
-// over a glass theme with the blur of GlassBackdrop under it, as the island has it (the island's own glass is hidden with it). How
+// While it shows, the island underneath is hidden (MainWindow.SetIslandCovered) and drawn here in the same outline and material
+// (a liquid glass theme's opaque surface: the glass is the island's own, GlassSurface). How
 // the motion plays follows the notice and the theme (NoticeArrivals via NoticeLook): its strength and pace, one flash or two, the
 // light's color, and the theme's marks (a cut-corner theme's signal bar, hatching and frame) beside the words, never over them.
 // It never takes focus.
@@ -257,7 +257,6 @@ internal sealed class IslandNotice : Window
     private void Empty()
     {
         _stage.Opacity = 0;
-        _glass?.Update();
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, () => { if (_item is null && !_leaving) Hide(); });
     }
 
@@ -373,7 +372,6 @@ internal sealed class IslandNotice : Window
         _content.Clip = IslandBorder.BuildOutline(_island.Width, _island.Height, _shape.Shoulder, new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius));
         _notchGlowCore = _notchGlowWide = null;
         _words = null;
-        if (_glassFrame is { } frame) { Canvas.SetLeft(frame, _island.X); Canvas.SetTop(frame, _island.Y); frame.Width = _island.Width; frame.Height = _island.Height; }
     }
 
     // The area the icon and the words take, in the island's coordinates: what the theme's marks keep clear of (IslandDecor.Draw).
@@ -400,10 +398,9 @@ internal sealed class IslandNotice : Window
     {
         double dpi = PresentationSource.FromVisual(this) is null ? (WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen()).Scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
         _look = NoticeLook.Current(dpi);
-        _fill = null; _rim = null; _edge = null; _rest = null;
+        _fill = null; _rim = null; _rest = null;
         _decor = _look.HighContrast ? null : IslandDecor.For(PanelTheme.Current);
-        // As the island's: a pixel theme's text is not smoothed, and over glass ClearType cannot be used (the surface is a tint).
-        RenderOptions.SetClearTypeHint(_content, _look.Glass ? ClearTypeHint.Auto : ClearTypeHint.Enabled);
+        // As the island's: a pixel theme's text is not smoothed.
         if (_look.Pixel > 0) TextOptions.SetTextRenderingMode(_content, TextRenderingMode.Aliased); else _content.ClearValue(TextOptions.TextRenderingModeProperty);
         // The content is clipped to the island as it is drawn now (a pixel theme's steps, a cut theme's slants).
         if (_shape is not null && Form != IslandForm.Line) _content.Clip = Rest().Outline;
@@ -419,7 +416,6 @@ internal sealed class IslandNotice : Window
         _bloomMiddle.Effect = new BlurEffect { Radius = 4 * 3 * _k, RenderingBias = RenderingBias.Performance };
         _bloomWide.Effect = new BlurEffect { Radius = 9 * 3 * _k, RenderingBias = RenderingBias.Performance };
         Arrive();
-        Backdrop();
         _body.InvalidateVisual(); _shadow.InvalidateVisual(); _marks.InvalidateVisual();
     }
 
@@ -433,99 +429,6 @@ internal sealed class IslandNotice : Window
 
     private static NoticeWeight WeightOf(AttentionItem? item)
         => item is null ? NoticeWeight.Standard : NoticeArrivals.Weigh(item.Kind, item.Priority, item.Urgent, (item.Payload as Notice)?.Call ?? false, (item.Payload as Notice)?.Category);
-
-    // ----- Glass -----
-    //
-    // Over a glass theme the island is the theme's tint over the desktop blurred by Windows (GlassBackdrop: a window of its own just
-    // under this one, its content clipped to the island's body). While a notice covers the island the island's own glass is hidden with
-    // it (the island is not shown), so the notice makes its own, with the same shape, tint and rim, and the island's liquid glass
-    // (the system acrylic) when the theme is one. It is made when a glass notice first shows and let go when the theme is not glass; it
-    // draws nothing while this window is hidden (GlassBackdrop hides with its owner), takes no capture of the desktop (the acrylic's
-    // light probe runs only while a notice shows) and, where Windows cannot blur (battery saver, a remote session, transparency
-    // effects off, high contrast), is not shown at all: the tint stays over the bare desktop, or the opaque surface of the theme.
-    private GlassBackdrop? _glass;
-    private Border? _glassFrame;
-    // The tint's opacity over the blur and whether the island's own surface steps aside for liquid glass (GlassBackdrop.Held).
-    private double _fillOpacity = 1;
-    private Brush? _glassGrain;
-    private bool _aside;
-    private System.Windows.Media.Effects.DropShadowEffect? _halo;
-
-    private NoticeBackdrop BackdropNow()
-        => _shape is null || _look.HighContrast ? NoticeBackdrop.Opaque : NoticeBackdrops.Of(Form, _look.Glass, GlassBackdrop.Available);
-
-    private void Backdrop()
-    {
-        bool blur = BackdropNow() == NoticeBackdrop.Blur;
-        if (blur && _glass is null) MakeGlass();
-        else if (!_look.Glass && _glass is not null) DropGlass();
-        if (_glassFrame is not null) _glassFrame.Visibility = blur ? Visibility.Visible : Visibility.Collapsed;
-        if (!blur && (_aside || _fillOpacity != 1)) { _aside = false; _fillOpacity = 1; Halo(false); }
-        _glass?.Update();
-    }
-
-    private void MakeGlass()
-    {
-        _glassFrame = new Border { IsHitTestVisible = false, Background = null };
-        Canvas.SetLeft(_glassFrame, _island.X); Canvas.SetTop(_glassFrame, _island.Y); _glassFrame.Width = _island.Width; _glassFrame.Height = _island.Height;
-        _stage.Children.Insert(0, _glassFrame);
-        _glass = new GlassBackdrop(this, _glassFrame, () => (new CornerRadius(_shape.TopRadius, _shape.TopRadius, _shape.BottomRadius, _shape.BottomRadius), _shape.Shoulder, 1));
-        // The liquid glass themes' acrylic body takes the island's tint alpha, and its whole face is a content row (the words).
-        _glass.LiquidTint = () => _look.Surface.A / 255d;
-        _glass.AcrylicTransparency = () => Settings.GlassTransparency;
-        _glass.ContentArea = () => _glassFrame is { ActualWidth: > 1, ActualHeight: > 1 } frame ? new Rect(frame.RenderSize) : null;
-        _glass.Held += GlassHeld;
-    }
-
-    private void DropGlass()
-    {
-        if (_glass is null) return;
-        _glass.Held -= GlassHeld;
-        _glass.Dispose();
-        _glass = null;
-        if (_glassFrame is not null) _stage.Children.Remove(_glassFrame);
-        _glassFrame = null;
-        _aside = false; _fillOpacity = 1;
-        Halo(false);
-    }
-
-    // What the glass reported for a frame: the tint's opacity over it, and whether the island's own surface, rim and edge step aside
-    // for liquid glass (they come back with the blur).
-    private void GlassHeld(double held)
-    {
-        if (_closed || _glass is null) return;
-        bool aside = _glass.SurfaceAside;
-        double opacity = GlassBackdrop.SurfaceOpacity(aside, held, _look.Surface.A / 255d);
-        var grain = aside && GlassBackdrop.AcrylicSettingsApply
-            ? LiquidGlass.AcrylicNoise.Brush(Dpi(), GlassMaterial.GrainStrength(Settings.GlassTransparency)) : null;
-        if (aside == _aside && Math.Abs(opacity - _fillOpacity) < .002)
-        {
-            if (ReferenceEquals(grain, _glassGrain)) return;
-            _glassGrain = grain;
-            _body.InvalidateVisual();
-            return;
-        }
-        _glassGrain = grain;
-        bool turned = aside != _aside;
-        _aside = aside; _fillOpacity = opacity;
-        if (turned) Halo(aside);
-        _body.InvalidateVisual(); _parts.InvalidateVisual();
-    }
-
-    // Round 13b's: the text on liquid glass carries its own legibility, a soft halo about a pixel wide in the glass's own tint, as the
-    // island's words have it (MainWindow.GlassHalo).
-    private void Halo(bool on)
-    {
-        if (!on)
-        {
-            if (_halo is not null && ReferenceEquals(_content.Effect, _halo)) _content.ClearValue(EffectProperty);
-            return;
-        }
-        _halo ??= new System.Windows.Media.Effects.DropShadowEffect { ShadowDepth = 0, BlurRadius = 3, RenderingBias = RenderingBias.Quality };
-        _halo.Color = Color.FromRgb(_look.Surface.R, _look.Surface.G, _look.Surface.B);
-        _halo.Opacity = PanelTheme.Current.IsDark ? .45 : .7;
-        _content.Effect = _halo;
-    }
 
     // ----- Motion -----
 
@@ -615,7 +518,6 @@ internal sealed class IslandNotice : Window
 
     private (Geometry Outline, (Geometry Light, Geometry Shade)? Bevel)? _rest;
     private IslandDecor? _decor;
-    private Pen[]? _edge;
 
     // The island's body at this frame: its outline pushed out by the ripples (the notch's top edge stays against the screen).
     // Without the liquid it is the island at rest, to the pixel.
@@ -650,26 +552,9 @@ internal sealed class IslandNotice : Window
     {
         if (Form == IslandForm.Line) { DrawLine(drawing); return; }
         var body = BodyOutline();
-        // Over glass the tint is thinned by the blur under it (GlassBackdrop.Held), and gone where liquid glass draws the island.
-        if (_fillOpacity > .002)
-        {
-            if (_fillOpacity < 1) drawing.PushOpacity(_fillOpacity);
-            drawing.DrawGeometry(Fill, null, body);
-            if (_look.Gradient is { } gradient) drawing.DrawGeometry(gradient, null, body);
-            if (_fillOpacity < 1) drawing.Pop();
-        }
-        // The island's grain: liquid glass has the acrylic's noise (as the island has it), the other themes their own pattern.
-        var grain = _aside && _glassGrain is not null ? _glassGrain : _look.Pattern;
-        if (grain is not null) drawing.DrawGeometry(grain, null, body);
-        // Liquid glass draws its own rim light and edge (the island's painted ones step aside while it is shown).
-        if (_aside) return;
-        if (_look.Edge is { } edge)
-        {
-            // Glass: the light gathered along the inside of the outline; clipped to the body, the pens' outer halves go.
-            drawing.PushClip(body);
-            IslandBorder.DrawEdge(drawing, _edge ??= IslandBorder.EdgePens(edge), body);
-            drawing.Pop();
-        }
+        drawing.DrawGeometry(Fill, null, body);
+        if (_look.Gradient is { } gradient) drawing.DrawGeometry(gradient, null, body);
+        if (_look.Pattern is { } grain) drawing.DrawGeometry(grain, null, body);
         if (_look.RimWidth > 0 && Rest().Bevel is { } bevel && _look.Bevel is { } shade)
         {
             // A pixel theme's rim is its bevel: the light side in the rim's brush, the shade side in the bevel's.
@@ -687,8 +572,6 @@ internal sealed class IslandNotice : Window
             drawing.Pop();
         }
     }
-
-    private double Dpi() => PresentationSource.FromVisual(this) is null ? (WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen()).Scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
 
     // The theme's marks on the island (IslandDecor), at rest and clear of the icon and the words: a cut-corner theme's signal bar,
     // hatching and frame along the bottom edge, a HUD theme's cuts. They come and go with the content (the layer's opacity).
@@ -710,9 +593,7 @@ internal sealed class IslandNotice : Window
         using (var g = parts.Open())
             foreach (var c in _circles) Circle(g, _island.X + c.X * _k, _island.Y + c.Y * _k, c.R * _k);
         parts.Freeze();
-        if (_fillOpacity < 1) drawing.PushOpacity(_fillOpacity);
         drawing.DrawGeometry(Fill, null, parts);
-        if (_fillOpacity < 1) drawing.Pop();
     }
 
     // How bright the indicator is at this frame: two breaths, or the one of a plain notice.

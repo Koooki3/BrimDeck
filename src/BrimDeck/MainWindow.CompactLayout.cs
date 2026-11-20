@@ -141,7 +141,7 @@ public partial class MainWindow
         var view = new Canvas { Width = span, Height = row, ClipToBounds = true, VerticalAlignment = VerticalAlignment.Center, Tag = AlertRegionTag };
         Canvas.SetTop(parts, Snap((row - parts.DesiredSize.Height) / 2, dpi));
         view.Children.Add(parts);
-        RenderOptions.SetClearTypeHint(parts, PanelTheme.ClearType);
+        RenderOptions.SetClearTypeHint(parts, ClearTypeHint.Enabled);
         CompactAlert.Children.Add(view);
         double shown = AlertShown.TotalSeconds;
         var (start, end) = CompactAlertLayout.Scroll(overflow, shown);
@@ -176,7 +176,7 @@ public partial class MainWindow
         child.Width = cw; child.HorizontalAlignment = HorizontalAlignment.Left; child.VerticalAlignment = VerticalAlignment.Top;
         Canvas.SetLeft(child, Snap(left, dpi)); Canvas.SetTop(child, Snap((row - ch) / 2, dpi));
         region.ClipToBounds = left < 0 || left + cw > w + .001;
-        if (region.ClipToBounds && child is TextBlock) RenderOptions.SetClearTypeHint(child, PanelTheme.ClearType);
+        if (region.ClipToBounds && child is TextBlock) RenderOptions.SetClearTypeHint(child, ClearTypeHint.Enabled);
         region.Children.Add(child);
         return region;
     }

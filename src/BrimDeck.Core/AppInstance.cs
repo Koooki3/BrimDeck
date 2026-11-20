@@ -2,7 +2,7 @@ namespace BrimDeck.Core;
 
 // The names BrimDeck's single instance goes by: the running BrimDeck holds Mutex (the installer waits on it too) and waits on
 // Settings, which a second start sets (to open its settings) before it quits. A test harness that makes BrimDeck's App
-// (FxPreview --liquid-pages) takes a scope of its own first (ForTest): the App's names are then its process's alone, so it can
+// (FxPreview's page sheets) takes a scope of its own first (ForTest): the App's names are then its process's alone, so it can
 // neither find nor signal the user's BrimDeck, and its OnStartup starts nothing at all.
 public static class AppInstance
 {

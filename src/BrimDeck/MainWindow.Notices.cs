@@ -1042,7 +1042,7 @@ public partial class MainWindow
                 var small = new Image { Source = logo, Stretch = Stretch.Uniform, Width = 20, Height = 20 };
                 // A 128 pixel icon drawn at 20 DIPs is jagged and blurred unless WPF scales it down with its best filter.
                 RenderOptions.SetBitmapScalingMode(small, BitmapScalingMode.HighQuality);
-                var badge = new Border { Width = 24, Height = 24, CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Background = new SolidColorBrush(PanelTheme.SurfaceColor), Padding = new Thickness(2),
+                var badge = new Border { Width = 24, Height = 24, CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Background = new SolidColorBrush(PanelTheme.ColorOf("surface")), Padding = new Thickness(2),
                     HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -4, -4), Child = small };
                 plate.Children.Add(badge);
             }
