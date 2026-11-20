@@ -76,12 +76,33 @@ internal sealed class AcrylicProbe : IDisposable
     public Reading? Read(Int32Rect island, Int32Rect display, int gap, int band)
     {
         if (Interlocked.CompareExchange(ref _state, 1, 0) != 0) return null;
-        try { return ReadOnce(island, display, gap, band); }
+        try { return ReadOnce(Strips(island, display, gap, band), (island, display, gap, band)); }
         finally
         {
             Volatile.Write(ref _state, 0);
             if (_disposeAsked) Dispose();
         }
+    }
+
+    // The area itself (the part of the desktop an opening panel is about to cover, read before it does), shrunk to at most Cells a
+    // side; its Changed is 0 and its Sides NaN but the first.
+    public Reading? ReadArea(Int32Rect area, Int32Rect display)
+    {
+        if (Interlocked.CompareExchange(ref _state, 1, 0) != 0) return null;
+        try { return ReadOnce([Clip(area, display), Int32Rect.Empty, Int32Rect.Empty, Int32Rect.Empty], (area, display, -1, 0)); }
+        finally
+        {
+            Volatile.Write(ref _state, 0);
+            if (_disposeAsked) Dispose();
+        }
+    }
+
+    internal static Int32Rect Clip(Int32Rect area, Int32Rect display)
+    {
+        int left = Math.Max(area.X, display.X), top = Math.Max(area.Y, display.Y);
+        int width = Math.Min(area.X + area.Width, display.X + display.Width) - left;
+        int height = Math.Min(area.Y + area.Height, display.Y + display.Height) - top;
+        return width < 2 || height < 2 ? Int32Rect.Empty : new Int32Rect(left, top, width, height);
     }
 
     public void Dispose()
@@ -90,9 +111,9 @@ internal sealed class AcrylicProbe : IDisposable
         if (Interlocked.CompareExchange(ref _state, 2, 0) == 0) Release();
     }
 
-    private Reading? ReadOnce(Int32Rect island, Int32Rect display, int gap, int band)
+    private Reading? ReadOnce(Int32Rect[] strips, (Int32Rect Island, Int32Rect Display, int Gap, int Band) key)
     {
-        var strips = Strips(island, display, gap, band);
+        var (island, display, gap, band) = key;
         int valid = 0, count = 0, moved = 0;
         var buffers = _buffers ??= new Buffers();
         var sideSum = buffers.SideSum;

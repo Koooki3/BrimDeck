@@ -162,6 +162,27 @@ public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = Gla
         return true;
     }
 
+    // How far past the threshold the area an opening panel is about to cover must be for the look to turn with the opening.
+    public const double OpenMargin = .1;
+
+    // The panel begins to open over this measure (the area it is about to cover, read before the panel's lock holds): clearly
+    // past the threshold (by OpenMargin), the look turns with the opening at once - no candidate's span, no settled hold, the
+    // panel is a new scene of its own - and the average starts from it; otherwise nothing changes, and the lock keeps the look.
+    // Not over a video. True when the look turned (a turn under way reverses the same way).
+    public bool Open(double covered, long now)
+    {
+        if (!double.IsFinite(covered) || Video) return false;
+        if (!(Dark ? covered > ToLight + OpenMargin : covered < ToDark - OpenMargin)) return false;
+        bool reversal = InFlightAt(now);
+        HoldFor = reversal || now - _turnedAt < HoldFor + Restless ? Math.Min(HoldFor * 2, MaxHold) : Dwell;
+        if (!reversal) _flightFrom = now;
+        _log = Math.Log(Math.Max(covered, Floor));
+        _lastLog = double.NaN;
+        Dark = !Dark; _turnedAt = now; _inFlight = true;
+        _smoothPastSince = _rawPastSince = _candidateSince = -1;
+        return true;
+    }
+
     // The palette has arrived at the look decided (its text swapped): the settled hold begins.
     public void Arrived(long now)
     {

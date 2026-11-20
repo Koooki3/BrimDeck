@@ -182,6 +182,28 @@ internal static class GlassLookTests
         check($"Automatic liquid glass reverses a turn under way when the backdrop returns (turned {there - 3000} ms, reversed {reversed - 3000} ms)",
             there > 0 && reversed > there && reversed - 3350 <= 250 + 160 && reversed - there < GlassAppearance.Dwell && turnBack.Dark);
 
+        // User 11-21: a capsule decided dark over a dark tab bar opens over a white page. The area the panel will cover, read as the
+        // opening begins, turns the look light with the opening (then the panel's lock holds it), and the shown look's veil rises
+        // with the opening, never darkening again after it; the old way kept the dark look and thickened its veil to about .8.
+        var opening = Settled(dark: true, appDark: true, luma: .1);
+        bool openedLight = opening.Open(.96, 3000) && !opening.Dark;
+        bool lockedLight = TurnAt(opening, .1, 3016, 6000, held: true) < 0 && !opening.Dark;
+        double Veil(bool darkLook, (double B, double D) capsule, (double B, double D) covered, double o)
+            => GlassMaterial.LuminosityOpacity(GlassOpening.Required(GlassRecipe.LuminosityFor(darkLook, capsule.B, capsule.D),
+                GlassRecipe.LuminosityFor(darkLook, covered.B, covered.D), o), o, GlassMaterial.DefaultTransparency);
+        (double, double) tabBar = (.15, .05), whitePage = (.99, .9), darkPage = (.14, .04);
+        var lightVeil = Enumerable.Range(0, 21).Select(i => Veil(false, tabBar, whitePage, i / 20d)).ToArray();
+        double oldDark = GlassMaterial.LuminosityOpacity(GlassRecipe.LuminosityFor(true, whitePage.Item1, whitePage.Item2), 1, GlassMaterial.DefaultTransparency);
+        bool monotone = lightVeil.Zip(lightVeil.Skip(1)).All(pair => pair.Second >= pair.First - 1e-12);
+        check(FormattableString.Invariant($"Liquid glass opening over a white page turns light with the opening and its light veil rises with it ({lightVeil[0]:0.00} -> {lightVeil[^1]:0.00}; the dark look kept by the lock darkened to {oldDark:0.00})"),
+            openedLight && lockedLight && monotone);
+        // Over a dark area, or a grey one not clearly past the threshold, the dark look stays, its veil as monotone.
+        var staying = Settled(dark: true, appDark: true, luma: .1);
+        bool keptDark = !staying.Open(.12, 3000) && !staying.Open(.78, 3016) && staying.Dark;
+        var darkVeil = Enumerable.Range(0, 21).Select(i => Veil(true, tabBar, darkPage, i / 20d)).ToArray();
+        check(FormattableString.Invariant($"Liquid glass opening over a dark area keeps the dark look, its veil monotone ({darkVeil[0]:0.00} -> {darkVeil[^1]:0.00})"),
+            keptDark && darkVeil.Zip(darkVeil.Skip(1)).All(pair => pair.Second >= pair.First - 1e-12) && GlassOpening.Required(.3, double.NaN, .5) == .3 && GlassOpening.Required(.3, .8, .5) == .55 && GlassOpening.Required(.3, .1, 1) == .3);
+
         // Review v2 U05: readings that stopped being trustworthy (a gap, a late or misplaced reading) end a candidate; after the gap
         // the new scene must stay for the candidate's span again, from fresh readings.
         var gap = Settled(dark: true, appDark: true, luma: .1);

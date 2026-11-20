@@ -58,6 +58,10 @@ public partial class MainWindow
     private double _glassRequiredDark, _glassRequiredLight, _glassWantedDark = double.NaN, _glassWantedLight = double.NaN;
     private long _glassBurstUntil, _glassReadAt, _glassSoftBurstAt = long.MinValue / 2;
     private double _glassLastMiddle = double.NaN;
+    // The luminosity each look asks for over the area the opening panel covers (read as it began; NaN: none), reached in step with
+    // the opening shown (GlassOpening), and the openness the veils last followed.
+    private double _glassCoverDark = double.NaN, _glassCoverLight = double.NaN, _glassVeilOpenness = double.NaN;
+    private AcrylicProbe? _glassCoverProbe;
     private (double Bright, double Dark) _glassTails = (1, 0);
     private readonly record struct GlassSampleArea(nint Monitor, Rect Screen, Int32Rect Bounds, double Scale, PanelLook Look);
     private (double X, double Y) _glassLight = GlassLight.Default;
@@ -215,7 +219,12 @@ public partial class MainWindow
             _glassPalette.Reset(dark ? 0 : 1, now);
         }
         bool expanded = _expanded;
-        if (expanded != _glassWasExpanded) { _glassWasExpanded = expanded; GlassBurst(); }
+        if (expanded != _glassWasExpanded)
+        {
+            _glassWasExpanded = expanded;
+            if (expanded) ReadGlassCover();
+            GlassBurst();
+        }
         GlassTargets(now, snap: !Animates);
         var material = GlassMaterialNow(now);
         var owner = new WindowInteropHelper(this).Handle;
@@ -237,19 +246,24 @@ public partial class MainWindow
         }
     }
 
-    // Each look's veil heads for what the backdrop asks for at the opening shown now; a target that moved retargets its spring
-    // from where it is (faster when thickening). Snap: at rest on the target at once (reduced motion, a first frame).
+    // Each look's veil heads for what the backdrop asks for at the opening shown now (with the covered area's share growing with
+    // the opening, GlassOpening); a target that moved retargets its spring from where it is (faster when thickening). A veil at
+    // rest whose target moved only with the opening follows the opening shown exactly, frame by frame, instead of a spring
+    // catching up after it. Snap: at rest on the target at once (reduced motion, a first frame).
     private void GlassTargets(long now, bool snap)
     {
         int transparency = Settings.GlassTransparency;
         double openness = GlassOpenness();
-        Head(ref _glassDarkVeil, GlassMaterial.LuminosityOpacity(_glassRequiredDark, openness, transparency));
-        Head(ref _glassLightVeil, GlassMaterial.LuminosityOpacity(_glassRequiredLight, openness, transparency));
+        if (!_expanded && openness <= 0) _glassCoverDark = _glassCoverLight = double.NaN;
+        bool opening = openness != _glassVeilOpenness;
+        _glassVeilOpenness = openness;
+        Head(ref _glassDarkVeil, GlassMaterial.LuminosityOpacity(GlassOpening.Required(_glassRequiredDark, _glassCoverDark, openness), openness, transparency));
+        Head(ref _glassLightVeil, GlassMaterial.LuminosityOpacity(GlassOpening.Required(_glassRequiredLight, _glassCoverLight, openness), openness, transparency));
         if (snap) _glassPalette.Reset(_glassGoalDark ? 0 : 1, now);
 
         void Head(ref FluidSpring spring, double target)
         {
-            if (snap) { spring.Reset(target, now); return; }
+            if (snap || opening && !spring.Moving) { spring.Reset(target, now); return; }
             if (Math.Abs(spring.Target - target) < 1e-6) return;
             double current = spring.Evaluate(now).Position;
             spring.Retarget(target, now, target > current ? GlassVeilAttack : GlassVeilRelease);
@@ -461,12 +475,21 @@ public partial class MainWindow
         bool held = _expanded || _app.Decks.Any(deck => ReferenceEquals(deck.Look, Look) && (deck._expanded
             || deck._glassActive && deck.GlassOpenness() > .001));
         if (!decision.Feed(sample.MiddleMean, now, held: held)) return;
+        StartGlassTurn(decision, now);
+    }
+
+    // The decision turned (or reversed): a new epoch for the shared look; the panels that animate head their palettes for it and
+    // the leader publishes it at the readable frame; a leader that does not animate (or shows no glass) publishes it at once.
+    private void StartGlassTurn(GlassAppearance decision, long now)
+    {
+        var group = GlassGroup;
         bool dark = decision.Dark;
         long epoch = group.Begin(dark);
-        if (!Animates || _glassSurface?.Visible != true)
+        var leader = group.Leader ?? this;
+        if (!leader.Animates || leader._glassSurface?.Visible != true)
         {
-            _glassGoalDark = dark; _glassTurnEpoch = epoch;
-            if (group.TryPublish(this, epoch, dark)) PublishGlassPalette(dark, coordinated: false);
+            leader._glassGoalDark = dark; leader._glassTurnEpoch = epoch;
+            if (group.TryPublish(leader, epoch, dark)) leader.PublishGlassPalette(dark, coordinated: false);
             decision.Arrived(now);
             return;
         }
@@ -476,6 +499,47 @@ public partial class MainWindow
                 || !deck.Animates || deck._glassSurface?.Visible != true) continue;
             deck.BeginGlassPaletteTurn(dark, now, epoch);
         }
+    }
+
+    // The panel begins to open (user 11-21): read the desktop it is about to cover before it does, so the veils reach what that
+    // area asks for in step with the opening (a failed read: the worst range), and a clearly light or dark area turns the shared
+    // look with the opening, before the open panel's lock holds it. Where the area cannot be told (no larger open height known,
+    // nothing of it on the display), the opening goes on as before.
+    private async void ReadGlassCover()
+    {
+        if (!_glassActive || CurrentGlassSampleArea() is not { } area || GlassCoveredArea() is not { } covered) return;
+        var monitor = area.Screen;
+        var screen = new Int32Rect((int)monitor.X, (int)monitor.Y, (int)monitor.Width, (int)monitor.Height);
+        var probe = _glassCoverProbe ??= new AcrylicProbe();
+        var reading = await Task.Run(() => probe.ReadArea(covered, screen));
+        if (!_glassActive || !_expanded) return;
+        long now = Environment.TickCount64;
+        int transparency = Settings.GlassTransparency;
+        var (bright, dark) = reading is { } read ? (read.Bright, read.Dark) : (1d, 0d);
+        _glassCoverDark = GlassRecipe.LuminosityFor(true, bright, dark, transparency);
+        _glassCoverLight = GlassRecipe.LuminosityFor(false, bright, dark, transparency);
+        QueueGlass();
+        if (reading is not { } sample || PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) return;
+        ElectGlassLeader();
+        if (GlassGroup.Decision is { } decision && decision.Open(sample.MiddleMean, now)) StartGlassTurn(decision, now);
+    }
+
+    // The screen pixels the open panel will cover beyond the island shown now (a margin past it, as the ring keeps from its
+    // shadow): the open panel's height away from the edge, its width along it (the island's own on a side edge, where the open
+    // width is not kept), centred on the island; null when nothing of it can be told.
+    private Int32Rect? GlassCoveredArea()
+    {
+        if (Island.RenderSize is not { Width: > 1, Height: > 1 } size || PresentationSource.FromVisual(Island) is null) return null;
+        double open = _glassOpenHeight, from = size.Height + 24;
+        if (!double.IsFinite(open) || open - from < 8) return null;
+        double width = _frame.Across ? size.Width : Math.Max(size.Width, _pageWidth * _scale), left = (size.Width - width) / 2;
+        Point[] corners = [new(left, from), new(left + width, from), new(left, open), new(left + width, open)];
+        var screen = corners.Select(Island.PointToScreen).ToArray();
+        int x = (int)Math.Floor(screen.Min(p => p.X)), y = (int)Math.Floor(screen.Min(p => p.Y));
+        var rect = new Int32Rect(x, y, (int)Math.Ceiling(screen.Max(p => p.X)) - x, (int)Math.Ceiling(screen.Max(p => p.Y)) - y);
+        return WindowsHost.MonitorScreen(MonitorHandle) is { Bounds: var monitor }
+            && AcrylicProbe.Clip(rect, new Int32Rect((int)monitor.X, (int)monitor.Y, (int)monitor.Width, (int)monitor.Height)) is { IsEmpty: false } clipped
+            ? clipped : null;
     }
 
     // Heads the palette for dark or light from wherever it is now (a reversal mid-way included), for the group's epoch. The veils
@@ -549,6 +613,9 @@ public partial class MainWindow
         // A worker still reading keeps the old probe until it answers (then it is released); late answers are dropped.
         _acrylicProbe.Dispose();
         _acrylicProbe = new AcrylicProbe();
+        _glassCoverProbe?.Dispose();
+        _glassCoverProbe = null;
+        _glassCoverDark = _glassCoverLight = _glassVeilOpenness = double.NaN;
         _glassValidity = new GlassSampleValidity(Environment.TickCount64);
         _glassLastMiddle = double.NaN;
         _glassGeneration++;
