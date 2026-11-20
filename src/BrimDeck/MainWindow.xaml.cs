@@ -280,7 +280,11 @@ public partial class MainWindow : Window
     {
         if (IslandStrip() is not { } strip) return null;
         double room = 24 * (_pixelsPerDip > 0 ? _pixelsPerDip : 1);
-        return Resizing || Rect.Inflate(strip, 2 * room, 2 * room).Contains(WindowsHost.Cursor()) ? Rect.Inflate(strip, room, room) : strip;
+        // Only on a grip, while resizing or in move mode: a lens lets the mouse through its clear parts only to this app's own
+        // windows, so a wider lens would keep clicks around the island from the window it covers (TaskbarMirror).
+        var cursor = WindowsHost.Cursor();
+        bool wide = Resizing || OnGrip(cursor) || _moveArmed && Rect.Inflate(strip, 2 * room, 2 * room).Contains(cursor);
+        return wide ? Rect.Inflate(strip, room, room) : strip;
     }
 
     // What the taskbar mirror (TaskbarMirror) asks of a window of the panel it shows: the panel itself (its stage, as the window

@@ -131,6 +131,11 @@ public partial class MainWindow
         return edge;
     }
 
+    // Whether the pointer, a place on screen in physical pixels, is on a grip the layer offers now.
+    private bool OnGrip(Point screen)
+        => _grips is { Shape: not ResizeGripLayer.Form.None } grips && PresentationSource.FromVisual(Stage) is not null
+            && grips.EdgeAt(Stage.PointFromScreen(screen)) != ResizeEdges.None;
+
     private bool NearGrips(Point screen)
     {
         if (!PanelResizable || PresentationSource.FromVisual(Stage) is null) return false;
@@ -202,7 +207,8 @@ public partial class MainWindow
         bool compact = _grips.Shape == ResizeGripLayer.Form.Compact;
         var style = EffectiveStyle;
         // A double click on an end does what the settings choose (MainWindow.Move.cs).
-        if (compact && e.ClickCount >= 2 && !_resizeSettling) { GripDoubleClicked(style); return; }
+        bool second = SecondGripPress(e);
+        if (compact && second && !_resizeSettling) { GripDoubleClicked(style); return; }
         BeginResize(compact);
         _resizeSettling = false; _resizeByKey = false;
         _resizeEdge = edge; _resizeStart = WindowsHost.Cursor();
@@ -210,6 +216,23 @@ public partial class MainWindow
         _grips.Light(edge, true, SizeLabel(_resizeFrom.Width, _resizeFrom.Height));
         _grips.CaptureMouse();
     }
+
+    // Whether a press on a grip is the second of a double click. Presses handed on by the taskbar mirror (TaskbarMirror) carry no
+    // click count, so a press within the system's double-click time and distance of the previous one counts as well.
+    private long _gripPressAt = long.MinValue;
+    private Point _gripPressPoint;
+    private bool SecondGripPress(MouseButtonEventArgs e)
+    {
+        long now = Environment.TickCount64;
+        var point = WindowsHost.Cursor();
+        bool second = e.ClickCount >= 2 || now - _gripPressAt <= GetDoubleClickTime()
+            && Math.Abs(point.X - _gripPressPoint.X) <= GetSystemMetrics(36) / 2.0 && Math.Abs(point.Y - _gripPressPoint.Y) <= GetSystemMetrics(37) / 2.0; // SM_CXDOUBLECLK, SM_CYDOUBLECLK
+        // A third press starts afresh rather than counting as another double click.
+        _gripPressAt = second ? long.MinValue : now; _gripPressPoint = point;
+        return second;
+    }
+    [System.Runtime.InteropServices.DllImport("user32")] private static extern uint GetDoubleClickTime();
+    [System.Runtime.InteropServices.DllImport("user32")] private static extern int GetSystemMetrics(int index);
 
     // Starts resizing the open page or the collapsed surface, for a drag's press or the resize shortcut. A start while the same
     // form still settles picks it up where it is heading; the other form still settling is saved first. A page starts from the
