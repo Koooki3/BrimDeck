@@ -266,7 +266,7 @@ public partial class MainWindow : Window
     private Rect? OccupiedArea()
     {
         if (Settings.Occupied == WindowBehavior.Normal) return null;
-        if (Collapsed.Style == Settings.Style && !CapsuleFromLine && _pixelsPerDip > 0 && Collapsed.Surface.Width > 0 && Collapsed.Surface.Height > 0)
+        if (Collapsed.Style == Settings.Style && !IslandFromLine && _pixelsPerDip > 0 && Collapsed.Surface.Width > 0 && Collapsed.Surface.Height > 0)
         {
             var r = _frame.ToScreen(Collapsed.Surface);
             _ownArea = new Rect((MonitorBoundsDip.X + r.X) * _pixelsPerDip, (MonitorBoundsDip.Y + r.Y) * _pixelsPerDip,
@@ -551,12 +551,13 @@ public partial class MainWindow : Window
     private CollapsedShape ShapeFor(CompactStyle style)
     {
         double? wanted = Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null;
-        // The capsule the line opens into takes the line's place (MainWindow.Peek.cs).
+        // The capsule or the notch the line opens into takes the line's place (MainWindow.Peek.cs).
         if (style == CompactStyle.Capsule && CapsuleFromLine)
         {
             var placed = PeekCapsule(wanted);
             return placed with { Surface = _frame.FromScreen(placed.Surface) };
         }
+        if (style == CompactStyle.Notch && NotchFromLine) return PeekNotch(wanted);
         // The capsule keeps its place on the screen; docked with the bottom (MainWindow.Edge.cs) it is only seen from there.
         if (style == CompactStyle.Capsule && _frame.Edge != ScreenEdge.Top)
         {
@@ -817,7 +818,7 @@ public partial class MainWindow : Window
     }
 
     // The capsule while the line has opened into it (MainWindow.Peek.cs).
-    private CompactStyle EffectiveStyle => CapsuleFromLine ? CompactStyle.Capsule : RestStyle;
+    private CompactStyle EffectiveStyle => IslandFromLine && LineIsland is { } island ? island : RestStyle;
     // One animated track: where it starts and ends, as fractions of the configured duration.
     private readonly record struct Track(double Start, double End);
     // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
@@ -1096,7 +1097,7 @@ public partial class MainWindow : Window
     private void OpenAtPointer()
     {
         // The line that opens into the capsule does that first; a click on the capsule opens the panel (MainWindow.Peek.cs).
-        if (!_expanded && LineOpensCapsule && !_peek.Active) { BeginPeek(); return; }
+        if (!_expanded && LineOpensIsland && !_peek.Active) { BeginPeek(); return; }
         if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
         SetExpanded(true);
     }
@@ -1107,7 +1108,7 @@ public partial class MainWindow : Window
     private void Island_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         bool pressed = _islandPressed; _islandPressed = false;
-        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed || !Settings.ClickToExpand && !CapsuleFromLine) return;
+        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed || !Settings.ClickToExpand && !IslandFromLine) return;
         e.Handled = true;
         _hover.Stop(); _leave.Stop();
         OpenAtPointer();
@@ -1145,7 +1146,7 @@ public partial class MainWindow : Window
         // Whole 20 ms steps, so small movements far away do not reschedule the timer on every check.
         double wait = _expanded ? TrackNear : Math.Clamp(Math.Floor(Math.Sqrt(dx * dx + dy * dy) / ApproachSpeed / 20) * 20, TrackNear, TrackFar);
         // The capsule of the line is left as quickly as the open panel is.
-        if (CapsuleFromLine) wait = TrackNear;
+        if (IslandFromLine) wait = TrackNear;
         _pointerTrack.Interval = TimeSpan.FromMilliseconds(wait);
         if (_preview)
         {
@@ -1204,13 +1205,13 @@ public partial class MainWindow : Window
             _popupReturnArea = null;
             _leave.Stop(); if (_expanded || IsSuppressed) return;
             // The capsule of the line opens the panel by a click only.
-            _hover.Stop(); if (CapsuleFromLine || Settings.ClickToExpand) return;
+            _hover.Stop(); if (IslandFromLine || Settings.ClickToExpand) return;
             _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
         {
             _hover.Stop();
-            if (CapsuleFromLine && !_expanded) { StartPeekLeave(); return; }
+            if (IslandFromLine && !_expanded) { StartPeekLeave(); return; }
             if (_expanded && !_preview) WatchOutsidePress(true);
             if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) return;
             // A press outside closes the panel at once (MainWindow.OutsidePress.cs).
@@ -1224,7 +1225,7 @@ public partial class MainWindow : Window
         if (IsHotkeyPinned || Resizing) { _leave.Stop(); return; }
         if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) { _leave.Stop(); return; }
         // The pointer has been away from the capsule of the line: it turns back into the line.
-        if (CapsuleFromLine && !_expanded) { _leave.Stop(); EndPeek(); return; }
+        if (IslandFromLine && !_expanded) { _leave.Stop(); EndPeek(); return; }
         // Closing a calendar with either button must leave a path back to the results.
         // Keep checking until the cursor leaves that area; entering the island restores normal hover behavior.
         if (_popupReturnArea is { } area && area.Contains(screenPoint) && !_pressedOutside) return;

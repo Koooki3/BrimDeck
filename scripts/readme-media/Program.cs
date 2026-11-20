@@ -183,7 +183,7 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (scenes.Contains("monitor-free")) { await MonitorFree(); await SettingsPage("monitor-free-settings", 9, 1100, tips: true); }
             // The backup section of the displays and profiles page, and the export and import windows in each state; for checking.
             if (scenes.Contains("config-backup")) { await ConfigBackupScene(); await SettingsPage("backup-settings", 16, 1500); }
-            // The indicator that opens into the capsule on each edge: the line, the capsule in its place, the panel opened from it, and
+            // The indicator that opens into the capsule or the notch on each edge: the line, that style in its place, the panel opened from it, and
             // the line after the panel closes; its option on the collapsed view page. For checking, not for the README.
             if (scenes.Contains("line-capsule")) { await LineCapsule(); _settings.Style = CompactStyle.Line; await SettingsPage("line-capsule-settings", 1, 1300, tips: true); }
         }
@@ -1788,7 +1788,7 @@ internal sealed class Renderer(App app, string output, string language, string[]
         const double scale = 1;
         bool animations = _settings.Animations;
         var style = _settings.Style;
-        _settings.Animations = false; _settings.Style = CompactStyle.Line; _settings.LineOpensCapsule = true;
+        _settings.Animations = false; _settings.Style = CompactStyle.Line;
         string Place()
         {
             var shape = (CollapsedShape)Program.GetProperty(_deck, "Collapsed")!;
@@ -1796,29 +1796,31 @@ internal sealed class Renderer(App app, string output, string language, string[]
             var r = frame.ToScreen(shape.Surface);
             return $"{shape.Style} on {frame.Edge}: {r.X:0.#},{r.Y:0.#} {r.Width:0.#}x{r.Height:0.#}";
         }
+        foreach (var opens in new[] { IndicatorOpens.Capsule, IndicatorOpens.Notch })
         foreach (var edge in new[] { ScreenEdge.Top, ScreenEdge.Bottom, ScreenEdge.Left, ScreenEdge.Right })
         {
-            string name = "line-capsule-" + edge.ToString().ToLowerInvariant();
+            _settings.LineOpens = opens;
+            string name = $"line-{opens.ToString().ToLowerInvariant()}-{edge.ToString().ToLowerInvariant()}";
             _settings.LineEdge = edge; Refresh();
             await Settle(); await Settle();
-            Console.WriteLine($"{edge} line: {Place()}");
+            Console.WriteLine($"{opens} {edge} line: {Place()}");
             await Save(name + "-1-line", scale);
             // Without pointer tracking here, the line that turned back on the last edge would rest until the pointer left it.
             Program.Call(Program.Field(_deck, "_peek")!, "Reset", []);
             Program.Call(_deck, "BeginPeek", []);
             await Settle(); await Settle();
-            Console.WriteLine($"{edge} capsule: {Place()}, active {Program.GetProperty(_deck, "CapsuleFromLine")}");
+            Console.WriteLine($"{opens} {edge} capsule: {Place()}, active {Program.GetProperty(_deck, "IslandFromLine")}");
             await Save(name + "-2-capsule", scale);
             _deck.SetExpanded(true, true);
             await Settle(); await Settle();
-            Console.WriteLine($"{edge} panel: {Place()}");
+            Console.WriteLine($"{opens} {edge} panel: {Place()}");
             await Save(name + "-3-panel", scale);
             _deck.SetExpanded(false, true);
             await Settle(); await Settle(); await Settle();
-            Console.WriteLine($"{edge} closed: {Place()}, active {Program.GetProperty(_deck, "CapsuleFromLine")}");
+            Console.WriteLine($"{opens} {edge} closed: {Place()}, active {Program.GetProperty(_deck, "IslandFromLine")}");
             await Save(name + "-4-closed", scale);
         }
-        _settings.LineEdge = ScreenEdge.Top; _settings.LineOpensCapsule = false; _settings.Style = style; _settings.Animations = animations;
+        _settings.LineEdge = ScreenEdge.Top; _settings.LineOpens = IndicatorOpens.Panel; _settings.Style = style; _settings.Animations = animations;
         Refresh(); await Settle();
     }
     private void SelectPage(DeckPage page) => Program.Call(_deck, "SelectPage", [typeof(DeckPage), typeof(bool)], page, false);

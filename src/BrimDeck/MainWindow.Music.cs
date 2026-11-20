@@ -302,7 +302,7 @@ public partial class MainWindow
         _timelineHoldEnd.Interval = until - now + TimeSpan.FromMilliseconds(50); _timelineHoldEnd.Start();
     }
     // The expanded page and the compact text choose lyrics independently; either one is enough to look them up.
-    private bool CompactLyrics => (Settings.ShowsMusic(Settings.Style) || Settings.CapsuleFromIndicator && Settings.ShowsMusic(CompactStyle.Capsule)) && Settings.MusicText == CompactMusicText.Lyrics;
+    private bool CompactLyrics => (Settings.ShowsMusic(Settings.Style) || Settings.IslandFromIndicator is { } island && Settings.ShowsMusic(island)) && Settings.MusicText == CompactMusicText.Lyrics;
     private bool NeedsLyrics => Settings.MusicPage && Settings.LyricsEnabled || CompactLyrics;
     // While the song is paused the collapsed title or lyric, the cover, or both give way (DeckSettings.MusicPausedHide); the state
     // change builds the row again.

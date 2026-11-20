@@ -1,33 +1,40 @@
 using System.Text.Json;
 using BrimDeck.Core;
 
-// The indicator that opens into the capsule (DeckSettings.LineOpensCapsule): its setting, its state and where the capsule sits.
+// The indicator that opens into the capsule or the notch (DeckSettings.LineOpens): its setting, its state and where it sits.
 internal static class IndicatorCapsuleTests
 {
     internal static void Run(Action<string, bool> check)
     {
-        // The setting: off by default and in older settings, saved and read back.
-        check("The indicator opens the panel by default", !new DeckSettings().LineOpensCapsule);
-        check("Older settings without the choice open the panel", !JsonSerializer.Deserialize<DeckSettings>("""{"Style":2}""")!.LineOpensCapsule);
-        var saved = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { LineOpensCapsule = true }))!;
-        check("The choice survives a save", saved.LineOpensCapsule);
-        check("A copy keeps the choice", new DeckSettings { LineOpensCapsule = true }.Copy().LineOpensCapsule);
+        // The setting: the panel by default and in older settings, saved and read back; an unknown choice opens the panel.
+        check("The indicator opens the panel by default", new DeckSettings().LineOpens == IndicatorOpens.Panel);
+        check("Older settings without the choice open the panel", JsonSerializer.Deserialize<DeckSettings>("""{"Style":2}""")!.LineOpens == IndicatorOpens.Panel);
+        var saved = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { LineOpens = IndicatorOpens.Notch }))!;
+        check("The choice survives a save", saved.LineOpens == IndicatorOpens.Notch);
+        check("A copy keeps the choice", new DeckSettings { LineOpens = IndicatorOpens.Capsule }.Copy().LineOpens == IndicatorOpens.Capsule);
+        var unknown = new DeckSettings { LineOpens = (IndicatorOpens)9 };
+        unknown.Normalize();
+        check("An unknown choice opens the panel", unknown.LineOpens == IndicatorOpens.Panel);
 
-        // The capsule's content is read only while an indicator can open into it.
+        // The content of the style the indicator opens into is read only while an indicator can open into it.
         var notch = new DeckSettings { Style = CompactStyle.Notch, NotchSummary = false, CapsuleSummary = true, UsagePage = false, Maximized = WindowBehavior.Normal,
-            Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal, Occupied = WindowBehavior.Normal, LineOpensCapsule = true };
-        check("No indicator can show: nothing is read for the capsule", !notch.IndicatorMayShow && !notch.CapsuleFromIndicator && !notch.QuotaWanted);
+            Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal, Occupied = WindowBehavior.Normal, LineOpens = IndicatorOpens.Capsule };
+        check("No indicator can show: nothing is read for the capsule", !notch.IndicatorMayShow && notch.IslandFromIndicator is null && !notch.QuotaWanted);
         var rule = notch.Copy(); rule.Maximized = WindowBehavior.Line;
-        check("A global rule that shows the indicator reads the capsule's rings", rule.IndicatorMayShow && rule.CapsuleFromIndicator && rule.QuotaWanted);
+        check("A global rule that shows the indicator reads the capsule's rings", rule.IndicatorMayShow && rule.IslandFromIndicator == CompactStyle.Capsule && rule.QuotaWanted);
         var appRule = notch.Copy(); appRule.FullscreenRules = [new FullscreenRule("Game") { Exclusive = WindowBehavior.Line }];
         check("An app's rule that shows the indicator counts too", appRule.IndicatorMayShow && appRule.QuotaWanted);
         var line = notch.Copy(); line.Style = CompactStyle.Line;
         check("The indicator chosen as the style reads the capsule's rings", line.QuotaWanted);
-        var off = line.Copy(); off.LineOpensCapsule = false;
-        check("An indicator that opens the panel reads nothing for the capsule", !off.CapsuleFromIndicator && !off.QuotaWanted);
+        var toNotch = line.Copy(); toNotch.LineOpens = IndicatorOpens.Notch;
+        check("An indicator that opens into the notch reads the notch's rings, not the capsule's", toNotch.IslandFromIndicator == CompactStyle.Notch && !toNotch.QuotaWanted);
+        toNotch.NotchSummary = true;
+        check("The notch's rings are read for it", toNotch.QuotaWanted);
+        var off = line.Copy(); off.LineOpens = IndicatorOpens.Panel;
+        check("An indicator that opens the panel reads nothing for the capsule", off.IslandFromIndicator is null && !off.QuotaWanted);
         var music = line.Copy(); music.MusicPage = false; music.MusicIndicatorProgress = false; music.CapsuleMusic = true;
         check("The capsule's music is detected for an indicator that opens into it", music.MediaWanted);
-        music.LineOpensCapsule = false;
+        music.LineOpens = IndicatorOpens.Panel;
         check("Without the choice the indicator alone asks for no music", !music.MediaWanted);
 
         // The state: begins once, ends once, and rests until the pointer has left the line.
@@ -71,6 +78,12 @@ internal static class IndicatorCapsuleTests
         check("A capsule larger than the work area is cut to it", huge == work);
         check("No work area places nothing", IndicatorCapsule.Place(new DipRect(0, 0, 10, 4), ScreenEdge.Top, 240, 32, 5, new DipRect(0, 0, 0, 0)).Width == 0);
         check("A line with no place centres the capsule", IndicatorCapsule.Place(new DipRect(double.NaN, double.NaN, 0, 0), ScreenEdge.Top, 240, 32, 5, work).X == 840);
+
+        // Along the edge: centred on the line, kept within the span (the notch along the line's edge).
+        check("A surface is centred on the line along the edge", IndicatorCapsule.Along(960, 200, 1920) == 860);
+        check("A surface near an end stays within the span", IndicatorCapsule.Along(20, 200, 1920) == 0 && IndicatorCapsule.Along(1910, 200, 1920) == 1720);
+        check("A surface longer than the span starts at its beginning", IndicatorCapsule.Along(960, 3000, 1920) == 0);
+        check("A centre that is not a number centres the surface", IndicatorCapsule.Along(double.NaN, 200, 1920) == 860);
 
         // The area that keeps the capsule: the capsule, the line and the room between them.
         var holds = IndicatorCapsule.Holds(new DipRect(0, 400, 4, 200), left);

@@ -53,19 +53,19 @@ public sealed partial class SettingsWindow
         var enterMotion = Slide(0); enterMotion.Completed += (_, _) => { if (host.Children.Count == 1) host.ClipToBounds = false; };
         leave.BeginAnimation(TranslateTransform.XProperty, leaveMotion); enter.BeginAnimation(TranslateTransform.XProperty, enterMotion);
     }
-    // What hovering or clicking the indicator opens (DeckSettings.LineOpensCapsule): the panel, or first the capsule in its place.
+    // What hovering or clicking the indicator opens (DeckSettings.LineOpens): the panel, or first the capsule or the notch in its place.
     private FrameworkElement LineOpensRow()
     {
         var title = Loc.T("展开为", "Opens");
-        var options = new UniformGrid { Columns = 2, Width = 216 };
-        foreach (var (capsule, label) in new[] { (false, Loc.T("面板", "Panel")), (true, Loc.T("胶囊", "Capsule")) })
+        var options = new UniformGrid { Columns = 3, Width = 324 };
+        foreach (var (opens, label) in new[] { (IndicatorOpens.Panel, Loc.T("面板", "Panel")), (IndicatorOpens.Capsule, StyleName(CompactStyle.Capsule)), (IndicatorOpens.Notch, StyleName(CompactStyle.Notch)) })
         {
-            var option = new RadioButton { Content = label, Style = (Style)FindResource("SettingsSegment"), GroupName = "LineOpens", IsChecked = S.LineOpensCapsule == capsule };
-            AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.LineOpensCapsule = capsule); options.Children.Add(option);
+            var option = new RadioButton { Content = label, Style = (Style)FindResource("SettingsSegment"), GroupName = "LineOpens", IsChecked = S.LineOpens == opens };
+            AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.LineOpens = opens); options.Children.Add(option);
         }
         return Row(title, SegmentBorder(options), help: () => Loc.T(
-            "指示条先变成胶囊，点击胶囊再打开面板。胶囊的内容在“胶囊”样式中设置。",
-            "The indicator first turns into the capsule; click the capsule to open the panel. Set what the capsule shows under the Capsule style."));
+            "指示条先变成胶囊或刘海，点击后再打开面板。显示的内容在对应样式中设置。",
+            "The indicator first turns into the capsule or the notch; click it to open the panel. Set what it shows under that style."));
     }
     private void StyleOptions(CompactStyle style)
     {

@@ -1,23 +1,23 @@
 namespace BrimDeck.Core;
 
-// The indicator that opens into the capsule (DeckSettings.LineOpensCapsule): hovering the line, or clicking it with ClickToExpand,
-// turns it into the capsule in its place (IndicatorCapsule), read-only; a click on the capsule opens the panel, and leaving it
+// The indicator that opens into the capsule or the notch (DeckSettings.LineOpens): hovering the line, or clicking it with
+// ClickToExpand, turns it into that style in its place (IndicatorCapsule), read-only; a click on it opens the panel, and leaving it
 // turns it back into the line. It holds no timers; the window starts its open and close delays and tells this what happened.
 //   Line      the indicator at rest
-//   Active    the capsule shows in the indicator's place, and the panel a click on it opens
-// After the capsule ends, the pointer may still be on the line: the line rests until the pointer has left it, so that it does not
+//   Active    the capsule or the notch shows in the indicator's place, and the panel a click on it opens
+// After it ends, the pointer may still be on the line: the line rests until the pointer has left it, so that it does not
 // open again at once.
 public sealed class IndicatorPeek
 {
     public bool Active { get; private set; }
     public bool Resting { get; private set; }
-    // The pointer is on the indicator and the open delay has run out, or it was clicked: whether the capsule is to be shown.
+    // The pointer is on the indicator and the open delay has run out, or it was clicked: whether the capsule or the notch is to be shown.
     public bool Begin()
     {
         if (Active || Resting) return false;
         Active = true; return true;
     }
-    // The pointer has been away from the capsule for the close delay, or the panel opened from it has closed: back to the line,
+    // The pointer has been away from the capsule or the notch for the close delay, or the panel opened from it has closed: back to the line,
     // which rests until the pointer has left it.
     public bool End()
     {
@@ -29,11 +29,11 @@ public sealed class IndicatorPeek
     {
         if (Resting && !overIndicator) Resting = false;
     }
-    // The indicator no longer opens into the capsule (a setting, a window rule, the panels hidden).
+    // The indicator no longer opens into the capsule or the notch (a setting, a window rule, the panels hidden).
     public void Reset() { Active = false; Resting = false; }
 }
 
-// Where the capsule an indicator opens into sits. Every rectangle is in DIPs relative to the monitor's top-left corner (the
+// Where the capsule or the notch an indicator opens into sits. Every rectangle is in DIPs relative to the monitor's top-left corner (the
 // screen's frame, not the edge frame of EdgeFrame).
 public static class IndicatorCapsule
 {
@@ -46,14 +46,21 @@ public static class IndicatorCapsule
         double w = Math.Min(Size(width), work.Width), h = Math.Min(Size(height), work.Height);
         double g = double.IsFinite(gap) ? Math.Clamp(gap, 0, CollapsedHover.BridgeMaxGap) : 0;
         double cx = Finite(line.X + line.Width / 2, work.X + work.Width / 2), cy = Finite(line.Y + line.Height / 2, work.Y + work.Height / 2);
-        double Along(double centre, double size, double start, double span) => Math.Clamp(centre - size / 2, start, start + span - size);
         return edge switch
         {
-            ScreenEdge.Bottom => new(Along(cx, w, work.X, work.Width), Math.Max(work.Y, work.Bottom - g - h), w, h),
-            ScreenEdge.Left => new(Math.Min(work.X + g, work.Right - w), Along(cy, h, work.Y, work.Height), w, h),
-            ScreenEdge.Right => new(Math.Max(work.X, work.Right - g - w), Along(cy, h, work.Y, work.Height), w, h),
-            _ => new(Along(cx, w, work.X, work.Width), Math.Min(work.Y + g, work.Bottom - h), w, h)
+            ScreenEdge.Bottom => new(work.X + Along(cx - work.X, w, work.Width), Math.Max(work.Y, work.Bottom - g - h), w, h),
+            ScreenEdge.Left => new(Math.Min(work.X + g, work.Right - w), work.Y + Along(cy - work.Y, h, work.Height), w, h),
+            ScreenEdge.Right => new(Math.Max(work.X, work.Right - g - w), work.Y + Along(cy - work.Y, h, work.Height), w, h),
+            _ => new(work.X + Along(cx - work.X, w, work.Width), Math.Min(work.Y + g, work.Bottom - h), w, h)
         };
+    }
+
+    // Where a surface of this size starts along a span of this length to be centred on centre, kept within the span; a surface
+    // longer than the span starts at its beginning. Used for the notch along the line's edge too.
+    public static double Along(double centre, double size, double span)
+    {
+        double free = double.IsFinite(span) && double.IsFinite(size) ? Math.Max(0, span - size) : 0;
+        return double.IsFinite(centre) && double.IsFinite(size) ? Math.Clamp(centre - size / 2, 0, free) : free / 2;
     }
 
     // The area that keeps the capsule while the pointer is in it: the capsule and the indicator it came from, and the room between

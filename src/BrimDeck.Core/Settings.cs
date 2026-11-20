@@ -12,6 +12,8 @@ public enum ScreenEdge { Top, Bottom, Left, Right }
 // edge. Without a taskbar on that edge the two are the same line. See DeckSettings.Dock.
 public enum EdgeAnchor { Screen, Taskbar }
 public enum WindowBehavior { Normal, Line, Hide }
+// What hovering or clicking the indicator opens (DeckSettings.LineOpens): the panel, or first the capsule or the notch in its place.
+public enum IndicatorOpens { Panel, Capsule, Notch }
 // BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
 // Occupied: a window that neither is maximized nor fills the screen overlaps the place of the collapsed panel.
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen, Occupied }
@@ -412,10 +414,10 @@ public sealed class DeckSettings
     public double LineThickness { get; set; } = CollapsedLimits.LineThicknessDefault;
     public double LineTop { get; set; } = CollapsedLimits.LineTopDefault;
     public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
-    // What hovering or clicking the indicator opens (ClickToExpand decides which): the panel, or first the capsule in the indicator's
-    // place, read-only, whose click opens the panel (IndicatorPeek). The capsule shows what the capsule style is set to show, at its size.
-    // It applies to every indicator, the chosen style and the one a window rule shows.
-    public bool LineOpensCapsule { get; set; }
+    // What hovering or clicking the indicator opens (ClickToExpand decides which): the panel, or first the capsule or the notch in the
+    // indicator's place, read-only, whose click opens the panel (IndicatorPeek). Either shows what its own style is set to show, at its
+    // size. It applies to every indicator, the chosen style and the one a window rule shows.
+    public IndicatorOpens LineOpens { get; set; }
     // The global shortcuts (HotkeyKind), all unset by default; Hotkey and SetHotkey reach them by kind.
     public string HideHotkey { get; set; } = "";
     public string ExpandHotkey { get; set; } = "";
@@ -820,18 +822,19 @@ public sealed class DeckSettings
     // progress; a window rule can turn any style into the indicator.
     [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || ShowsEqualizer(Style) || MusicIndicatorProgress
         && IndicatorMayShow
-        || CapsuleFromIndicator && (ShowsMusic(CompactStyle.Capsule) || ShowsEqualizer(CompactStyle.Capsule));
+        || IslandFromIndicator is { } island && (ShowsMusic(island) || ShowsEqualizer(island));
     // Whether the indicator may show: the chosen style, or a window rule, global or an app's, that turns the panel into it.
     [JsonIgnore] public bool IndicatorMayShow => Style == CompactStyle.Line || Maximized == WindowBehavior.Line || Borderless == WindowBehavior.Line
         || Exclusive == WindowBehavior.Line || Occupied == WindowBehavior.Line
         || FullscreenRules.Any(rule => rule.Maximized == WindowBehavior.Line || rule.Borderless == WindowBehavior.Line || rule.Exclusive == WindowBehavior.Line);
-    // Whether an indicator may open into the capsule (LineOpensCapsule), whose content is then wanted too.
-    [JsonIgnore] public bool CapsuleFromIndicator => LineOpensCapsule && IndicatorMayShow;
+    // The style an indicator may open into (LineOpens), whose content is then wanted too; null when it opens the panel or cannot show.
+    [JsonIgnore] public CompactStyle? IslandFromIndicator => !IndicatorMayShow ? null
+        : LineOpens switch { IndicatorOpens.Capsule => CompactStyle.Capsule, IndicatorOpens.Notch => CompactStyle.Notch, _ => null };
     // The switched-on applications. Their quotas are read for the AI usage page or for the rings of the chosen compact
     // style; the two are shown independently, so either one keeps the data current.
     [JsonIgnore] public IReadOnlyList<AppEntry> ConfiguredApps => Apps.Where(app => app.Enabled).Take(AppPresets.MaximumShownApps).ToList();
     [JsonIgnore] public bool ShownAppsFull => ConfiguredApps.Count >= AppPresets.MaximumShownApps;
-    [JsonIgnore] public bool QuotaWanted => UsagePage || ShowsSummary(Style) || CapsuleFromIndicator && ShowsSummary(CompactStyle.Capsule);
+    [JsonIgnore] public bool QuotaWanted => UsagePage || ShowsSummary(Style) || IslandFromIndicator is { } island && ShowsSummary(island);
     [JsonIgnore] public IReadOnlyList<AppEntry> EnabledApps => QuotaWanted ? ConfiguredApps : [];
     [JsonIgnore] public IReadOnlySet<ProviderId> RequiredProviders => EnabledApps.SelectMany(app => new[] { app.QuotaSource, app.UsageSource }).ToHashSet();
     [JsonIgnore] public IReadOnlyList<ProviderId> StatisticsProviders => EnabledApps.Select(app => app.UsageSource).Distinct().ToList();
@@ -1012,6 +1015,7 @@ public sealed class DeckSettings
         NotchOffsetX = Offset(NotchOffsetX);
         if (!Enum.IsDefined(NotchEdge)) NotchEdge = ScreenEdge.Top;
         if (!Enum.IsDefined(LineEdge)) LineEdge = ScreenEdge.Top;
+        if (!Enum.IsDefined(LineOpens)) LineOpens = IndicatorOpens.Panel;
         if (NotchAnchor is { } notchAnchor && !Enum.IsDefined(notchAnchor)) NotchAnchor = null;
         if (LineAnchor is { } lineAnchor && !Enum.IsDefined(lineAnchor)) LineAnchor = null;
         if (!Enum.IsDefined(GripDoubleClick)) GripDoubleClick = GripDoubleClick.Move;

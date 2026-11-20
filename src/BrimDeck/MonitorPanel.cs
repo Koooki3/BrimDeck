@@ -47,6 +47,10 @@ public partial class MainWindow
         // devices (UpdateDevicesDemand), not the system.
         bool heldStrip = StripNeedsSystem && (_compactStrip is not null || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !DisplayPower.Off && EffectiveStyle != CompactStyle.Line;
         bool strip = heldStrip && !_expanded && _alert is null;
+        // The line that opens into the capsule or the notch keeps the readings that style shows current, as that style does, so they
+        // show as soon as it opens (MainWindow.Peek.cs); the line that opens the panel reads none.
+        bool ahead = StripNeedsSystem && LineIsland is { } island && Settings.ShowsMonitor(island) && EffectiveStyle == CompactStyle.Line
+            && !_expanded && _alert is null && IsVisible && !IsSuppressed && !DisplayPower.Off;
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -57,7 +61,7 @@ public partial class MainWindow
         // The power is read for a page that shows its line (a page too small for it, or with the setting off, reads none of it).
         bool power = page && _monitorView?.ShowsPower == true;
         _powerPage = power;
-        _app.PresentMonitor(this, page, strip, power, heldStrip, PageDemand());
+        _app.PresentMonitor(this, page, strip || ahead, power, heldStrip || ahead, PageDemand());
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
@@ -103,7 +107,7 @@ public partial class MainWindow
             // a letter that joins or leaves changes its reading's width, and the row is built again for it.
             if (admitted) return;
             // A row still waiting for its first figures stops asking for readings once its sensors turn out to be missing.
-            if (_compactStrip is null) { UpdateMonitorDemand(); return; }
+            if (_compactStrip is null) { if (EffectiveStyle != CompactStyle.Line) UpdateMonitorDemand(); return; }
             UpdateCompactStrips(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off); return;
         }
         if (!IsMonitorPage || _monitorView is null) return;
