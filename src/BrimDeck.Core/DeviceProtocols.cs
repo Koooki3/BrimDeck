@@ -2057,14 +2057,24 @@ public static class AppleAdvert
     private static bool IsProximity(byte[] data) => data.Length >= 8 && data[0] == 0x07 && data[1] == 0x19;
     private static int? Level(int nibble) => nibble <= 10 ? nibble * 10 : null;
     // One piece, without buds or a case of its own: AirPods Max, Beats Solo, Solo Pro, Studio, Studio Pro and Flex, BeatsX, Powerbeats 3.
-    public static bool IsSingle(byte[] data) => data.Length >= 5 && ((data[3] << 8) | data[4]) is 0x0A20 or 0x1F20 or 0x0620 or 0x0C20 or 0x0920 or 0x1720 or 0x0520 or 0x1020 or 0x0320;
+    private static bool IsKnownSingle(byte[] data) => data.Length >= 5 && ((data[3] << 8) | data[4]) is 0x0A20 or 0x1F20 or 0x0620 or 0x0C20 or 0x0920 or 0x1720 or 0x0520 or 0x1020 or 0x0320;
+    // A model not in the table that carries one level only, with no case: taken for a one-piece model. Earbuds worn with the
+    // other bud gone and the case unknown look the same and show as one level, which is still their right level.
+    private static bool IsLone(byte[] data) => IsProximity(data) && Model(data) is null && Level(data[7] & 0x0F) is null
+        && (Level(data[6] & 0x0F) is null) != (Level(data[6] >> 4) is null);
+    private static bool IsSingle(byte[] data) => IsKnownSingle(data) || IsLone(data);
 
-    // A single-unit model's one level, and charging (bit 0x01); null for earbuds, another advertisement, or no reading.
+    // A single-unit model's one level, and charging; null for earbuds, another advertisement, or no reading. A known model's is
+    // byte 6's low nibble (charging bit 0x10 of byte 7); an unknown one's is whichever nibble holds it (the high one charging 0x20).
     public static BatteryRead? Single(byte[] data)
-        => IsProximity(data) && IsSingle(data) && Level(data[6] & 0x0F) is { } level ? new(level, (data[7] & 0x10) != 0, Accuracy: BatteryAccuracy.Steps) : null;
+    {
+        if (!IsProximity(data) || !IsSingle(data)) return null;
+        if (Level(data[6] & 0x0F) is { } low) return new(low, (data[7] & 0x10) != 0, Accuracy: BatteryAccuracy.Steps);
+        return IsLone(data) && Level(data[6] >> 4) is { } high ? new(high, (data[7] & 0x20) != 0, Accuracy: BatteryAccuracy.Steps) : null;
+    }
 
     // The parts' levels: left, right and the case; empty for a single-unit model (Single), null when this is not a proximity
-    // pairing advertisement. A model not in the table (Model is null) is read as earbuds.
+    // pairing advertisement. A model not in the table (Model is null) is read as earbuds, unless it carries one level only (IsLone).
     public static IReadOnlyList<PartBattery>? Parts(byte[] data)
     {
         if (!IsProximity(data)) return null;

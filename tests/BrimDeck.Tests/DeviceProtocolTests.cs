@@ -660,6 +660,14 @@ static class DeviceProtocolTests
         var unknownParts = AppleAdvert.Parts(unknown)!;
         check("AirPods: a model not in the table is read as earbuds", AppleAdvert.Model(unknown) is null && AppleAdvert.Single(unknown) is null
             && unknownParts.Count == 3 && unknownParts[0] == new PartBattery(BatteryPart.Left, 60, false) && unknownParts[2] == new PartBattery(BatteryPart.Case, 30, true));
+        // A model not in the table with one level and no case is taken for a one-piece model, whichever nibble holds the level;
+        // two levels without a case are still earbuds.
+        byte[] loneLow = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0xF7, 0x1F, 0, 0], loneHigh = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0x7F, 0x2F, 0, 0];
+        byte[] budsNoCase = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0x86, 0x0F, 0, 0];
+        check("AirPods: an unknown model with one level and no case shows one level", AppleAdvert.Parts(loneLow) is { Count: 0 }
+            && AppleAdvert.Single(loneLow) == new BatteryRead(70, true, BatteryAccuracy.Steps)
+            && AppleAdvert.Parts(loneHigh) is { Count: 0 } && AppleAdvert.Single(loneHigh) == new BatteryRead(70, true, BatteryAccuracy.Steps)
+            && AppleAdvert.Single(budsNoCase) is null && AppleAdvert.Parts(budsNoCase) is { Count: 2 });
         check("AirPods: another advertisement is none", AppleAdvert.Parts([0x10, 0x05, 0, 0, 0, 0, 0, 0]) is null && AppleAdvert.Model([0x07, 0x19, 0x01, 0x99, 0x99]) is null);
     }
 }
