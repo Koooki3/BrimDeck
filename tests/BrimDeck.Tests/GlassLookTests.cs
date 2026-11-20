@@ -58,10 +58,16 @@ internal static class GlassLookTests
         long[] at = [.. new[] { 16, 33, 100 }.Select(step => TurnAt(Settled(true, true, .1, 3000, step), .95, 3000, 6000, step) - 3000)];
         check($"Automatic liquid glass smooths the same at any frame rate ({string.Join(", ", at)} ms)", at.All(t => t > 0) && at.Max() - at.Min() <= 100);
 
-        // After a turn the look holds for the dwell.
+        // After a turn has arrived the look holds for the dwell (review v2 U06: the hold runs from the arrival, not from the
+        // decision; the turn itself is modelled as the palette's 365 ms).
         var dwell = Settled(true, true, .1);
-        long up = TurnAt(dwell, .95, 3000, 6000), down = TurnAt(dwell, .05, up + 16, up + 6000);
-        check($"Automatic liquid glass holds a look for the dwell after turning ({down - up} ms)", up > 0 && down - up >= GlassAppearance.Dwell);
+        long up = TurnAt(dwell, .95, 3000, 6000);
+        bool flying = TurnAt(dwell, .95, up + 16, up + 365) < 0 && dwell.State == GlassTurnState.InFlight;
+        dwell.Arrived(up + 365);
+        bool holding = dwell.StateAt(up + 400) == GlassTurnState.SettledHold;
+        long down = TurnAt(dwell, .05, up + 381, up + 6000);
+        check($"Automatic liquid glass holds a look for the dwell after its turn arrived ({down - up - 365} ms)",
+            up > 0 && flying && holding && down - up - 365 >= GlassAppearance.Dwell);
 
         // Held (the open panel, a press): nothing turns, and once released the look turns after Settle.
         var held = Settled(true, true, .1);
@@ -75,6 +81,11 @@ internal static class GlassLookTests
         bool before = TurnAt(prior, .6, 3000, 8000) < 0;
         prior.Prior(false);
         check("Automatic liquid glass leans the other way at once when the Windows app mode turns", before && prior.Feed(.6, 8016) && !prior.Dark && !prior.Feed(double.NaN, 8032));
+        // That waiver is for the next measure only: a flash later still waits for the candidate's span.
+        var waived = Settled(true, true, .1);
+        waived.Prior(false);
+        bool waiverUsed = !waived.Feed(.1, 3000) && !waived.Feed(.95, 3300) && waived.Smoothed > waived.ToLight && waived.Dark;
+        check("Automatic liquid glass waives the candidate's span only for the measure right after the app mode turned", waiverUsed);
 
         // A video flashing between black and white every half second for a minute, most of its pixels changing on every frame:
         // a video, over which the look holds (no turn at all), in either app mode. The same brightness without the changes (a
@@ -86,12 +97,15 @@ internal static class GlassLookTests
             // The look decided when the island was shown (BackdropLook's first look), the dwell running from there.
             video.Reset(appDark, 0); plain.Reset(appDark, 0);
             int turns = 0, plainTurns = 0;
+            // Each turn's palette arrives 365 ms after it began (review v2 U06: the settled hold runs from there).
+            long plainArrives = -1;
             for (long now = 0; now < 60_000; now += 33)
             {
                 double luma = now / 500 % 2 == 0 ? .05 : .95;
                 video.Changed(.9, now);
                 if (video.Feed(luma, now)) turns++;
-                if (plain.Feed(luma, now)) plainTurns++;
+                if (plainArrives >= 0 && now >= plainArrives) { plain.Arrived(plainArrives); plainArrives = -1; }
+                if (plain.Feed(luma, now)) { plainTurns++; plainArrives = now + 365; }
             }
             check($"Automatic liquid glass holds its look over a flashing video ({(appDark ? "dark" : "light")} app mode: {turns} turns a minute; {plainTurns} without the video detected)",
                 turns == 0 && video.Video && plainTurns <= 12);
@@ -137,5 +151,68 @@ internal static class GlassLookTests
         check(FormattableString.Invariant($"Automatic liquid glass takes a new scene once its readings agree (burst: {burstTurn} ms), a lone or a 200 ms page flash does not turn it (smoothed {pageFlash.Smoothed:0.00})"),
             sceneTurned && !scene.Dark && burstTurn >= GlassAppearance.JumpSpan && burstTurn <= GlassAppearance.JumpSpan + 160
             && !flashed && flash.Dark && flash.Smoothed < .3 && !pageFlashed && pageFlash.Dark);
+
+        // Review v2 U06: one bright reading after a grey backdrop moves the average past the threshold at once (.65 then 1.0 80 ms
+        // later averages about .75, above .72); the look must still wait for the candidate's span, not turn at 80 ms.
+        var early = Settled(dark: true, appDark: true, luma: .65);
+        bool earlyTurn = early.Feed(1, 3064);
+        long earlyAt = -1;
+        for (long t = 3144; t <= 4000 && earlyAt < 0; t += 80) if (early.Feed(1, t)) earlyAt = t - 3064;
+        check(FormattableString.Invariant($"Automatic liquid glass waits for the candidate's span before turning, not only for the average (smoothed {early.Smoothed:0.000}, turned after {earlyAt} ms)"),
+            !earlyTurn && earlyAt >= 250 && earlyAt <= 250 + 80);
+
+        // Review v2 G07: A→B→A, the backdrop back after 80/160/250 ms (readings every 80 ms): the candidate never matured, nothing turns.
+        // After 350 ms it turned; the backdrop back while the turn is still under way reverses it once the reversal is a candidate
+        // for its span, without waiting for the settled dwell (the old dwell kept a started turn for 1.75 s).
+        foreach (long back in new long[] { 80, 160, 250 })
+        {
+            var flip = Settled(dark: true, appDark: true, luma: .1);
+            bool any = false;
+            for (long t = 3000; t <= 7000; t += 80) any |= flip.Feed(t - 3000 < back ? .95 : .1, t);
+            check($"Automatic liquid glass does not turn for a backdrop that returns after {back} ms", !any && flip.Dark);
+        }
+        var turnBack = Settled(dark: true, appDark: true, luma: .1);
+        long there = -1, reversed = -1;
+        for (long t = 3000; t <= 6000 && reversed < 0; t += 80)
+        {
+            bool turnedNow = turnBack.Feed(t - 3000 < 350 ? .95 : .1, t);
+            if (turnedNow && there < 0) there = t;
+            else if (turnedNow) reversed = t;
+        }
+        check($"Automatic liquid glass reverses a turn under way when the backdrop returns (turned {there - 3000} ms, reversed {reversed - 3000} ms)",
+            there > 0 && reversed > there && reversed - 3350 <= 250 + 160 && reversed - there < GlassAppearance.Dwell && turnBack.Dark);
+
+        // User 11-21: a capsule decided dark over a dark tab bar opens over a white page. The area the panel will cover, read as the
+        // opening begins, turns the look light with the opening (then the panel's lock holds it), and the shown look's veil rises
+        // with the opening, never darkening again after it; the old way kept the dark look and thickened its veil to about .8.
+        var opening = Settled(dark: true, appDark: true, luma: .1);
+        bool openedLight = opening.Open(.96, 3000) && !opening.Dark;
+        bool lockedLight = TurnAt(opening, .1, 3016, 6000, held: true) < 0 && !opening.Dark;
+        double Veil(bool darkLook, (double B, double D) capsule, (double B, double D) covered, double o)
+            => GlassMaterial.LuminosityOpacity(GlassOpening.Required(GlassRecipe.LuminosityFor(darkLook, capsule.B, capsule.D),
+                GlassRecipe.LuminosityFor(darkLook, covered.B, covered.D), o), o, GlassMaterial.DefaultTransparency);
+        (double, double) tabBar = (.15, .05), whitePage = (.99, .9), darkPage = (.14, .04);
+        var lightVeil = Enumerable.Range(0, 21).Select(i => Veil(false, tabBar, whitePage, i / 20d)).ToArray();
+        double oldDark = GlassMaterial.LuminosityOpacity(GlassRecipe.LuminosityFor(true, whitePage.Item1, whitePage.Item2), 1, GlassMaterial.DefaultTransparency);
+        bool monotone = lightVeil.Zip(lightVeil.Skip(1)).All(pair => pair.Second >= pair.First - 1e-12);
+        check(FormattableString.Invariant($"Liquid glass opening over a white page turns light with the opening and its light veil rises with it ({lightVeil[0]:0.00} -> {lightVeil[^1]:0.00}; the dark look kept by the lock darkened to {oldDark:0.00})"),
+            openedLight && lockedLight && monotone);
+        // Over a dark area, or a grey one not clearly past the threshold, the dark look stays, its veil as monotone.
+        var staying = Settled(dark: true, appDark: true, luma: .1);
+        bool keptDark = !staying.Open(.12, 3000) && !staying.Open(.78, 3016) && staying.Dark;
+        var darkVeil = Enumerable.Range(0, 21).Select(i => Veil(true, tabBar, darkPage, i / 20d)).ToArray();
+        check(FormattableString.Invariant($"Liquid glass opening over a dark area keeps the dark look, its veil monotone ({darkVeil[0]:0.00} -> {darkVeil[^1]:0.00})"),
+            keptDark && darkVeil.Zip(darkVeil.Skip(1)).All(pair => pair.Second >= pair.First - 1e-12) && GlassOpening.Required(.3, double.NaN, .5) == .3 && GlassOpening.Required(.3, .8, .5) == .55 && GlassOpening.Required(.3, .1, 1) == .3);
+
+        // Review v2 U05: readings that stopped being trustworthy (a gap, a late or misplaced reading) end a candidate; after the gap
+        // the new scene must stay for the candidate's span again, from fresh readings.
+        var gap = Settled(dark: true, appDark: true, luma: .1);
+        bool beforeGap = gap.Feed(.95, 3000) | gap.Feed(.95, 3080);
+        gap.Invalidate();
+        bool rightAfter = gap.Feed(.95, 3400);
+        long afterGap = -1;
+        for (long t = 3480; t <= 5000 && afterGap < 0; t += 80) if (gap.Feed(.95, t)) afterGap = t;
+        check($"Automatic liquid glass starts a candidate again after untrustworthy readings (turned {afterGap - 3400} ms after the gap)",
+            !beforeGap && !rightAfter && afterGap - 3400 >= GlassAppearance.CandidateSpan);
     }
 }
