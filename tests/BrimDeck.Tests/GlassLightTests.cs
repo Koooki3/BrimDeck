@@ -26,6 +26,17 @@ internal static class GlassLightTests
             last = next;
         }
         check(FormattableString.Invariant($"Sweeping to the opposite side turns the light smoothly ({worst:0.000} rad per step at most)"), worst < .05);
+        // A light from the far side with noise in the top and bottom strips: the direction stays on the side it is shown on.
+        var shownNow = GlassLight.Direction((.35, .65, .5, .5));
+        double flips = 0;
+        for (int i = 0; i < 200; i++)
+        {
+            double noise = (i % 2 == 0 ? 1 : -1) * .01;
+            var next = GlassLight.Direction((.35, .65, .5 + noise, .5 - noise), shownNow);
+            flips = Math.Max(flips, Math.Abs(Math.IEEERemainder(Angle(next) - Angle(shownNow), 2 * Math.PI)));
+            shownNow = GlassLight.Follow(shownNow, next, 80);
+        }
+        check(FormattableString.Invariant($"A light from the far side does not swing between top and bottom on noise ({flips:0.000} rad at most)"), flips < .3);
         var followed = GlassLight.Follow(GlassLight.Default, right, 300);
         var twice = GlassLight.Follow(GlassLight.Follow(GlassLight.Default, right, 150), right, 150);
         check("The light turns by the time passed, the same in one step or two", Math.Abs(Angle(followed) - Angle(twice)) < 1e-9

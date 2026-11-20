@@ -122,12 +122,20 @@ internal static class GlassLookTests
         check($"Automatic liquid glass over a video turns only once it stayed bright for good ({after} ms), and the video state ends with the video",
             after >= GlassAppearance.VideoEscape && after <= GlassAppearance.VideoEscape + 1000 && stopped);
 
-        // A new scene is taken after two agreeing readings; a lone flash between two dark readings only nudges the average.
+        // A new scene is taken once its readings have agreed for JumpSpan, at the 2 Hz rest rate (two readings) as in a burst; a lone
+        // flash, or a page's 200 ms white flash read in a burst every 80 ms, only nudges the average.
         var scene = Settled(dark: true, appDark: true, luma: .08);
-        bool sceneTurned = scene.Feed(.94, 3000) | scene.Feed(.94, 3080);
+        bool sceneTurned = scene.Feed(.94, 3000) | scene.Feed(.94, 3500);
+        var burstScene = Settled(dark: true, appDark: true, luma: .08);
+        long burstTurn = -1;
+        for (long t = 3000; t <= 3800 && burstTurn < 0; t += 80) if (burstScene.Feed(.94, t)) burstTurn = t - 3000;
         var flash = Settled(dark: true, appDark: true, luma: .08);
-        bool flashed = flash.Feed(.94, 3000) | flash.Feed(.08, 3080) | flash.Feed(.08, 3160);
-        check(FormattableString.Invariant($"Automatic liquid glass takes a new scene after two agreeing readings, a lone flash does not turn it (smoothed {flash.Smoothed:0.00})"),
-            sceneTurned && !scene.Dark && !flashed && flash.Dark && flash.Smoothed < .3);
+        bool flashed = flash.Feed(.94, 3000) | flash.Feed(.08, 3500) | flash.Feed(.08, 4000);
+        var pageFlash = Settled(dark: true, appDark: true, luma: .08);
+        bool pageFlashed = false;
+        for (long t = 3000; t <= 4500; t += 80) pageFlashed |= pageFlash.Feed(t < 3200 ? .94 : .08, t);
+        check(FormattableString.Invariant($"Automatic liquid glass takes a new scene once its readings agree (burst: {burstTurn} ms), a lone or a 200 ms page flash does not turn it (smoothed {pageFlash.Smoothed:0.00})"),
+            sceneTurned && !scene.Dark && burstTurn >= GlassAppearance.JumpSpan && burstTurn <= GlassAppearance.JumpSpan + 160
+            && !flashed && flash.Dark && flash.Smoothed < .3 && !pageFlashed && pageFlash.Dark);
     }
 }

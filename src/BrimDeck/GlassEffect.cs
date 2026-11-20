@@ -42,6 +42,9 @@ internal static class GlassEffect
     // Used on the UI thread only, as the compositor is.
     private static CompositionEffectFactory? _graph;
     private static bool _graphRefused;
+    // Failures that may pass (the device lost while the display changed) are retried a few times before the graph is given up.
+    private const int GraphTries = 3;
+    private static int _graphFailures;
     // Whether the persistent graph can be used on this system (false once Composition refused it).
     public static bool GraphAvailable => !_graphRefused;
     // Diagnostics only: makes Graph refuse, so the stepped fallback is used.
@@ -65,15 +68,18 @@ internal static class GlassEffect
                 var opaque = Create("opaque", ColorMatrixEffect, [linear], OpaqueMatrix, straight: true);
                 _graph = compositor.CreateEffectFactory((IGraphicsEffect)opaque, [Slope, Offset]);
                 _compiled++;
+                // A graph the compositor took but cannot draw would show as clear or black glass: the fallback instead.
+                if (_graph.LoadStatus is not (CompositionEffectFactoryLoadStatus.Success or CompositionEffectFactoryLoadStatus.Pending))
+                    throw new NotSupportedException($"the glass graph did not load: {_graph.LoadStatus}");
             }
             var brush = _graph.CreateBrush();
             brush.SetSourceParameter("backdrop", compositor.CreateHostBackdropBrush());
             _brushes++;
             return brush;
         }
-        catch (Exception error) when (error is COMException or ArgumentException or InvalidOperationException or InvalidCastException)
+        catch (Exception error) when (error is COMException or ArgumentException or InvalidOperationException or InvalidCastException or NotSupportedException)
         {
-            _graphRefused = true;
+            if (error is ArgumentException or InvalidCastException or NotSupportedException || ++_graphFailures >= GraphTries) _graphRefused = true;
             _graph?.Dispose();
             _graph = null;
             return null;

@@ -28,6 +28,9 @@ namespace BrimDeck;
 public partial class MainWindow
 {
     private const int GlassProbeInterval = 500, GlassBurstInterval = 80, GlassBurstMs = 700, GlassStaleMs = 1500;
+    // Soft hints (a title change, a reading that moved a lot) start a burst at most this often, and one window's title changes
+    // count once per GlassTitleGap: a player's progress, a download's percentage or a chat's unread count retitle every second.
+    private const int GlassHintGap = 2000, GlassTitleGap = 3000;
     // Stiffness (rad/s): the veil thickens within 5 % in about 180 ms and thins in about 300 ms; a palette turn about 365 ms.
     private const double GlassVeilAttack = 26, GlassVeilRelease = 16, GlassPaletteOmega = 13;
     // A turn passes through greys where neither palette's text reaches 4.5:1; while it is there the palette's spring is stiffened
@@ -46,7 +49,8 @@ public partial class MainWindow
     private FluidSpring _glassDarkVeil, _glassLightVeil, _glassPalette;
     private bool _glassMaterialReady, _glassFirstSample, _glassTurning, _glassLeads, _glassGoalDark, _glassWasExpanded, _glassHurried;
     private double _glassRequiredDark, _glassRequiredLight, _glassWantedDark = double.NaN, _glassWantedLight = double.NaN;
-    private long _glassSampledAt, _glassBurstUntil, _glassReadAt;
+    private long _glassSampledAt, _glassBurstUntil, _glassReadAt, _glassSoftBurstAt = long.MinValue / 2, _glassTitleAt = long.MinValue / 2;
+    private IntPtr _glassTitleWindow;
     private double _glassLastMiddle = double.NaN;
     private (double Bright, double Dark) _glassTails = (1, 0);
     private (GlassSampleArea Area, long Generation, long At, AcrylicProbe.Reading Reading)? _glassLatestSample;
@@ -72,7 +76,9 @@ public partial class MainWindow
 
     internal void UpdateGlassTheme()
     {
-        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) _glassAppearance = null;
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) { _glassAppearance = null; EndGlassTurn(); }
+        // The theme was applied again (Dress set the rim back to the theme's own): the optics are drawn anew.
+        _glassOptics = null;
         bool enabled = Look.Current.Effects.Glass is not null && !Look.HighContrast && GlassAvailable && !_retiring;
         if (enabled == (_glassSurface is not null)) { QueueGlass(); return; }
         if (!enabled) { CloseGlass(); return; }
@@ -91,8 +97,21 @@ public partial class MainWindow
     private void GlassTitle(IntPtr hook, uint winEvent, IntPtr window, int idObject, int idChild, uint thread, uint time)
     {
         if (idObject != 0 || idChild != 0 || _glassTitlePending || !_glassActive || window != GetForegroundWindow()) return;
+        long now = Environment.TickCount64;
+        if (window == _glassTitleWindow && now - _glassTitleAt < GlassTitleGap) return;
+        _glassTitleWindow = window; _glassTitleAt = now;
         _glassTitlePending = true;
-        Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { _glassTitlePending = false; GlassBurst(); });
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { _glassTitlePending = false; GlassBurst(soft: true); });
+    }
+
+    // A palette turn ends where the theme now is: a fixed glass chosen mid-way, or no automatic glass any more.
+    private void EndGlassTurn()
+    {
+        if (!_glassTurning) return;
+        _glassTurning = false; _glassHurried = false;
+        _glassGoalDark = Look.Current.IsDark;
+        _glassPalette.Reset(_glassGoalDark ? 0 : 1, Environment.TickCount64);
+        QueueGlass();
     }
 
     private void GlassLayout(object? sender, EventArgs e) => QueueGlass();
@@ -261,6 +280,7 @@ public partial class MainWindow
     private void GlassTurnStep(GlassSurface.Material material, long now)
     {
         if (!_glassTurning) return;
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) { EndGlassTurn(); return; }
         bool showingDark = Look.Current.IsDark, arrived = !_glassPalette.Moving;
         if (!arrived && !_glassHurried && GlassReadability.Worst(showingDark, material.DarkVeil, material.LightVeil, material.Palette,
                 _glassTails.Bright, _glassTails.Dark) < GlassReadable)
@@ -276,15 +296,32 @@ public partial class MainWindow
         if (arrived && Look.Current.IsDark == _glassGoalDark) _glassTurning = false;
     }
 
-    // A hint that the backdrop may have changed: read at once (unless a reading runs or one was just taken) and keep reading
-    // quickly for a while.
-    private void GlassBurst()
+    // A hint that the backdrop may have changed: read at once (unless a reading runs or one was taken within a burst's interval)
+    // and keep reading quickly for a while. Soft hints start a burst at most every GlassHintGap.
+    private void GlassBurst(bool soft = false)
     {
         if (_glassProbe is null) return;
         long now = Environment.TickCount64;
+        if (soft)
+        {
+            if (now - _glassSoftBurstAt < GlassHintGap) return;
+            _glassSoftBurstAt = now;
+        }
         _glassBurstUntil = now + GlassBurstMs;
         if (_glassProbe.Interval.TotalMilliseconds != GlassBurstInterval) _glassProbe.Interval = TimeSpan.FromMilliseconds(GlassBurstInterval);
-        if (_glassActive && !_glassReading && now - _glassReadAt > 30) SampleGlass(this, EventArgs.Empty);
+        if (_glassActive && !_glassReading && now - _glassReadAt >= GlassBurstInterval) SampleGlass(this, EventArgs.Empty);
+    }
+
+    // No usable reading for a while (none came, or each was for a place the panel has left, as in a long drag): keep the text safe
+    // over a backdrop we can no longer see, and let only readings that agree again thin the veil.
+    private void GlassStale(long now)
+    {
+        if (_glassFirstSample || now - _glassSampledAt <= GlassStaleMs) return;
+        int transparency = Settings.GlassTransparency;
+        _glassRequiredDark = Math.Max(_glassRequiredDark, GlassRecipe.LuminosityFor(true, .85, .15, transparency));
+        _glassRequiredLight = Math.Max(_glassRequiredLight, GlassRecipe.LuminosityFor(false, .85, .15, transparency));
+        _glassWantedDark = _glassWantedLight = double.NaN;
+        QueueGlass();
     }
 
     private GlassSampleArea? CurrentGlassSampleArea()
@@ -298,7 +335,7 @@ public partial class MainWindow
     private async void SampleGlass(object? sender, EventArgs e)
     {
         // The reading's continuation and everything it starts (the springs' frames, a turn) belong on this window's thread.
-        if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(() => SampleGlass(sender, e)); return; }
+        if (!Dispatcher.CheckAccess()) { _ = Dispatcher.BeginInvoke(() => SampleGlass(sender, e)); return; }
         if (_glassProbe is { } timer)
         {
             int interval = Environment.TickCount64 < _glassBurstUntil ? GlassBurstInterval : GlassProbeInterval;
@@ -314,27 +351,19 @@ public partial class MainWindow
         try
         {
             var reading = await Task.Run(() => probe.Read(area.Bounds, screen, (int)(24 * area.Scale), (int)(40 * area.Scale)));
-            if (!_glassActive || generation != _glassGeneration || area != CurrentGlassSampleArea()) return;
+            if (!_glassActive) return;
             long now = Environment.TickCount64;
             int transparency = Settings.GlassTransparency;
-            if (reading is not { } sample)
-            {
-                // No reading: after a while without one, keep the text safe over a backdrop we can no longer see.
-                if (!_glassFirstSample && now - _glassSampledAt > GlassStaleMs)
-                {
-                    _glassRequiredDark = Math.Max(_glassRequiredDark, GlassRecipe.LuminosityFor(true, .85, .15, transparency));
-                    _glassRequiredLight = Math.Max(_glassRequiredLight, GlassRecipe.LuminosityFor(false, .85, .15, transparency));
-                    QueueGlass();
-                }
-                return;
-            }
+            if (reading is not { } sample || generation != _glassGeneration || area != CurrentGlassSampleArea()) { GlassStale(now); return; }
             double openness = GlassOpenness();
             _glassSampledAt = now;
             _glassLatestSample = (area, generation, now, sample);
             _glassTails = (sample.BrightFor(openness), sample.DarkFor(openness));
-            if (double.IsFinite(_glassLastMiddle) && (Math.Abs(sample.MiddleMean - _glassLastMiddle) > .12 || sample.Changed > .5)) GlassBurst();
+            // A video's frames change most pixels every time and are no new scene: only the middle's brightness moving a lot hints at
+            // one, and not while the backdrop is a video.
+            if (double.IsFinite(_glassLastMiddle) && Math.Abs(sample.MiddleMean - _glassLastMiddle) > .12 && _glassAppearance?.Video != true) GlassBurst(soft: true);
             _glassLastMiddle = sample.MiddleMean;
-            _glassLight = GlassLight.Follow(_glassLight, GlassLight.Direction(sample.Sides), _glassLightAt == 0 ? 0 : now - _glassLightAt);
+            _glassLight = GlassLight.Follow(_glassLight, GlassLight.Direction(sample.Sides, _glassLight), _glassLightAt == 0 ? 0 : now - _glassLightAt);
             _glassLightAt = now;
             ApplyGlassOptics();
             double wantedDark = GlassRecipe.LuminosityFor(true, _glassTails.Bright, _glassTails.Dark, transparency);
@@ -398,14 +427,16 @@ public partial class MainWindow
     }
 
     // The rim and the bevel glow for the light's direction, the opening and the look; rebuilt only when one of them moved enough to
-    // see (the brushes are frozen, a few a second at most).
+    // see (the brushes are frozen): the light turns slowly, and an opening or closing passes in about ten steps of the rim and the
+    // bevel, which are exact again at rest.
     private void ApplyGlassOptics()
     {
         if (!_glassActive) return;
         double openness = GlassOpenness();
-        bool dark = Look.Current.IsDark;
+        bool dark = Look.Current.IsDark, atRest = openness is <= 0 or >= 1;
         double rim = Math.Min(1, GlassMaterial.RimStrength(Settings.GlassTransparency, openness)), width = GlassLight.BevelWidth(openness);
-        if (_glassOptics is { } shown && shown.Dark == dark && Math.Abs(shown.Rim - rim) < .02 && Math.Abs(shown.Width - width) < .1
+        double rimStep = atRest ? .005 : .06, widthStep = atRest ? .01 : .35;
+        if (_glassOptics is { } shown && shown.Dark == dark && Math.Abs(shown.Rim - rim) < rimStep && Math.Abs(shown.Width - width) < widthStep
             && Math.Abs(Math.IEEERemainder(Math.Atan2(shown.Y, shown.X) - Math.Atan2(_glassLight.Y, _glassLight.X), 2 * Math.PI)) < .03) return;
         _glassOptics = (_glassLight.X, _glassLight.Y, rim, width, dark);
         var (start, end) = GlassLight.Gradient(_glassLight);
