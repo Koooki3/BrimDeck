@@ -440,6 +440,11 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 _ => Loc.T("账户接口暂时不可用", "The account API is temporarily unavailable.")
             };
         }
+        catch (OperationCanceledException) when (id == ProviderId.Antigravity && ct.IsCancellationRequested
+            && !lifetime.IsCancellationRequested && _antigravityCliReading is { } reading)
+        {
+            ShowAntigravityCli(snapshot, reading, now, stale: true);
+        }
         // The overall deadline ends here too: what was read locally stays, and only the quota part is marked as not read.
         catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
         { snapshot.StatusLabel = Loc.T("读取超时", "Timed out"); snapshot.Status = Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."); }
@@ -1189,6 +1194,21 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         return new("cursor:" + identity, time, model.Length > 0 ? model : "Cursor", input, cacheRead, cacheWrite, 0, output, cost);
     }
 
+    private static void ShowAntigravityCli(ProviderSnapshot snapshot, (DateTimeOffset Time, List<Quota> Quotas) reading,
+        DateTimeOffset now, bool stale)
+    {
+        snapshot.Quotas = [.. reading.Quotas];
+        snapshot.Plan = snapshot.PlanSource = "";
+        Connected(snapshot, "Antigravity CLI", reading.Time);
+        if (stale)
+        {
+            snapshot.IsStale = true;
+            snapshot.StatusLabel = Loc.T("上次读取", "Last reading");
+            var time = Clock(reading.Time, now);
+            snapshot.Status = Loc.T($"CLI 刷新失败，显示 {time} 读取的额度", $"CLI refresh failed, showing quota read at {time}");
+        }
+    }
+
     private async Task ReadAntigravityAsync(ProviderSnapshot snapshot, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
         var endpoints = await desktop.FindAntigravityAsync(ct);
@@ -1222,26 +1242,18 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException) { }
         }
         ct.ThrowIfCancellationRequested();
-        if (_antigravityCliAttempt is not { } attempted || now - attempted >= TimeSpan.FromMinutes(5))
+        var attemptTime = _clock();
+        if (_antigravityCliAttempt is not { } attempted || attemptTime - attempted >= TimeSpan.FromMinutes(5))
         {
+            _antigravityCliAttempt = attemptTime;
             var report = await desktop.ReadAntigravityCliAsync(ct);
             ct.ThrowIfCancellationRequested();
             var quotas = QuotaParser.AntigravityCli(report);
-            _antigravityCliAttempt = now;
-            if (quotas.Count > 0) _antigravityCliReading = (now, quotas);
+            if (quotas.Count > 0) _antigravityCliReading = (attemptTime, quotas);
         }
         if (_antigravityCliReading is { } reading)
         {
-            snapshot.Quotas = [.. reading.Quotas];
-            snapshot.Plan = snapshot.PlanSource = "";
-            Connected(snapshot, "Antigravity CLI", reading.Time);
-            if (reading.Time != _antigravityCliAttempt)
-            {
-                snapshot.IsStale = true;
-                snapshot.StatusLabel = Loc.T("上次读取", "Last reading");
-                var time = Clock(reading.Time, now);
-                snapshot.Status = Loc.T($"CLI 刷新失败，显示 {time} 读取的额度", $"CLI refresh failed, showing quota read at {time}");
-            }
+            ShowAntigravityCli(snapshot, reading, now, reading.Time != _antigravityCliAttempt);
             return;
         }
         if (endpoints.Count == 0 && desktop.AntigravityUnreadable)

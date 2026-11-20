@@ -70,7 +70,7 @@ internal static class AntigravityUsageTests
         var fake = new Databases { Report = "Gemini Models\tWeekly Limit Remaining\t96%\t2026-11-25T02:00:10Z\n"
             + "bad row\nClaude and GPT models\tFive Hour Limit Remaining\t0%\t2026-11-20T13:28:20Z" };
         var locations = DataLocations.Resolve(root, root, root, null, null);
-        using var service = new UsageService(fake, locations, clock: () => now);
+        using var service = new UsageService(fake, locations, clock: () => now) { Deadline = TimeSpan.FromSeconds(1) };
         var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity }] };
         settings.Normalize();
         ProviderSnapshot Read() => service.RefreshAsync(settings).GetAwaiter().GetResult().Single(x => x.Id == ProviderId.Antigravity);
@@ -90,6 +90,20 @@ internal static class AntigravityUsageTests
         var recovered = Read();
         check("A successful retry replaces stale CLI quota", !recovered.IsStale && recovered.QuotaTime == now
             && recovered.Quotas is [{ Label: "Argon · 每周", Remaining: 100 }]);
+        now = now.AddMinutes(5);
+        fake.OnCliRead = ct => Task.Delay(Timeout.Infinite, ct);
+        var timedOut = Read();
+        check("The refresh deadline preserves stale CLI quotas and their timestamp", timedOut.IsStale
+            && timedOut.Quotas.SequenceEqual(recovered.Quotas) && timedOut.QuotaTime == recovered.QuotaTime);
+        now = now.AddMinutes(4);
+        check("A timed-out CLI poll counts toward the five-minute interval", Read().IsStale && fake.Calls == 4);
+        now = now.AddMinutes(1);
+        using var lifetime = new CancellationTokenSource();
+        fake.OnCliRead = ct => { lifetime.Cancel(); return Task.FromCanceled(ct); };
+        bool cancelled = false;
+        try { service.RefreshAsync(settings, lifetime.Token).GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { cancelled = true; }
+        check("Lifetime cancellation during a CLI poll propagates even with cached quota", cancelled && fake.Calls == 5);
     }
 
     // Antigravity adds words to model names ("claude-opus-5-5-high", "gemini-3.8-flash-control"), while the online catalog lists
@@ -198,7 +212,13 @@ internal static class AntigravityUsageTests
         public Dictionary<string, List<string?[]>> Models { get; } = new(StringComparer.OrdinalIgnoreCase);
         public string? Report { get; set; }
         public int Calls { get; private set; }
-        public Task<string?> ReadAntigravityCliAsync(CancellationToken cancellation) { Calls++; return Task.FromResult(Report); }
+        public Func<CancellationToken, Task>? OnCliRead { get; set; }
+        public async Task<string?> ReadAntigravityCliAsync(CancellationToken cancellation)
+        {
+            Calls++;
+            if (OnCliRead is not null) await OnCliRead(cancellation);
+            return Report;
+        }
         public string? ReadCursorToken(string database) => null;
         public Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation) => Task.FromResult<IReadOnlyList<LocalEndpoint>>([]);
         public IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) =>
