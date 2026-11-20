@@ -11,6 +11,9 @@
     <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+    <Compile Include="..\..\src\BrimDeck\GlassComposition.cs" Link="GlassComposition.cs" />
+    <Compile Include="..\..\src\BrimDeck\GlassEffect.cs" Link="GlassEffect.cs" />
+    <Compile Include="..\..\src\BrimDeck\GlassSurface.cs" Link="GlassSurface.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PdhQuery.cs" Link="PdhQuery.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\CpuProvider.cs" Link="CpuProvider.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\MonitorLog.cs" Link="MonitorLog.cs" />

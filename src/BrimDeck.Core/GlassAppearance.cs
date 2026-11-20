@@ -25,7 +25,7 @@ public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = Gla
 {
     public const double DarkModeToLight = .72, DarkModeToDark = .55, LightModeToDark = .28, LightModeToLight = .45;
     public const double LowQuantile = .2, HighQuantile = .8;
-    public const double Tau = 400;
+    public const double Tau = 200;
     public const long Dwell = 1750, MaxHold = 8000, Restless = 4000, Settle = 250;
     public const double VideoShare = .5;
     public const long VideoAfter = 1000, VideoGap = 400, VideoEscape = 5000;

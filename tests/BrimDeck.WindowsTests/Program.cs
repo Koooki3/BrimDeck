@@ -28,6 +28,7 @@ internal static class Program
             if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return Finish(); }
             if (args is ["--only", "popup"]) { PopupGhostChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themecards"]) { ThemeCardChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "glass"]) { GlassChecks.Run(Check); return Finish(); }
             if (args is ["--only", "fonts"]) { FontFollowTests.Run(Check); return Finish(); }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
             // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
@@ -47,6 +48,7 @@ internal static class Program
             SettingsFocusTests.Run(Check);
             ThemeCardChecks.Run(Check);
             PopupGhostChecks.Run(Check);
+            GlassChecks.Run(Check);
             PanelKeyboardTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);

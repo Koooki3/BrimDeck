@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Interop;
 using Windows.UI.Composition;
 using Windows.UI.Composition.Desktop;
+using BrimDeck.Core;
 
 namespace BrimDeck;
 
@@ -20,12 +21,50 @@ internal sealed class GlassSurface : IDisposable
 
     [StructLayout(LayoutKind.Sequential)]
     internal readonly record struct PixelPoint(int X, int Y);
-    private GlassEffect.AcrylicLook? _look;
+    // The material shown: each look's luminosity opacity and the light look's share (GlassEffect.Graph's weights).
+    internal readonly record struct Material(double DarkVeil, double LightVeil, double Palette);
+    private Material? _material;
+    private CompositionEffectBrush? _graph;
+    private GlassRecipe.Look? _fallbackLook;
     private bool _visible, _disposed;
-    internal GlassEffect.AcrylicLook? DisplayedLook => _visible ? _look : null;
+    internal bool Visible => _visible;
+    internal Material? DisplayedMaterial => _visible ? _material : null;
 
-    public bool Show(IntPtr owner, Int32Rect bounds, int radius, double opacity, GlassEffect.AcrylicLook look,
-        PixelPoint[]? contour = null, bool transient = false)
+    // Sets the material only (every frame of a material motion): the persistent graph's weights, nothing compiled, no window
+    // touched. False where the surface is not shown.
+    public bool Present(Material material)
+    {
+        if (_disposed || _sprite is null || !_visible) return false;
+        try { Apply(material); return true; }
+        catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException) { Dispose(); return false; }
+    }
+
+    private void Apply(Material material)
+    {
+        if (_material == material || GlassComposition.Compositor is not { } compositor) return;
+        var sprite = _sprite!;
+        if (_graph is null && _fallbackLook is null) _graph = GlassEffect.Graph(compositor);
+        if (_graph is { } graph)
+        {
+            if (!ReferenceEquals(sprite.Brush, graph)) sprite.Brush = graph;
+            GlassEffect.Present(graph, material.DarkVeil, material.LightVeil, material.Palette);
+        }
+        else
+        {
+            // No persistent graph on this system: one fixed brush per stepped look (bounded), swapped when the step changes.
+            var look = GlassEffect.StepLook(material.DarkVeil, material.LightVeil, material.Palette);
+            if (_fallbackLook != look)
+            {
+                var previous = sprite.Brush;
+                sprite.Brush = GlassEffect.Acrylic(compositor, look);
+                GlassEffect.Release(previous);
+                _fallbackLook = look;
+            }
+        }
+        _material = material;
+    }
+
+    public bool Show(IntPtr owner, Int32Rect bounds, int radius, double opacity, Material material, PixelPoint[]? contour = null)
     {
         if (_disposed || owner == IntPtr.Zero || bounds.Width < 2 || bounds.Height < 2 || opacity <= 0)
         {
@@ -55,13 +94,7 @@ internal sealed class GlassSurface : IDisposable
 
             var handle = _window.Handle;
             var sprite = _sprite!;
-            if (_look != look)
-            {
-                var previous = sprite.Brush;
-                sprite.Brush = GlassEffect.Acrylic(compositor, look, transient);
-                GlassEffect.Release(previous);
-                _look = look;
-            }
+            Apply(material);
             if (bounds.Width != _bounds.Width || bounds.Height != _bounds.Height || radius != _radius || !ReferenceEquals(_contour, contour))
             {
                 sprite.Size = _outline!.Size = new Vector2(bounds.Width, bounds.Height);
@@ -139,6 +172,8 @@ internal sealed class GlassSurface : IDisposable
             _sprite.Brush = null;
             _sprite.Clip = null;
             GlassEffect.Release(brush);
+            if (_graph is not null && !ReferenceEquals(_graph, brush)) GlassEffect.Release(_graph);
+            _graph = null;
             clip?.Dispose();
             _sprite.Dispose();
         }

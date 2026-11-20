@@ -26,13 +26,14 @@ public static class GlassMaterial
     }
 
 
-    // A lone demanding sample gets a small response. When two readings agree, apply the
-    // shared readability floor promptly. Release slowly after both readings require less.
-    public static double FollowBackdrop(double shown, double required, double previous)
+    // The readability floor a new reading leaves: a reading that asks for more thickens the glass to it at once (the spring
+    // then carries the material there); one that asks for less thins it only as far as the reading before also allows, so one
+    // dark frame of a video or a scroll does not clear the glass. Continuous: no fixed step per reading.
+    public static double Settle(double wanted, double previousWanted, double current)
     {
-        if (required > shown)
-            return Math.Min(required, Math.Max(shown + .025, previous));
-        return Math.Max(shown - .025, Math.Min(shown, Math.Max(required, previous)));
+        if (!double.IsFinite(wanted)) return current;
+        if (wanted >= current || !double.IsFinite(current)) return wanted;
+        return Math.Min(current, Math.Max(wanted, double.IsFinite(previousWanted) ? previousWanted : current));
     }
 
     public static double LuminosityOpacity(double required, double openness, int transparency)
@@ -41,36 +42,6 @@ public static class GlassMaterial
         double baseVeil = amount <= .5 ? DefaultCollapsedVeil + (.5 - amount) * .50
             : DefaultCollapsedVeil - (amount - .5) * .20;
         double openingVeil = (DefaultExpandedVeil - DefaultCollapsedVeil) * Math.Clamp(openness, 0, 1);
-        return Math.Ceiling(Math.Clamp(Math.Max(required, baseVeil + openingVeil), 0, MaximumVeil) * 20 - 1e-9) / 20;
-    }
-}
-
-// The opacity actually presented to the compositor, distinct from the sampler's readability target.
-public struct GlassVeilTransition
-{
-    private double _shown, _from, _target;
-    private long _start;
-
-    public bool Active => _shown != _target;
-
-    public double Update(double target, long now, bool animate, bool sampleChanged = false)
-    {
-        if (!animate || (!Active && (!sampleChanged || Math.Abs(target - _shown) < .075)))
-            return _shown = _target = target;
-
-        if (target != _target)
-        {
-            _from = _shown;
-            _target = target;
-            _start = now;
-            return _shown;
-        }
-
-        double duration = _target > _from ? 180 : 260;
-        double progress = Math.Clamp((now - _start) / duration, 0, 1);
-        double weight = progress * progress * (3 - 2 * progress);
-        // Use the same .05 opacity steps as the brush cache. A retarget starts at the last displayed step.
-        _shown = progress >= 1 ? _target : Math.Round((_from + (_target - _from) * weight) * 20) / 20;
-        return _shown;
+        return Math.Clamp(Math.Max(required, baseVeil + openingVeil), 0, MaximumVeil);
     }
 }
