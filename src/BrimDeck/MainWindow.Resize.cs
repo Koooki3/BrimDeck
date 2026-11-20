@@ -53,7 +53,7 @@ public partial class MainWindow
     private DeckPage _resizePage;
     private long _resizeRendered;
     // The widest a page can be on this monitor, and the limits of the page being resized.
-    private double PageMaxWidth => DeckPages.MaxWidthOn(WorkDip.Width, _scale * Zoom);
+    private double PageMaxWidth => DeckPages.MaxWidthOn(WorkDip.Width, _scale);
     private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimits => PageLimitsOf(_resizePage);
     private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimitsOf(DeckPage page)
     {
@@ -104,7 +104,7 @@ public partial class MainWindow
         var form = PanelResizable && !PanelIgnoresPointer ? ResizeGripLayer.Form.Panel
             : CompactResizable && !ClickThrough && Settings.GripDoubleClick != GripDoubleClick.Off || Resizing && _resizeCompact ? ResizeGripLayer.Form.Compact : ResizeGripLayer.Form.None;
         if (Resizing && !_resizeCompact) form = ResizeGripLayer.Form.Panel;
-        _grips.Show(form, IslandBox(), _header.Row * _scale * Zoom, PanelRadius, EffectiveStyle == CompactStyle.Line);
+        _grips.Show(form, IslandBox(), _header.Row * _scale, PanelRadius, EffectiveStyle == CompactStyle.Line);
         if (form == ResizeGripLayer.Form.None && _hoverEdge != ResizeEdges.None && !Dragging) SetHoverEdge(ResizeEdges.None);
     }
 
@@ -120,7 +120,7 @@ public partial class MainWindow
         var r = _grips.Rect;
         // The distance to the nearest grip: zero on one, growing inside the panel; nothing above the header.
         double near = 0;
-        if (point.Y >= r.Y + _header.Row * _scale * Zoom && point.X >= r.X - ResizeGrips.PanelOuter && point.X <= r.Right + ResizeGrips.PanelOuter && point.Y <= r.Bottom + ResizeGrips.PanelOuter)
+        if (point.Y >= r.Y + _header.Row * _scale && point.X >= r.X - ResizeGrips.PanelOuter && point.X <= r.Right + ResizeGrips.PanelOuter && point.Y <= r.Bottom + ResizeGrips.PanelOuter)
         {
             double distance = Math.Max(0, Math.Min(Math.Min(point.X - r.X, r.Right - point.X), r.Bottom - point.Y) - ResizeGrips.PanelInner);
             near = 1 - Math.Clamp(distance / HintReach, 0, 1);
@@ -136,7 +136,7 @@ public partial class MainWindow
         if (!PanelResizable || PresentationSource.FromVisual(Stage) is null) return false;
         var area = ResizeGrips.PanelArea(IslandBox());
         var point = Stage.PointFromScreen(screen);
-        return point.X >= area.X - GripSlack && point.X <= area.Right + GripSlack && point.Y >= area.Y + _header.Row * _scale * Zoom && point.Y <= area.Bottom + GripSlack;
+        return point.X >= area.X - GripSlack && point.X <= area.Right + GripSlack && point.Y >= area.Y + _header.Row * _scale && point.Y <= area.Bottom + GripSlack;
     }
 
     private void SetHoverEdge(ResizeEdges edge)
@@ -166,8 +166,8 @@ public partial class MainWindow
         double scale = _pixelsPerDip > 0 ? _pixelsPerDip : 1;
         // The grips are in the edge's frame: x along the edge, y away from it (MainWindow.Edge.cs).
         var (dx, dy) = _frame.FromScreen((cursor.X - _resizeStart.X) / scale, (cursor.Y - _resizeStart.Y) / scale);
-        // A page's size is its own, without the panel's scale and the text size the open panel is drawn larger by (Zoom).
-        if (!_resizeCompact) { dx /= _scale * Zoom; dy /= _scale * Zoom; }
+        // The open panel's size is unscaled: the pointer moves it by its move divided by the panel's scale.
+        if (!_resizeCompact) { dx /= _scale; dy /= _scale; }
         // On a side edge the page's height runs along the edge and its width away from it.
         bool across = !_resizeCompact && _frame.Across;
         // Both sides move, so the length along the edge changes by twice the pointer's move.
@@ -313,7 +313,7 @@ public partial class MainWindow
         if ((width, height) == DeckPages.Size(Settings, _resizePage)) return;
         _resizeChanged = true;
         DeckPages.SetSize(Settings, _resizePage, width, height);
-        _pageWidth = width * Zoom;
+        _pageWidth = width;
         SetExpanded(true, instant: true);
         // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
         // layout step and stretch in between, so they follow too; the notices page stretches as it is, its header and margins

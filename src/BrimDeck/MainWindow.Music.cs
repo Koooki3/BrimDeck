@@ -217,9 +217,8 @@ public partial class MainWindow
     {
         // Size the toolbar from the first visible tab, even on a shorter or taller page.
         var settings = Settings;
-        // The page heights are the pages' own, laid out before the text size (Zoom); PageHeight works on them as drawn.
-        double wanted = DeckPages.Size(settings, DeckPages.FirstVisible(settings)).Height * Zoom;
-        double height = PageHeight(wanted, PanelFor(wanted)) / Zoom;
+        double wanted = DeckPages.Size(settings, DeckPages.FirstVisible(settings)).Height;
+        double height = PageHeight(wanted, PanelFor(wanted));
         var header = page.WithControlsOf(PanelHeader.ForPanel(height));
         bool gripBoundaryChanged = _header.Row != header.Row;
         _header = header;
@@ -437,8 +436,8 @@ public partial class MainWindow
         }
         WatchSourceMenu(menu);
         MediaSourceButton.ContextMenu = menu; menu.PlacementTarget = MediaSourceButton; menu.Placement = PlacementMode.Bottom;
-        // A pop-up is not part of the panel's visual tree, so it takes the panel's scale and the text size itself (PanelTheme.Text on its Opened).
-        UI.Scale(menu, _scale * Zoom); menu.VerticalOffset = 6 * _scale * Zoom; ResizeSourceMenu(menu); menu.IsOpen = true;
+        // A pop-up is not part of the panel's visual tree, so it takes the panel's scale itself.
+        UI.Scale(menu, _scale); menu.VerticalOffset = 6 * _scale; ResizeSourceMenu(menu); menu.IsOpen = true;
     }
     // Guidance shown in place of the transport when Netease runs without SMTC. Both sentences stay at every size:
     // what is required and where to switch it on. Only the type size and the entry's label adapt to the row.

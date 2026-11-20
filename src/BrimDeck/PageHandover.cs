@@ -91,7 +91,7 @@ internal sealed class PageHandover
     // not part of it. Its own opacity and render transform are: the brush draws the element as it is drawn.
     public static BitmapSource Snapshot(Visual element, double width, double height, DpiScale dpi)
     {
-        // The picture is drawn at the scale the panel is (UI.Scale: the panel's scale and the text size), so it is taken at that many
+        // The picture is drawn at the scale the panel is (UI.Scale: the panel's scale), so it is taken at that many
         // more pixels and stays as sharp as the page.
         if (element is DependencyObject owner && UI.GetScale(owner) is var drawn and > 0 and not 1) dpi = new DpiScale(dpi.DpiScaleX * drawn, dpi.DpiScaleY * drawn);
         var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);

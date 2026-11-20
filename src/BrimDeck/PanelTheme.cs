@@ -79,15 +79,10 @@ internal static class PanelTheme
     // A menu or tooltip takes the text rendering of what it opens from (App.OnStartup): unsmoothed over a pixel theme's panel,
     // smoothed over the settings, which follow Windows rather than the panel theme, and over the tray. Opened over a panel that
     // shows another profile, it takes that panel's brushes too, since it is not in the panel's tree to find them.
-    // One opened from the open panel is drawn larger by Windows' text size as the panel is (MainWindow.Zoom),
-    // and by the panel's own scale (MainWindow.Scale).
     public static void Text(FrameworkElement popup, DependencyObject? from)
     {
         if (from is not null && TextOptions.GetTextRenderingMode(from) == TextRenderingMode.Aliased) TextOptions.SetTextRenderingMode(popup, TextRenderingMode.Aliased);
         else popup.ClearValue(TextOptions.TextRenderingModeProperty);
-        double zoom = from is not null && Window.GetWindow(from) is MainWindow deck ? TextScale.Current * deck.Scale : 1;
-        if (zoom == 1) { popup.ClearValue(FrameworkElement.LayoutTransformProperty); popup.ClearValue(UI.ScaleProperty); }
-        else if (popup.LayoutTransform is not ScaleTransform known || known.ScaleX != zoom) UI.Scale(popup, zoom);
         if (from is not null) PanelLook.Of(from).PublishTo(popup.Resources, onlyOwn: true);
     }
 

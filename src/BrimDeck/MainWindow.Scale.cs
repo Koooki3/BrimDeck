@@ -29,8 +29,6 @@ public partial class MainWindow
         UI.Scale(ExpandedContent, scale);
         // On a side edge the width is set by SetExpanded instead (MainWindow.Edge.cs).
         BindingOperations.GetBindingExpression(ExpandedContent, WidthProperty)?.UpdateTarget();
-        // The page inside takes the text size (Zoom) on top; its drawn scale is the product (UI.PixelsPerDip).
-        ApplyZoom();
     }
 
     internal double Scale => _scale;

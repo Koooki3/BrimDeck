@@ -440,13 +440,12 @@ public partial class MainWindow : Window
         bool newEdge = ApplyFrame();
         if (newEdge) Collapsed = ShapeFor(EffectiveStyle);
         NoteCollapsedWidth(shapeBefore, dipBefore);
-        // Page widths are the page as laid out with the text size (Zoom) but before the panel's scale; drawn at the scale they fit
-        // the work area less 12 DIP each side.
+        // Page widths are unscaled; drawn at the panel's scale they fit the work area less 12 DIP each side.
         double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
-        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width * Zoom);
+        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width);
         // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
         // only the page that shows, which SetExpanded takes from _pageWidth; this is set again when the size is saved (ApplySettings).
-        _widestPage = Fit(DeckPages.Largest(Settings).Width * Zoom);
+        _widestPage = Fit(DeckPages.Largest(Settings).Width);
         // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
         // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
         // resize flashed the panel cut off or shifted for a frame (it did on each press and release of a resize drag). That is
@@ -454,7 +453,7 @@ public partial class MainWindow : Window
         // monitor, with room on either side for the resize grips just outside them (ResizeGrips). The notch and the capsule may be
         // as wide as the monitor, so the window is as wide as the monitor too. Only Island animates.
         var largest = DeckPages.Largest(Settings);
-        largest = (Math.Max(largest.Width, PageMaxWidth) * Zoom, Math.Max(largest.Height, DeckPages.MaxHeight) * Zoom);
+        largest = (Math.Max(largest.Width, PageMaxWidth), Math.Max(largest.Height, DeckPages.MaxHeight));
         double widestSurface = Enum.GetValues<CompactStyle>().Max(style => CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip, _scale).Max);
         // In the edge's frame: on a side edge a page's height runs along the edge and its width away from it.
         // The window starts at the monitor top (the frame's edge). A capsule's panel can start lower (at the top of a top taskbar's work area, or
@@ -664,23 +663,7 @@ public partial class MainWindow : Window
         double height = Math.Max(0, Math.Min(wanted, (FrameHeight - (panel.Top > 0 ? 0 : 12) - panel.Top - panel.HeaderExtra) / _scale));
         return panel.Top > 0 ? Math.Max(0, Math.Min(height, (PanelBottom - panel.Top - panel.HeaderExtra) / _scale)) : height;
     }
-    // Windows' text size (TextScale): the open panel and everything on it are drawn larger by this factor, and its pages lay
-    // out at the size they have at 100 %, so their layouts, which step between sizes by the room they have, stay as they are.
-    // _pageWidth and the heights SetExpanded works with are the panel's size on screen before the panel's scale
-    // (_scale, MainWindow.Scale.cs), which comes on top of this one; the sizes saved in the settings, and the drag's, are the
-    // pages' own.
-    private double Zoom => TextScale.Current;
-    internal void ApplyZoom()
-    {
-        double zoom = Zoom;
-        // What the page is drawn at in all (UI.PixelsPerDip): the panel's scale times the text size.
-        UI.SetScale(ContentCanvas, _scale * zoom);
-        if (zoom == 1) { if (ContentCanvas.LayoutTransform != Transform.Identity) ContentCanvas.LayoutTransform = Transform.Identity; return; }
-        if (ContentCanvas.LayoutTransform is ScaleTransform known && known.ScaleX == zoom) return;
-        var scale = new ScaleTransform(zoom, zoom); scale.Freeze();
-        ContentCanvas.LayoutTransform = scale;
-    }
-    // pageHeight is before the panel's scale; the panel's place depends on its height as drawn.
+    // pageHeight is unscaled; the panel's place depends on its height as drawn.
     // On the bottom, left and right edges the panel's top is a free side, rounded as a floating capsule panel's is, so it keeps the
     // same space above its header (CollapsedLimits.FloatingHeaderExtra) rather than the 4 DIPs under the screen edge.
     // A capsule docked with the bottom hangs its panel from there, as a notch on that edge does.
@@ -990,7 +973,7 @@ public partial class MainWindow : Window
         var shape = Collapsed;
         var style = shape.Style;
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
-        double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height * Zoom;
+        double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height;
         var panel = PanelFor(wantedHeight);
         if (!expanded) _popupFloor = 0;
         // The floor is on screen, as drawn; the page's height is before the panel's scale.
@@ -1034,11 +1017,9 @@ public partial class MainWindow : Window
         // The page and its header start headerExtra below the panel's top edge. The header row keeps its own height, so its
         // controls keep their size tier. Collapsing keeps the offset the content had, so it fades out without moving.
         if (expanded) ExpandedContent.Margin = new Thickness(0, headerExtra, 0, 0);
-        // Lay out in device-independent pixels. Column typography adapts to its available space. Under a larger Windows text
-        // size the page lays out at the size it has at 100 % and is drawn larger by the factor (Zoom).
-        ContentCanvas.Width = _pageWidth / Zoom;
-        ContentCanvas.Height = ExpandedContent.Height / Zoom;
-        ApplyZoom();
+        // Lay out in device-independent pixels. Column typography adapts to its available space.
+        ContentCanvas.Width = _pageWidth;
+        ContentCanvas.Height = pageHeight;
         // The recent notices page is drawn only while it shows (NoticesChanged), so notices that arrived while the panel was
         // closed are not on it yet: it is drawn again before the panel opens, and what it lists counts as seen as on a page
         // switch, the notices hotkey's opening too.
