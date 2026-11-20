@@ -96,6 +96,7 @@ try
     GlassGraphTests.Run(Check);
     GlassHotPathTests.Run(Check);
     GlassLightTests.Run(Check);
+    GlassBoundaryMathTests.Run(Check);
     Check("Automatic liquid glass resolves to a built-in variant with the supplied system mode",
         PanelThemes.Find(PanelThemes.GlassAuto, true, []).Id == PanelThemes.GlassDark
         && PanelThemes.Find(PanelThemes.GlassAuto, false, []).Id == PanelThemes.GlassLight);

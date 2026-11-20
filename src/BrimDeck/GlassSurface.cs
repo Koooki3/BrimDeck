@@ -14,11 +14,17 @@ internal sealed class GlassSurface : IDisposable
 {
     private HwndSource? _window;
     private DesktopWindowTarget? _target;
+    // The glass: a sprite clipped to the outline, in a container that carries its place in the window.
+    private ContainerVisual? _frame;
     private SpriteVisual? _sprite;
     private CompositionRoundedRectangleGeometry? _outline;
-    private Int32Rect _bounds;
-    private int _radius;
+    // Where the window is (_placed), where the outline asks to be (_need, the bounds of the latest Show), the outline's clip
+    // within _need, the clip as set on the geometry (within _placed), and the region now set, if any.
+    private Int32Rect _placed, _need;
+    private GlassBoundaryMath.GlassClip _clip, _shown;
     private PixelPoint[]? _contour;
+    private (PixelPoint[] Contour, int Dx, int Dy)? _region;
+    private IntPtr _owner;
 
     [StructLayout(LayoutKind.Sequential)]
     internal readonly record struct PixelPoint(int X, int Y);
@@ -196,10 +202,18 @@ internal sealed class GlassSurface : IDisposable
         catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException) { Dispose(); }
     }
 
+    // A rounded rectangle filling the bounds (the glass checks), or the given contour as the window's region.
     public bool Show(IntPtr owner, Int32Rect bounds, int radius, double opacity, Material material, out AppliedMaterial applied, PixelPoint[]? contour = null)
+        => Show(owner, bounds, contour is null ? new GlassBoundaryMath.GlassClip(new(0, 0, bounds.Width, bounds.Height, radius)) : null, contour, opacity, material, out applied);
+
+    // The outline is drawn one of two ways. A rounded clip (GlassBoundaryMath.TryRoundedClip) is the composition's own antialiased
+    // geometry, and the window keeps no region: the backdrop is drawn inside the clip only, so its edge is the same curve as the
+    // WPF outline's, and a move or a new size sets a few numbers on the geometry. Any other outline (shoulders) is the window's
+    // region, a polygon of whole pixels, set only when the contour is a new one (a move by whole pixels keeps it).
+    public bool Show(IntPtr owner, Int32Rect bounds, GlassBoundaryMath.GlassClip? clip, PixelPoint[]? contour, double opacity, Material material, out AppliedMaterial applied)
     {
         applied = default;
-        if (_disposed || owner == IntPtr.Zero || bounds.Width < 2 || bounds.Height < 2 || opacity <= 0)
+        if (_disposed || owner == IntPtr.Zero || bounds.Width < 2 || bounds.Height < 2 || opacity <= 0 || clip is null && contour is not { Length: >= 3 })
         {
             Hide();
             return false;
@@ -219,50 +233,26 @@ internal sealed class GlassSurface : IDisposable
                 int enabled = 1;
                 Marshal.ThrowExceptionForHR(DwmSetWindowAttribute(_window.Handle, 17, ref enabled, sizeof(int)));
                 _target = GlassComposition.Target(_window.Handle);
+                _frame = compositor.CreateContainerVisual();
                 _sprite = compositor.CreateSpriteVisual();
                 _outline = compositor.CreateRoundedRectangleGeometry();
                 _sprite.Clip = compositor.CreateGeometricClip(_outline);
-                _target.Root = _sprite;
+                _frame.Children.InsertAtTop(_sprite);
+                _target.Root = _frame;
             }
 
-            var handle = _window.Handle;
-            var sprite = _sprite!;
             applied = Apply(material);
             if (applied.Backend == Backend.None) { Hide(); return false; }
-            if (bounds.Width != _bounds.Width || bounds.Height != _bounds.Height || radius != _radius || !ReferenceEquals(_contour, contour))
-            {
-                sprite.Size = _outline!.Size = new Vector2(bounds.Width, bounds.Height);
-                _outline.CornerRadius = new Vector2(radius);
-                // The region is only the outer limit; the composition clip draws the antialiased corners.
-                var region = contour is { Length: >= 3 } ? CreatePolygonRgn(contour, contour.Length, 1)
-                    : CreateRoundRectRgn(0, 0, bounds.Width + 1, bounds.Height + 1, Math.Max(1, 2 * radius - 4), Math.Max(1, 2 * radius - 4));
-                if (region == IntPtr.Zero) { Hide(); return false; }
-                if (SetWindowRgn(handle, region, true) == 0)
-                {
-                    DeleteObject(region);
-                    Hide();
-                    return false;
-                }
-                _radius = radius;
-                _contour = contour;
-            }
-            sprite.Opacity = (float)Math.Clamp(opacity, 0, 1);
-            const uint NoSize = 0x01, NoMove = 0x02, NoActivate = 0x10, ShowWindowFlag = 0x40, NoOwnerZOrder = 0x200;
-            const uint PositionOnly = NoSize | NoMove | NoActivate | NoOwnerZOrder;
-            bool ownerTopmost = IsTopmost(owner);
-            bool tierChanged = IsTopmost(handle) != ownerTopmost;
-            if (tierChanged || !_visible || _bounds != bounds || GetWindow(owner, 2) != handle) // GW_HWNDNEXT
-            {
-                if ((tierChanged && !SetWindowPos(handle, new IntPtr(ownerTopmost ? -1 : -2), 0, 0, 0, 0, PositionOnly))
-                    || !SetWindowPos(handle, owner, bounds.X, bounds.Y, bounds.Width, bounds.Height, NoActivate | ShowWindowFlag | NoOwnerZOrder))
-                {
-                    Hide();
-                    return false;
-                }
-                if (!_visible) SetWindowPos(handle, owner, 0, 0, 0, 0, PositionOnly);
-                _visible = true;
-                _bounds = bounds;
-            }
+            _sprite!.Opacity = (float)Math.Clamp(opacity, 0, 1);
+            // The window covers its owner (the panel's window, which holds the island at every size), and the glass inside it is a
+            // visual placed and clipped to the outline: an opening or closing, or a new shape, changes only the visual and its clip,
+            // in one composition commit, with no window message on any frame. Resizing the window on every frame cost a few
+            // milliseconds each and let the window's place and its content reach the screen on different frames.
+            _owner = owner;
+            _need = bounds;
+            _clip = clip ?? new GlassBoundaryMath.GlassClip(new(0, 0, bounds.Width, bounds.Height, 0));
+            _contour = clip is null ? contour : null;
+            if (!Place(Frame(owner, bounds))) { Hide(); return false; }
             return true;
         }
         catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException)
@@ -271,6 +261,80 @@ internal sealed class GlassSurface : IDisposable
             Dispose();
             return false;
         }
+    }
+
+    // Puts the window at place, the visual and its clip (or the window's region) where the outline asked for (_need) falls in
+    // it, and keeps the window right behind the owner. Each part is touched only when it changed.
+    private bool Place(Int32Rect place)
+    {
+        var handle = _window!.Handle;
+        int dx = _need.X - place.X, dy = _need.Y - place.Y;
+        var frame = _frame!;
+        var offset = new Vector3(dx, dy, 0);
+        if (frame.Offset != offset) frame.Offset = offset;
+        var extent = new Vector2(_need.Width, _need.Height);
+        if (_sprite!.Size != extent) _sprite.Size = extent;
+        var shown = _contour is null ? _clip : new GlassBoundaryMath.GlassClip(new(0, 0, _need.Width, _need.Height, 0));
+        if (shown != _shown)
+        {
+            _shown = shown;
+            Set(_outline!, shown.First);
+        }
+        if (_contour is null)
+        {
+            if (_region is not null)
+            {
+                SetWindowRgn(handle, IntPtr.Zero, true);
+                _region = null;
+            }
+        }
+        else if (_region is not { } set || !ReferenceEquals(set.Contour, _contour) || set.Dx != dx || set.Dy != dy)
+        {
+            var region = CreatePolygonRgn(_contour, _contour.Length, 1);
+            if (region == IntPtr.Zero) return false;
+            if (dx != 0 || dy != 0) OffsetRgn(region, dx, dy);
+            if (SetWindowRgn(handle, region, true) == 0)
+            {
+                DeleteObject(region);
+                return false;
+            }
+            _region = (_contour, dx, dy);
+        }
+        const uint NoSize = 0x01, NoMove = 0x02, NoActivate = 0x10, ShowWindowFlag = 0x40, NoOwnerZOrder = 0x200;
+        const uint PositionOnly = NoSize | NoMove | NoActivate | NoOwnerZOrder;
+        var owner = _owner;
+        bool ownerTopmost = IsTopmost(owner);
+        bool tierChanged = IsTopmost(handle) != ownerTopmost;
+        if (tierChanged || !_visible || _placed != place || GetWindow(owner, 2) != handle) // GW_HWNDNEXT
+        {
+            // A move alone leaves the size: no WM_SIZE for the window and its target.
+            uint size = _visible && place.Width == _placed.Width && place.Height == _placed.Height ? NoSize : 0;
+            if ((tierChanged && !SetWindowPos(handle, new IntPtr(ownerTopmost ? -1 : -2), 0, 0, 0, 0, PositionOnly))
+                || !SetWindowPos(handle, owner, place.X, place.Y, place.Width, place.Height, NoActivate | ShowWindowFlag | NoOwnerZOrder | size))
+                return false;
+            if (!_visible) SetWindowPos(handle, owner, 0, 0, 0, 0, PositionOnly);
+            _visible = true;
+            _placed = place;
+        }
+        return true;
+    }
+
+    private static void Set(CompositionRoundedRectangleGeometry geometry, GlassBoundaryMath.RoundedClip clip)
+    {
+        geometry.Offset = new Vector2((float)clip.X, (float)clip.Y);
+        geometry.Size = new Vector2((float)clip.Width, (float)clip.Height);
+        geometry.CornerRadius = new Vector2((float)clip.Radius);
+    }
+
+    private static bool Contains(Int32Rect outer, Int32Rect inner)
+        => inner.X >= outer.X && inner.Y >= outer.Y && inner.X + inner.Width <= outer.X + outer.Width && inner.Y + inner.Height <= outer.Y + outer.Height;
+
+    // The owner's window rectangle when it holds the bounds (it always does for a panel), else the bounds themselves.
+    private static Int32Rect Frame(IntPtr owner, Int32Rect bounds)
+    {
+        if (!GetWindowRect(owner, out var r)) return bounds;
+        var frame = new Int32Rect(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
+        return frame.Width > 0 && frame.Height > 0 && Contains(frame, bounds) ? frame : bounds;
     }
 
     private static bool IsTopmost(IntPtr window) => (GetWindowLong(window, -20) & 0x08) != 0;
@@ -310,6 +374,7 @@ internal sealed class GlassSurface : IDisposable
             clip?.Dispose();
             _sprite.Dispose();
         }
+        _frame?.Dispose();
         GlassEffect.Release(_graph);
         _graph = null;
         ReleaseFallback();
@@ -326,7 +391,9 @@ internal sealed class GlassSurface : IDisposable
     [DllImport("user32", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32")] private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
     [DllImport("user32")] private static extern bool ShowWindow(IntPtr window, int command);
-    [DllImport("gdi32")] private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int ellipseWidth, int ellipseHeight);
     [DllImport("gdi32")] private static extern IntPtr CreatePolygonRgn([In] PixelPoint[] points, int count, int fillMode);
     [DllImport("gdi32")] private static extern bool DeleteObject(IntPtr value);
+    [DllImport("gdi32")] private static extern int OffsetRgn(IntPtr region, int x, int y);
+    [StructLayout(LayoutKind.Sequential)] private struct Rect32 { public int Left, Top, Right, Bottom; }
+    [DllImport("user32")] private static extern bool GetWindowRect(IntPtr window, out Rect32 rect);
 }

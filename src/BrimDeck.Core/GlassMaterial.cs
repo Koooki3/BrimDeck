@@ -12,13 +12,6 @@ public static class GlassMaterial
 
     public static double DarkBackdropLimit(int transparency) => .26 + .06 * Math.Max(0, NormalizeTransparency(transparency) - 50) / 50;
 
-    // Quantize the grain so a whole slider drag uses a small set of frozen WPF brushes.
-    public static double GrainStrength(int transparency)
-    {
-        double amount = NormalizeTransparency(transparency) / 100d;
-        return Math.Round((1 + (.5 - amount)) * 10) / 10;
-    }
-
     public static double RimStrength(int transparency, double openness)
     {
         double amount = NormalizeTransparency(transparency) / 100d;

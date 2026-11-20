@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -55,10 +56,18 @@ public partial class MainWindow
     private (double Bright, double Dark) _glassTails = (1, 0);
     private (GlassSampleArea Area, long Generation, long At, AcrylicProbe.Reading Reading)? _glassLatestSample;
     private readonly record struct GlassSampleArea(nint Monitor, Rect Screen, Int32Rect Bounds, double Scale, PanelLook Look);
-    private (double X, double Y) _glassLight = GlassLight.Default;
-    private long _glassLightAt;
-    private (double X, double Y, double Rim, double Width, bool Dark)? _glassOptics;
-    private (Size Size, double Shoulder, CornerRadius Corners, Point Origin, Point Along, Point Depth)? _glassOutline;
+    // The light's direction shown (moved toward the target on the display's frames, GlassOpticsFrame) and the one the latest
+    // reading asks for.
+    private (double X, double Y) _glassLight = GlassLight.Default, _glassLightTarget = GlassLight.Default;
+    private double _glassLightAt;
+    private bool _glassOpticsRendering;
+    private GlassEdge? _glassEdge;
+    private IReadOnlyList<ThemeColor>? _glassEdgeStops;
+    // The outline's shape in the window's pixels apart from where it is (a move keeps it), its points in the island's own
+    // units for a contour, and the contour for the place's fraction of a pixel.
+    private (Size Size, double Shoulder, CornerRadius Corners, Vector Along, Vector Depth)? _glassOutline;
+    private Point[]? _glassOutlinePoints;
+    private (double X, double Y) _glassContourAt;
     private GlassSurface.PixelPoint[]? _glassContour;
 
     // EVENT_OBJECT_NAMECHANGE out of context: a title change of the window in front (a browser's tab or page) hints at a new backdrop.
@@ -77,8 +86,8 @@ public partial class MainWindow
     internal void UpdateGlassTheme()
     {
         if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) { _glassAppearance = null; EndGlassTurn(); }
-        // The theme was applied again (Dress set the rim back to the theme's own): the optics are drawn anew.
-        _glassOptics = null;
+        // The theme was applied again: the edge takes its light's shape from it anew.
+        _glassEdgeStops = null;
         bool enabled = Look.Current.Effects.Glass is not null && !Look.HighContrast && GlassAvailable && !_retiring;
         if (enabled == (_glassSurface is not null)) { QueueGlass(); return; }
         if (!enabled) { CloseGlass(); return; }
@@ -165,30 +174,48 @@ public partial class MainWindow
         int right = (int)Math.Ceiling(Math.Max(Math.Max(origin.X, along.X), Math.Max(depth.X, far.X)));
         int bottom = (int)Math.Ceiling(Math.Max(Math.Max(origin.Y, along.Y), Math.Max(depth.Y, far.Y)));
         _glassBounds = new Int32Rect(left, top, right - left, bottom - top);
-        var shape = (size, Island.ShoulderRadius, Island.CornerRadius, origin, along, depth);
-        if (_glassOutline != shape)
+        // A rounded outline is the glass layer's own clip (no region); one with shoulders is a contour, built from the outline only
+        // for a new shape and placed anew only for a new fraction of a pixel, so a move by whole pixels changes neither.
+        var corners = Island.CornerRadius;
+        var layout = GlassBoundaryMath.Measure(size.Width, size.Height, Island.ShoulderRadius, corners.TopLeft, corners.TopRight, corners.BottomRight, corners.BottomLeft, 0);
+        (double X, double Y) at = (origin.X - left, origin.Y - top);
+        GlassBoundaryMath.GlassClip? clip = GlassBoundaryMath.TryRoundedClip(layout, at, (along.X - left, along.Y - top), (depth.X - left, depth.Y - top), out var rounded)
+            ? rounded : null;
+        if (clip is null)
         {
-            _glassOutline = shape;
-            var outline = IslandBorder.BuildOutline(size.Width, size.Height, shape.ShoulderRadius, shape.CornerRadius, 0).GetFlattenedPathGeometry(.25, ToleranceType.Absolute);
-            var points = new List<GlassSurface.PixelPoint>();
-            void Add(Point point)
+            var shape = (size, Island.ShoulderRadius, corners, along - origin, depth - origin);
+            if (_glassOutline != shape || _glassOutlinePoints is null)
             {
-                var pixel = Island.PointToScreen(point);
-                points.Add(new GlassSurface.PixelPoint((int)Math.Round(pixel.X - left), (int)Math.Round(pixel.Y - top)));
+                _glassOutline = shape;
+                // Flattened to about a seventh of a pixel.
+                double perDip = (along - origin).Length / size.Width;
+                var flat = IslandBorder.BuildOutline(size.Width, size.Height, shape.ShoulderRadius, corners, 0).GetFlattenedPathGeometry(.15 / perDip, ToleranceType.Absolute);
+                var local = new List<Point>();
+                foreach (var figure in flat.Figures)
+                {
+                    local.Add(figure.StartPoint);
+                    foreach (var segment in figure.Segments)
+                        if (segment is PolyLineSegment lines) local.AddRange(lines.Points);
+                        else if (segment is LineSegment line) local.Add(line.Point);
+                }
+                _glassOutlinePoints = [.. local];
+                _glassContour = null;
             }
-            foreach (var figure in outline.Figures)
+            if (_glassContour is null || _glassContourAt != at)
             {
-                Add(figure.StartPoint);
-                foreach (var segment in figure.Segments)
-                    if (segment is PolyLineSegment lines) foreach (var point in lines.Points) Add(point);
-                    else if (segment is LineSegment line) Add(line.Point);
+                _glassContourAt = at;
+                var points = _glassOutlinePoints;
+                Vector u = (along - origin) / size.Width, v = (depth - origin) / size.Height;
+                var contour = new GlassSurface.PixelPoint[points.Length];
+                for (int i = 0; i < points.Length; i++)
+                    contour[i] = new((int)Math.Round(at.X + points[i].X * u.X + points[i].Y * v.X), (int)Math.Round(at.Y + points[i].X * u.Y + points[i].Y * v.Y));
+                _glassContour = contour.Length >= 3 ? contour : null;
             }
-            _glassContour = points.Count >= 3 ? points.ToArray() : null;
-        }
-        if (_glassContour is null)
-        {
-            HideGlass();
-            return;
+            if (_glassContour is null)
+            {
+                HideGlass();
+                return;
+            }
         }
         long now = Environment.TickCount64;
         bool dark = Look.Current.IsDark;
@@ -216,7 +243,7 @@ public partial class MainWindow
         GlassTargets(now, snap: !Animates);
         var material = GlassMaterialNow(now);
         var owner = new WindowInteropHelper(this).Handle;
-        if (!_glassSurface.Show(owner, _glassBounds, 0, HoverZone.Opacity * Island.MaterialOpacity, material, out var applied, _glassContour))
+        if (!_glassSurface.Show(owner, _glassBounds, clip, clip is null ? _glassContour : null, HoverZone.Opacity * Island.MaterialOpacity, material, out var applied))
         {
             // Retry on a later settings or environment update instead of every layout pass.
             CloseGlass();
@@ -226,7 +253,6 @@ public partial class MainWindow
         GlassTurnStep(applied.Material, now);
         GlassRenderingNeeded();
         ApplyGlassOptics();
-        Island.Pattern = AcrylicNoise.Brush(VisualTreeHelper.GetDpi(Island).DpiScaleX, GlassMaterial.GrainStrength(Settings.GlassTransparency));
         if (_glassProbe is { IsEnabled: false } probe)
         {
             probe.Start();
@@ -363,9 +389,8 @@ public partial class MainWindow
             // one, and not while the backdrop is a video.
             if (double.IsFinite(_glassLastMiddle) && Math.Abs(sample.MiddleMean - _glassLastMiddle) > .12 && _glassAppearance?.Video != true) GlassBurst(soft: true);
             _glassLastMiddle = sample.MiddleMean;
-            _glassLight = GlassLight.Follow(_glassLight, GlassLight.Direction(sample.Sides, _glassLight), _glassLightAt == 0 ? 0 : now - _glassLightAt);
-            _glassLightAt = now;
-            ApplyGlassOptics();
+            _glassLightTarget = GlassLight.Direction(sample.Sides, _glassLight);
+            GlassOpticsNeeded();
             double wantedDark = GlassRecipe.LuminosityFor(true, _glassTails.Bright, _glassTails.Dark, transparency);
             double wantedLight = GlassRecipe.LuminosityFor(false, _glassTails.Bright, _glassTails.Dark, transparency);
             double dark = _glassFirstSample ? wantedDark : GlassMaterial.Settle(wantedDark, _glassWantedDark, _glassRequiredDark);
@@ -426,37 +451,54 @@ public partial class MainWindow
         QueueGlass();
     }
 
-    // The rim and the bevel glow for the light's direction, the opening and the look; rebuilt only when one of them moved enough to
-    // see (the brushes are frozen): the light turns slowly, and an opening or closing passes in about ten steps of the rim and the
-    // bevel, which are exact again at rest.
+    // The optical edge (GlassEdge) for the light's direction, the opening and the palette shown now. The edge's brushes are moved
+    // in place, so this runs on any frame without a new brush; the island draws anew only when the rings change (a new width).
     private void ApplyGlassOptics()
     {
         if (!_glassActive) return;
         double openness = GlassOpenness();
-        bool dark = Look.Current.IsDark, atRest = openness is <= 0 or >= 1;
-        double rim = Math.Min(1, GlassMaterial.RimStrength(Settings.GlassTransparency, openness)), width = GlassLight.BevelWidth(openness);
-        double rimStep = atRest ? .005 : .06, widthStep = atRest ? .01 : .35;
-        if (_glassOptics is { } shown && shown.Dark == dark && Math.Abs(shown.Rim - rim) < rimStep && Math.Abs(shown.Width - width) < widthStep
-            && Math.Abs(Math.IEEERemainder(Math.Atan2(shown.Y, shown.X) - Math.Atan2(_glassLight.Y, _glassLight.X), 2 * Math.PI)) < .03) return;
-        _glassOptics = (_glassLight.X, _glassLight.Y, rim, width, dark);
-        var (start, end) = GlassLight.Gradient(_glassLight);
+        double strength = Math.Min(1, GlassMaterial.RimStrength(Settings.GlassTransparency, openness));
+        var (peak, baseline) = GlassBoundaryMath.Light(_glassPalette.Evaluate(Environment.TickCount64).Position);
+        var edge = _glassEdge ??= new GlassEdge();
         var stops = Look.Current.Effects.RimGradient;
-        Brush rimBrush = stops.Count >= 2
-            ? new LinearGradientBrush(new GradientStopCollection(stops.Select((stop, i) => new GradientStop(PanelTheme.ToColor(stop), (double)i / (stops.Count - 1)))),
-                new Point(start.X, start.Y), new Point(end.X, end.Y))
-            : Look.RimBrush();
-        rimBrush = rimBrush.CloneCurrentValue();
-        rimBrush.Opacity = rim;
-        rimBrush.Freeze();
-        Island.RimBrush = rimBrush;
-        byte peak = dark ? (byte)26 : (byte)36;
-        var glow = new LinearGradientBrush(new GradientStopCollection
+        if (!ReferenceEquals(_glassEdgeStops, stops))
         {
-            new(Color.FromArgb(peak, 255, 255, 255), 0), new(Color.FromArgb((byte)(peak * .35), 255, 255, 255), .6), new(Color.FromArgb((byte)(peak * .15), 255, 255, 255), 1)
-        }, new Point(start.X, start.Y), new Point(end.X, end.Y));
-        glow.Freeze();
-        Island.BevelGlow = glow;
-        Island.BevelGlowWidth = width;
+            _glassEdgeStops = stops;
+            edge.Stops([.. stops.Select(PanelTheme.ToColor)]);
+        }
+        var (start, end) = GlassLight.Gradient(_glassLight);
+        edge.Light(start, end);
+        bool rings = edge.Shape(GlassBoundaryMath.BevelWidth(openness), 1 / VisualTreeHelper.GetDpi(Island).PixelsPerDip, peak, baseline, strength);
+        if (!ReferenceEquals(Island.Edge, edge)) Island.Edge = edge;
+        else if (rings) Island.InvalidateVisual();
+    }
+
+    // The light turns toward the latest reading's direction on the display's frames (GlassLight.Follow by the time passed), and the
+    // edge follows a palette turn as it goes; neither waits for the next reading, and nothing runs once both are at rest.
+    private void GlassOpticsNeeded()
+    {
+        bool moving = _glassActive && (_glassPalette.Moving
+            || Math.Abs(Math.IEEERemainder(Math.Atan2(_glassLight.Y, _glassLight.X) - Math.Atan2(_glassLightTarget.Y, _glassLightTarget.X), 2 * Math.PI)) > .002);
+        if (moving == _glassOpticsRendering) return;
+        _glassOpticsRendering = moving;
+        if (moving)
+        {
+            _glassLightAt = Stopwatch.GetTimestamp() * 1000d / Stopwatch.Frequency;
+            CompositionTarget.Rendering += GlassOpticsFrame;
+        }
+        else CompositionTarget.Rendering -= GlassOpticsFrame;
+    }
+
+    private void GlassOpticsFrame(object? sender, EventArgs e)
+    {
+        if (_glassActive)
+        {
+            double now = Stopwatch.GetTimestamp() * 1000d / Stopwatch.Frequency;
+            _glassLight = GlassLight.Follow(_glassLight, _glassLightTarget, now - _glassLightAt);
+            _glassLightAt = now;
+            ApplyGlassOptics();
+        }
+        GlassOpticsNeeded();
     }
 
     private void PublishGlassPalette(bool dark, bool coordinated)
@@ -482,15 +524,10 @@ public partial class MainWindow
         _acrylicProbe = new AcrylicProbe();
         _glassLastMiddle = double.NaN;
         _glassGeneration++;
-        _glassLight = GlassLight.Default; _glassLightAt = 0; _glassOptics = null;
-        Island.RimBrush = Look.RimBrush();
-        Island.BevelGlow = null;
+        _glassLight = _glassLightTarget = GlassLight.Default;
+        GlassOpticsNeeded();
+        Island.Edge = null;
         ApplySurface();
-        if (AcrylicNoise.Is(Island.Pattern))
-        {
-            double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-            Island.Pattern = Look.Texture(dpiScale: dpi) ?? Look.Scanlines(dpiScale: dpi);
-        }
     }
 
     private void CloseGlass()
@@ -510,6 +547,7 @@ public partial class MainWindow
         _glassAppearance = null;
         _glassAppearanceLook = null;
         _glassOutline = null;
+        _glassOutlinePoints = null;
         _glassContour = null;
         _glassMaterialReady = false;
     }
