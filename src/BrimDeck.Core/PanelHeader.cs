@@ -38,7 +38,7 @@ public sealed record PanelHeader(double Row, double Height, double Side, double 
     public static double ToolbarFor(double panelHeight) => panelHeight < 150 ? 28 : panelHeight >= 290 ? 40 : 36;
     public static PanelHeader ForPanel(double height) => For(ToolbarFor(height), height < 170 ? 14 : 20);
 
-    // The body and the side grips start at this page's row. Only the toolbar uses the shared geometry.
+    // The body keeps this page's row; the toolbar and side grips use the shared height.
     public PanelHeader WithControlsOf(PanelHeader shared) => shared with { Row = Row, ContentSide = ContentSide };
 
     // The space between a rounded rectangle and the outline of a panel corner of the given radius, for a rectangle x and y
