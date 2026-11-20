@@ -92,8 +92,6 @@ public partial class MainWindow
                     for (int j = 0; j < parts.Count; j++) { if (parts[j] is FrameworkElement part) Add(part, ref area); }
                 else Add(child, ref area);
             }
-            // A row on its way out (MainWindow.RowSwap.cs, a picture of it) is still drawn and keeps its place under the glass until it is gone.
-            foreach (var leaving in _leavingRows) Add(leaving, ref area);
         }
         catch (InvalidOperationException) { return Rect.Empty; }
         return area;

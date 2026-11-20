@@ -808,18 +808,9 @@ public partial class MainWindow : Window
         RenderCompact();
     }
 
-    // The collapsed row is built at once; a quota alert coming, changing or ending swaps it with the one before on the compact
-    // content's own tracks (MainWindow.RowSwap.cs).
-    internal void RenderCompact()
-    {
-        int swap = LeaveRow();
-        BuildCompact();
-        if (swap > 0) LandRow(swap);
-    }
-
     private bool _inRenderCompact;
     // The compact island shows one ring per enabled application: the highest used share among its quotas.
-    private void BuildCompact()
+    internal void RenderCompact()
     {
         _inRenderCompact = true;
         try
