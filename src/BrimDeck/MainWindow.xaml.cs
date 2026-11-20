@@ -144,6 +144,7 @@ public partial class MainWindow : Window
             if (_expanded && !_preview) PointerChanged(_pointerInside);
         }) { Interval = TimeSpan.FromSeconds(1) };
         InitializeComponent();
+        MenuDismissal.Attach(this);
         // Out of sight until the boot (or, without animations, until it has its place): the window shows before it is placed.
         HoverZone.Opacity = 0;
         // The island stays in sight over a taskbar that Start or search has lifted above every application window, and above
@@ -337,9 +338,11 @@ public partial class MainWindow : Window
         var first = new MouseButtonEventArgs(Mouse.PrimaryDevice, time, button) { RoutedEvent = press ? Mouse.PreviewMouseDownEvent : Mouse.PreviewMouseUpEvent };
         target.RaiseEvent(first);
         target.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, time, button) { RoutedEvent = press ? Mouse.MouseDownEvent : Mouse.MouseUpEvent, Handled = first.Handled });
+        // A press or release held back (one that only closed a menu, MenuDismissal) clicks no button.
+        if (press && button == MouseButton.Left && first.Handled) _mirrorPressed = null;
         if (!press && button == MouseButton.Left)
         {
-            if (owner is not null && ReferenceEquals(owner, _mirrorPressed) && !pressed && owner.IsEnabled && UIElementAutomationPeer.CreatePeerForElement(owner) is { } peer)
+            if (!first.Handled && owner is not null && ReferenceEquals(owner, _mirrorPressed) && !pressed && owner.IsEnabled && UIElementAutomationPeer.CreatePeerForElement(owner) is { } peer)
             {
                 if (peer.GetPattern(PatternInterface.Invoke) is IInvokeProvider invoke) invoke.Invoke();
                 else if (peer.GetPattern(PatternInterface.Toggle) is IToggleProvider toggle) toggle.Toggle();
