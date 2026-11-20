@@ -949,8 +949,11 @@ public partial class MainWindow : Window
         HoverExtension.Width = stretch ? double.NaN : Math.Max(0, box.Width);
         // Collapsed, hovering is detected by polling the cursor (TrackPointer), so the strip is not drawn: its nearly transparent
         // pixels would still catch clicks for this layered window (Windows only lets clicks through fully transparent pixels).
-        HoverExtension.IsHitTestVisible = expanded;
-        HoverExtension.Visibility = expanded ? Visibility.Visible : Visibility.Hidden;
+        // The indicator that a click opens (ClickToExpand) is the exception: it is a few pixels thick and stands off the screen's
+        // edge, so the strip takes the clicks around it, up to the edge, where the pointer pushed against the edge lands.
+        bool strip = expanded || indicator && Settings.ClickToExpand && !_preview && !ClickThrough;
+        HoverExtension.IsHitTestVisible = strip;
+        HoverExtension.Visibility = strip ? Visibility.Visible : Visibility.Hidden;
         double boxTop = double.IsFinite(box.Top) ? box.Top : 0;
         // Collapsing runs in three stages: the content leaves first, the surface follows a moment later on the drawer's curve
         // (leaving at once, landing softly), the compact content lands last.

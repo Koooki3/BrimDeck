@@ -89,5 +89,11 @@ internal static class IndicatorCapsuleTests
         var holds = IndicatorCapsule.Holds(new DipRect(0, 400, 4, 200), left);
         check("The area reaches from the line to the capsule", holds == new DipRect(0, 400, 245, 200));
         check("Without a line the capsule alone keeps itself", IndicatorCapsule.Holds(new DipRect(0, 0, 0, 0), top) == top);
+        // The line on the right edge, 4 DIPs from it: the pointer pushed against the screen's edge beside the line keeps the capsule.
+        var rightFrame = EdgeFrame.For(ScreenEdge.Right, 1920, 1080, work, true);
+        var reach = IndicatorCapsule.LineReach(rightFrame, new DipRect(440, 4, 200, 4));
+        var rightHolds = IndicatorCapsule.Holds(reach, IndicatorCapsule.Place(rightFrame.ToScreen(new DipRect(440, 4, 200, 4)), ScreenEdge.Right, 240, 32, 5, work));
+        check("The line's reach runs to the screen's edge", Near(reach.Right, 1920) && Near(reach.X, 1910));
+        check("The area keeps the strip between the line and the screen's edge", Near(rightHolds.Right, 1920) && rightHolds.Y <= 440 && rightHolds.Bottom >= 640);
     }
 }

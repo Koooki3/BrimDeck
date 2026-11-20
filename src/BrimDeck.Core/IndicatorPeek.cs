@@ -63,8 +63,13 @@ public static class IndicatorCapsule
         return double.IsFinite(centre) && double.IsFinite(size) ? Math.Clamp(centre - size / 2, 0, free) : free / 2;
     }
 
+    // Where the line senses the pointer (CollapsedHover.Zone), on the screen: the line, a little around it, and the strip between it
+    // and the screen's edge. line is in the frame of its edge.
+    public static DipRect LineReach(EdgeFrame frame, DipRect line) => frame.ToScreen(CollapsedHover.Zone(CompactStyle.Line, line, 0));
+
     // The area that keeps the capsule while the pointer is in it: the capsule and the indicator it came from, and the room between
-    // them, so the pointer that opened it from the line does not have to reach the capsule first.
+    // them, so the pointer that opened it from the line does not have to reach the capsule first. line is the line's LineReach, so
+    // the pointer that opened it from the strip between the line and the screen's edge keeps it too.
     public static DipRect Holds(DipRect line, DipRect capsule)
     {
         if (!(line.Width > 0) || !(line.Height > 0)) return capsule;
