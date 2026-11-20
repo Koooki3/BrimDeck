@@ -1201,7 +1201,10 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         SectionTitle(Loc.T("项目信息", "Project"));
         // What's new sits beside the version number, where someone looking for this version's changes looks first.
         var version = new StackPanel { Orientation = Orientation.Horizontal };
-        var current = TextLine(_app.Updates.CurrentVersion,TextSize.Body,TextSecondary); current.VerticalAlignment = VerticalAlignment.Center; version.Children.Add(current);
+        var release = _app.Updates.CurrentVersion;
+        var current = TextLine(ApplicationVersion.LocalPlus ? release + " plus" : release, TextSize.Body, TextSecondary);
+        current.VerticalAlignment = VerticalAlignment.Center;
+        version.Children.Add(current);
         var notes = ActionButton(Loc.T("更新内容", "What's new"), ShowReleaseNotes); notes.Style = (Style)FindResource("SettingsLink"); notes.Margin = new Thickness(14, 0, 0, 0);
         version.Children.Add(notes);
         Group(Row(Loc.T("当前版本", "Current version"),version),

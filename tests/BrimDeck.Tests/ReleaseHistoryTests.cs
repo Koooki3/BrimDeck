@@ -25,6 +25,8 @@ internal static class ReleaseHistoryTests
             Versions(ReleaseHistory.Shown(all, "1.2.0-beta.2", beta: true)) == "1.2.0-beta.2 1.2.0-beta.1 1.1.0 1.0.0");
         check("beta updates off lists no betas even on a beta",
             Versions(ReleaseHistory.Shown(all, "1.2.0-beta.2", beta: false)) == "1.1.0 1.0.0");
+        check("a local Plus build shows its exact alpha notes with beta updates off",
+            Versions(ReleaseHistory.Shown(all, "1.2.0-alpha.1", beta: false, includeCurrentPrerelease: true)) == "1.2.0-alpha.1 1.1.0 1.0.0");
         check("versions newer than this copy are not listed", Versions(ReleaseHistory.Shown(all, "1.1.0", beta: false)) == "1.1.0 1.0.0");
 
         check("versions since the previous one are marked new", ReleaseHistory.IsNew("1.2.0", "1.0.0", "1.2.0") &&

@@ -37,7 +37,7 @@ public sealed partial class SettingsWindow
         var title = TextLine(Loc.T("更新内容", "What's new"), 21, TextPrimary, FontWeights.SemiBold); title.Margin = new Thickness(0, 0, 0, 16); panel.Children.Add(title);
 
         var list = new StackPanel { Margin = new Thickness(0, 0, 14, 0) };
-        var entries = ReleaseHistory.Shown(ReleaseHistory.Bundled, updates.CurrentVersion, updates.Beta);
+        var entries = ReleaseHistory.Shown(ReleaseHistory.Bundled, updates.CurrentVersion, updates.Beta, ApplicationVersion.LocalPlus);
         foreach (var entry in entries)
         {
             if (list.Children.Count > 0) list.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider), Margin = new Thickness(0, 18, 0, 18) });

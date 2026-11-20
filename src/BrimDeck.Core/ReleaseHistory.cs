@@ -28,15 +28,15 @@ public static partial class ReleaseHistory
         return new ReleaseNotes(entries);
     }
 
-    // The versions the window lists, newest first: every release up to this one. Alphas are never listed. Betas are listed
-    // only with beta updates on (AppUpdates.Beta), and only those newer than the last release: a release gathers the notes
-    // of the betas before it.
-    public static IReadOnlyList<ReleaseEntry> Shown(IEnumerable<ReleaseEntry> entries, string current, bool beta)
+    // List releases newest first. Normally only standalone releases and opted-in betas since the previous release
+    // appear. A local Plus build also lists its exact prerelease baseline when it has bundled notes.
+    public static IReadOnlyList<ReleaseEntry> Shown(IEnumerable<ReleaseEntry> entries, string current, bool beta, bool includeCurrentPrerelease = false)
     {
         var order = Comparer<string>.Create(ApplicationVersion.Compare);
         var known = entries.Where(e => ApplicationVersion.Compare(e.Version, current) <= 0).ToList();
         var lastRelease = known.Where(e => !ApplicationVersion.IsPrerelease(e.Version)).Select(e => e.Version).Max(order);
         return known.Where(e => !ApplicationVersion.IsPrerelease(e.Version) ||
+                includeCurrentPrerelease && ApplicationVersion.Compare(e.Version, current) == 0 ||
                 beta && IsBeta(e.Version) && (lastRelease is null || ApplicationVersion.Compare(e.Version, lastRelease) > 0))
             .OrderByDescending(e => e.Version, order).ToList();
     }
