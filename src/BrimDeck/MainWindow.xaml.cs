@@ -594,6 +594,8 @@ public partial class MainWindow : Window
     }
     // SetExpanded runs for FitCompactToContent: the surface at rest takes the width its content asks for (ContentResize).
     private bool _contentResize;
+    // The collapsed surface was last laid out as the line (SetExpanded), so the line turning into another style can tell.
+    private bool _laidOutIndicator;
     // When the last such move ends (Environment.TickCount64), so that a new one while it is under way carries it on.
     private long _contentResizeEnds;
     // The limits the settings window offers for a collapsed style on this window's monitor, whatever values are saved.
@@ -879,6 +881,10 @@ public partial class MainWindow : Window
         var shape = Collapsed;
         var style = shape.Style;
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
+        // The line turning into the capsule or the notch: Collapsed already holds the new style here (UpdateCollapsedGeometry), so
+        // whether the surface was last laid out as the line is kept apart.
+        bool fromIndicator = _laidOutIndicator && !expanded && !line;
+        _laidOutIndicator = indicator;
         double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height;
         var panel = PanelFor(wantedHeight);
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
@@ -1067,8 +1073,9 @@ public partial class MainWindow : Window
         var tone = Look.ColorOf(indicator ? "indicator" : "surface");
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
-        // indicator's color.
-        if (duration == 0 || expanded && line && !wasExpanded) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
+        // indicator's color. The line turning into the capsule or the notch without a morph (a window rule letting go of it, the
+        // line opening into either) does the same: on the closing's track the tint came late, after the surface had grown.
+        if (duration == 0 || expanded && line && !wasExpanded || fromIndicator && !morphing) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
