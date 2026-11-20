@@ -30,6 +30,10 @@ Under "When expanded", "What the page shows" has a chip for each reading, clicke
 - Until you change these switches or the order, the expanded page is exactly as before the upgrade; the old switches for the process list, drives, power and battery, and frame rate are now part of "What the page shows".
 - With both the CPU and the GPU shown, click the smaller one on the expanded page to choose which one is shown large.
 
+Under **When expanded › Individual CPU cores**, choose **Hide** to keep total CPU usage and remove the graph of individual cores from the expanded page. The collapsed row continues to use its own reading selections.
+
+Under **When expanded › Reading layout**, choose **Custom cards** to place memory, download, upload, and each internal drive letter in its own card. Use the arrows to move a card and choose **Half width** or **Full row**. On the memory card, choose **Full bar** or **Compact bar** independently of the card width. Cards wrap in reading order and use one column when the panel is narrow. Scroll within the cards when they cannot all fit vertically. The **What the page shows** switches still determine which readings appear, and a disconnected drive's choice is saved for when it returns. The card section starts at the first position occupied by memory, network, or drives in **Order on the page**. Switching back to **Automatic** restores the grouped layout and keeps your card settings.
+
 ## CPU and GPU
 
 - CPU usage is worked out from the time the processor is busy (including WSL2 and virtual machines when Hyper-V is on), as Task Manager does from Windows 11 24H2.

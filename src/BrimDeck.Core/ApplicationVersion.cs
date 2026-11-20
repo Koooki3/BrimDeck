@@ -4,6 +4,9 @@ namespace BrimDeck.Core;
 
 public static class ApplicationVersion
 {
+    public static bool LocalPlus { get; } = Assembly.GetEntryAssembly()?.GetCustomAttributes<AssemblyMetadataAttribute>()
+        .Any(metadata => metadata.Key == "BrimDeckLocalPlus" && metadata.Value == "true") == true;
+
     // Version of the running application: the entry assembly's informational version without build metadata
     // ("0.2.0+abc123" -> "0.2.0", "0.3.0-beta.1+abc123" -> "0.3.0-beta.1"). Release builds receive it from the tag through -p:Version.
     public static string Current { get; } = Normalize(Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);

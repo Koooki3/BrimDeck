@@ -144,8 +144,20 @@ public partial class MainWindow
     private ExpandedPlan CurrentMonitorPlan((int Drives, bool Small, int Power) sensors)
     {
         double height = ContentCanvas.Height;
-        return ExpandedLayout.For(ExpandedMonitor.Shown(Settings.ExpandedReadings), ContentCanvas.Width - 2 * _header.ContentSide, height - _header.Row - MonitorBottom(height),
-            new ExpandedContent(sensors.Drives, sensors.Power), null, Settings.MonitorMain, _monitorView is not null ? _monitorPlan : null);
+        var shown = ExpandedMonitor.Shown(Settings.ExpandedReadings);
+        ExpandedCardContent? cards = null;
+        if (Settings.ExpandedCustomCards)
+        {
+            bool storage = shown.Contains(ExpandedItem.Storage);
+            var monitor = _app.Monitor;
+            var letters = storage ? (monitor?.Latest?.Storage ?? []).SelectMany(drive => drive.Volumes).Select(volume => volume.Letter).ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
+            var visible = ExpandedCards.Resolve(Settings.ExpandedCardOrder, shown, letters)
+                .Where(card => shown.Contains(card.Item) && (card.Letter is null || letters.Contains(card.Letter))).ToList();
+            bool waiting = storage && letters.Count == 0 && (monitor?.StorageState is null or SensorState.Unknown || monitor?.StorageCount > 0);
+            cards = new(visible, waiting, storage);
+        }
+        return ExpandedLayout.For(shown, ContentCanvas.Width - 2 * _header.ContentSide, height - _header.Row - MonitorBottom(height),
+            new ExpandedContent(sensors.Drives, sensors.Power), null, Settings.MonitorMain, _monitorView is not null ? _monitorPlan : null, Settings.ExpandedCpuCores, cards);
     }
     // What the open page reads: what its layout kept, before the first one is made what the table chooses.
     private ExpandedDemand PageDemand() => (_monitorPlan is { } plan ? plan.Demand(Settings.MonitorTemperatures) : ExpandedMonitor.Demand(ExpandedMonitor.Shown(Settings.ExpandedReadings), Settings.MonitorTemperatures));
@@ -214,7 +226,12 @@ public partial class MainWindow
         var layout = CurrentMonitorPlan(sensors);
         var key = MonitorKey(layout, sensors.Small);
         bool fade = _monitorFade; _monitorFade = false;
-        if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView)) return;
+        if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView))
+        {
+            _monitorPlan = layout;
+            _monitorView.ResizeCards(layout);
+            return;
+        }
         _monitorKey = key; _monitorPlan = layout; _monitorSensors = BuiltSensors(layout, sensors.Small);
         // The list being replaced may have been under the pointer; its leave event never comes.
         if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
@@ -223,6 +240,7 @@ public partial class MainWindow
         _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings, Look), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
             Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor(old is null && MonitorMotion && !Resizing), MonitorMessage(layout), Settings.CoreDisplay, Settings.MonitorShowFree, Settings.CoreMatrixColumns);
+        if (old is not null) _monitorView.KeepCardScrollFrom(old);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         // The new page may show the power line where the old one did not, or the other way round: what is read follows
         // (UpdateMonitorDemand, which asks for the extras as well). And the frame rate's line: the frame rate is read only while a

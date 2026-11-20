@@ -678,7 +678,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     s.ClipboardPage=defaults.ClipboardPage;s.ClipboardWidth=defaults.ClipboardWidth;s.ClipboardHeight=defaults.ClipboardHeight;
                     s.NoticesPage=defaults.NoticesPage;s.NoticesWidth=defaults.NoticesWidth;s.NoticesHeight=defaults.NoticesHeight;
                     s.DevicesPage=defaults.DevicesPage;s.DevicesWidth=defaults.DevicesWidth;s.DevicesHeight=defaults.DevicesHeight;s.PageOrder=defaults.PageOrder;break;
-                case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.CompactSmoothing=defaults.CompactSmoothing;s.CoreDisplay=defaults.CoreDisplay;s.CoreMatrixColumns=defaults.CoreMatrixColumns;s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
+                case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.CompactSmoothing=defaults.CompactSmoothing;s.CoreDisplay=defaults.CoreDisplay;s.CoreMatrixColumns=defaults.CoreMatrixColumns;s.ExpandedCpuCores=defaults.ExpandedCpuCores;s.ExpandedCustomCards=defaults.ExpandedCustomCards;s.ExpandedCardOrder=[];s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
                     s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;s.MonitorPower=defaults.MonitorPower;s.MonitorFrames=defaults.MonitorFrames;s.ExpandedTable=null;s.MonitorGpuUsage=defaults.MonitorGpuUsage;s.MonitorTrafficPeriod=defaults.MonitorTrafficPeriod;s.MonitorShowFree=defaults.MonitorShowFree;break;
                 // The devices' order, names and switches stay; the page and its size are Expanded view's (case 2).
                 case DevicesSettingsPage:s.DeviceLowPercent=defaults.DeviceLowPercent;s.DeviceWarningPercent=defaults.DeviceWarningPercent;s.DeviceFigures=defaults.DeviceFigures;s.DeviceLowNotice=defaults.DeviceLowNotice;break;
@@ -1201,7 +1201,10 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         SectionTitle(Loc.T("项目信息", "Project"));
         // What's new sits beside the version number, where someone looking for this version's changes looks first.
         var version = new StackPanel { Orientation = Orientation.Horizontal };
-        var current = TextLine(_app.Updates.CurrentVersion,TextSize.Body,TextSecondary); current.VerticalAlignment = VerticalAlignment.Center; version.Children.Add(current);
+        var release = _app.Updates.CurrentVersion;
+        var current = TextLine(ApplicationVersion.LocalPlus ? release + " plus" : release, TextSize.Body, TextSecondary);
+        current.VerticalAlignment = VerticalAlignment.Center;
+        version.Children.Add(current);
         var notes = ActionButton(Loc.T("更新内容", "What's new"), ShowReleaseNotes); notes.Style = (Style)FindResource("SettingsLink"); notes.Margin = new Thickness(14, 0, 0, 0);
         version.Children.Add(notes);
         Group(Row(Loc.T("当前版本", "Current version"),version),

@@ -95,7 +95,7 @@ public partial class MainWindow
     }
 
     // Anchor the side handles to the shared toolbar, independently of each page's body row.
-    private double GripHeaderHeight => _header.Height * _scale;
+    private double GripHeaderHeight => _header.Height * _scale * Zoom;
 
     // Brings the layer up to date with the island; cheap when nothing changed.
     private void UpdateGrips()

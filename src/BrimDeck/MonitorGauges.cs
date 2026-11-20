@@ -597,14 +597,14 @@ internal sealed class MemoryBlock : FrameworkElement
     // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
     private PanelLook Look => PanelLook.Of(this);
     private readonly MonitorColors _colors;
-    private readonly bool _compact, _free;
+    private readonly bool _compact, _free, _compactBar;
     private readonly double _body, _caption;
     private Eased _used, _cached, _commit;
     private MemorySample? _memory;
 
-    public MemoryBlock(MonitorColors colors, bool compact, double body, double caption, bool free = false)
+    public MemoryBlock(MonitorColors colors, bool compact, double body, double caption, bool free = false, bool compactBar = false)
     {
-        _colors = colors; _compact = compact; _body = body; _caption = caption; _free = free;
+        _colors = colors; _compact = compact; _body = body; _caption = caption; _free = free; _compactBar = compactBar;
         Height = compact ? Math.Ceiling(body * 1.7) : Math.Ceiling(body * 1.7 + 6 + 5 + 5 + 3);
     }
 
@@ -651,18 +651,19 @@ internal sealed class MemoryBlock : FrameworkElement
         {
             // One line: the bar fills what the figures leave, with the commit charge as a thin line just under it, so it shows at
             // every size and not only where memory has a block of its own.
-            double start = x + 10, end = w;
-            if (end - start > 16)
+            double start = x + 10, available = w - start, width = available * (_compactBar ? .6 : 1);
+            if (width > 16)
             {
                 double top = Math.Round(line / 2 - 4);
-                Bar(drawing, new Rect(start, top, end - start, 4), color, now);
-                Commit(drawing, new Rect(start, top + 4 + 3, end - start, 2), now);
+                Bar(drawing, new Rect(start, top, width, 4), color, now);
+                Commit(drawing, new Rect(start, top + 4 + 3, width, 2), now);
             }
             return;
         }
         double barTop = line + 6;
-        Bar(drawing, new Rect(0, barTop, w, 5), color, now);
-        Commit(drawing, new Rect(0, barTop + 5 + 5, w, 2), now);
+        double fullWidth = w * (_compactBar ? .6 : 1);
+        Bar(drawing, new Rect(0, barTop, fullWidth, 5), color, now);
+        Commit(drawing, new Rect(0, barTop + 5 + 5, fullWidth, 2), now);
     }
 
     // The commit charge as a thin line under the bar, as ftop draws swap.

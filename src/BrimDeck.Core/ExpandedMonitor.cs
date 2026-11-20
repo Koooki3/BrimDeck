@@ -17,6 +17,65 @@ public sealed class ExpandedReading
     public ExpandedReading Copy() => (ExpandedReading)MemberwiseClone();
 }
 
+// In the optional card layout, a drive card is identified by its volume letter.
+public sealed record ExpandedCard(ExpandedItem Item, string? Letter = null, bool Wide = false)
+{
+    // The memory bar length is independent of the card width and defaults to the existing full-width bar.
+    public bool CompactMemoryBar { get; init; }
+}
+
+public static class ExpandedCards
+{
+    public static bool IsCard(ExpandedItem item) => item is ExpandedItem.Memory or ExpandedItem.Download or ExpandedItem.Upload or ExpandedItem.Storage;
+
+    public static List<ExpandedCard> Normalize(IEnumerable<ExpandedCard?>? cards)
+    {
+        var seen = new HashSet<(ExpandedItem, string?)>();
+        var result = new List<ExpandedCard>();
+        foreach (var card in (cards ?? []).OfType<ExpandedCard>())
+        {
+            if (!IsCard(card.Item)) continue;
+            var letter = card.Item == ExpandedItem.Storage ? card.Letter?.Trim().ToUpperInvariant() : null;
+            if (card.Item == ExpandedItem.Storage && letter is not [>= 'A' and <= 'Z', ':']) continue;
+            if (seen.Add((card.Item, letter)))
+                result.Add(card with { Letter = letter, CompactMemoryBar = card.Item == ExpandedItem.Memory && card.CompactMemoryBar });
+        }
+        return result;
+    }
+
+    // Saved positions survive a drive disconnecting or a reading being hidden. Newly available cards join in reading order.
+    public static List<ExpandedCard> Resolve(IEnumerable<ExpandedCard?>? cards, IEnumerable<ExpandedItem> items, IEnumerable<string> letters)
+    {
+        var defaults = items.Where(IsCard).SelectMany(item => item == ExpandedItem.Storage
+            ? letters.Order(StringComparer.OrdinalIgnoreCase).Select(letter => new ExpandedCard(item, letter))
+            : [new ExpandedCard(item)]);
+        return Normalize((cards ?? []).Concat(defaults));
+    }
+
+    public static bool TwoColumns(double width, double scale) => width >= 400 * scale;
+
+    // Pack in reading order. A wide card starts a new row, and narrow displays give each card its own row.
+    public static IReadOnlyList<(int Row, int Column, int Span)> Place(IReadOnlyList<ExpandedCard> cards, bool twoColumns)
+    {
+        var slots = new List<(int, int, int)>(cards.Count);
+        int row = 0, column = 0;
+        foreach (var card in cards)
+        {
+            if (!twoColumns || card.Wide)
+            {
+                if (column != 0) { row++; column = 0; }
+                slots.Add((row++, 0, 2));
+            }
+            else
+            {
+                slots.Add((row, column++, 1));
+                if (column == 2) { row++; column = 0; }
+            }
+        }
+        return slots;
+    }
+}
+
 // What the sampler must read for the page as laid out; nothing else is read for it.
 [Flags]
 public enum ExpandedDemand
