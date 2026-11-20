@@ -18,7 +18,11 @@ public sealed class ExpandedReading
 }
 
 // In the optional card layout, a drive card is identified by its volume letter.
-public sealed record ExpandedCard(ExpandedItem Item, string? Letter = null, bool Wide = false);
+public sealed record ExpandedCard(ExpandedItem Item, string? Letter = null, bool Wide = false)
+{
+    // The memory bar length is independent of the card width and defaults to the existing full-width bar.
+    public bool CompactMemoryBar { get; init; }
+}
 
 public static class ExpandedCards
 {
@@ -33,7 +37,8 @@ public static class ExpandedCards
             if (!IsCard(card.Item)) continue;
             var letter = card.Item == ExpandedItem.Storage ? card.Letter?.Trim().ToUpperInvariant() : null;
             if (card.Item == ExpandedItem.Storage && letter is not [>= 'A' and <= 'Z', ':']) continue;
-            if (seen.Add((card.Item, letter))) result.Add(card with { Letter = letter });
+            if (seen.Add((card.Item, letter)))
+                result.Add(card with { Letter = letter, CompactMemoryBar = card.Item == ExpandedItem.Memory && card.CompactMemoryBar });
         }
         return result;
     }

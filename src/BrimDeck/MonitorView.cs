@@ -65,6 +65,8 @@ internal sealed class MonitorView : Grid
     private readonly List<(string Letter, StorageBlock Block)> _driveCards = [];
     private readonly NetworkBlock? _downloadCard, _uploadCard;
     private readonly ScrollViewer? _cardScroll;
+    private readonly IReadOnlyList<ExpandedCard> _cards = [];
+    private (ExpandedCard Card, double WithinRow)? _pendingCardScroll;
     private readonly PowerBlock? _power;
     private readonly FramesBlock? _frames;
     private readonly bool _temperatures;
@@ -181,6 +183,7 @@ internal sealed class MonitorView : Grid
 
         if (plan.CardContent is { } custom && (custom.Cards.Count > 0 || custom.AwaitingDrives))
         {
+            _cards = custom.Cards;
             var cards = new Grid();
             cards.ColumnDefinitions.Add(new ColumnDefinition());
             cards.ColumnDefinitions.Add(new ColumnDefinition());
@@ -192,7 +195,7 @@ internal sealed class MonitorView : Grid
                 while (cards.RowDefinitions.Count <= row) cards.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
                 FrameworkElement reading;
                 if (card.Item == ExpandedItem.Memory)
-                    reading = _memory = new MemoryBlock(colors, false, layout.Body, layout.Caption, free);
+                    reading = _memory = new MemoryBlock(colors, false, layout.Body, layout.Caption, free, compactBar: card.CompactMemoryBar);
                 else if (card.Letter is { } letter)
                 {
                     var drive = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, 1, 1, temperatures, free);
@@ -343,6 +346,40 @@ internal sealed class MonitorView : Grid
     public void ResizeCards(ExpandedPlan plan)
     {
         if (_cardScroll is not null && _cardScroll.MaxHeight != plan.CardsHeight) _cardScroll.MaxHeight = plan.CardsHeight;
+    }
+
+    public void KeepCardScrollFrom(MonitorView previous)
+    {
+        var scroll = _cardScroll;
+        if (scroll?.Content is not Grid grid || previous.CardScrollAnchor() is not { } anchor) return;
+        int index = 0;
+        while (index < _cards.Count && (_cards[index].Item != anchor.Card.Item || _cards[index].Letter != anchor.Card.Letter)) index++;
+        if (index == _cards.Count || grid.Children[index] is not FrameworkElement card) return;
+        _pendingCardScroll = anchor;
+        scroll.Loaded += Restore;
+
+        void Restore(object sender, RoutedEventArgs e)
+        {
+            scroll.Loaded -= Restore;
+            double rowTop = card.TranslatePoint(new Point(), grid).Y;
+            double withinRow = Math.Min(anchor.WithinRow, Math.Max(0, card.ActualHeight - 1));
+            scroll.ScrollToVerticalOffset(rowTop + withinRow);
+            Dispatcher.InvokeAsync(() => { _pendingCardScroll = null; }, System.Windows.Threading.DispatcherPriority.Background);
+        }
+    }
+
+    private (ExpandedCard Card, double WithinRow)? CardScrollAnchor()
+    {
+        if (_pendingCardScroll is { } pending) return pending;
+        if (_cardScroll?.Content is not Grid grid || _cardScroll.VerticalOffset <= 0) return null;
+        double offset = _cardScroll.VerticalOffset;
+        for (int i = 0; i < _cards.Count; i++)
+        {
+            if (grid.Children[i] is not FrameworkElement card) continue;
+            double top = card.TranslatePoint(new Point(), grid).Y;
+            if (top + card.ActualHeight > offset) return (_cards[i], Math.Max(0, offset - top));
+        }
+        return null;
     }
 
     // A press anywhere in the window outside the card and the list's rows closes the card: the page's blank room, the list's own

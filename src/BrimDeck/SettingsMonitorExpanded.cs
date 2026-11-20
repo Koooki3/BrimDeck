@@ -101,8 +101,8 @@ public sealed partial class SettingsWindow
     private FrameworkElement ExpandedCardEditor(List<Action> refresh)
     {
         var panel = new StackPanel();
-        var hint = TextLine(Loc.T("移动内存、下载、上传或盘符，设置半宽或整行。窄面板自动排为一列。",
-            "Move memory, download, upload, and drive letters and choose half width or full row. Narrow panels use one column."), 12, TextSecondary);
+        var hint = TextLine(Loc.T("移动内存、下载、上传或盘符，设置半宽或整行；内存条可选常规或紧凑。窄面板自动排为一列。",
+            "Move memory, download, upload, and drive letters and choose half width or full row. Set the memory bar to full or compact; narrow panels use one column."), 12, TextSecondary);
         hint.TextWrapping = TextWrapping.Wrap;
         hint.Margin = new Thickness(0, 8, 0, 6);
         var rows = new StackPanel();
@@ -114,7 +114,7 @@ public sealed partial class SettingsWindow
         string Name(ExpandedCard card) => card.Letter ?? ExpandedName(card.Item);
 
         Button? reset = null;
-        reset = ActionButton(Loc.T("重置卡片顺序和宽度", "Reset card order and width"), () =>
+        reset = ActionButton(Loc.T("重置卡片顺序、宽度和内存条", "Reset card order, width, and memory bar"), () =>
         {
             Resize(s => s.ExpandedCardOrder = [], DeckPage.Monitor);
             Build();
@@ -185,6 +185,23 @@ public sealed partial class SettingsWindow
                     if (reset is not null) reset.IsEnabled = true;
                 };
                 controls.Children.Add(width);
+                if (card.Item == ExpandedItem.Memory)
+                {
+                    var barLength = new ComboBox { Width = 112, Style = (Style)FindResource("SettingsCombo"),
+                        ItemsSource = new[] { Loc.T("常规条", "Full bar"), Loc.T("紧凑条", "Compact bar") }, SelectedIndex = card.CompactMemoryBar ? 1 : 0 };
+                    AutomationProperties.SetName(barLength, Loc.T("内存条长度", "Memory bar length"));
+                    barLength.SelectionChanged += (_, _) =>
+                    {
+                        if (barLength.SelectedIndex < 0) return;
+                        var compact = barLength.SelectedIndex == 1;
+                        if (cards[index].CompactMemoryBar == compact) return;
+                        cards[index] = cards[index] with { CompactMemoryBar = compact };
+                        built = [.. cards];
+                        Resize(s => s.ExpandedCardOrder = [.. cards], DeckPage.Monitor);
+                        if (reset is not null) reset.IsEnabled = true;
+                    };
+                    controls.Children.Add(barLength);
+                }
                 rows.Children.Add(line);
                 if (focus is { } target && target.Card == card)
                 {
