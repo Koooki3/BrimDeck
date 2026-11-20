@@ -25,11 +25,10 @@ public partial class MainWindow
 
     private void StartPeekLeave() { _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.CloseDelay)); _leave.Start(); }
 
-    // The open delay ran out on the indicator: the bubble appears. With no readings chosen there is nothing to show, and the indicator
-    // stays as it is.
+    // The open delay ran out on the indicator: the bubble appears.
     private void BeginPeek()
     {
-        if (!StripNeedsSystem || NoticeCovering || IsSuppressed || !IsVisible || ScreenOff || !_peek.Begin()) return;
+        if (!PeekShows || NoticeCovering || IsSuppressed || !IsVisible || ScreenOff || !_peek.Begin()) return;
         _hover.Stop();
         if (!ShowPeekBubble()) _peek.End();
     }
@@ -39,16 +38,21 @@ public partial class MainWindow
         _hover.Stop(); _leave.Stop();
         HidePeekBubble();
     }
-    // A context change or a new setting may take the peeking rule away.
+    // The peeking rule with readings to show. Without readings the indicator behaves as an ordinary one: hovering (or a click, with
+    // ClickToExpand) opens the panel.
+    private bool PeekShows => PeekRule && StripNeedsSystem;
+    // A context change, a new setting or hiding the panels (hotkey, tray, a hiding rule) may take the peek away. Hiding is immediate,
+    // so the bubble goes without its animation.
     private void KeepPeekCurrent()
     {
-        if ((_peek.Active || _peek.Resting) && !PeekRule) { _peek.Reset(); HidePeekBubble(); }
+        if (IsSuppressed && (_peek.Active || _peek.Resting || _peekBubble is not null)) { _peek.Reset(); HidePeekBubble(animate: false); return; }
+        if ((_peek.Active || _peek.Resting) && !PeekShows) { _peek.Reset(); HidePeekBubble(); }
     }
     // Asked on every pointer check: the bubble goes at once when the panel is hidden, moved or opened, or the display is off.
     private void GuardPeekBubble()
     {
         if (_peekBubble is null) return;
-        if (NoticeCovering || IsSuppressed || !IsVisible || _moveArmed || _expanded || !PeekRule || ScreenOff) { _peek.Reset(); _hover.Stop(); _leave.Stop(); HidePeekBubble(); }
+        if (NoticeCovering || IsSuppressed || !IsVisible || _moveArmed || _expanded || !PeekShows || ScreenOff) { _peek.Reset(); _hover.Stop(); _leave.Stop(); HidePeekBubble(); }
     }
 
     private bool ShowPeekBubble()

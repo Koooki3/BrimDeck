@@ -149,7 +149,7 @@ public partial class MainWindow : Window
         {
             _hover!.Stop();
             if (IsSuppressed || !_pointerInside) return;
-            if (!_expanded && PeekRule && !_peek.Active) { BeginPeek(); return; }
+            if (!_expanded && PeekShows && !_peek.Active) { BeginPeek(); return; }
             OpenAtPointer();
         });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
@@ -1311,7 +1311,7 @@ public partial class MainWindow : Window
             if (_expanded || IsSuppressed) return;
             // The bubble next to the indicator opens the panel by a click only.
             // ClickToExpand covers the full panel only; a peeking rule still peeks on hover.
-            _hover.Stop(); if (_peek.Active || Settings.ClickToExpand && !PeekRule) return;
+            _hover.Stop(); if (_peek.Active || Settings.ClickToExpand && !PeekShows) return;
             _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
