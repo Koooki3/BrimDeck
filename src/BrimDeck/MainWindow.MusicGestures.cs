@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using BrimDeck.Core;
 using BrimDeck.Native;
 using Microsoft.Win32;
@@ -26,8 +27,12 @@ public partial class MainWindow
     private Polyline? _dragTrail;
     private Border? _dragLabel;
     // A drag recognised as a volume drag adjusts the volume as it goes on, by how far the pointer moves along its axis from where it
-    // was recognised; it then keeps to the volume until released, whatever its trail does.
-    private (bool Horizontal, int Sign, double From, float Start, SystemVolume Device)? _volumeDrag;
+    // was recognised; it then keeps to the volume until released, whatever its trail does. Player marks the player's own volume.
+    private (bool Horizontal, int Sign, double From, float Start, IVolumeLevel Device, bool Player)? _volumeDrag;
+    // The player had no audio session when this drag looked for one; it does not look again until the next drag.
+    private bool _playerVolumeMissing;
+    // Puts away the label a touchpad swipe on the player's volume shows.
+    private DispatcherTimer? _volumeFlash;
     // Lets go of a press the cover is showing, when a drag that began on it takes over.
     private Action? _releaseCoverPress;
 
@@ -73,18 +78,25 @@ public partial class MainWindow
         if (_volumeDrag is null)
         {
             var direction = DragDirection(point);
-            int sign = MusicGestures.VolumeSign(direction, MusicGestures.Drag(Settings, direction));
-            if (sign != 0 && SystemVolume.Open() is { } device)
+            var action = MusicGestures.Drag(Settings, direction);
+            int sign = MusicGestures.VolumeSign(direction, action);
+            bool player = MusicGestures.IsPlayerVolume(action);
+            if (sign != 0 && (!player || !_playerVolumeMissing) && CanRunGesture(action))
             {
-                bool horizontal = direction is GestureDirection.Left or GestureDirection.Right;
-                _volumeDrag = (horizontal, sign, horizontal ? point.X : point.Y, device.Level, device);
+                IVolumeLevel? device = player ? _media?.CurrentOwner is { } owner ? PlayerVolume.Open(owner) : null : SystemVolume.Open();
+                if (device is not null)
+                {
+                    bool horizontal = direction is GestureDirection.Left or GestureDirection.Right;
+                    _volumeDrag = (horizontal, sign, horizontal ? point.X : point.Y, device.Level, device, player);
+                }
+                else if (player) _playerVolumeMissing = true;
             }
         }
         if (_volumeDrag is { } volume)
         {
             double level = MusicGestures.VolumeLevel(volume.Start, volume.Sign, (volume.Horizontal ? point.X : point.Y) - volume.From);
             volume.Device.Level = (float)level;
-            ShowDragLabel(Loc.T($"音量 {Math.Round(level * 100)}%", $"Volume {Math.Round(level * 100)}%"), true);
+            ShowDragLabel(VolumeLabel(volume.Player, level), true);
         }
         else ShowDragAction(point);
         e.Handled = true;
@@ -103,7 +115,7 @@ public partial class MainWindow
         e.Handled = true;
         // A volume drag has done its work while it moved.
         var action = MusicGestures.Drag(Settings, direction);
-        if (!adjusted && GesturesAllowed && action is not (MusicGestureAction.VolumeUp or MusicGestureAction.VolumeDown)) RunGesture(action);
+        if (!adjusted && GesturesAllowed && !MusicGestures.IsVolume(action)) RunGesture(action);
     }
 
     // The horizontal wheel: answers whether the panel took it.
@@ -126,8 +138,9 @@ public partial class MainWindow
         catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or System.IO.IOException) { return true; }
     }
 
-    private bool CanRunGesture(MusicGestureAction action) => action is MusicGestureAction.VolumeUp or MusicGestureAction.VolumeDown || _mediaTrack is { } track && action switch
+    private bool CanRunGesture(MusicGestureAction action) => MusicGestures.IsSystemVolume(action) || _mediaTrack is { } track && action switch
     {
+        MusicGestureAction.PlayerVolumeUp or MusicGestureAction.PlayerVolumeDown => _media?.CurrentOwner is not null,
         MusicGestureAction.NextTrack => track.CanNext,
         MusicGestureAction.PreviousTrack => track.CanPrevious,
         MusicGestureAction.PlayPause => track.CanToggle,
@@ -146,7 +159,16 @@ public partial class MainWindow
     private void RunGesture(MusicGestureAction action)
     {
         if (!CanRunGesture(action)) return;
-        if (action is MusicGestureAction.VolumeUp or MusicGestureAction.VolumeDown) { VolumeKeys.Press(action == MusicGestureAction.VolumeUp, MusicGestures.VolumeSteps); return; }
+        if (MusicGestures.IsSystemVolume(action)) { VolumeKeys.Press(action == MusicGestureAction.VolumeUp, MusicGestures.VolumeSteps); return; }
+        if (MusicGestures.IsPlayerVolume(action))
+        {
+            using var volume = _media?.CurrentOwner is { } owner ? PlayerVolume.Open(owner) : null;
+            if (volume is null) { FlashGestureLabel(PlayerVolumeMissing, false); return; }
+            double level = MusicGestures.PlayerVolumeStepped(volume.Level, action);
+            volume.Level = (float)level;
+            FlashGestureLabel(VolumeLabel(true, level), true);
+            return;
+        }
         if (_mediaTrack is not { } track) return;
         switch (action)
         {
@@ -156,22 +178,54 @@ public partial class MainWindow
             default: _media?.Select(NeighbourSource(action == MusicGestureAction.NextPlayer ? 1 : -1)); break;
         }
     }
+    private static string VolumeLabel(bool player, double level) => player
+        ? Loc.T($"播放器音量 {Math.Round(level * 100)}%", $"Player volume {Math.Round(level * 100)}%")
+        : Loc.T($"音量 {Math.Round(level * 100)}%", $"Volume {Math.Round(level * 100)}%");
+    // The player has no audio session to adjust, as before it plays for the first time.
+    private static string PlayerVolumeMissing => Loc.T("播放器尚未输出声音", "The player has not played sound yet");
     private string GestureLabel(MusicGestureAction action) => !CanRunGesture(action) ? SettingsWindow.GestureName(MusicGestureAction.None)
+        : MusicGestures.IsPlayerVolume(action) && _playerVolumeMissing ? PlayerVolumeMissing
         : action == MusicGestureAction.PlayPause ? _mediaTrack?.State == MediaState.Playing ? Loc.T("暂停", "Pause") : Loc.T("播放", "Play")
         : SettingsWindow.GestureName(action);
 
     private void StartTrail(Point start)
     {
+        _volumeFlash?.Stop(); _playerVolumeMissing = false;
         GestureLayer.BeginAnimation(OpacityProperty, null);
         GestureLayer.Opacity = 1;
         GestureLayer.Children.Clear();
         _dragTrail = new Polyline { Stroke = UI.Brush(Look.Primary), Opacity = .45, StrokeThickness = 4, StrokeLineJoin = PenLineJoin.Round,
             StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
         _dragTrail.Points.Add(start);
-        var text = new TextBlock { FontFamily = UI.PanelFont, FontSize = 12, TextWrapping = TextWrapping.NoWrap };
-        _dragLabel = new Border { Child = text, Background = UI.Brush(Look.Hex("popup")), BorderBrush = UI.Brush(Look.Hex("popupBorder")),
-            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 3, 8, 4) };
+        _dragLabel = NewGestureLabel();
         GestureLayer.Children.Add(_dragTrail); GestureLayer.Children.Add(_dragLabel);
+    }
+    private Border NewGestureLabel() => new()
+    {
+        Child = new TextBlock { FontFamily = UI.PanelFont, FontSize = 12, TextWrapping = TextWrapping.NoWrap },
+        Background = UI.Brush(Look.Hex("popup")), BorderBrush = UI.Brush(Look.Hex("popupBorder")),
+        BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 3, 8, 4)
+    };
+    // A touchpad swipe draws no trail: the player's new volume shows in the label alone, centred in the panel, for a moment.
+    private void FlashGestureLabel(string words, bool runs)
+    {
+        if (_dragging) return;
+        GestureLayer.BeginAnimation(OpacityProperty, null);
+        GestureLayer.Opacity = 1;
+        GestureLayer.Children.Clear();
+        var label = NewGestureLabel();
+        var text = (TextBlock)label.Child;
+        text.Text = words; text.Foreground = UI.Brush(runs ? Look.Primary : Look.Tertiary);
+        label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Canvas.SetLeft(label, Math.Max(4, (GestureLayer.ActualWidth - label.DesiredSize.Width) / 2));
+        Canvas.SetTop(label, Math.Max(4, (GestureLayer.ActualHeight - label.DesiredSize.Height) / 2));
+        GestureLayer.Children.Add(label);
+        if (_volumeFlash is null)
+        {
+            _volumeFlash = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
+            _volumeFlash.Tick += (_, _) => { _volumeFlash.Stop(); if (!_dragging) FadeGestureLayer(); };
+        }
+        _volumeFlash.Stop(); _volumeFlash.Start();
     }
     // The label sits centred under the trail, or above it when there is no room below, and inside the panel.
     // The trail as drawn, with the pointer's latest point, which the trail skips while it is under 2 DIPs from the last one.
@@ -180,7 +234,7 @@ public partial class MainWindow
     private void ShowDragAction(Point pointer)
     {
         var action = MusicGestures.Drag(Settings, DragDirection(pointer));
-        ShowDragLabel(GestureLabel(action), CanRunGesture(action));
+        ShowDragLabel(GestureLabel(action), CanRunGesture(action) && !(MusicGestures.IsPlayerVolume(action) && _playerVolumeMissing));
     }
     private void ShowDragLabel(string words, bool runs)
     {
@@ -199,6 +253,10 @@ public partial class MainWindow
     {
         _dragging = false; _dragTrail = null; _dragLabel = null;
         _volumeDrag?.Device.Dispose(); _volumeDrag = null;
+        FadeGestureLayer();
+    }
+    private void FadeGestureLayer()
+    {
         if (GestureLayer.Children.Count == 0) return;
         if (!Animates) { GestureLayer.Children.Clear(); return; }
         var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(180)) { EasingFunction = Soft.Out };

@@ -67,5 +67,14 @@ internal static class HorizontalSwipeTests
             && MusicGestures.VolumeSign(GestureDirection.Left, MusicGestureAction.NextTrack) == 0);
         check("The volume stays within its range", MusicGestures.VolumeLevel(.9, 1, 100) == 1 && MusicGestures.VolumeLevel(.1, -1, 100) == 0);
         check("An unknown saved action does nothing", new DeckSettings { MusicSwipeLeft = (MusicGestureAction)99 }.MusicSwipeLeft == MusicGestureAction.None);
+        check("The player's volume drags as the system volume does", MusicGestures.VolumeSign(GestureDirection.Up, MusicGestureAction.PlayerVolumeUp) == -1
+            && MusicGestures.VolumeSign(GestureDirection.Right, MusicGestureAction.PlayerVolumeDown) == -1);
+        check("The player's volume is not the system volume", MusicGestures.IsPlayerVolume(MusicGestureAction.PlayerVolumeUp)
+            && !MusicGestures.IsSystemVolume(MusicGestureAction.PlayerVolumeDown) && !MusicGestures.IsPlayerVolume(MusicGestureAction.VolumeUp)
+            && MusicGestures.IsVolume(MusicGestureAction.PlayerVolumeDown) && MusicGestures.IsVolume(MusicGestureAction.VolumeDown) && !MusicGestures.IsVolume(MusicGestureAction.PlayPause));
+        check("A swipe steps the player's volume by a tenth and keeps it within its range",
+            MusicGestures.PlayerVolumeStepped(.5, MusicGestureAction.PlayerVolumeUp) == .6 && MusicGestures.PlayerVolumeStepped(.5, MusicGestureAction.PlayerVolumeDown) == .4
+            && MusicGestures.PlayerVolumeStepped(.95, MusicGestureAction.PlayerVolumeUp) == 1 && MusicGestures.PlayerVolumeStepped(.04, MusicGestureAction.PlayerVolumeDown) == 0);
+        check("The player's volume is saved", new DeckSettings { MusicDragUp = MusicGestureAction.PlayerVolumeUp }.MusicDragUp == MusicGestureAction.PlayerVolumeUp);
     }
 }
