@@ -340,6 +340,20 @@ static class DeviceProtocolTests
         check("Beken: misaka310's X1 sample (90 %), the X6 in tenths, charging on its dock", Pushes.Battery(Pushes.Kind.Beken, Bytes("03 B1 40 01 5A")) == new BatteryRead(90)
             && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 85 40 01 05")) == new BatteryRead(50, Accuracy: BatteryAccuracy.Steps) && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 55 40 03 40")) == new BatteryRead(64, true)
             && Pushes.Battery(Pushes.Kind.Beken, Bytes("01 00 00 00 00")) is null && Pushes.Name(Pushes.Kind.Beken, Bytes("03 B1 40 01 5A")) == "ATTACK SHARK X1");
+        check("Beken: the X3 / R1 (0x10) in tenths (measured: 03 10 40 01 09 is 90 % in the X3's own driver), an X6 level above 10 taken as it is",
+            Pushes.Battery(Pushes.Kind.Beken, Bytes("03 10 40 01 09")) == new BatteryRead(90, Accuracy: BatteryAccuracy.Steps)
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 10 40 03 0A")) == new BatteryRead(100, true, BatteryAccuracy.Steps)
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 85 40 01 32")) == new BatteryRead(50)
+            && Pushes.Name(Pushes.Kind.Beken, Bytes("03 10 40 01 09")) == "ATTACK SHARK X3 / R1");
+        check("Beken: the V6's 41 frame, the X3 Max and V3 Pro in percent, the vendor table's names, another event is none",
+            Pushes.Battery(Pushes.Kind.Beken, Bytes("03 24 41 01 64")) == new BatteryRead(100) && Pushes.Name(Pushes.Kind.Beken, Bytes("03 24 41 01 64")) == "ATTACK SHARK V6"
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 4E 40 01 1E")) == new BatteryRead(30) && Pushes.Name(Pushes.Kind.Beken, Bytes("03 4E 40 01 1E")) == "ATTACK SHARK X3 Max"
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 E5 40 03 22")) == new BatteryRead(34, true)
+            && Pushes.Name(Pushes.Kind.Beken, Bytes("03 42 40 01 50")) == "Inphic IN9" && Pushes.Name(Pushes.Kind.Beken, Bytes("03 FF 40 01 50")) == "ATTACK SHARK"
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 10 42 01 09")) is null);
+        check("Compx: Attack Shark's pairs named by the brand when the receiver gives no product string",
+            Dongles.CompxName(0x3554, 0xFB44) == "ATTACK SHARK R11 Ultra" && Dongles.CompxName(0x3554, 0xFB43) == "ATTACK SHARK R11 Ultra"
+            && Dongles.CompxName(0x3554, 0xF516) == "ATTACK SHARK" && Dongles.CompxName(0x3554, 0xF508) == "Compx");
         check("DELUX M900 Pro and Inphic ZHEN: one receiver id, told apart by the collection", Pushes.Battery(Pushes.Kind.Delux, Bytes("03 30 40 01 59")) == new BatteryRead(89)
             && Pushes.Battery(Pushes.Kind.Delux, Bytes("03 30 40 03 59")) == new BatteryRead(89, true) && Pushes.Battery(Pushes.Kind.InphicZhen, Bytes("03 76 41 01 55")) == new BatteryRead(85)
             && Pushes.Battery(Pushes.Kind.InphicZhen, Bytes("03 76 41 03 54")) == new BatteryRead(84, true)
