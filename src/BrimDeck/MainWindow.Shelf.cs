@@ -184,8 +184,7 @@ public partial class MainWindow
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
         var layout = _shelfLayout = ShelfLayoutFor(width, height);
-        var header = PanelHeader.For(ToolbarFor(height), layout.Side);
-        ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
+        ApplyPageHeader(PanelHeader.For(PanelHeader.ToolbarFor(height), layout.Side));
         bool showingDetail = _shelfDetail is { } open && Find(open.Side, open.Id) is not null;
         // In the lowest panels the toolbar leaves 2 DIP under the page switch (PanelHeader); the page keeps 4 more below it. Stacked,
         // the cards reach out to CardSide from the panel's edges, so that the columns in them start where they do side by side.

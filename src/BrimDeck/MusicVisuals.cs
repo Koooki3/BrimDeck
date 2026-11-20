@@ -645,7 +645,7 @@ internal sealed class QuotaCarousel : GlideCarousel
     // flowing: the window as wide as the room gives it, not whole rings (the surface is being dragged; CompactSpacing.ShareFlowing),
     // with the ring it cuts faded over cut DIPs; nothing glides then.
     public QuotaCarousel(IReadOnlyList<(IReadOnlyList<double?> Shares, string Color, string Tip, string Letter, bool Stale)> items, double size, double thickness, double rowScale, double gap, int count, double edge,
-        TimeSpan elapsed = default, bool animate = true, double? flowing = null, double cut = 0)
+        TimeSpan elapsed = default, bool animate = true, double? flowing = null, double cut = 0, double? rowHeight = null)
     {
         // Ring positions, the window and the travel all use whole device pixels. Layout rounding would otherwise widen each gap
         // at 150 % and carry the last ring into the edge fade.
@@ -654,11 +654,15 @@ internal sealed class QuotaCarousel : GlideCarousel
         double step = Snap(size + gap);
         int shown = Math.Clamp(count, 0, items.Count);
         double window = flowing is { } flow ? Math.Min(Math.Max(0, flow), items.Count * step - Snap(gap)) : shown == 0 ? 0 : (shown - 1) * step + size;
-        Height = size;
-        var strip = new Canvas { Width = items.Count * step, Height = size };
+        Height = Math.Max(size, rowHeight ?? size);
+        var strip = new Canvas { Width = items.Count * step, Height = Height };
         for (int i = 0; i < items.Count; i++)
         {
             var ring = Ring(items[i], size, thickness, rowScale, Look);
+            // Keep the row's centre even when an odd diameter leaves a half-DIP above and below it.
+            // Centring a separate, rounded-height carousel moved the rings half a pixel off the readings.
+            ring.UseLayoutRounding = false;
+            Canvas.SetTop(ring, (Height - size) / 2);
             Canvas.SetLeft(ring, i * step); strip.Children.Add(ring);
         }
         ToolTip = string.Join("\n", items.Select(i => i.Tip));

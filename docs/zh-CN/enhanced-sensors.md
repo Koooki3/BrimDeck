@@ -16,7 +16,7 @@
 
 ## 启用步骤
 
-1. **安装 PawnIO**：点击“安装”，BrimDeck 会打开一个命令窗口运行 `winget install --id namazso.PawnIO --exact`，安装程序会请求管理员确认。没有 winget 时会打开 PawnIO 的官方下载页面。已经装过 PawnIO 的电脑（例如装过 FanControl 或 LibreHardwareMonitor）会直接显示“已安装”，不需要再装。
+1. **安装 PawnIO**。点击“安装”，BrimDeck 会在命令窗口中运行 `winget install --id namazso.PawnIO --exact --source winget`。如果 Windows 请求管理员确认，请按提示操作。安装完成后，设置页会自动显示“已安装”和版本号。安装失败时，页面会显示错误，并提供官方下载链接。没有 WinGet 时会直接打开官方下载页。已经安装 PawnIO 的电脑会直接显示“已安装”。
 2. **启用传感器服务**：点击“启用”，BrimDeck 会下载传感器服务和 PawnIO 官方模块，Windows 请求一次管理员确认，之后不再需要。
 
 ## 安全说明

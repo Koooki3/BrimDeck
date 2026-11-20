@@ -26,7 +26,7 @@ public partial class MainWindow
     private readonly List<(Notice Notice, int Revision, string Key, FrameworkElement Row)> _pageRows = [];
     private string _pageKey = "";
     // The settings, size and theme the page was last built for (NoticeLayout).
-    private (DeckSettings? Settings, int Theme, double Width, double Height, double UsageWidth) _noticeLayout;
+    private (DeckSettings? Settings, int Theme, double Width, double Height) _noticeLayout;
     // The empty page's text block, whose width follows the page's (FitNoticeLayout).
     private FrameworkElement? _pageEmpty;
     // A drag of the page's edges is being saved (FinishResize): the settings that come back are a copy of those the page was
@@ -326,8 +326,8 @@ public partial class MainWindow
     }
 
     // What the page's frame was built for: the settings (each change replaces them), its size and the theme.
-    private (DeckSettings? Settings, int Theme, double Width, double Height, double UsageWidth) NoticeLayout()
-        => (Settings, PanelTheme.Generation, ContentCanvas.Width, ContentCanvas.Height, UsageLayoutWidth);
+    private (DeckSettings? Settings, int Theme, double Width, double Height) NoticeLayout()
+        => (Settings, PanelTheme.Generation, ContentCanvas.Width, ContentCanvas.Height);
 
     // RenderUsage on the notices page (N50-2). Closed, the page is not drawn at all: SetExpanded builds it as the panel opens,
     // with what arrived meanwhile. Open with the page already on screen for the same theme, a data refresh or the minute's tick
@@ -346,8 +346,8 @@ public partial class MainWindow
         var layout = NoticeLayout();
         if (_noticeLayout == layout) return true;
         bool sameSettings = ReferenceEquals(_noticeLayout.Settings, layout.Settings) || _noticeResizeSaved;
-        if (!sameSettings || _noticeLayout.Theme != layout.Theme || _noticeLayout.UsageWidth != layout.UsageWidth) return false;
-        if (!Settings.UsagePage) ApplyHeader(UnfittedHeader(ContentCanvas.Height));
+        if (!sameSettings || _noticeLayout.Theme != layout.Theme) return false;
+        ApplyPageHeader(UnfittedHeader(ContentCanvas.Height));
         NoticesContent.Margin = PageMargin;
         if (_pageEmpty is { } empty) empty.MaxWidth = EmptyWidth;
         _noticeLayout = layout;
@@ -408,7 +408,7 @@ public partial class MainWindow
     private bool _noticeUnread, _noticeEarlier;
     private string _focusKey = "";
 
-    private Thickness PageMargin => new(_header.Side, 0, Math.Max(0, _header.Side - 6), 14);
+    private Thickness PageMargin => new(_header.ContentSide, 0, Math.Max(0, _header.ContentSide - 6), 14);
 
     private static bool Today(Notice notice) => notice.ReceivedAt.ToLocalTime().Date == DateTime.Today;
 
@@ -459,7 +459,7 @@ public partial class MainWindow
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; ShelfContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
-        ApplyHeader(Settings.UsagePage ? UsageHeader(UsageLayoutWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
+        ApplyPageHeader(UnfittedHeader(ContentCanvas.Height));
         double offset = fresh ? 0 : _pageScroll?.VerticalOffset ?? 0;
         // Worked from the keyboard, the page keeps the focus on the same notice when it is built again.
         string? refocus = NoticesContent.IsKeyboardFocusWithin ? _focusedNotice : null;

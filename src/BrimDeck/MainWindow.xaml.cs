@@ -142,7 +142,8 @@ public partial class MainWindow : Window
     {
         _app = app; _lead = lead;
         _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
-            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove, OccupiedArea);
+            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove, OccupiedArea,
+            () => Settings.WindowCapture && _expanded && !_preview && InsideOpenPanel(WindowsHost.Cursor()));
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () =>
         {
@@ -441,7 +442,7 @@ public partial class MainWindow : Window
         // Page widths are the page as laid out with the text size (Zoom) but before the panel's scale; drawn at the scale they fit
         // the work area less 12 DIP each side.
         double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
-        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width * Zoom); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width * Zoom);
+        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width * Zoom);
         // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
         // only the page that shows, which SetExpanded takes from _pageWidth; this is set again when the size is saved (ApplySettings).
         _widestPage = Fit(DeckPages.Largest(Settings).Width * Zoom);
@@ -662,13 +663,9 @@ public partial class MainWindow : Window
         double height = Math.Max(0, Math.Min(wanted, (FrameHeight - (panel.Top > 0 ? 0 : 12) - panel.Top - panel.HeaderExtra) / _scale));
         return panel.Top > 0 ? Math.Max(0, Math.Min(height, (PanelBottom - panel.Top - panel.HeaderExtra) / _scale)) : height;
     }
-    // The usage page's height in the current window, while the music page is shown too.
-    private double UsagePageHeight => PageHeight(Settings.Height * Zoom, PanelFor(Settings.Height * Zoom)) / Zoom;
-    // The usage page's width as it lays out, the panel's width without the text size (Zoom).
-    private double UsageLayoutWidth => _usageWidth / Zoom;
     // Windows' text size (TextScale): the open panel and everything on it are drawn larger by this factor, and its pages lay
     // out at the size they have at 100 %, so their layouts, which step between sizes by the room they have, stay as they are.
-    // _pageWidth, _usageWidth and the heights SetExpanded works with are the panel's size on screen before the panel's scale
+    // _pageWidth and the heights SetExpanded works with are the panel's size on screen before the panel's scale
     // (_scale, MainWindow.Scale.cs), which comes on top of this one; the sizes saved in the settings, and the drag's, are the
     // pages' own.
     private double Zoom => TextScale.Current;

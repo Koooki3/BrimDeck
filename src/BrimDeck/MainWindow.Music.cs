@@ -30,7 +30,7 @@ public partial class MainWindow
         EventManager.RegisterClassHandler(typeof(FrameworkContentElement), ToolTipService.ToolTipOpeningEvent, new ToolTipEventHandler(Suppress), true);
     }
     private DeckPage _page;
-    private double _pageWidth = 760, _usageWidth = 760, _widestPage = 760;
+    private double _pageWidth = 760, _widestPage = 760;
     private MediaSessions? _media => _app.Media;
     private MediaTrack? _mediaTrack;
     private IReadOnlyList<MediaTrack> _mediaTracks = [];
@@ -212,40 +212,21 @@ public partial class MainWindow
     private void DevicesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Devices);
     // Where the usage page's application tabs start: after the page switch, which holds one 28 DIP button per shown page.
     private double ApplicationPagesLeft(double side) { int pages = DeckPages.Visible(Settings).Count; return side + (pages <= 1 ? 36 : 72 + 29 * (pages - 2)); }
-    // The header shared by both pages (see PanelHeader). Its row holds the page's top margin, so the clock, the switch and the
-    // right group are centred on one line, and the switch and the gear line up with the page's content edges. Toolbar's own
-    // height replaces its binding to the row: the music page takes the usage page's controls (PanelHeader.WithControlsOf), so
-    // its band can be shorter than its row, with the rest below the controls; the row may also be one DIP taller, and the
-    // controls are centred in the even part. Toolbar lies outside ContentCanvas's rows, so a band taller than the row is not
-    // clipped. Only layout values change, and setting an unchanged value does nothing.
     private PanelHeader _header = PanelHeader.For(36, 20);
-    private double _headerControlSide = 20;
-
-    // Equal-size pages can share the controls without sharing the space reserved for their content.
-    private PanelHeader HeaderControls(PanelHeader page)
+    private void ApplyPageHeader(PanelHeader page)
     {
-        if (CurrentPage is not (DeckPage.Music or DeckPage.Monitor)) return page;
-        var size = DeckPages.Size(Settings, CurrentPage);
-        if (Settings.UsagePage && size == DeckPages.Size(Settings, DeckPage.Usage))
-            return CachedUsageHeader();
-        if (CurrentPage == DeckPage.Music && Settings.MonitorPage && size == DeckPages.Size(Settings, DeckPage.Monitor))
-        {
-            var monitor = MonitorPageHeader(ContentCanvas.Height);
-            return Settings.UsagePage ? monitor.WithControlsOf(page) : monitor;
-        }
-        return page;
-    }
-
-    private void ApplyHeader(PanelHeader header)
-    {
+        // Size the toolbar from the first visible tab, even on a shorter or taller page.
+        var settings = Settings;
+        // The page heights are the pages' own, laid out before the text size (Zoom); PageHeight works on them as drawn.
+        double wanted = DeckPages.Size(settings, DeckPages.FirstVisible(settings)).Height * Zoom;
+        double height = PageHeight(wanted, PanelFor(wanted)) / Zoom;
+        var header = page.WithControlsOf(PanelHeader.ForPanel(height));
         bool gripBoundaryChanged = _header.Row != header.Row;
         _header = header;
-        var controls = HeaderControls(header);
-        _headerControlSide = controls.Side;
         ToolbarRow.Height = new GridLength(header.Row);
-        Toolbar.Height = controls.Height;
-        PageSwitch.Margin = new Thickness(controls.Side, 0, 0, 0);
-        FitPageButtons(controls);
+        Toolbar.Height = header.Height;
+        PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
+        FitPageButtons(header);
         foreach (var button in new[] { AIUsageButton, MonitorPageButton, MusicPageButton, ShelfPageButton, DevicesPageButton, NoticesPageButton })
         {
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
@@ -253,9 +234,9 @@ public partial class MainWindow
             if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(Look.Corner(PanelHeader.ButtonRadius));
         }
         PageCapsule.CornerRadius = new CornerRadius(Look.Corner(PanelHeader.ButtonRadius));
-        SettingsButton.Height = controls.SettingsHeight;
-        if (SettingsButton.Parent is FrameworkElement right) right.Margin = new Thickness(0, 0, controls.RightMargin, 0);
-        ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(controls.Side), 0, 0, 0);
+        SettingsButton.Height = header.SettingsHeight;
+        ToolbarActions.Margin = new Thickness(0, 0, header.RightMargin, 0);
+        ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(header.Side), 0, 0, 0);
         // A same-size page switch can change the grip boundary without raising Island.SizeChanged.
         if (gripBoundaryChanged) UpdateGrips();
     }
@@ -276,7 +257,7 @@ public partial class MainWindow
         PlacePageCapsule();
         UpdateNoticeBadge();
         UpdateShelfPageButton();
-        ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(_headerControlSide), 0, 0, 0);
+        ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(_header.Side), 0, 0, 0);
         // With the entry switched on the source menu has one more row. Without a source that row stands alone in the button.
         bool entry = FullControlEntryShown, alone = entry && _mediaTrack is null;
         MediaSourceButton.Visibility = IsMusicPage && (_mediaTrack is not null || entry) ? Visibility.Visible : Visibility.Collapsed;
@@ -511,10 +492,7 @@ public partial class MainWindow
         var layout = MusicLayout.Calculate(w, h, hasLyrics, timeline, message.Length > 0, logMode || appleEntry || kugouEntry, transport: !showSmtcHint,
             lyricsExpected: Settings.LyricsEnabled);
         var c = layout.Metrics;
-        // With the usage page on, the controls are the usage page's, as it would lay them out now; see PanelHeader.WithControlsOf.
-        // Fitting the usage page for them is kept until its size, data or settings change (CachedUsageHeader): this runs on every
-        // update of the song and many times a second during a drag.
-        ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(CachedUsageHeader()) : PanelHeader.Music(c));
+        ApplyPageHeader(PanelHeader.Music(c));
         bool animate = Animates;
         // In the column layout the lyrics, or a message, take a column of their own right of the titles; with neither the titles
         // have the width.
@@ -1345,8 +1323,8 @@ public partial class MainWindow
                     devices!.Width = devicesWidth;
                     element = CompactRegion(devices, room, devicesWidth, devices.Height, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Rings:
-                    element = _quotaCarousel = new QuotaCarousel(steadyItems, layout.RingSize, layout.RingThickness, layout.Scale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
-                        flow > 0 ? rings.Window : null, ringCut); break;
+                    element = _quotaCarousel = new QuotaCarousel(steadyItems, layout.RingSize, layout.RingThickness, layout.RingScale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
+                        flow > 0 ? rings.Window : null, ringCut, rowHeight: row); break;
                 case CompactPart.Music:
                     element = _compactMarquee = CompactTitle(text, room, layout); break;
                 default:

@@ -42,13 +42,18 @@ public sealed record UsageMetric(MetricKind Kind, string Label)
         MetricKind.Spend when Total is > 0 && Amount is { } spent => (double)(spent / Total.Value * 100),
         _ => null
     };
-    public string ValueText => Kind == MetricKind.Text ? Value : Kind is MetricKind.Balance or MetricKind.Spend ? (AtLeast ? "≥" : "") + Money(Amount!.Value, Currency) : UsedPercent is { } p ? $"{p:0.#}%" : "—";
+    public string ValueText => Kind == MetricKind.Text ? Value : Kind is MetricKind.Balance or MetricKind.Spend ? (AtLeast ? "≥" : "") + (Currency.Length == 0 && Unit.Length > 0 ? Number(Amount!.Value) : Money(Amount!.Value, Currency)) : UsedPercent is { } p ? $"{p:0.#}%" : "—";
     public string ValueSuffix => Kind switch { MetricKind.Text => Value.Length > 0 ? Suffix : "", MetricKind.Balance => Loc.T("可用", "left"), _ => Loc.T("已用", "used") };
     public string CountText => Kind == MetricKind.Count ? $"{Used:N0} / {Total:N0}" : "";
     public string Description => string.Join("\n", new[] { Kind == MetricKind.Text ? Label : Loc.Label(Label), (ValueText + " " + ValueSuffix).Trim(), Note, ResetText,
-        Total is { } total ? (TotalIsTarget ? Kind == MetricKind.Spend ? Loc.T("目标金额：", "Target: ") : Loc.T("目标余额：", "Target balance: ") : Loc.T("总额：", "Total: ")) + (Kind == MetricKind.Count ? total.ToString("N0") + " " + Loc.Label(Unit) : Money(total, Currency)) : "",
+        Total is { } total ? (TotalIsTarget ? Kind == MetricKind.Spend ? Loc.T("目标金额：", "Target: ") : Loc.T("目标余额：", "Target balance: ") : Loc.T("总额：", "Total: ")) + (Kind == MetricKind.Count ? total.ToString("N0") + " " + Loc.Label(Unit) : AmountText(total)) : "",
         CountText, Unlimited ? Loc.T("无上限", "No limit") : "", ResetAt is { } reset ? Loc.T("重置时间：", "Resets: ") + $"{reset.LocalDateTime:yyyy-MM-dd HH:mm:ss}" : "",
         ExpiresAt is { } expiry ? Loc.T("到期时间：", "Expires: ") + $"{expiry.LocalDateTime:yyyy-MM-dd HH:mm:ss}" : "" }.Where(x => x.Length > 0));
+    // A balance or spend counted in a unit rather than money (credits left, with no total to set them against) keeps up to two
+    // decimals: the big number shows it alone, as its label names the unit, and totals and targets add the unit. One in money shows
+    // its currency.
+    public string AmountText(decimal amount) => Currency.Length == 0 && Unit.Length > 0 ? Number(amount) + " " + Loc.Label(Unit) : Money(amount, Currency);
+    private static string Number(decimal amount) => (amount < 0 ? "−" : "") + Math.Abs(amount).ToString("#,0.##", CultureInfo.InvariantCulture);
     public static string Money(decimal amount, string currency) => (amount < 0 ? "−" : "") + (currency switch { "USD" => "$", "CNY" => "¥", "" => "", _ => currency + " " }) + Math.Abs(amount).ToString("N2", CultureInfo.InvariantCulture);
     public static UsageMetric FromQuota(Quota quota) => new(MetricKind.Percent, quota.Label)
     { Id = quota.Label, Percent = quota.UsedPercent, ResetAt = quota.ResetAt, Window = quota.Minutes };

@@ -86,6 +86,8 @@ public sealed class Pricing : IDisposable
         get { lock (_sync) return MergedModels().Values.OrderBy(x => x.Model, StringComparer.OrdinalIgnoreCase).ToArray(); }
     }
     public bool IsManual(string model) { lock (_sync) return _manual.ContainsKey(Normalize(model)); }
+    // The prices added by hand, for a settings backup (ConfigBackup).
+    public IReadOnlyList<ModelPrice> ManualModels { get { lock (_sync) return [.. _manual.Values.OrderBy(m => m.Model, StringComparer.OrdinalIgnoreCase)]; } }
     public bool IsStale => UpdatedAt is null || _now() - UpdatedAt >= RefreshInterval;
 
     public Pricing(string directory, HttpClient? http = null, Func<DateTimeOffset>? now = null)
@@ -440,6 +442,36 @@ public sealed class Pricing : IDisposable
             { error = Loc.T("无法写入手动价格，请检查设置目录权限。", "The prices added by hand could not be written. Check the permissions of the settings folder."); return false; }
             _manual = next; RebuildLookup(); return true;
         }
+    }
+    // Adds the prices of a settings backup to those added by hand: a model already here takes the backup's prices, the others stay.
+    // An invalid price in the backup is left out. Returns how many were added or replaced, or -1 when the file cannot be written or
+    // the file of prices added by hand could not be read (it is kept as it is, ManualLoadWarning).
+    public int MergeManual(IEnumerable<ModelPrice> models)
+    {
+        int merged = 0;
+        lock (_sync)
+        {
+            if (ManualLoadWarning is not null) return -1;
+            var next = new Dictionary<string, ModelPrice>(_manual, StringComparer.OrdinalIgnoreCase);
+            foreach (var model in models)
+            {
+                if (!ValidModel(model) || !Regex.IsMatch(model.Model.Trim(), @"^[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,199}$")) continue;
+                next[Normalize(model.Model)] = new(model.Model.Trim(), model.Prices, []);
+                merged++;
+            }
+            if (merged == 0) return 0;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_manualFile)!);
+                var temporary = _manualFile + ".tmp";
+                File.WriteAllText(temporary, JsonSerializer.Serialize(next.Values.ToArray(), new JsonSerializerOptions { WriteIndented = true }));
+                File.Move(temporary, _manualFile, true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return -1; }
+            _manual = next; RebuildLookup();
+        }
+        Changed?.Invoke();
+        return merged;
     }
     public ModelPrice? Find(string model)
     {

@@ -58,11 +58,12 @@ public static class AulaMice
         // The AULA A9 headset's base (38A6:001D, named "AULA-A9" or "AULA-A9 PC"): AULA's web driver asks it with output report
         // 0x55, 55 65 00 and zeros to 64 bytes, on usage page 0xFF90, usage 1, and reads 55 65 <percent> <state>, the state
         // 03 and 04 charging (the driver takes both so, the level as read), 1A the headset not linked: the frame ATK's N9 V2
-        // answers, whose 04 means full there (AulaA9). Not measured by us.
+        // answers, whose 04 means full there (AulaA9). Not measured by us. Also sent where Windows lists report 0x55 as an input
+        // report alone, as on the MCHOSE V9 PRO's receiver (BrandWay.Undeclared).
         new("AULA headset", shape => shape.Vendor == L9Vendor && shape.Product == 0x001D && HeadsetPages.Is(shape, 0xFF90) && shape.Usage == 0x0001
                 && shape.InputLength >= 4 && shape.OutputLength >= 64
                 && shape.Name.Trim() is var name && (name.Equals("AULA-A9", StringComparison.OrdinalIgnoreCase) || name.Equals("AULA-A9 PC", StringComparison.OrdinalIgnoreCase)),
-            _ => [new BrandWay("aula.a9", WayTransport.Output, BrandFamilies.Frame(64, 0x55, 0x65, 0x00), AulaA9) { TimeoutMs = 1000 }])
+            _ => [new BrandWay("aula.a9", WayTransport.Output, BrandFamilies.Frame(64, 0x55, 0x65, 0x00), AulaA9) { TimeoutMs = 1000, Undeclared = true }])
         { Kind = _ => DeviceKind.Headphones, Prefix = "aula-headset", DisplayName = _ => "AULA A9" },
     ];
 }

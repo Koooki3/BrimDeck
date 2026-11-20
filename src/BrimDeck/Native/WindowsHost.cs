@@ -50,10 +50,12 @@ public sealed class WindowsHost : IDisposable
     // alwaysOnTop says whether the panel is a topmost overlay; off, it is an ordinary window (see WatchDesktop).
     // occupiedArea gives the place a window must overlap for the Occupied context; null while that rule is not in use.
     public WindowsHost(Func<IntPtr> monitor, Func<IntPtr> window, Func<Rect?> island, Func<bool>? forceTopmost = null,
-        Func<bool>? backgroundWindows = null, Func<bool>? alwaysOnTop = null, Func<Rect?>? occupiedArea = null)
+        Func<bool>? backgroundWindows = null, Func<bool>? alwaysOnTop = null, Func<Rect?>? occupiedArea = null,
+        Func<bool>? interactingWithCapturePanel = null)
     {
         _monitor = monitor; _window = window; _island = island; _forceTopmost = forceTopmost; _backgroundWindows = backgroundWindows;
         _alwaysOnTop = alwaysOnTop; _occupiedArea = occupiedArea;
+        _interactingWithCapturePanel = interactingWithCapturePanel;
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
         DisplayPower.Changed += DisplayChanged;
@@ -102,6 +104,8 @@ public sealed class WindowsHost : IDisposable
     private readonly Func<bool>? _backgroundWindows;
     private readonly Func<bool>? _alwaysOnTop;
     private readonly Func<Rect?>? _occupiedArea;
+    private readonly Func<bool>? _interactingWithCapturePanel;
+    private (IntPtr Window, uint Pid) _previousForeground;
     // The strip the island actually draws in, in screen physical pixels, as of the last layout; null before the first.
     private readonly Func<Rect?> _island;
     private string _raisedName = "", _raisedPath = "";
@@ -477,12 +481,34 @@ public sealed class WindowsHost : IDisposable
     }
     public static Point Cursor()
     { GetCursorPos(out var point); return new Point(point.X, point.Y); }
+    // Clicking a capturable overlay can leave Windows with no foreground window, or with the overlay itself
+    // in front. While the pointer is on that open panel, keep evaluating the window the user was working in.
+    internal IntPtr ForegroundForRules(IntPtr foreground)
+    {
+        if (foreground != IntPtr.Zero && foreground != _window())
+        {
+            GetWindowThreadProcessId(foreground, out var pid);
+            _previousForeground = (foreground, pid);
+            return foreground;
+        }
+        var (previous, previousPid) = _previousForeground;
+        if (previousPid != 0 && _interactingWithCapturePanel?.Invoke() == true && IsWindowVisible(previous) && !IsIconic(previous))
+        {
+            GetWindowThreadProcessId(previous, out var pid);
+            if (pid == previousPid && (DwmGetWindowAttribute(previous, 14, out int cloaked, sizeof(int)) != 0 || cloaked == 0))
+                return previous;
+        }
+        _previousForeground = default;
+        return foreground;
+    }
+
     // Only a foreground window on the given monitor counts; each panel follows the windows on its own monitor.
     private ScreenContext Detect(IntPtr monitor)
     {
         var foreground = GetForegroundWindow();
         // The panel holding the keyboard is in front: nothing has changed, and the background app read last time is kept.
         if (foreground != IntPtr.Zero && foreground == KeyboardPanel && IsWindowVisible(foreground) && !IsIconic(foreground)) return Current;
+        foreground = ForegroundForRules(foreground);
         _backgroundName = ""; _backgroundPath = ""; _backgroundKind = ScreenContext.Desktop;
         // Nothing but the desktop: a full-screen window elsewhere on this monitor still owns the screen, so the answer is
         // BackgroundFullscreen rather than Desktop, and a window behind that overlaps the panel's place makes it Occupied.

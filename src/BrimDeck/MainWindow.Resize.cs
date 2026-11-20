@@ -314,7 +314,6 @@ public partial class MainWindow
         _resizeChanged = true;
         DeckPages.SetSize(Settings, _resizePage, width, height);
         _pageWidth = width * Zoom;
-        if (_resizePage == DeckPage.Usage) _usageWidth = width * Zoom;
         SetExpanded(true, instant: true);
         // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
         // layout step and stretch in between, so they follow too; the notices page stretches as it is, its header and margins
