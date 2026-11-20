@@ -1257,7 +1257,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         // An ATK mouse listed from ATK HUB was read with BitMouse on its 0xFF05 collection before (key "atk:"); it keeps that key
         // whichever of its collections answers, so its settings stay and it is one device.
         string prefix = info.Vendor == Dongles.AtkVendor && Dongles.IsCompxOfficial(info.Vendor, info.Product) ? "atk" : "compx";
-        return [Mouse(prefix, info, "Compx", battery, Dongles.CompxKind(info.Vendor, info.Product))];
+        return [Mouse(prefix, info, Dongles.CompxName(info.Vendor, info.Product), battery, Dongles.CompxKind(info.Vendor, info.Product))];
     }
 
     // The Compx frame split over two collections (Dongles.CompxSplit): set as a feature report on the command collection this
