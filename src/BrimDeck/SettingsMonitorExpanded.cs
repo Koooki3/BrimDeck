@@ -107,17 +107,67 @@ public sealed partial class SettingsWindow
         hint.Margin = new Thickness(0, 8, 0, 6);
         var rows = new StackPanel();
         panel.Children.Add(hint);
-        panel.Children.Add(rows);
+        panel.Children.Add(SettingLabel(Loc.T("整行读数", "Full-row readings"), null));
+        var inlineChoices = new WrapPanel { Margin = new Thickness(0, 6, 0, 4) };
+        var inlineToggles = new List<(ExpandedItem Item, ToggleButton Toggle)>();
         ExpandedCard[] built = [];
         string availability = "";
         (ExpandedCard Card, int Direction)? focus = null;
+        Button? reset = null;
+        bool syncingInline = false;
+        void RefreshInlineChoices()
+        {
+            syncingInline = true;
+            try
+            {
+                var selected = ExpandedCards.Normalize(S.ExpandedCardOrder).Select(card => card.Item).ToHashSet();
+                foreach (var (item, toggle) in inlineToggles) toggle.IsChecked = selected.Contains(item);
+            }
+            finally { syncingInline = false; }
+        }
+        void SetInline(ExpandedItem item, bool include)
+        {
+            if (syncingInline) return;
+            var cards = ExpandedCards.Resolve(S.ExpandedCardOrder, S.ExpandedReadings.Select(reading => reading.Item),
+                (_app.Monitor?.Latest?.Storage ?? []).SelectMany(drive => drive.Volumes).Select(volume => volume.Letter));
+            bool included = cards.Any(card => card.Item == item);
+            if (included == include) return;
+            if (include) cards.Add(new ExpandedCard(item));
+            else cards.RemoveAll(card => card.Item == item);
+            Resize(s => s.ExpandedCardOrder = [.. cards], DeckPage.Monitor);
+            Build();
+            RefreshInlineChoices();
+        }
+        foreach (var item in new[] { ExpandedItem.Power, ExpandedItem.Frames })
+        {
+            string name = ExpandedName(item);
+            string help = Loc.T($"加入后，{name}作为整行卡片参与排序；移除后恢复普通布局。“显示的内容”仍单独控制是否显示。",
+                $"When included, {name} is a full-row card that can be reordered. Removing it restores the regular layout. “What the page shows” still controls its visibility.");
+            var toggle = new ToggleButton
+            {
+                Style = (Style)FindResource("SettingsPickChip"),
+                Content = new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center },
+                Margin = new Thickness(0, 0, 8, 8), ToolTip = help
+            };
+            AutomationProperties.SetName(toggle, Loc.T($"自定义卡片中的整行项目：{name}", $"Full-row item in custom cards: {name}"));
+            AutomationProperties.SetHelpText(toggle, help);
+            toggle.Checked += (_, _) => SetInline(item, true);
+            toggle.Unchecked += (_, _) => SetInline(item, false);
+            inlineToggles.Add((item, toggle));
+            inlineChoices.Children.Add(toggle);
+        }
+        panel.Children.Add(inlineChoices);
+        panel.Children.Add(TextLine(Loc.T("加入的项目会出现在下方列表中，可用上移、下移与其他卡片交错排列。",
+            "Included readings appear in the list below, where you can move them among the other cards."), 12, TextSecondary));
+        refresh.Add(RefreshInlineChoices);
+        panel.Children.Add(rows);
         string Name(ExpandedCard card) => card.Letter ?? ExpandedName(card.Item);
 
-        Button? reset = null;
-        reset = ActionButton(Loc.T("重置卡片顺序、宽度和内存条", "Reset card order, width, and memory bar"), () =>
+        reset = ActionButton(Loc.T("重置卡片布局", "Reset card layout"), () =>
         {
             Resize(s => s.ExpandedCardOrder = [], DeckPage.Monitor);
             Build();
+            RefreshInlineChoices();
         });
         reset.Style = (Style)FindResource("SettingsLink");
         reset.HorizontalAlignment = HorizontalAlignment.Left;
@@ -171,20 +221,23 @@ public sealed partial class SettingsWindow
                 var down = Arrow("↓", 1, Loc.T($"下移 {Name(card)}", $"Move {Name(card)} down"));
                 controls.Children.Add(up);
                 controls.Children.Add(down);
-                var width = new ComboBox { Width = 126, Style = (Style)FindResource("SettingsCombo"),
-                    ItemsSource = new[] { Loc.T("半宽", "Half width"), Loc.T("整行", "Full row") }, SelectedIndex = card.Wide ? 1 : 0 };
-                AutomationProperties.SetName(width, Loc.T($"{Name(card)} 的宽度", $"Width of {Name(card)}"));
-                width.SelectionChanged += (_, _) =>
+                if (!ExpandedCards.IsInline(card.Item))
                 {
-                    if (width.SelectedIndex < 0) return;
-                    var wide = width.SelectedIndex == 1;
-                    if (cards[index].Wide == wide) return;
-                    cards[index] = cards[index] with { Wide = wide };
-                    built = [.. cards];
-                    Resize(s => s.ExpandedCardOrder = [.. cards], DeckPage.Monitor);
-                    if (reset is not null) reset.IsEnabled = true;
-                };
-                controls.Children.Add(width);
+                    var width = new ComboBox { Width = 126, Style = (Style)FindResource("SettingsCombo"),
+                        ItemsSource = new[] { Loc.T("半宽", "Half width"), Loc.T("整行", "Full row") }, SelectedIndex = card.Wide ? 1 : 0 };
+                    AutomationProperties.SetName(width, Loc.T($"{Name(card)} 的宽度", $"Width of {Name(card)}"));
+                    width.SelectionChanged += (_, _) =>
+                    {
+                        if (width.SelectedIndex < 0) return;
+                        var wide = width.SelectedIndex == 1;
+                        if (cards[index].Wide == wide) return;
+                        cards[index] = cards[index] with { Wide = wide };
+                        built = [.. cards];
+                        Resize(s => s.ExpandedCardOrder = [.. cards], DeckPage.Monitor);
+                        if (reset is not null) reset.IsEnabled = true;
+                    };
+                    controls.Children.Add(width);
+                }
                 if (card.Item == ExpandedItem.Memory)
                 {
                     var barLength = new ComboBox { Width = 112, Style = (Style)FindResource("SettingsCombo"),

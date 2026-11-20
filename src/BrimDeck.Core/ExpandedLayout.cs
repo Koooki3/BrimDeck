@@ -147,12 +147,24 @@ public static class ExpandedLayout
         double w = width / scale, h = height / scale;
 
         bool cpu = order.Contains(ExpandedItem.Cpu), gpu = order.Contains(ExpandedItem.Gpu), gauge = cpu || gpu;
+        bool framesSelected = order.Contains(ExpandedItem.Frames), processes = order.Contains(ExpandedItem.Processes);
+        int powerLinesAvailable = order.Contains(ExpandedItem.Power) ? Math.Clamp(content.PowerLines, 0, 2) : 0;
+        bool InlineAvailable(ExpandedCard card) => card.Item switch
+        {
+            ExpandedItem.Power => powerLinesAvailable > 0,
+            ExpandedItem.Frames => framesSelected,
+            _ => true
+        };
+        if (cardContent is not null && !cardContent.Cards.All(InlineAvailable))
+            cardContent = cardContent with { Cards = cardContent.Cards.Where(InlineAvailable).ToArray() };
+        bool inlinePower = cardContent?.Cards.Any(card => card.Item == ExpandedItem.Power) == true;
+        bool inlineFrames = cardContent?.Cards.Any(card => card.Item == ExpandedItem.Frames) == true;
+        int powerWant = inlinePower ? 0 : powerLinesAvailable;
+        bool frames = framesSelected && !inlineFrames;
         bool cards = cardContent is { Cards.Count: > 0 } or { AwaitingDrives: true };
         bool mem = cardContent is null && order.Contains(ExpandedItem.Memory), down = cardContent is null && order.Contains(ExpandedItem.Download),
             up = cardContent is null && order.Contains(ExpandedItem.Upload), net = down || up, metrics = mem || net;
-        bool frames = order.Contains(ExpandedItem.Frames), processes = order.Contains(ExpandedItem.Processes);
         int drives = cardContent is null && order.Contains(ExpandedItem.Storage) ? Math.Max(0, content.Drives) : 0;
-        int powerWant = order.Contains(ExpandedItem.Power) ? Math.Clamp(content.PowerLines, 0, 2) : 0;
         bool readings = gauge || metrics || cards || frames || drives > 0 || powerWant > 0;
 
         // Type sizes and the list's step as before the table.
@@ -239,7 +251,8 @@ public static class ExpandedLayout
             var bands = new List<Band>();
             if (gaugeShown) bands.Add(new Band { Kind = BandKind.Gauge, Index = Index(ExpandedItem.Cpu, ExpandedItem.Gpu), Height = head + margins + graphMin });
             if (restNow > 0) bands.Add(new Band { Kind = BandKind.Metrics, Index = Index(ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload), Height = restNow, Stretch = StretchBlocks });
-            if (cards) bands.Add(new Band { Kind = BandKind.Cards, Index = Index(ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Storage), Height = ln,
+            if (cards) bands.Add(new Band { Kind = BandKind.Cards, Index = Index(ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Storage,
+                inlinePower ? ExpandedItem.Power : ExpandedItem.Memory, inlineFrames ? ExpandedItem.Frames : ExpandedItem.Memory), Height = ln,
                 Stretch = cardRows * cardRow / ln });
             if (frameLine) bands.Add(new Band { Kind = BandKind.Frames, Index = Index(ExpandedItem.Frames), Height = rowS, Stretch = StretchRows });
             if (storageLines > 0) bands.Add(new Band { Kind = BandKind.Storage, Index = Index(ExpandedItem.Storage), Height = storageLines * rowS, Stretch = StretchDrives });
@@ -373,7 +386,7 @@ public static class ExpandedLayout
 
         var steps = new MonitorLayout(figure, body, caption, mode, (ListPlacement)(int)(list == ExpandedList.Full ? ExpandedList.None : list), row)
         {
-            StorageLines = storageLines, StorageColumns = storageLines > 0 ? columns : 0, PowerLines = powerLines, FrameLine = frameLine
+            StorageLines = storageLines, StorageColumns = storageLines > 0 ? columns : 0, PowerLines = inlinePower ? 1 : powerLines, FrameLine = frameLine || inlineFrames
         };
         var listBox = list switch
         {

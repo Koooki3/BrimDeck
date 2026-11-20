@@ -37,7 +37,7 @@ internal static class ExpandedMonitorTests
         old.ExpandedCpuCores = false;
         old.ExpandedCustomCards = true;
         old.ExpandedCardOrder = [new(ExpandedItem.Storage, " d: ", true), new(ExpandedItem.Upload), new(ExpandedItem.Storage, "D:"),
-            new(ExpandedItem.Storage, "folder"), new(ExpandedItem.Power), new(ExpandedItem.Memory, "D:")];
+            new(ExpandedItem.Storage, "folder"), new(ExpandedItem.Processes), new(ExpandedItem.Memory, "D:")];
         var back = SettingsMigrations.Read(JsonSerializer.Serialize(old));
         check("Expanded customization: width and order round-trip, with invalid/duplicate entries removed and compact core mode preserved",
             !back.ExpandedCpuCores && back.ExpandedCustomCards && back.CoreDisplay == CoreDisplay.Columns &&
@@ -103,6 +103,25 @@ internal static class ExpandedMonitorTests
         var compactBar = ExpandedLayout.For([ExpandedItem.Memory], 560, 200, cardContent: WithBar(true));
         check("Expanded customization: changing memory bar length refreshes the view without changing the card allocation",
             compactBar.Signature != normalBar.Signature && compactBar.Parts.SequenceEqual(normalBar.Parts));
+
+        ExpandedItem[] selected = [ExpandedItem.Cpu, ExpandedItem.Memory, ExpandedItem.Power, ExpandedItem.Storage, ExpandedItem.Frames];
+        var defaults = ExpandedCards.Resolve(null, selected, ["D:"]);
+        check("Expanded customization: power and frame rate stay in their normal bands by default",
+            defaults.SequenceEqual([new(ExpandedItem.Memory), new(ExpandedItem.Storage, "D:")]));
+        var inline = ExpandedCards.Resolve([new(ExpandedItem.Memory), new(ExpandedItem.Power), new(ExpandedItem.Storage, "D:"), new(ExpandedItem.Frames)], selected, ["D:"]);
+        var mixed = new ExpandedCardContent(inline, false, true);
+        var arranged = ExpandedLayout.For(selected, 800, 344, new(1, 1), cardContent: mixed);
+        check("Expanded customization: inserted sections use full rows between cards, without duplicate bands or lost demand",
+            ExpandedCards.Place(inline, true).SequenceEqual([(0, 0, 1), (1, 0, 2), (2, 0, 1), (3, 0, 2)])
+            && arranged.CardContent!.Cards.SequenceEqual(inline) && arranged.Parts.All(part => part.Item is not (ExpandedItem.Power or ExpandedItem.Frames))
+            && arranged.Demand(false).HasFlag(ExpandedDemand.Power | ExpandedDemand.Frames));
+        var unavailablePower = ExpandedLayout.For(selected, 800, 344, new(1, 0), cardContent: mixed);
+        check("Expanded customization: missing power is omitted without changing the saved order",
+            unavailablePower.CardContent!.Cards.All(card => card.Item != ExpandedItem.Power) && !unavailablePower.Demand(false).HasFlag(ExpandedDemand.Power)
+            && mixed.Cards.Any(card => card.Item == ExpandedItem.Power));
+        var separate = ExpandedLayout.For(selected, 800, 344, new(1, 1), cardContent: mixed with { Cards = defaults });
+        check("Expanded customization: removing inline rows restores their normal bands",
+            separate.Part(ExpandedItem.Power) is not null && separate.Part(ExpandedItem.Frames) is not null);
     }
 
     private static List<ExpandedItem> Subset(int mask) => [.. Every.Where((item, index) => (mask >> index & 1) != 0)];

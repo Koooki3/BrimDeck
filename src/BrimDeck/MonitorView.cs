@@ -88,8 +88,8 @@ internal sealed class MonitorView : Grid
     // the drives' entries theirs (the layout's StorageLines and StorageColumns are the places kept for the volumes under memory and
     // network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
     public MonitorView(ExpandedPlan plan, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
-        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures = false, bool smallTemperature = false,
-        PowerOptions? power = null, FrameworkElement? message = null, CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false, int matrixColumns = 0)
+        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures, bool smallTemperature,
+        PowerOptions power, FrameworkElement? message = null, CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false, int matrixColumns = 0)
     {
         var layout = plan.Steps;
         _layout = layout; _colors = colors; _temperatures = temperatures;
@@ -196,6 +196,10 @@ internal sealed class MonitorView : Grid
                 FrameworkElement reading;
                 if (card.Item == ExpandedItem.Memory)
                     reading = _memory = new MemoryBlock(colors, false, layout.Body, layout.Caption, free, compactBar: card.CompactMemoryBar);
+                else if (card.Item == ExpandedItem.Power)
+                    reading = _power = new PowerBlock(colors, power, layout.Body, layout.Caption, layout.StorageRow);
+                else if (card.Item == ExpandedItem.Frames)
+                    reading = _frames = new FramesBlock(colors[MonitorRole.Frames], layout.Body, layout.Caption, layout.StorageRow);
                 else if (card.Letter is { } letter)
                 {
                     var drive = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, 1, 1, temperatures, free);
@@ -204,8 +208,9 @@ internal sealed class MonitorView : Grid
                 }
                 else if (card.Item == ExpandedItem.Download)
                     reading = _downloadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, upload: false);
-                else
+                else if (card.Item == ExpandedItem.Upload)
                     reading = _uploadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, download: false);
+                else continue;
                 var frame = new Border { Child = reading, ClipToBounds = true,
                     Padding = new Thickness(6, 4, 6, 4),
                     Margin = new Thickness(column == 1 ? 3 : 0, 0, span == 1 && column == 0 ? 3 : 0, 4) };
@@ -274,7 +279,7 @@ internal sealed class MonitorView : Grid
             _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, layout.StorageLines, layout.StorageColumns, temperatures, free);
             bands.Add((ExpandedItem.Storage, _storage));
         }
-        if (plan.Part(ExpandedItem.Power) is not null && layout.PowerLines > 0 && power is not null)
+        if (plan.Part(ExpandedItem.Power) is not null && layout.PowerLines > 0)
         {
             // One line of a list row's height.
             _power = new PowerBlock(colors, power, layout.Body, layout.Caption, layout.StorageRow);

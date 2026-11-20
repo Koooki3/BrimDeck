@@ -27,6 +27,7 @@ public sealed record ExpandedCard(ExpandedItem Item, string? Letter = null, bool
 public static class ExpandedCards
 {
     public static bool IsCard(ExpandedItem item) => item is ExpandedItem.Memory or ExpandedItem.Download or ExpandedItem.Upload or ExpandedItem.Storage;
+    public static bool IsInline(ExpandedItem item) => item is ExpandedItem.Power or ExpandedItem.Frames;
 
     public static List<ExpandedCard> Normalize(IEnumerable<ExpandedCard?>? cards)
     {
@@ -34,11 +35,12 @@ public static class ExpandedCards
         var result = new List<ExpandedCard>();
         foreach (var card in (cards ?? []).OfType<ExpandedCard>())
         {
-            if (!IsCard(card.Item)) continue;
+            if (!IsCard(card.Item) && !IsInline(card.Item)) continue;
             var letter = card.Item == ExpandedItem.Storage ? card.Letter?.Trim().ToUpperInvariant() : null;
             if (card.Item == ExpandedItem.Storage && letter is not [>= 'A' and <= 'Z', ':']) continue;
             if (seen.Add((card.Item, letter)))
-                result.Add(card with { Letter = letter, CompactMemoryBar = card.Item == ExpandedItem.Memory && card.CompactMemoryBar });
+                result.Add(card with { Letter = letter, Wide = !IsInline(card.Item) && card.Wide,
+                    CompactMemoryBar = card.Item == ExpandedItem.Memory && card.CompactMemoryBar });
         }
         return result;
     }
@@ -61,7 +63,7 @@ public static class ExpandedCards
         int row = 0, column = 0;
         foreach (var card in cards)
         {
-            if (!twoColumns || card.Wide)
+            if (!twoColumns || card.Wide || IsInline(card.Item))
             {
                 if (column != 0) { row++; column = 0; }
                 slots.Add((row++, 0, 2));
