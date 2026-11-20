@@ -133,6 +133,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private Button? _maximize;
     private void UpdateCaption()
     {
+        // A maximized window has no outline, as in Windows' own windows; it would draw a line along the screen's edges.
+        if (RootVisual is Border frame) frame.BorderThickness = new Thickness(WindowState == WindowState.Maximized ? 0 : 1);
         if (_maximize is null) return;
         _maximize.Content = CaptionIcon(WindowState == WindowState.Maximized ? "restore" : "maximize");
         _maximize.ToolTip = WindowState == WindowState.Maximized ? Loc.T("还原", "Restore") : Loc.T("最大化", "Maximize");
