@@ -668,6 +668,12 @@ static class DeviceProtocolTests
             && AppleAdvert.Single(loneLow) == new BatteryRead(70, true, BatteryAccuracy.Steps)
             && AppleAdvert.Parts(loneHigh) is { Count: 0 } && AppleAdvert.Single(loneHigh) == new BatteryRead(70, true, BatteryAccuracy.Steps)
             && AppleAdvert.Single(budsNoCase) is null && AppleAdvert.Parts(budsNoCase) is { Count: 2 });
+        // The exact model takes the place of a plain Apple name of its line; a name the user gave, another line or no model keeps it.
+        check("AirPods: the exact model", AppleAdvert.Product(four) == "AirPods 4" && AppleAdvert.Product(advert) == "AirPods Pro 1"
+            && AppleAdvert.Product(maxUsbC) == "AirPods Max USB-C" && AppleAdvert.Product(fitPro) is null && AppleAdvert.Product(unknown) is null);
+        check("AirPods: a plain name shows the exact model, a given name stays", AppleAdvert.Shown("AirPods", "AirPods 4") == "AirPods 4"
+            && AppleAdvert.Shown(" airpods pro ", "AirPods Pro 2 USB-C") == "AirPods Pro 2 USB-C" && AppleAdvert.Shown("AirPods Pro", "AirPods 4") == "AirPods Pro"
+            && AppleAdvert.Shown("Koooki's AirPods", "AirPods 4") == "Koooki's AirPods" && AppleAdvert.Shown("AirPods", null) == "AirPods");
         check("AirPods: another advertisement is none", AppleAdvert.Parts([0x10, 0x05, 0, 0, 0, 0, 0, 0]) is null && AppleAdvert.Model([0x07, 0x19, 0x01, 0x99, 0x99]) is null);
     }
 }

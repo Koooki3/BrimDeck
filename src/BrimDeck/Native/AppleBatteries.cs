@@ -22,8 +22,9 @@ internal sealed class AppleBatteries(Dispatcher dispatcher, Action<DeviceSource,
     private BluetoothLEAdvertisementWatcher? _watcher;
     private DeviceDemand _demand;
     private DeviceBattery? _target;
-    // The parts of earbuds, or the one level of a single-unit model (AirPods Max, the one-piece Beats).
-    private (IReadOnlyList<PartBattery> Parts, BatteryRead? Single, DateTimeOffset At)? _last;
+    // The parts of earbuds, or the one level of a single-unit model (AirPods Max, the one-piece Beats), and the exact AirPods
+    // model (AppleAdvert.Product), shown in place of a plain name such as "AirPods".
+    private (IReadOnlyList<PartBattery> Parts, BatteryRead? Single, string? Product, DateTimeOffset At)? _last;
     private DispatcherTimer? _retry;
     private TimeSpan _backOff = FirstRetry;
 
@@ -112,6 +113,7 @@ internal sealed class AppleBatteries(Dispatcher dispatcher, Action<DeviceSource,
             if (AppleAdvert.Parts(bytes) is not { } parts) continue;
             // A model not in the table (a newer one) is read all the same, as earbuds, the layout every known model shares.
             var model = AppleAdvert.Model(bytes);
+            var product = AppleAdvert.Product(bytes);
             var single = AppleAdvert.Single(bytes);
             if (parts.Count == 0 && single is null) continue;
             dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
@@ -123,8 +125,8 @@ internal sealed class AppleBatteries(Dispatcher dispatcher, Action<DeviceSource,
                 // "Powerbeats Pro". An unknown model's family is not known, so any AirPods or Beats device takes it.
                 string? family = model is null ? null : model.Contains("Beats", StringComparison.OrdinalIgnoreCase) ? "Beats" : "AirPods";
                 if (family is not null && !target.Name.Contains(family, StringComparison.OrdinalIgnoreCase)) return;
-                bool same = _last is { } last && last.Parts.SequenceEqual(parts) && last.Single == single;
-                _last = (parts, single, DateTimeOffset.UtcNow);
+                bool same = _last is { } last && last.Parts.SequenceEqual(parts) && last.Single == single && last.Product == product;
+                _last = (parts, single, product, DateTimeOffset.UtcNow);
                 if (!same) Publish();
             });
         }
@@ -141,7 +143,8 @@ internal sealed class AppleBatteries(Dispatcher dispatcher, Action<DeviceSource,
             _stale.Interval = Fresh - (DateTimeOffset.UtcNow - fresh.At) + TimeSpan.FromMilliseconds(50);
             _stale.Start();
         }
-        if (_target is not { } target || _last is not { } last || DateTimeOffset.UtcNow - last.At > Fresh || _demand != DeviceDemand.Watch) { report(DeviceSource.Apple, []); return; }
+        if (_target is not { } shown || _last is not { } last || DateTimeOffset.UtcNow - last.At > Fresh || _demand != DeviceDemand.Watch) { report(DeviceSource.Apple, []); return; }
+        var target = shown with { Name = AppleAdvert.Shown(shown.Name, last.Product) };
         // A single-unit model shows its one level, without parts.
         if (last.Single is { } single)
         {

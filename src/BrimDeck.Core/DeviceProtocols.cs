@@ -2054,6 +2054,23 @@ public static class AppleAdvert
         0x1220 => "Beats Fit Pro", 0x0320 => "Powerbeats", _ => null
     } : null;
 
+    // The exact AirPods model, as AirPodsDesktop tells them apart; null for Beats and a model not in the table.
+    public static string? Product(byte[] data) => data.Length >= 5 ? ((data[3] << 8) | data[4]) switch
+    {
+        0x0220 => "AirPods 1", 0x0F20 => "AirPods 2", 0x1320 => "AirPods 3", 0x1920 => "AirPods 4", 0x1B20 => Loc.T("AirPods 4 降噪款", "AirPods 4 ANC"),
+        0x0E20 => "AirPods Pro 1", 0x1420 => "AirPods Pro 2", 0x2420 => "AirPods Pro 2 USB-C", 0x2720 => "AirPods Pro 3",
+        0x0A20 => "AirPods Max", 0x1F20 => "AirPods Max USB-C", _ => null
+    } : null;
+
+    // The name to show: the exact model in place of a plain Apple name ("AirPods", "AirPods Pro"), when the model is of that
+    // line; a name the user gave ("Koooki's AirPods") stays.
+    public static string Shown(string name, string? product)
+    {
+        var plain = name.Trim();
+        return product is not null && System.Text.RegularExpressions.Regex.IsMatch(plain, @"^AirPods( Pro| Max)?( \d+)?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            && product.StartsWith(plain, StringComparison.OrdinalIgnoreCase) ? product : name;
+    }
+
     private static bool IsProximity(byte[] data) => data.Length >= 8 && data[0] == 0x07 && data[1] == 0x19;
     private static int? Level(int nibble) => nibble <= 10 ? nibble * 10 : null;
     // One piece, without buds or a case of its own: AirPods Max, Beats Solo, Solo Pro, Studio, Studio Pro and Flex, BeatsX, Powerbeats 3.
