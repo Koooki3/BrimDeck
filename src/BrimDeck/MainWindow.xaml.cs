@@ -241,8 +241,8 @@ public partial class MainWindow : Window
             const int DisplayChange = 0x007E, SettingChange = 0x001A, SetWorkArea = 0x002F, Wheel = 0x020A, SideWheel = 0x020E;
             if (message == DisplayChange || message == SettingChange && wParam == SetWorkArea) _app.DisplaysChanged();
             // WPF has no event for the horizontal wheel; the vertical one is only noted, and WPF still handles it.
-            else if (message == Wheel) { _swipe.Vertical(DateTimeOffset.UtcNow); if (!Native.PasteInput.KeyDown(0x10)) _shelfSwipe.Vertical(DateTimeOffset.UtcNow); }
-            else if (message == SideWheel) { int delta = unchecked((short)((long)wParam >> 16)); handled = MusicWheelSwipe(delta) || ShelfSideWheel(delta); }
+            else if (message == Wheel) VerticalWheel();
+            else if (message == SideWheel) handled = HorizontalWheel(unchecked((short)((long)wParam >> 16)));
             return IntPtr.Zero;
         });
         Closed += (_, _) => DisposeMusic();
@@ -297,6 +297,11 @@ public partial class MainWindow : Window
     // Whether that window draws at a place on screen, in physical pixels; where it does not, the mouse passes the mirror.
     private bool MirrorHit(IntPtr window, Point screen) => MirrorRoot(window) is { } root && root.InputHitTest(root.PointFromScreen(screen)) is not null;
 
+    // The vertical wheel is only noted: a swipe that also scrolls is a scroll (HorizontalSwipe). The horizontal wheel (a touchpad's
+    // two-finger sideways swipe) runs the music page's or the file shelf's swipe; true when one took it.
+    private void VerticalWheel() { _swipe.Vertical(DateTimeOffset.UtcNow); _shelfSwipe.Vertical(DateTimeOffset.UtcNow); }
+    private bool HorizontalWheel(int delta) => MusicWheelSwipe(delta) || ShelfSideWheel(delta);
+
     // A press, a release or a wheel turn over the taskbar mirror, at a place on screen in physical pixels. It is raised as WPF's
     // own mouse events on the element at that place (or on the element that holds the mouse, as during a drag), so the island
     // opens on a click as it does itself and the open panel's part over the taskbar takes clicks and the wheel. A raised press
@@ -310,8 +315,12 @@ public partial class MainWindow : Window
             : root.InputHitTest(root.PointFromScreen(screen)) as UIElement;
         if (target is null) return false;
         int time = Environment.TickCount;
+        // The wheel over a lens never reaches the panel's window (its hook), so it is passed on from here as it would be there.
+        bool own = window == new WindowInteropHelper(this).Handle;
+        if (message is 0x020E) return own && HorizontalWheel(delta); // WM_MOUSEHWHEEL
         if (message is 0x020A) // WM_MOUSEWHEEL
         {
+            if (own) VerticalWheel();
             var preview = new MouseWheelEventArgs(Mouse.PrimaryDevice, time, delta) { RoutedEvent = Mouse.PreviewMouseWheelEvent };
             target.RaiseEvent(preview);
             target.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, time, delta) { RoutedEvent = Mouse.MouseWheelEvent, Handled = preview.Handled });

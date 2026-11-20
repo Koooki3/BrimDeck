@@ -663,10 +663,10 @@ public sealed class DeckSettings
     public double ShelfFileShare { get; set; } = ShelfLayout.DefaultShare;
     // Stacked, further ways to bring the card behind forward, besides a click on its side strip, on the title of the card in
     // front or on the page's own button: resting the pointer on the side strip, a middle click anywhere on the page, and a
-    // two-finger sideways swipe or Shift with the wheel.
+    // two-finger sideways swipe on a touchpad, either way.
     public bool ShelfHoverSwitch { get; set; }
     public bool ShelfMiddleSwitch { get; set; } = true;
-    public bool ShelfSwipeSwitch { get; set; }
+    public bool ShelfSwipeSwitch { get; set; } = true;
     // How each column shows its entries (ClipView, FileView), chosen for each by itself. At first the clipboard shows one line an
     // entry, and the file transfer two, under a larger icon.
     public ClipView ShelfClipView { get; set; } = ClipView.Single;

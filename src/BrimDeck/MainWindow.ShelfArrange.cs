@@ -203,10 +203,8 @@ public partial class MainWindow
     }
     private Deck? _deck;
     private DispatcherTimer? _deckHoverTimer;
-    private long _deckSwapCooldownUntil, _shelfShiftWheelCooldownUntil;
+    private long _deckSwapCooldownUntil;
     private readonly HorizontalSwipe _shelfSwipe = new();
-    private int _shelfShiftWheelRest;
-    private long _shelfShiftWheelAt;
     // The curves of the design: cubic-bezier(.22, 1, .36, 1) for the cards' size, and "ease" for what fades or changes color.
     private static readonly IEasingFunction DeckEase = FrozenEase(.22, 1, .36, 1), DeckFade = FrozenEase(.25, .1, .25, 1);
     private static IEasingFunction FrozenEase(double x1, double y1, double x2, double y2) { var ease = new BezierEase(x1, y1, x2, y2); ease.Freeze(); return ease; }
@@ -434,7 +432,7 @@ public partial class MainWindow
         else RenderShelf();
     }
 
-    // ---- Quick-switching input gestures (middle-click, horizontal touchpad swipe, Shift + wheel) ----
+    // ---- Quick-switching input gestures (middle-click, horizontal touchpad swipe) ----
     private bool IsOverShelfTextInput(DependencyObject? source)
     {
         for (var at = source; at is not null; at = at is Visual ? VisualTreeHelper.GetParent(at) : LogicalTreeHelper.GetParent(at))
@@ -457,30 +455,12 @@ public partial class MainWindow
         e.Handled = true;
     }
 
+    // A swipe either way switches the cards, so swiping on the same way keeps switching them back and forth.
     private bool ShelfWheelSwipe(int delta)
     {
         if (!CanQuickSwitchShelf || !Settings.ShelfSwipeSwitch || !ScreenBounds(Island).Contains(WindowsHost.Cursor())) return false;
-        int step = _shelfSwipe.Feed(delta, DateTimeOffset.UtcNow);
-        if (step > 0) BringForward(ShelfSide.Files);
-        else if (step < 0) BringForward(ShelfSide.Clipboard);
+        if (_shelfSwipe.Feed(delta, DateTimeOffset.UtcNow) != 0) BringForward(ShelfFront == ShelfSide.Clipboard ? ShelfSide.Files : ShelfSide.Clipboard);
         return true;
-    }
-
-    private void ShelfPreviewMouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 || PasteInput.KeyDown(0x10);
-        if (!shift || !CanQuickSwitchShelf || !Settings.ShelfSwipeSwitch) return;
-        e.Handled = true;
-        long now = Environment.TickCount64;
-        if (now - _shelfShiftWheelAt > 300 || Math.Sign(e.Delta) != Math.Sign(_shelfShiftWheelRest)) _shelfShiftWheelRest = 0;
-        _shelfShiftWheelAt = now;
-        _shelfShiftWheelRest += e.Delta;
-        if (Math.Abs(_shelfShiftWheelRest) < 60) return;
-        int dir = Math.Sign(_shelfShiftWheelRest);
-        _shelfShiftWheelRest = 0;
-        if (now < _shelfShiftWheelCooldownUntil) return;
-        _shelfShiftWheelCooldownUntil = now + 200;
-        BringForward(dir < 0 ? ShelfSide.Files : ShelfSide.Clipboard);
     }
 
     // Puts the clickable area where the card in front calls for, gives the columns their size, shows on each strip what its height

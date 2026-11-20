@@ -73,7 +73,6 @@ public partial class MainWindow
         ShelfContent.Background = Brushes.Transparent;
         ExpandedContent.PreviewMouseDown += ShelfPreviewMouseDown;
         ExpandedContent.PreviewMouseUp += ShelfPreviewMouseUp;
-        ExpandedContent.PreviewMouseWheel += ShelfPreviewMouseWheel;
         // A press anywhere else on the panel lets go of the search box: the keyboard goes back to the window it came from, and the
         // search and its results stay. A panel holding the keyboard for a hotkey keeps it (PanelKeyboard).
         PreviewMouseLeftButtonDown += (_, e) =>
