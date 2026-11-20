@@ -126,23 +126,8 @@ internal static class GlassEffect
         CompositionBrush? backdrop = null;
         try
         {
-            if (_graph is null)
-            {
-                Inject?.Invoke("CreateFactory");
-                var source = new CompositionEffectSourceParameter("backdrop");
-                // The matrices leave their output unclamped, so a compositor with float intermediates keeps a vivid colour's
-                // saturation overshoot; the composite clamps once.
-                var bare = Create("base", ColorMatrixEffect, [source], GlassRecipe.BaseMatrix(), clamp: false);
-                var luma = Create("luma", ColorMatrixEffect, [source], GlassRecipe.LumaMatrix(), clamp: false);
-                var linear = Create("linear", ArithmeticEffect, [bare, luma], coefficients: [0, 1, -.28f, .1f]);
-                var opaque = Create("opaque", ColorMatrixEffect, [linear], OpaqueMatrix, straight: true);
-                _graph = Compile(compositor, (IGraphicsEffect)opaque, [Slope, Offset]);
-                GraphState = GlassBackendState.Loading;
-                // A graph the compositor took but cannot draw would show as clear or black glass: the fallback instead.
-                if (Status(_graph) is not (CompositionEffectFactoryLoadStatus.Success or CompositionEffectFactoryLoadStatus.Pending))
-                    throw new NotSupportedException($"the glass graph did not load: {Status(_graph)}");
-            }
-            var factory = _graph;
+            EnsureFactory(compositor);
+            var factory = _graph!;
             Inject?.Invoke("CreateBrush");
             brush = factory.Value.CreateBrush();
             Inject?.Invoke("SetSource");
@@ -161,6 +146,34 @@ internal static class GlassEffect
             Fail(_graph, Permanent(error));
             return null;
         }
+    }
+
+    // Compiles the persistent graph ahead of the first panel that shows it: a new factory loads asynchronously (it stays Pending
+    // until the UI thread has pumped messages, about 70-100 ms), and a panel shown meanwhile would show its opaque base first.
+    // Called when liquid glass is chosen; harmless when the graph exists, is refused or is backing off.
+    public static void Prewarm(Compositor compositor)
+    {
+        if (_graph is not null || !CanTryGraph(compositor)) return;
+        try { EnsureFactory(compositor); }
+        catch (Exception error) when (Expected(error)) { Fail(_graph, Permanent(error)); }
+    }
+
+    private static void EnsureFactory(Compositor compositor)
+    {
+        if (_graph is not null) return;
+        Inject?.Invoke("CreateFactory");
+        var source = new CompositionEffectSourceParameter("backdrop");
+        // The matrices leave their output unclamped, so a compositor with float intermediates keeps a vivid colour's
+        // saturation overshoot; the composite clamps once.
+        var bare = Create("base", ColorMatrixEffect, [source], GlassRecipe.BaseMatrix(), clamp: false);
+        var luma = Create("luma", ColorMatrixEffect, [source], GlassRecipe.LumaMatrix(), clamp: false);
+        var linear = Create("linear", ArithmeticEffect, [bare, luma], coefficients: [0, 1, -.28f, .1f]);
+        var opaque = Create("opaque", ColorMatrixEffect, [linear], OpaqueMatrix, straight: true);
+        _graph = Compile(compositor, (IGraphicsEffect)opaque, [Slope, Offset]);
+        GraphState = GlassBackendState.Loading;
+        // A graph the compositor took but cannot draw would show as clear or black glass: the fallback instead.
+        if (Status(_graph) is not (CompositionEffectFactoryLoadStatus.Success or CompositionEffectFactoryLoadStatus.Pending))
+            throw new NotSupportedException($"the glass graph did not load: {Status(_graph)}");
     }
 
     // A brush's factory's load status as it is now (Other for a brush not made here or a factory that cannot be read).

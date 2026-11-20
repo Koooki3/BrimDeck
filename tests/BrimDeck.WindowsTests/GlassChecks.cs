@@ -113,6 +113,14 @@ internal static class GlassChecks
             check($"A new graph shows an opaque ground while Composition loads it ({shown.Backend}), then the graph and the material asked for",
                 loadingFirst && Settle(a, GlassSurface.Backend.Graph) && a.Applied.Material == asked
                 && Present(a, next) is { Backend: GlassSurface.Backend.Graph } p && p.Material == next);
+            // Prewarmed when liquid glass is chosen: by the time a panel shows, the graph has loaded and no opaque ground flashes.
+            if (GlassEffect.Graph(compositor) is { } loaded) { GlassEffect.Failed(loaded, permanent: false); GlassEffect.Release(loaded); }
+            GlassEffect.Renew();
+            GlassEffect.Prewarm(compositor);
+            var warm = System.Diagnostics.Stopwatch.StartNew();
+            while (warm.ElapsedMilliseconds < 400) Pump();
+            Open(asked, out var warmShown);
+            check($"A prewarmed graph is shown at once, without the opaque loading ground ({warmShown.Backend})", warmShown.Backend == GlassSurface.Backend.Graph);
             // The fallback step the faults below fall back to, loaded beforehand (its first load is Pending as well).
             GlassEffect.Release(Loaded(compositor, GlassEffect.StepLook(asked.DarkVeil, asked.LightVeil, asked.Palette)));
 

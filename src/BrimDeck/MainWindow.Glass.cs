@@ -86,6 +86,7 @@ public partial class MainWindow
         bool enabled = Look.Current.Effects.Glass is not null && !Look.HighContrast && GlassAvailable && !_retiring;
         if (enabled == (_glassSurface is not null)) { QueueGlass(); return; }
         if (!enabled) { CloseGlass(); return; }
+        if (GlassComposition.Compositor is { } compositor) GlassEffect.Prewarm(compositor);
         _glassSurface = new GlassSurface();
         _glassProbe = new DispatcherTimer(TimeSpan.FromMilliseconds(GlassProbeInterval), DispatcherPriority.Background, SampleGlass, Dispatcher);
         _glassProbe.Stop();
