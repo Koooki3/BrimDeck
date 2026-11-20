@@ -414,6 +414,31 @@ public static class QuotaParser
         if (root.Get("usagePercent").Number() is not { } percent) return null;
         return new("Grok Bot", Math.Clamp(percent, 0, 100), root.Get("nextResetTimestampUtc").Date());
     }
+    public static List<Quota> AntigravityCli(string? report)
+    {
+        var quotas = new List<Quota>();
+        if (string.IsNullOrWhiteSpace(report)) return quotas;
+        foreach (var line in report.Split('\n'))
+        {
+            var fields = line.Split('\t', StringSplitOptions.TrimEntries);
+            if (fields.Length != 4 || fields[0].Length == 0 || fields[1].Length == 0 || !fields[2].EndsWith('%')
+                || !double.TryParse(fields[2][..^1], System.Globalization.NumberStyles.AllowDecimalPoint,
+                    System.Globalization.CultureInfo.InvariantCulture, out var remaining) || !(remaining >= 0 && remaining <= 100)
+                || !DateTimeOffset.TryParse(fields[3], System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out var reset)) continue;
+            var group = fields[0] switch { "Gemini Models" => "Gemini", "Claude and GPT models" => "Claude", "Gemini 4 Argon" => "Argon", var name => name };
+            var (period, minutes) = fields[1].ToLowerInvariant() switch
+            {
+                var name when name.Contains("weekly") => ("每周", (int?)10080),
+                var name when name.Contains("five hour") => ("5 小时", 300),
+                var name when name.Contains("daily") => ("每日", 1440),
+                _ => (fields[1], null)
+            };
+            quotas.Add(new($"{group} · {period}", 100 - remaining, reset, minutes));
+        }
+        return quotas;
+    }
+
     public static List<Quota> Antigravity(JsonElement root)
     {
         var result = new List<Quota>();
