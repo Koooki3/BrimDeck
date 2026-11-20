@@ -92,6 +92,8 @@ try
     SurfaceTransparencyTests.Run(Check);
     GlassMaterialTests.Run(Check);
     GlassLookTests.Run(Check);
+    GlassSampleValidityTests.Run(Check);
+    GlassLookGroupTests.Run(Check);
     FluidMotionTests.Run(Check);
     GlassGraphTests.Run(Check);
     GlassLightTests.Run(Check);
