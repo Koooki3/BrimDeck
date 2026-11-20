@@ -39,8 +39,33 @@ internal static class MusicTests
         check("LRC multiple timestamps and offsets are parsed", lrc.Synced && lrc.Lines.Count == 3 && lrc.Lines[0].Seconds == 1.5 && lrc.Lines[1].Seconds == 5.75);
         check("Lyrics show an instrumental introduction before the first timestamp", lrc.At(0).Current == "♪");
         check("Long lyric lines stay visible until the next timestamp", lrc.At(10.75).Current == "同一行" && lrc.At(12).Current == "同一行" && lrc.At(19.499).Current == "同一行" && lrc.At(19.5).Current == "后一行");
-        var words = Lyrics.Parse("[03:17.552]<03:17.552>我<03:17.855>也<03:18.143>可<03:18.479>以 <03:19.000>", null, 252, "test");
-        check("Word timing tags are removed from LRC lines", words.Lines.Count == 1 && words.Lines[0].Text == "我也可以" && Math.Abs(words.Lines[0].Seconds - 197.552) < 0.001);
+        var timed = Lyrics.Parse("[03:17.552]<03:17.552>我<03:17.855>也<03:18.143>可<03:18.479>以 <03:19.000>", null, 252, "test");
+        check("Word timing tags are removed from LRC lines", timed.Lines.Count == 1 && timed.Lines[0].Text == "我也可以" && Math.Abs(timed.Lines[0].Seconds - 197.552) < 0.001);
+        check("Word timing tags are kept as the line's words (Karaoke)",
+            timed.Lines[0].Words is { Count: 4 } words && words.Select(w => w.Count).SequenceEqual([1, 1, 1, 1])
+            && Math.Abs(words[3].Time - 198.479) < 0.001 && words[3].Count == 1
+            && Math.Abs(timed.Karaoke(197.6).Sweep.Sung - .16) < .01 && Math.Abs(timed.Karaoke(198.2).Sweep.Sung - 2.17) < .01
+            && timed.Karaoke(198.5).Sweep.Sung == 4 && timed.Karaoke(200).Sweep.Sung == 4);
+        check("A word is crossed a character at a time, and the sweep rests where the word ends (Karaoke)",
+            timed.Karaoke(197.6).Sweep is { Rest: 1 } start && Math.Abs(start.Rate - 3.3) < .01
+            && timed.Karaoke(198.2).Sweep.Rest == 3);
+        var yrc = Lyrics.ParseYrc("[11470,2080](11470,300,0)被(11700,300,0)我(12000,200,0)弄(12200,260,0)丢\n[15300,6200](15300,634,0)爱(15934,366,0)情(17000,400,0)像(17370,370,0)游", 210, "网易云音乐");
+        check("NetEase yrc words parse a line's tokens, absolute on the song's clock",
+            yrc.Synced && yrc.Lines.Select(l => l.Text).SequenceEqual(["被我弄丢", "爱情像游"])
+            && yrc.Lines[1].Words is { Count: 4 } yrcWords && Math.Abs(yrcWords[2].Time - 17.0) < 0.001
+            && Math.Abs(yrcWords[1].Duration - 366 / 1000d) < 0.001
+            && Math.Abs(yrc.Karaoke(11.999).Sweep.Sung - 1.997) < .01 && Math.Abs(yrc.Karaoke(12.4).Sweep.Sung - 3.77) < .01
+            && yrc.Karaoke(16.5).Sweep == new LyricSweep(2, 0, 2));
+        check("A word's own duration ends the sweep before the next one is due (Karaoke)",
+            yrc.Karaoke(16.0).Sweep is { Rest: 2 } sungWord && Math.Abs(sungWord.Sung - 1.18) < .01 && Math.Abs(sungWord.Rate - 2.73) < .01);
+        var yrcSeconds = Lyrics.ParseYrc("[10000,3000](10000,469,0)甲(10469,530,0)乙(10999,1,0)丙", 60, "test");
+        check("NetEase yrc word times in milliseconds are read as seconds from the song's clock",
+            yrcSeconds.Lines.Count == 1 && yrcSeconds.Lines[0].Words is { Count: 3 } secondsWords
+            && Math.Abs(secondsWords[1].Time - 10.469) < 0.001 && Math.Abs(yrcSeconds.Karaoke(10.46).Sweep.Sung - .98) < .01
+            && Math.Abs(yrcSeconds.Karaoke(10.5).Sweep.Sung - 1.06) < .01);
+        var yrcLrc = Lyrics.ParseYrc("[00:11.470]被我弄丢", 60, "test");
+        check("An LRC row mixed into the yrc field is kept as a line without words",
+            yrcLrc.Lines is [{ Seconds: 11.470, Text: "被我弄丢" }] && yrcLrc.Lines[0].Words is null);
         var gap = Lyrics.Parse("[00:02]长句\n[00:14]\n[00:20]下一句", null, 40, "网易云音乐");
         check("Only timestamped blank lines start an instrumental gap", gap.At(13.999).Current == "长句" && gap.At(14).Current == "♪" && gap.At(19.999).Current == "♪" && gap.At(20).Current == "下一句");
         check("Seeking backwards from an explicit gap restores the lyric", gap.At(16).Current == "♪" && gap.At(8).Current == "长句");
@@ -86,7 +111,11 @@ internal static class MusicTests
         check("Native full lyrics bypass online lookup", nativeLyrics.At(2).Current == "播放器提供的完整歌词" && handler.Calls == 1);
         using var versioned = new NeteaseLyricHandler(); using var versionedHttp = new HttpClient(versioned); using var versionedService = new LyricsService(versionedHttp);
         var firstVersion = await versionedService.FindAsync(track with { Source = "NetEase", SongId = "netease:2692035029" }, true, default);
-        check("A NetEase lyric still at its first version is requested in full", firstVersion.At(1.5).Current == "first" && versioned.Requested.All(u => !u.Contains("lv=1")));
+        check("A NetEase lyric is asked of the public endpoint for its newest versions (Karaoke)",
+            firstVersion.Lines.Select(l => l.Text).SequenceEqual(["逐字歌词"]) && firstVersion.Lines[0].Words is { Count: 3 }
+            && firstVersion.At(0.8).Current == "逐字歌词" && Math.Abs(firstVersion.Karaoke(0.8).Sweep.Sung - 1.17) < .01
+            && versioned.Requested.Count == 1
+            && versioned.Requested[0] == "https://music.163.com/api/song/lyric?id=2692035029&lv=1&kv=1&tv=1&yv=1&ytv=1&rv=1&yrv=1");
         async Task<(Lyrics Lyrics, List<Uri> Requested)> Served(Func<Uri, HttpResponseMessage> reply)
         {
             using var served = new ReplyHandler(reply); using var servedHttp = new HttpClient(served); using var servedService = new LyricsService(servedHttp);
@@ -240,7 +269,7 @@ internal static class MusicTests
         }
         check("The music page fits every size from 440x140 to 1200x400" + (failures.Count > 0 ? ": " + string.Join("; ", failures.Take(5)) : ""), failures.Count == 0);
     }
-    // NetEase's lyric endpoint answers lv=<held version> with an empty lyric unless its own version is newer.
+    // The public endpoint serves each lyric version in one GET; its yrc carries the word-timed lyric.
     private sealed class NeteaseLyricHandler : HttpMessageHandler
     {
         public readonly List<string> Requested = [];
@@ -248,9 +277,12 @@ internal static class MusicTests
         {
             string url = request.RequestUri!.ToString(); Requested.Add(url);
             if (!url.StartsWith("https://music.163.com/api/song/lyric?", StringComparison.Ordinal)) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
-            var held = System.Text.RegularExpressions.Regex.Match(url, @"[?&]lv=(-?\d+)");
-            string lyric = held.Success && int.Parse(held.Groups[1].Value) >= 1 ? "" : "[00:01]first";
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"lrc\":{\"version\":1,\"lyric\":\"" + lyric + "\"},\"code\":200}") });
+            // The public endpoint is asked for each version in one request; yv holds the word-timed yrc for
+            // Karaoke and lv the plain lrc a song without word timings falls back to.
+            string lyric = url.Contains("lv=1", StringComparison.Ordinal) ? "[00:01]first" : "";
+            string yrc = url.Contains("yv=1", StringComparison.Ordinal) ? "[0,0](0,0,0)逐(700,600,0)字(1300,600,0)歌词" : "";
+            var body = $"{{\"lrc\":{{\"version\":1,\"lyric\":\"{lyric}\"}},\"yrc\":{{\"version\":1,\"lyric\":\"{yrc}\"}},\"code\":200}}";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
         }
     }
     private sealed class LyricsHandler : HttpMessageHandler

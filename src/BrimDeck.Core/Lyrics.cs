@@ -1,11 +1,22 @@
 using System.Globalization;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace BrimDeck.Core;
 
-public sealed record LyricLine(double Seconds, string Text);
+// A word of a timed line (Karaoke): the second it is sung, how many characters of the line it covers, and how long it is
+// sung (0 where the lyric does not say: the word then lasts until the next one). The words keep the order they are sung,
+// so each lights up as its time passes.
+public sealed record LyricWord(double Time, int Count, double Duration = 0);
+// How far a word-timed line is sung at a time (Karaoke): the characters the words cover so far, how fast the sweep moves
+// through them (characters a second), and the characters it covers when it comes to rest at the end of the word being sung,
+// where it waits for the next. The rate and the rest let a lyric area carry the sweep on between a player's reports, which
+// come four times a second (MusicMarquee), so a character lights up as it is sung rather than the line jumping word by word.
+public readonly record struct LyricSweep(double Sung, double Rate, double Rest);
+// Lines without per-word times carry no Words (null): they are shown whole, with no Karaoke highlighting.
+public sealed record LyricLine(double Seconds, string Text, IReadOnlyList<LyricWord>? Words = null);
 // The lines shown around the one being sung: Before ends with the line just sung, After starts with the next one.
 public sealed record LyricWindow(IReadOnlyList<string> Before, string Current, IReadOnlyList<string> After)
 {
@@ -53,9 +64,7 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         before = Math.Max(0, before); after = Math.Max(0, after);
         if (Lines.Count == 0) return LyricWindow.Only(Instrumental ? "♪" : "");
         if (!Synced) return LyricWindow.Empty;
-        int index = -1;
-        for (int i = 0; i < Lines.Count && Lines[i].Seconds <= seconds; i++) index = i;
-        if (hold is not null) index = hold.Index(this, index, seconds);
+        int index = FindIndex(seconds, hold);
         string[] Texts(int from, int count) => [.. Lines.Skip(from).Take(count).Select(line => line.Text)];
         if (index < 0) return new([], "♪", Texts(0, after));
         // LRC timestamps start a line; they do not specify how long it is sung.
@@ -63,6 +72,44 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         string text = string.IsNullOrWhiteSpace(Lines[index].Text) ? "♪" : Lines[index].Text;
         int first = Math.Max(0, index - before);
         return new(Texts(first, index - first), text, Texts(index + 1, after));
+    }
+    // The line the position falls in (-1 before the first). hold keeps the line on show through a small
+    // step back of the position (LyricHold), as the line the position fell in when it stepped back.
+    internal int FindIndex(double seconds, LyricHold? hold)
+    {
+        int index = -1;
+        for (int i = 0; i < Lines.Count && Lines[i].Seconds <= seconds; i++) index = i;
+        return hold is null ? index : hold.Index(this, index, seconds);
+    }
+    // The current line and how far it is sung, word by word (Karaoke): the words whose time has passed and the part of the
+    // word being sung, so the marquee can sweep the highlight through a character as it is sung. The words are the current
+    // line's own; a line without per-word times, or none yet (an instrumental, the start of a gap), returns no words: the
+    // line is drawn whole. A paused song reports no rate: the sweep stays where the song does.
+    public (IReadOnlyList<LyricWord>? Words, LyricSweep Sweep) Karaoke(MediaTrack track, DateTimeOffset now, LyricHold? hold = null)
+    {
+        if (!CanSynchronize(track) || QqPreview && track.IsQqMusic) return (null, default);
+        var (words, sweep) = Karaoke(track.Position(now).TotalSeconds + (track.IsAppleMusic ? AppleLead : 0), hold);
+        return (words, track.State == MediaState.Playing ? sweep : sweep with { Rate = 0 });
+    }
+    public (IReadOnlyList<LyricWord>? Words, LyricSweep Sweep) Karaoke(double seconds, LyricHold? hold = null)
+    {
+        int index = FindIndex(seconds, hold);
+        if (index < 0 || index >= Lines.Count || Lines[index].Words is not { Count: > 0 } words) return (null, default);
+        return (words, Swept(words, seconds));
+    }
+    // A word covers its characters over the time it is sung — its own duration where the lyric gives one (yrc), otherwise
+    // until the next word — so the sweep crosses the word a character at a time instead of lighting it whole. Before the
+    // first word, and between one word's end and the next one's start, it rests where it stands.
+    private static LyricSweep Swept(IReadOnlyList<LyricWord> words, double seconds)
+    {
+        int sung = 0, index = 0;
+        while (index < words.Count && words[index].Time <= seconds) sung += words[index++].Count;
+        if (index == 0) return new(0, 0, 0);
+        var word = words[index - 1];
+        double end = word.Duration > 0 ? word.Time + word.Duration : index < words.Count ? words[index].Time : 0;
+        if (end <= word.Time) return new(sung, 0, sung);
+        double part = Math.Clamp((seconds - word.Time) / (end - word.Time), 0, 1);
+        return part >= 1 ? new(sung, 0, sung) : new(sung - (1 - part) * word.Count, word.Count / (end - word.Time), sung);
     }
     public static Lyrics Parse(string? lrc, string? plain, double duration, string source, bool instrumental = false)
     {
@@ -74,13 +121,14 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         {
             var stamps = Regex.Matches(row, @"\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]");
             if (stamps.Count == 0) continue;
-            // Word-timed LRC puts a <mm:ss.xx> tag before each word; the panel shows whole lines, so the tags are dropped.
-            string text = Regex.Replace(row[(stamps[^1].Index + stamps[^1].Length)..], @"<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>", "").Trim();
+            // Word-timed LRC puts a <mm:ss.xx> tag before each word; the tags are dropped, and the words are
+            // kept so the line can light up as it is sung (Karaoke). The same words are kept with every line a row stamps.
+            var words = WordTimedRows(row[(stamps[^1].Index + stamps[^1].Length)..], out string text);
             foreach (Match stamp in stamps)
             {
                 double time = int.Parse(stamp.Groups[1].Value) * 60 + int.Parse(stamp.Groups[2].Value);
                 if (stamp.Groups[3].Success) time += double.Parse("0." + stamp.Groups[3].Value, CultureInfo.InvariantCulture);
-                result.Add(new(Math.Max(0, time + offset), text));
+                result.Add(new(Math.Max(0, time + offset), text, words));
             }
         }
         if (result.Count > 0)
@@ -106,6 +154,108 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         }
         kept.Reverse();
         return kept;
+    }
+    // Word-timed LRC puts a <mm:ss.xx> tag before each word, its time on the song's clock and the characters it
+    // covers of the line (the next tag's, or the line's end). Tags of empty words are dropped. The line's text is
+    // the words it carries with its leading and trailing whitespace trimmed, and a word that held the trimmed text
+    // covers as many characters as remain. Without tags the whole line is returned as its text and no words.
+    private static IReadOnlyList<LyricWord>? WordTimedRows(string seed, out string text)
+    {
+        var matches = Regex.Matches(seed, @"<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>");
+        if (matches.Count == 0) { text = seed.Trim(); return null; }
+        var words = new List<LyricWord>();
+        var builder = new StringBuilder();
+        for (int i = 0; i < matches.Count; i++)
+        {
+            var match = matches[i];
+            string fragment = seed[(match.Index + match.Length)..(i + 1 < matches.Count ? matches[i + 1].Index : seed.Length)];
+            if (fragment.Length == 0) continue;
+            double time = int.Parse(match.Groups[1].Value) * 60 + int.Parse(match.Groups[2].Value);
+            if (match.Groups[3].Success) time += double.Parse("0." + match.Groups[3].Value, CultureInfo.InvariantCulture);
+            words.Add(new LyricWord(time, fragment.Length));
+            builder.Append(fragment);
+        }
+        text = builder.ToString().Trim();
+        // A line trimmed about its text is trimmed about its words as well, so they cover exactly the shown line:
+        // the whitespace dropped at a side comes off the first (or last) word that carried it.
+        if (words.Count > 0 && text.Length < builder.Length)
+        {
+            int droppedLead = 0;
+            while (droppedLead < builder.Length && char.IsWhiteSpace(builder[droppedLead])) droppedLead++;
+            int droppedTrail = 0;
+            while (droppedTrail < builder.Length - droppedLead && char.IsWhiteSpace(builder[^(1 + droppedTrail)])) droppedTrail++;
+            if (droppedLead > 0) words[0] = words[0] with { Count = Math.Max(0, words[0].Count - droppedLead) };
+            if (droppedTrail > 0) words[^1] = words[^1] with { Count = Math.Max(0, words[^1].Count - droppedTrail) };
+        }
+        return words.Count > 0 ? words : null;
+    }
+    // NetEase yrc lyrics give a song word at a time. A row opens a line with its start and its whole length in
+    // milliseconds, then each word with the time it is sung on the song's clock, how long it is sung and, after a
+    // fixed third field, the word itself: [17400,2080](17400,300,0)被(17700,300,0)我. The words let a line light
+    // up as it is sung (Karaoke). A row without a comma after its start is an ordinary LRC line, which some
+    // replies mix into the yrc field.
+    public static Lyrics ParseYrc(string? yrc, double duration, string source, bool instrumental = false)
+    {
+        if (string.IsNullOrWhiteSpace(yrc)) return new([], true, source, instrumental);
+        double offset = 0;
+        var offsetMatch = Regex.Match(yrc, @"\[offset:([+-]?\d+)\]", RegexOptions.IgnoreCase);
+        if (offsetMatch.Success && double.TryParse(offsetMatch.Groups[1].Value, CultureInfo.InvariantCulture, out var ms)) offset = ms / 1000;
+        static bool Milliseconds(string value, out double seconds)
+        {
+            seconds = 0;
+            return long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out long raw) && (seconds = raw / 1000d) >= 0;
+        }
+        var result = new List<LyricLine>();
+        foreach (var row in yrc.Split('\n'))
+        {
+            string line = row.Trim();
+            if (line.Length == 0 || line[0] != '[' || line.IndexOf(']') < 0) continue;
+            int close = line.IndexOf(']');
+            string header = line[1..close];
+            string tail = line[(close + 1)..];
+            // A row without a comma holds an ordinary LRC line, kept without word timings.
+            if (header.IndexOf(',') < 0)
+            {
+                var stamp = Regex.Match(line, @"\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]");
+                if (!stamp.Success) continue;
+                double time = int.Parse(stamp.Groups[1].Value) * 60 + int.Parse(stamp.Groups[2].Value);
+                if (stamp.Groups[3].Success) time += double.Parse("0." + stamp.Groups[3].Value, CultureInfo.InvariantCulture);
+                result.Add(new(Math.Max(0, time + offset), tail.Trim()));
+                continue;
+            }
+            // A word's token holds the time it is sung and its duration, with a fixed third field; the word follows
+            // it, from the token's end up to the next token or the row's end. The duration is kept with the word, so the
+            // sweep can cross it a character at a time rather than lighting it whole (LyricSweep).
+            var words = new List<LyricWord>();
+            var builder = new StringBuilder();
+            for (int position = 0; ;)
+            {
+                if (tail.IndexOf('(', position) != position) break;
+                int tokenEnd = tail.IndexOf(')', position + 1);
+                if (tokenEnd < 0) break;
+                var fields = tail[(position + 1)..tokenEnd].Split(',');
+                if (fields.Length < 2 || !Milliseconds(fields[0], out double at)) break;
+                Milliseconds(fields[1], out double sung);
+                int next = tail.IndexOf('(', tokenEnd + 1);
+                string fragment = next < 0 ? tail[(tokenEnd + 1)..] : tail[(tokenEnd + 1)..next];
+                position = next < 0 ? tail.Length : next;
+                if (fragment.Length == 0) continue;
+                words.Add(new LyricWord(Math.Max(0, at + offset), fragment.Length, sung));
+                builder.Append(fragment);
+            }
+            if (words.Count == 0) continue;
+            string text = builder.ToString();
+            // A trailing space a line draws at its end is dropped with the word that carried it, so the words
+            // cover exactly the shown line.
+            int trailing = text.Length - text.TrimEnd(' ', '\t').Length;
+            if (trailing > 0) { text = text[..^trailing]; words[^1] = words[^1] with { Count = Math.Max(0, words[^1].Count - trailing) }; }
+            int comma = header.IndexOf(',');
+            if (comma < 0 || text.Length == 0 || !Milliseconds(header[..comma], out double start)) continue;
+            result.Add(new(Math.Max(0, start + offset), text, words));
+        }
+        if (result.Count > 0)
+            return InstrumentalNotice(result.Select(line => line.Text)) ? new([], true, source, true) : new(WithoutShortGaps([.. result.OrderBy(line => line.Seconds).Distinct()]), true, source, instrumental);
+        return new([], true, source, instrumental);
     }
     // QQ Music, NetEase and KuGou give a song without words a lyric of only credits ("作曲 : Yiruma") and a notice such as
     // "纯音乐，请欣赏" or "此歌曲为没有填词的纯音乐，请您欣赏"; such a lyric is the song's mark as instrumental. A notice worded
@@ -278,12 +428,27 @@ public sealed partial class LyricsService : IDisposable
     private async Task<Lyrics> FindNeteaseId(string id, double duration, CancellationToken token)
     {
         if (!Regex.IsMatch(id, @"\A[0-9]{1,16}\z")) return Lyrics.Empty;
-        // lv, kv and tv name the lyric versions the caller already holds; the reply leaves out a version that is
-        // not newer. lv=1 therefore received an empty lyric for every song still at its first version (measured).
-        var data = await Get($"https://music.163.com/api/song/lyric?id={id}&lv=-1&kv=-1&tv=-1", token);
+        // The public GET endpoint answers every lyric version it has; each of lv, kv, tv, yv, ytv, rv and yrv
+        // asks it (yv for the word-timed yrc, lv for the plain lrc), and NeteaseLyric takes the newest it holds.
+        var data = await Get($"https://music.163.com/api/song/lyric?id={id}&lv=1&kv=1&tv=1&yv=1&ytv=1&rv=1&yrv=1", token);
         if (data is not { ValueKind: JsonValueKind.Object } value) return Lyrics.Empty;
+        return NeteaseLyric(value, duration);
+    }
+    // A NetEase lyric reply: the word-timed lyric wins over the plain one when it has words, its times being the
+    // line's own. It is labelled yrc (the version asked for with yv) or klyric; both hold the word-timed rows
+    // ParseYrc reads. The plain lrc is the fallback for a song without word timings.
+    private Lyrics NeteaseLyric(JsonElement value, double duration)
+    {
         // NetEase marks a song without words; its lyric then holds only credits and a notice.
         if (value.TryGetProperty("pureMusic", out var pure) && pure.ValueKind == JsonValueKind.True) return new([], true, "网易云音乐", true);
+        static string WordTimed(JsonElement root, string name) => root.TryGetProperty(name, out var entry) ? Str(entry, "lyric") : "";
+        string wordTimed = WordTimed(value, "yrc");
+        if (wordTimed.Length == 0) wordTimed = WordTimed(value, "klyric");
+        if (wordTimed.Length > 0)
+        {
+            var karaoke = Lyrics.ParseYrc(wordTimed, duration, "网易云音乐");
+            if (karaoke.Lines.Count > 0 || karaoke.Instrumental) return karaoke;
+        }
         return value.TryGetProperty("lrc", out var lrc) ? Lyrics.Parse(Str(lrc, "lyric"), null, duration, "网易云音乐") : Lyrics.Empty;
     }
     private async Task<Lyrics> FindLrclib(MediaTrack track, CancellationToken token)
