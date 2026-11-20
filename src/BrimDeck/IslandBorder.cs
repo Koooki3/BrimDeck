@@ -50,15 +50,13 @@ public sealed class IslandBorder : Border
         nameof(Pixel), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsArrange));
     public static readonly DependencyProperty BevelBrushProperty = DependencyProperty.Register(
         nameof(BevelBrush), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
-    // Liquid glass's inner optical edge: a soft glow inside the outline, brightest where the rim catches the light, fading inward
-    // over BevelGlowWidth (MainWindow.Glass sets both; null elsewhere).
-    public static readonly DependencyProperty BevelGlowProperty = DependencyProperty.Register(
-        nameof(BevelGlow), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._glowPens = null));
-    public static readonly DependencyProperty BevelGlowWidthProperty = DependencyProperty.Register(
-        nameof(BevelGlowWidth), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._glowPens = null));
-    public Brush? BevelGlow { get => (Brush?)GetValue(BevelGlowProperty); set => SetValue(BevelGlowProperty, value); }
-    public double BevelGlowWidth { get => (double)GetValue(BevelGlowWidthProperty); set => SetValue(BevelGlowWidthProperty, value); }
-    private Pen[]? _glowPens;
+    // Liquid glass's optical edge (GlassEdge), drawn in place of the rim; MainWindow.Glass sets it while the glass shows.
+    private GlassEdge? _edge;
+    internal GlassEdge? Edge
+    {
+        get => _edge;
+        set { if (ReferenceEquals(_edge, value)) return; _edge = value; _rings = null; InvalidateVisual(); }
+    }
 
     private Pen? _rim;
     private (Size Size, double Shoulder, CornerRadius Corners, double Inset, double Step, double Rim)? _outlineKey;
@@ -108,8 +106,10 @@ public sealed class IslandBorder : Border
         // See-through: the base color and the layers together take the surface's opacity, and the rim keeps its own strength so
         // the outline stays readable.
         drawingContext.PushOpacity(surface);
+        // The base is drawn even fully clear (liquid glass): its outline is what takes the pointer. The layers are not, as nothing
+        // of them would show.
         drawingContext.DrawGeometry(Background, null, outline);
-        if (material > 0)
+        if (material > 0 && surface > 0)
         {
             if (fading) drawingContext.PushOpacity(material);
             Layers(drawingContext, outline);
@@ -131,7 +131,7 @@ public sealed class IslandBorder : Border
 
     private void Rim(DrawingContext drawingContext, Geometry outline)
     {
-        Glow(drawingContext, outline);
+        if (_edge is { Count: > 0 } edge && Pixel <= 0) { DrawEdge(drawingContext, edge); return; }
         if (RimWidth <= 0) return;
         if (_bevel is { } bevel && BevelBrush is { } shade)
         {
@@ -146,21 +146,30 @@ public sealed class IslandBorder : Border
         }
     }
 
-    // The inner glow as three nested strokes along the outline (only their inner halves show, inside the outline): together a falloff
-    // from the edge inward, without making a widened geometry on an animation's frames.
-    private void Glow(DrawingContext drawingContext, Geometry outline)
+    // The optical edge as its rings (GlassEdge): ring k lies between the outline drawn k and k + 1 steps inside, so each pixel of
+    // the edge is covered by one ring once. Each ring is the two outlines filled even-odd: no widened or combined geometry to
+    // compute, and on an animation's frames a new size costs the few outlines only.
+    private void DrawEdge(DrawingContext drawingContext, GlassEdge edge)
     {
-        if (BevelGlow is not { } glow || BevelGlowWidth <= 0 || Pixel > 0) return;
-        if (_glowPens is null)
+        var key = (_outline, edge.Count, edge.Step, edge.Width);
+        if (_rings is null || _ringsKey != key)
         {
-            _glowPens = new Pen[3];
-            for (int i = 0; i < 3; i++) { _glowPens[i] = new Pen(glow, 2 * BevelGlowWidth * (3 - i) / 3); _glowPens[i].Freeze(); }
+            _ringsKey = key;
+            _rings ??= new Geometry[GlassEdge.MaxBands];
+            Geometry outer = BuildOutline(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset);
+            for (int k = 0; k < edge.Count; k++)
+            {
+                var inner = BuildOutline(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset + Math.Min((k + 1) * edge.Step, edge.Width));
+                var ring = new GeometryGroup { FillRule = FillRule.EvenOdd, Children = new GeometryCollection(2) { outer, inner } };
+                ring.Freeze();
+                _rings[k] = ring;
+                outer = inner;
+            }
         }
-        // At rest the layout clip is the bounds (SettledClip), so the strokes' outer halves are clipped here.
-        drawingContext.PushClip(outline);
-        foreach (var pen in _glowPens) drawingContext.DrawGeometry(null, pen, outline);
-        drawingContext.Pop();
+        for (int k = 0; k < edge.Count; k++) drawingContext.DrawGeometry(edge.Brushes[k], null, _rings[k]);
     }
+    private Geometry[]? _rings;
+    private (Geometry Outline, int Count, double Step, double Width)? _ringsKey;
 
     // The visible surface owns input; its decorative shadow is a separate, non-interactive sibling.
     // At rest collapsed (SettledClip, set by the window), the content keeps clear of the corners and shoulders and is clipped to
@@ -288,24 +297,15 @@ public sealed class IslandBorder : Border
     }
 
     // The island's smooth outline for a size, shoulder and corners; insetBy draws it that far inside the bounds (Inset). Frozen.
+    // The parts are GlassBoundaryMath's (Measure, RightShoulder), where the clamps and the shoulder curves are tested.
     internal static Geometry BuildOutline(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy)
     {
         if (!(w > 0) || !(h > 0)) return Geometry.Empty;
-        // The shoulders are sized on the full bounds, so an inset outline has the same shoulders moved in by the inset: its
-        // curves then lie inside the full outline's. The corners keep their centres and lose the inset from their radii.
-        double shoulder = Math.Clamp(shoulderRadius, 0, Math.Min(w / 4, h / 2));
-        double shoulderDepth = shoulder * (7d / 16);
-        double inset = Math.Clamp(insetBy, 0, Math.Min(w, h) / 4), top = shoulder > 0 ? 0 : inset;
-        w -= 2 * inset; h -= top + inset;
-        double left = shoulder, right = w - shoulder;
-        // With shoulders the bottom corners also stay within half the height, so the limit does not jump when a shoulder
-        // shrinking to nothing on a low surface (a notch becoming the line) ends; a notch at rest never reaches either bound.
-        double limit = Math.Max(0, Math.Min(shoulder > 0 ? Math.Min(h - shoulderDepth, h / 2) : h / 2, (right - left) / 2));
-        double bl = Math.Clamp(corners.BottomLeft - inset, 0, limit);
-        double br = Math.Clamp(corners.BottomRight - inset, 0, limit);
-        double tl = Math.Clamp(corners.TopLeft - inset, 0, Math.Min(w, h) / 2);
-        double tr = Math.Clamp(corners.TopRight - inset, 0, Math.Min(w, h) / 2);
-        const double k = .5522847498307936; // Cubic approximation of a circular quadrant.
+        var o = GlassBoundaryMath.Measure(w, h, shoulderRadius, corners.TopLeft, corners.TopRight, corners.BottomRight, corners.BottomLeft, insetBy);
+        double shoulder = o.Shoulder, shoulderDepth = o.ShoulderDepth, left = o.Left, right = o.Right;
+        double tl = o.TopLeft, tr = o.TopRight, br = o.BottomRight, bl = o.BottomLeft;
+        w = o.Width; h = o.Height;
+        const double k = GlassBoundaryMath.Kappa;
         var geometry = new StreamGeometry();
         using (var path = geometry.Open())
         {
@@ -313,12 +313,9 @@ public sealed class IslandBorder : Border
             path.LineTo(new Point(shoulder > 0 ? w : w - tr, 0), true, false);
             if (shoulder > 0)
             {
-                // Two C2-joined cubics: curvature starts and ends at zero, matching
-                // the straight edges. Independent width/depth avoids a circular cutout.
-                path.BezierTo(new Point(w - shoulder * .28, 0), new Point(w - shoulder * .64, 0),
-                    new Point(w - shoulder * .82, shoulderDepth * .18), true, true);
-                path.BezierTo(new Point(right, shoulderDepth * .36), new Point(right, shoulderDepth * .72),
-                    new Point(right, shoulderDepth), true, true);
+                var s = GlassBoundaryMath.RightShoulder(w, shoulder, shoulderDepth);
+                path.BezierTo(P(s.A1), P(s.A2), P(s.Mid), true, true);
+                path.BezierTo(P(s.B1), P(s.B2), P(s.End), true, true);
             }
             else
                 path.BezierTo(new Point(w - tr * (1 - k), 0), new Point(w, tr * (1 - k)),
@@ -332,17 +329,88 @@ public sealed class IslandBorder : Border
             path.LineTo(new Point(left, shoulder > 0 ? shoulderDepth : tl), true, false);
             if (shoulder > 0)
             {
-                path.BezierTo(new Point(left, shoulderDepth * .72), new Point(left, shoulderDepth * .36),
-                    new Point(shoulder * .82, shoulderDepth * .18), true, true);
-                path.BezierTo(new Point(shoulder * .64, 0), new Point(shoulder * .28, 0),
-                    new Point(0, 0), true, true);
+                // The right shoulder mirrored, run backwards.
+                var s = GlassBoundaryMath.RightShoulder(w, shoulder, shoulderDepth);
+                path.BezierTo(M(s.B2), M(s.B1), M(s.Mid), true, true);
+                path.BezierTo(M(s.A2), M(s.A1), new Point(0, 0), true, true);
             }
             else
                 path.BezierTo(new Point(0, tl * (1 - k)), new Point(tl * (1 - k), 0),
                     new Point(tl, 0), true, true);
         }
-        if (inset > 0) geometry.Transform = new TranslateTransform(inset, top);
+        if (o.Inset > 0) geometry.Transform = new TranslateTransform(o.Inset, o.Top);
         geometry.Freeze();
         return geometry;
+
+        static Point P((double X, double Y) p) => new(p.X, p.Y);
+        Point M((double X, double Y) p) => new(w - p.X, p.Y);
+    }
+}
+
+// Liquid glass's optical edge (GlassBoundaryMath.Bands): up to MaxBands rings a step (one device pixel) wide inward from the outline,
+// ring k drawn with Brushes[k]. The brushes are the light's gradient across the island at each ring's strength; they stay mutable,
+// so the light's direction, the opening and the palette move them in place on any frame without a new brush. IslandBorder draws
+// anew only for new rings (Shape returns true).
+internal sealed class GlassEdge
+{
+    public const int MaxBands = 8;
+    public readonly LinearGradientBrush[] Brushes = new LinearGradientBrush[MaxBands];
+    private readonly GradientStopCollection _stops = [];
+    private readonly double[] _alphas = new double[MaxBands];
+    public int Count { get; private set; }
+    public double Step { get; private set; }
+    public double Width { get; private set; }
+
+    public GlassEdge()
+    {
+        for (int k = 0; k < MaxBands; k++) Brushes[k] = new LinearGradientBrush { GradientStops = _stops, Opacity = 0 };
+    }
+
+    // widthDip: the bevel's width; step: one device pixel in DIP; strength scales the whole edge (RimStrength). True when the
+    // rings changed (the island has to be drawn anew); the strengths alone change in place.
+    public bool Shape(double widthDip, double step, double peak, double baseline, double strength)
+    {
+        if (!(widthDip > 0) || !(step > 0)) widthDip = 0;
+        int count = widthDip > 0 ? GlassBoundaryMath.Bands(widthDip / step, peak, baseline, _alphas) : 0;
+        // The width is kept to a hundredth of a step, so a light or palette frame at rest never redraws the rings.
+        double width = Math.Min(Math.Round(widthDip / step * 100) / 100, count) * step;
+        bool changed = count != Count || step != Step || Math.Abs(width - Width) > 1e-9;
+        Count = count; Step = step; Width = width;
+        for (int k = 0; k < MaxBands; k++)
+        {
+            double opacity = k < count ? Math.Clamp(_alphas[k] * strength, 0, 1) : 0;
+            if (Brushes[k].Opacity != opacity) Brushes[k].Opacity = opacity;
+        }
+        return changed;
+    }
+
+    // The light's shape around the island: the theme's rim gradient, each stop's alpha relative to the brightest (the edge's
+    // strength is the profile's, not the theme's).
+    public void Stops(IReadOnlyList<Color> colors)
+    {
+        double brightest = 0;
+        foreach (var c in colors) brightest = Math.Max(brightest, c.A);
+        if (colors.Count < 2 || brightest <= 0) { colors = [Colors.White, Colors.White]; brightest = 255; }
+        if (_stops.Count != colors.Count)
+        {
+            _stops.Clear();
+            for (int i = 0; i < colors.Count; i++) _stops.Add(new GradientStop(Colors.Transparent, (double)i / (colors.Count - 1)));
+        }
+        for (int i = 0; i < colors.Count; i++)
+        {
+            var c = colors[i];
+            var color = Color.FromArgb((byte)Math.Round(c.A / brightest * 255), c.R, c.G, c.B);
+            if (_stops[i].Color != color) _stops[i].Color = color;
+        }
+    }
+
+    public void Light((double X, double Y) start, (double X, double Y) end)
+    {
+        Point a = new(start.X, start.Y), b = new(end.X, end.Y);
+        foreach (var brush in Brushes)
+        {
+            if (brush.StartPoint != a) brush.StartPoint = a;
+            if (brush.EndPoint != b) brush.EndPoint = b;
+        }
     }
 }

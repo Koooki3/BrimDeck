@@ -3,14 +3,15 @@ namespace BrimDeck.Core;
 // Where liquid glass's edge catches its light: an edge facing a brighter part of the desktop reflects more of it. The probe's ring
 // tells how bright each side around the island is (AcrylicProbe.Reading.Sides); the rim's gradient and the inner bevel's glow
 // start on the brighter side. Where the sides hardly differ the light stays the theme's own, from the left (the gradient as
-// the theme draws it), so a plain desktop shows the designed rim. The direction moves with a time constant, never in a jump.
+// the theme draws it), so a plain desktop shows the designed rim. A reading only sets where the light heads; the direction shown
+// moves there on the display's frames with a time constant (Follow), never in a jump at a reading.
 public static class GlassLight
 {
     // The theme's own light: the rim gradient runs from the left edge to the right.
     public static readonly (double X, double Y) Default = (1, 0);
     // A difference between opposite sides below Calm leaves the theme's light; above Clear the sides' own direction is taken.
     public const double Calm = .04, Clear = .20;
-    public const double Tau = 600;
+    public const double Tau = 300;
 
     // Within this of half a turn from the theme's light, the way round is taken from the direction shown (Direction's shown), so a
     // light from the far side does not swing between top and bottom on a little noise in the top and bottom strips.
@@ -52,7 +53,4 @@ public static class GlassLight
     // The gradient's start and end in the island's box (0..1) for a direction.
     public static ((double X, double Y) Start, (double X, double Y) End) Gradient((double X, double Y) direction)
         => ((.5 - .5 * direction.X, .5 - .5 * direction.Y), (.5 + .5 * direction.X, .5 + .5 * direction.Y));
-
-    // The inner bevel's width in DIP: a thin optical edge on the capsule, a wider one on the open panel.
-    public static double BevelWidth(double openness) => 3 + 3 * Math.Clamp(openness, 0, 1);
 }

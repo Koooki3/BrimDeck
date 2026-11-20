@@ -43,6 +43,5 @@ internal static class GlassLightTests
             && Math.Abs(Angle(followed)) > .1 && Math.Abs(Angle(followed)) < Math.PI - .1);
         var (start, end) = GlassLight.Gradient(GlassLight.Default);
         check("The theme's light gives the theme's own gradient, left to right", start.X == 0 && end.X == 1 && start.Y == .5 && end.Y == .5);
-        check("The bevel is thin on the capsule and wider open", GlassLight.BevelWidth(0) == 3 && GlassLight.BevelWidth(1) == 6 && GlassLight.BevelWidth(9) == 6);
     }
 }
