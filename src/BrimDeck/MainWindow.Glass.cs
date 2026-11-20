@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -17,15 +18,21 @@ namespace BrimDeck;
 //     it from where it is, at its speed: nothing queues, nothing restarts.
 //   Readability: the text swaps once, at the frame its new colours read at least as well as the old ones over the glass then
 //     shown (GlassReadability.SwapNow); only the leading panel of a shared look publishes it.
+// Optics: the rim's gradient and an inner bevel glow start on the brighter side of the desktop around the island (GlassLight,
+// from the probe's four strips), turning there slowly; the bevel widens and the rim softens as the panel opens.
 // The springs run on the display's frames (CompositionTarget.Rendering) only while one moves, and set the persistent graph's
 // weights (GlassSurface.Present): nothing is compiled while the material moves. Sampling never stops for a turn. It runs
 // twice a second at rest and in a short burst after a hint that the backdrop may have changed (another window came to the
-// front, the panel moved or began to open or close, a reading that changed a lot), one reading at a time.
+// front, the window in front changed its title - a browser's tab or page -, the panel moved or began to open or close, a
+// reading that changed a lot), one reading at a time.
 public partial class MainWindow
 {
     private const int GlassProbeInterval = 500, GlassBurstInterval = 80, GlassBurstMs = 700, GlassStaleMs = 1500;
     // Stiffness (rad/s): the veil thickens within 5 % in about 180 ms and thins in about 300 ms; a palette turn about 365 ms.
     private const double GlassVeilAttack = 26, GlassVeilRelease = 16, GlassPaletteOmega = 13;
+    // A turn passes through greys where neither palette's text reaches 4.5:1; while it is there the palette's spring is stiffened
+    // (from where it is, at its speed) so that stretch is short.
+    private const double GlassPaletteHurry = 26, GlassReadable = 4.5;
     private AcrylicProbe _acrylicProbe = new();
     private GlassSurface? _glassSurface;
     private GlassAppearance? _glassAppearance;
@@ -37,15 +44,27 @@ public partial class MainWindow
     private double _glassOpenHeight;
     // The material's channels (GlassSurface.Material) and what they head for.
     private FluidSpring _glassDarkVeil, _glassLightVeil, _glassPalette;
-    private bool _glassMaterialReady, _glassFirstSample, _glassTurning, _glassLeads, _glassGoalDark, _glassWasExpanded;
+    private bool _glassMaterialReady, _glassFirstSample, _glassTurning, _glassLeads, _glassGoalDark, _glassWasExpanded, _glassHurried;
     private double _glassRequiredDark, _glassRequiredLight, _glassWantedDark = double.NaN, _glassWantedLight = double.NaN;
     private long _glassSampledAt, _glassBurstUntil, _glassReadAt;
     private double _glassLastMiddle = double.NaN;
     private (double Bright, double Dark) _glassTails = (1, 0);
     private (GlassSampleArea Area, long Generation, long At, AcrylicProbe.Reading Reading)? _glassLatestSample;
     private readonly record struct GlassSampleArea(nint Monitor, Rect Screen, Int32Rect Bounds, double Scale, PanelLook Look);
+    private (double X, double Y) _glassLight = GlassLight.Default;
+    private long _glassLightAt;
+    private (double X, double Y, double Rim, double Width, bool Dark)? _glassOptics;
     private (Size Size, double Shoulder, CornerRadius Corners, Point Origin, Point Along, Point Depth)? _glassOutline;
     private GlassSurface.PixelPoint[]? _glassContour;
+
+    // EVENT_OBJECT_NAMECHANGE out of context: a title change of the window in front (a browser's tab or page) hints at a new backdrop.
+    private IntPtr _glassTitleHook;
+    private WinEventProc? _glassTitleEvent;
+    private bool _glassTitlePending;
+    private delegate void WinEventProc(IntPtr hook, uint winEvent, IntPtr window, int idObject, int idChild, uint thread, uint time);
+    [DllImport("user32")] private static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc callback, uint process, uint thread, uint flags);
+    [DllImport("user32")] private static extern bool UnhookWinEvent(IntPtr hook);
+    [DllImport("user32")] private static extern IntPtr GetForegroundWindow();
 
     internal static bool GlassAvailable => PanelTheme.GlassAvailable;
     // A palette turn is under way: the palette still moves, or the text has not yet swapped to the goal.
@@ -64,7 +83,16 @@ public partial class MainWindow
         LocationChanged += GlassLocation;
         IsVisibleChanged += GlassVisibility;
         _host.ForegroundSwitched += GlassForeground;
+        _glassTitleEvent ??= GlassTitle;
+        _glassTitleHook = SetWinEventHook(0x800C, 0x800C, IntPtr.Zero, _glassTitleEvent, 0, 0, 0x0002); // OUTOFCONTEXT | SKIPOWNPROCESS
         QueueGlass();
+    }
+
+    private void GlassTitle(IntPtr hook, uint winEvent, IntPtr window, int idObject, int idChild, uint thread, uint time)
+    {
+        if (idObject != 0 || idChild != 0 || _glassTitlePending || !_glassActive || window != GetForegroundWindow()) return;
+        _glassTitlePending = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { _glassTitlePending = false; GlassBurst(); });
     }
 
     private void GlassLayout(object? sender, EventArgs e) => QueueGlass();
@@ -178,6 +206,7 @@ public partial class MainWindow
         if (!_glassActive) { _glassActive = true; ApplySurface(); }
         GlassTurnStep(material, now);
         GlassRenderingNeeded();
+        ApplyGlassOptics();
         Island.Pattern = AcrylicNoise.Brush(VisualTreeHelper.GetDpi(Island).DpiScaleX, GlassMaterial.GrainStrength(Settings.GlassTransparency));
         if (_glassProbe is { IsEnabled: false } probe)
         {
@@ -233,6 +262,12 @@ public partial class MainWindow
     {
         if (!_glassTurning) return;
         bool showingDark = Look.Current.IsDark, arrived = !_glassPalette.Moving;
+        if (!arrived && !_glassHurried && GlassReadability.Worst(showingDark, material.DarkVeil, material.LightVeil, material.Palette,
+                _glassTails.Bright, _glassTails.Dark) < GlassReadable)
+        {
+            _glassHurried = true;
+            _glassPalette.Retarget(_glassPalette.Target, now, GlassPaletteHurry);
+        }
         // The leader swaps at the readable frame; any panel whose palette has arrived publishes the goal if nobody did (a leader
         // hidden mid-way), which is the same palette again for the others.
         if (showingDark != _glassGoalDark && (!Animates || arrived || _glassLeads && GlassReadability.SwapNow(showingDark, _glassGoalDark,
@@ -262,6 +297,8 @@ public partial class MainWindow
 
     private async void SampleGlass(object? sender, EventArgs e)
     {
+        // The reading's continuation and everything it starts (the springs' frames, a turn) belong on this window's thread.
+        if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(() => SampleGlass(sender, e)); return; }
         if (_glassProbe is { } timer)
         {
             int interval = Environment.TickCount64 < _glassBurstUntil ? GlassBurstInterval : GlassProbeInterval;
@@ -297,6 +334,9 @@ public partial class MainWindow
             _glassTails = (sample.BrightFor(openness), sample.DarkFor(openness));
             if (double.IsFinite(_glassLastMiddle) && (Math.Abs(sample.MiddleMean - _glassLastMiddle) > .12 || sample.Changed > .5)) GlassBurst();
             _glassLastMiddle = sample.MiddleMean;
+            _glassLight = GlassLight.Follow(_glassLight, GlassLight.Direction(sample.Sides), _glassLightAt == 0 ? 0 : now - _glassLightAt);
+            _glassLightAt = now;
+            ApplyGlassOptics();
             double wantedDark = GlassRecipe.LuminosityFor(true, _glassTails.Bright, _glassTails.Dark, transparency);
             double wantedLight = GlassRecipe.LuminosityFor(false, _glassTails.Bright, _glassTails.Dark, transparency);
             double dark = _glassFirstSample ? wantedDark : GlassMaterial.Settle(wantedDark, _glassWantedDark, _glassRequiredDark);
@@ -351,9 +391,41 @@ public partial class MainWindow
         _glassGoalDark = dark;
         _glassLeads = leads;
         _glassTurning = true;
+        _glassHurried = false;
         _glassPalette.Retarget(dark ? 0 : 1, now, GlassPaletteOmega);
         GlassRenderingNeeded();
         QueueGlass();
+    }
+
+    // The rim and the bevel glow for the light's direction, the opening and the look; rebuilt only when one of them moved enough to
+    // see (the brushes are frozen, a few a second at most).
+    private void ApplyGlassOptics()
+    {
+        if (!_glassActive) return;
+        double openness = GlassOpenness();
+        bool dark = Look.Current.IsDark;
+        double rim = Math.Min(1, GlassMaterial.RimStrength(Settings.GlassTransparency, openness)), width = GlassLight.BevelWidth(openness);
+        if (_glassOptics is { } shown && shown.Dark == dark && Math.Abs(shown.Rim - rim) < .02 && Math.Abs(shown.Width - width) < .1
+            && Math.Abs(Math.IEEERemainder(Math.Atan2(shown.Y, shown.X) - Math.Atan2(_glassLight.Y, _glassLight.X), 2 * Math.PI)) < .03) return;
+        _glassOptics = (_glassLight.X, _glassLight.Y, rim, width, dark);
+        var (start, end) = GlassLight.Gradient(_glassLight);
+        var stops = Look.Current.Effects.RimGradient;
+        Brush rimBrush = stops.Count >= 2
+            ? new LinearGradientBrush(new GradientStopCollection(stops.Select((stop, i) => new GradientStop(PanelTheme.ToColor(stop), (double)i / (stops.Count - 1)))),
+                new Point(start.X, start.Y), new Point(end.X, end.Y))
+            : Look.RimBrush();
+        rimBrush = rimBrush.CloneCurrentValue();
+        rimBrush.Opacity = rim;
+        rimBrush.Freeze();
+        Island.RimBrush = rimBrush;
+        byte peak = dark ? (byte)26 : (byte)36;
+        var glow = new LinearGradientBrush(new GradientStopCollection
+        {
+            new(Color.FromArgb(peak, 255, 255, 255), 0), new(Color.FromArgb((byte)(peak * .35), 255, 255, 255), .6), new(Color.FromArgb((byte)(peak * .15), 255, 255, 255), 1)
+        }, new Point(start.X, start.Y), new Point(end.X, end.Y));
+        glow.Freeze();
+        Island.BevelGlow = glow;
+        Island.BevelGlowWidth = width;
     }
 
     private void PublishGlassPalette(bool dark, bool coordinated)
@@ -379,6 +451,9 @@ public partial class MainWindow
         _acrylicProbe = new AcrylicProbe();
         _glassLastMiddle = double.NaN;
         _glassGeneration++;
+        _glassLight = GlassLight.Default; _glassLightAt = 0; _glassOptics = null;
+        Island.RimBrush = Look.RimBrush();
+        Island.BevelGlow = null;
         ApplySurface();
         if (AcrylicNoise.Is(Island.Pattern))
         {
@@ -394,6 +469,7 @@ public partial class MainWindow
         LocationChanged -= GlassLocation;
         IsVisibleChanged -= GlassVisibility;
         _host.ForegroundSwitched -= GlassForeground;
+        if (_glassTitleHook != IntPtr.Zero) { UnhookWinEvent(_glassTitleHook); _glassTitleHook = IntPtr.Zero; }
         HideGlass();
         _glassActive = false;
         GlassRenderingNeeded();

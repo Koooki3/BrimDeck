@@ -50,6 +50,15 @@ public sealed class IslandBorder : Border
         nameof(Pixel), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsArrange));
     public static readonly DependencyProperty BevelBrushProperty = DependencyProperty.Register(
         nameof(BevelBrush), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+    // Liquid glass's inner optical edge: a soft glow inside the outline, brightest where the rim catches the light, fading inward
+    // over BevelGlowWidth (MainWindow.Glass sets both; null elsewhere).
+    public static readonly DependencyProperty BevelGlowProperty = DependencyProperty.Register(
+        nameof(BevelGlow), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._glowPens = null));
+    public static readonly DependencyProperty BevelGlowWidthProperty = DependencyProperty.Register(
+        nameof(BevelGlowWidth), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._glowPens = null));
+    public Brush? BevelGlow { get => (Brush?)GetValue(BevelGlowProperty); set => SetValue(BevelGlowProperty, value); }
+    public double BevelGlowWidth { get => (double)GetValue(BevelGlowWidthProperty); set => SetValue(BevelGlowWidthProperty, value); }
+    private Pen[]? _glowPens;
 
     private Pen? _rim;
     private (Size Size, double Shoulder, CornerRadius Corners, double Inset, double Step, double Rim)? _outlineKey;
@@ -122,6 +131,7 @@ public sealed class IslandBorder : Border
 
     private void Rim(DrawingContext drawingContext, Geometry outline)
     {
+        Glow(drawingContext, outline);
         if (RimWidth <= 0) return;
         if (_bevel is { } bevel && BevelBrush is { } shade)
         {
@@ -134,6 +144,22 @@ public sealed class IslandBorder : Border
             if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); _rim.Freeze(); }
             drawingContext.DrawGeometry(null, _rim, outline);
         }
+    }
+
+    // The inner glow as three nested strokes along the outline (only their inner halves show, inside the outline): together a falloff
+    // from the edge inward, without making a widened geometry on an animation's frames.
+    private void Glow(DrawingContext drawingContext, Geometry outline)
+    {
+        if (BevelGlow is not { } glow || BevelGlowWidth <= 0 || Pixel > 0) return;
+        if (_glowPens is null)
+        {
+            _glowPens = new Pen[3];
+            for (int i = 0; i < 3; i++) { _glowPens[i] = new Pen(glow, 2 * BevelGlowWidth * (3 - i) / 3); _glowPens[i].Freeze(); }
+        }
+        // At rest the layout clip is the bounds (SettledClip), so the strokes' outer halves are clipped here.
+        drawingContext.PushClip(outline);
+        foreach (var pen in _glowPens) drawingContext.DrawGeometry(null, pen, outline);
+        drawingContext.Pop();
     }
 
     // The visible surface owns input; its decorative shadow is a separate, non-interactive sibling.

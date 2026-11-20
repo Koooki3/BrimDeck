@@ -10,7 +10,9 @@ namespace BrimDeck.Core;
 //   page, where the light text could no longer read (Windows' vendor guidance: vendor-benchmark §2.3).
 //   Smoothing: an exponential moving average of the log of the measure with time constant Tau, the step weighted by the time
 //   since the last measure (1 - e^(-Δt/Tau)), so it is the same at any frame rate; the thresholds above (a Schmitt trigger)
-//   are compared with it. After a change the look holds for at least Dwell; a change that comes within Restless of the hold
+//   are compared with it. A new scene is taken at once instead: two measures in a row that agree with each other (within
+//   Agree) and lie far from the average (beyond Jump, a factor of about three in brightness) move the average onto them, so a
+//   switch from a dark app to a white page turns the glass after two readings, while a lone flash still only nudges it. After a change the look holds for at least Dwell; a change that comes within Restless of the hold
 //   ending doubles the hold, up to MaxHold (a backdrop that keeps flipping), and a change after a quieter while starts from
 //   Dwell again.
 //   Video: while most of the backdrop changes from capture to capture (more than VideoShare of its pixels, answers no further
@@ -26,6 +28,7 @@ public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = Gla
     public const double DarkModeToLight = .72, DarkModeToDark = .55, LightModeToDark = .28, LightModeToLight = .45;
     public const double LowQuantile = .2, HighQuantile = .8;
     public const double Tau = 200;
+    public const double Jump = 1.1, Agree = .25;
     public const long Dwell = 1750, MaxHold = 8000, Restless = 4000, Settle = 250;
     public const double VideoShare = .5;
     public const long VideoAfter = 1000, VideoGap = 400, VideoEscape = 5000;
@@ -78,7 +81,7 @@ public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = Gla
     // Whether the backdrop is a video now (see above).
     public bool Video => _movingSince >= 0 && _movedAt - _movingSince >= VideoAfter;
 
-    private double _log = double.NaN;
+    private double _log = double.NaN, _lastLog = double.NaN;
     private long _fedAt;
     // The last change of either kind (the hold runs from it), the last one this decided (restlessness counts from it), since
     // when the smoothed measure has been past the threshold (-1: it is not), and before when nothing turns (released).
@@ -94,7 +97,9 @@ public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = Gla
         if (!double.IsFinite(luma)) return false;
         double log = Math.Log(Math.Max(luma, Floor));
         if (double.IsNaN(_log)) _log = log;
+        else if (Math.Abs(log - _log) > Jump && Math.Abs(log - _lastLog) < Agree) _log = log;
         else _log += (1 - Math.Exp(-Math.Max(0, now - _fedAt) / Tau)) * (log - _log);
+        _lastLog = log;
         _fedAt = now;
         if (_movingSince >= 0 && now - _movedAt > videoGap) _movingSince = -1;
         if (_held && !held) _calmUntil = now + Settle;

@@ -39,6 +39,19 @@ public static class GlassReadability
         return least;
     }
 
+    // The weakest body text of a palette over the glass shown over each of the grey backdrops.
+    public static double Worst(bool darkLook, double darkVeil, double lightVeil, double palette, params double[] backdrops)
+    {
+        if (backdrops.Length == 0) backdrops = [.5];
+        double least = double.MaxValue;
+        foreach (double b in backdrops)
+        {
+            double g = double.IsFinite(b) ? Math.Clamp(b, 0, 1) : .5;
+            least = Math.Min(least, Weakest(darkLook, GlassRecipe.Shown((g, g, g), darkVeil, lightVeil, palette)));
+        }
+        return least;
+    }
+
     // Whether the text should now show the goal palette's colours, the glass shown over each of the grey backdrops (the
     // probe's bright and dark tails): the goal's weakest text over its worst backdrop reads at least as well as the current one's.
     public static bool SwapNow(bool showingDark, bool goalDark, double darkVeil, double lightVeil, double palette, params double[] backdrops)

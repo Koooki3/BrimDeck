@@ -121,5 +121,13 @@ internal static class GlassLookTests
         bool stopped = !escape.Feed(.9, turned + GlassAppearance.VideoGap + 100) && !escape.Video;
         check($"Automatic liquid glass over a video turns only once it stayed bright for good ({after} ms), and the video state ends with the video",
             after >= GlassAppearance.VideoEscape && after <= GlassAppearance.VideoEscape + 1000 && stopped);
+
+        // A new scene is taken after two agreeing readings; a lone flash between two dark readings only nudges the average.
+        var scene = Settled(dark: true, appDark: true, luma: .08);
+        bool sceneTurned = scene.Feed(.94, 3000) | scene.Feed(.94, 3080);
+        var flash = Settled(dark: true, appDark: true, luma: .08);
+        bool flashed = flash.Feed(.94, 3000) | flash.Feed(.08, 3080) | flash.Feed(.08, 3160);
+        check(FormattableString.Invariant($"Automatic liquid glass takes a new scene after two agreeing readings, a lone flash does not turn it (smoothed {flash.Smoothed:0.00})"),
+            sceneTurned && !scene.Dark && !flashed && flash.Dark && flash.Smoothed < .3);
     }
 }

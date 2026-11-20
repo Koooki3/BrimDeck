@@ -6,13 +6,15 @@ namespace BrimDeck.LiquidGlass;
 
 // Round 16: what lies around the acrylic island, looked at a couple of times a second (GlassBackdrop's acrylic body). DWM blurs
 // the desktop for the body itself on every frame, with nothing of ours in that path; this only tells the body how bright the
-// desktop around it is, for the luminosity layer the text needs (GlassEffect.LuminosityFor) and for automatic liquid glass's
+// desktop around it is, for the luminosity layer the text needs (GlassRecipe.LuminosityFor) and for automatic liquid glass's
 // look (GlassAppearance). No capture device: GDI shrinks a ring around the island, from Gap to
 // Gap + Band outside its outline, past its own shadow - to a few dozen pixels (StretchBlt, HALFTONE: an area average), so the
 // island and its shadow are never in it and none of our windows needs to be left out of anything.
 internal sealed class AcrylicProbe
 {
-    public readonly record struct Reading(double Mean, double Bright, double Dark, double Changed, double Median, double MiddleMean)
+    // Sides: the mean luma of the left, right, top and bottom strips (NaN for a strip off the display), for the rim's light.
+    public readonly record struct Reading(double Mean, double Bright, double Dark, double Changed, double Median, double MiddleMean,
+        (double Left, double Right, double Top, double Bottom) Sides = default)
     {
         // The brightest and darkest the glass has to answer for, by its openness: the collapsed island's ring is small, so one
         // bright neighbour would hold its 90th percentile up; the capsule answers to the ring's middle, the open panel (a
@@ -65,6 +67,8 @@ internal sealed class AcrylicProbe
     {
         var strips = Strips(island, display, gap, band);
         int valid = 0, count = 0, moved = 0;
+        var sideSum = new double[4];
+        var sideCount = new int[4];
         IntPtr screen = GetDC(IntPtr.Zero);
         if (screen == IntPtr.Zero) return null;
         var buffers = _buffers ??= new Buffers();
@@ -108,7 +112,9 @@ internal sealed class AcrylicProbe
                             pixels[at] = r;
                             pixels[at + 1] = g;
                             pixels[at + 2] = b;
-                            buffers.Luma[count++] = (.2126 * r + .7152 * g + .0722 * b) / 255;
+                            double luma = (.2126 * r + .7152 * g + .0722 * b) / 255;
+                            buffers.Luma[count++] = luma;
+                            sideSum[i] += luma; sideCount[i]++;
                         }
                     }
                 }
@@ -130,8 +136,9 @@ internal sealed class AcrylicProbe
         Array.Sort(lumas, 0, count);
         double sum = 0;
         for (int i = 0; i < count; i++) sum += lumas[i];
+        double Side(int i) => sideCount[i] > 0 ? sideSum[i] / sideCount[i] : double.NaN;
         return new Reading(sum / count, lumas[(int)(count * Tail)], lumas[(int)(count * (1 - Tail))],
-            changed, lumas[count / 2], GlassAppearance.SortedRangeMean(lumas.AsSpan(0, count)));
+            changed, lumas[count / 2], GlassAppearance.SortedRangeMean(lumas.AsSpan(0, count)), (Side(0), Side(1), Side(2), Side(3)));
     }
 
     private const int Halftone = 4, SrcCopy = 0x00CC0020;
