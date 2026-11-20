@@ -112,7 +112,7 @@ public partial class MainWindow : Window
     // The panel is a topmost overlay: kept above other windows, or an ordinary panel a window rule turns into the indicator,
     // which shows above the window that fills the screen.
     private bool KeepsAbove => Settings.AlwaysOnTop
-        || !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind).IsIndicator();
+        || !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line;
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
     // Set when the first read has ended, with data or without (RefreshAsync); until then the usage page shows its skeleton.
     private bool _firstReadEnded;
@@ -132,7 +132,6 @@ public partial class MainWindow : Window
         {
             _hover!.Stop();
             if (IsSuppressed || !_pointerInside) return;
-            if (!_expanded && PeekShows && !_peek.Active) { BeginPeek(); return; }
             OpenAtPointer();
         });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
@@ -266,7 +265,7 @@ public partial class MainWindow : Window
     private Rect? OccupiedArea()
     {
         if (Settings.Occupied == WindowBehavior.Normal) return null;
-        if (Collapsed.Style == Settings.Style && _pixelsPerDip > 0 && Collapsed.Surface.Width > 0 && Collapsed.Surface.Height > 0)
+        if (Collapsed.Style == Settings.Style && !CapsuleFromLine && _pixelsPerDip > 0 && Collapsed.Surface.Width > 0 && Collapsed.Surface.Height > 0)
         {
             var r = _frame.ToScreen(Collapsed.Surface);
             _ownArea = new Rect((MonitorBoundsDip.X + r.X) * _pixelsPerDip, (MonitorBoundsDip.Y + r.Y) * _pixelsPerDip,
@@ -540,6 +539,12 @@ public partial class MainWindow : Window
     private CollapsedShape ShapeFor(CompactStyle style)
     {
         double? wanted = Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null;
+        // The capsule the line opens into takes the line's place (MainWindow.Peek.cs).
+        if (style == CompactStyle.Capsule && CapsuleFromLine)
+        {
+            var placed = PeekCapsule(wanted);
+            return placed with { Surface = _frame.FromScreen(placed.Surface) };
+        }
         // The capsule keeps its place on the screen; docked with the bottom (MainWindow.Edge.cs) it is only seen from there.
         if (style == CompactStyle.Capsule && _frame.Edge != ScreenEdge.Top)
         {
@@ -799,9 +804,8 @@ public partial class MainWindow : Window
         if (!_expanded && !IsSuppressed) SetExpanded(false);
     }
 
-    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind).IsIndicator() ? CompactStyle.Line : Settings.Style;
-    // The indicator that peeks stays the line; the readout bubble beside it is a window of its own (MainWindow.Peek.cs).
-    private bool PeekRule => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Peek;
+    // The capsule while the line has opened into it (MainWindow.Peek.cs).
+    private CompactStyle EffectiveStyle => CapsuleFromLine ? CompactStyle.Capsule : RestStyle;
     // One animated track: where it starts and ends, as fractions of the configured duration.
     private readonly record struct Track(double Start, double End);
     // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
@@ -826,9 +830,8 @@ public partial class MainWindow : Window
     private void PanelClosed()
     {
         _app.UpdateCollectionLatency();
-        // A panel opened from the peek closes back to the line, even if the pointer is still on it; the line rests until the pointer
-        // has left it.
-        if (_peek.PanelClosed()) { _hover.Stop(); _leave.Stop(); }
+        // A panel opened from the capsule of the line closes back to the line (MainWindow.Peek.cs).
+        PeekPanelClosed();
         WatchOutsidePress(false);
         ResetShelf();
         HotkeyPanelCollapsed();
@@ -854,8 +857,6 @@ public partial class MainWindow : Window
         // host's own state, as a new screen context closes the panel without passing here.
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
-        // The readout bubble of a peeking indicator gives way to the panel.
-        if (expanded) HidePeekBubble();
         // The smooth memory mode holds off full collections while a panel is open (App.UpdateCollectionLatency).
         if (expanded && !wasExpanded) _app.UpdateCollectionLatency();
         _escapeDismissal?.SetEnabled(HoldsEscape);
@@ -1082,6 +1083,8 @@ public partial class MainWindow : Window
     // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded).
     private void OpenAtPointer()
     {
+        // The line that opens into the capsule does that first; a click on the capsule opens the panel (MainWindow.Peek.cs).
+        if (!_expanded && LineOpensCapsule && !_peek.Active) { BeginPeek(); return; }
         if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
         SetExpanded(true);
     }
@@ -1092,7 +1095,7 @@ public partial class MainWindow : Window
     private void Island_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         bool pressed = _islandPressed; _islandPressed = false;
-        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed || !Settings.ClickToExpand && !_peek.Active) return;
+        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed || !Settings.ClickToExpand && !CapsuleFromLine) return;
         e.Handled = true;
         _hover.Stop(); _leave.Stop();
         OpenAtPointer();
@@ -1109,7 +1112,6 @@ public partial class MainWindow : Window
     internal void TrackPointer()
     {
         CheckMoveOvertaken();
-        GuardPeekBubble();
         if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) return;
         var cursor = WindowsHost.Cursor();
         // Move mode: the panel does not open (MainWindow.Move.cs).
@@ -1130,8 +1132,8 @@ public partial class MainWindow : Window
         double dx = Math.Max(0, Math.Max(area.Left - cursor.X, cursor.X - area.Right)), dy = Math.Max(0, Math.Max(area.Top - cursor.Y, cursor.Y - area.Bottom));
         // Whole 20 ms steps, so small movements far away do not reschedule the timer on every check.
         double wait = _expanded ? TrackNear : Math.Clamp(Math.Floor(Math.Sqrt(dx * dx + dy * dy) / ApproachSpeed / 20) * 20, TrackNear, TrackFar);
-        // The bubble beside the indicator is left as quickly as the open panel is.
-        if (_peek.Active) wait = TrackNear;
+        // The capsule of the line is left as quickly as the open panel is.
+        if (CapsuleFromLine) wait = TrackNear;
         _pointerTrack.Interval = TimeSpan.FromMilliseconds(wait);
         if (_preview)
         {
@@ -1168,9 +1170,9 @@ public partial class MainWindow : Window
             if (_pointerInside) PointerChanged(false);
             return;
         }
-        // A peek holds while the pointer is on the bubble or on the way to it, not only on the indicator.
-        if (_peek.Active && !inCompact && PointerOnPeekBubble(cursor)) inCompact = true;
-        // The indicator that has just ended a peek stays quiet until the pointer has left it.
+        // The capsule of the line holds while the pointer is on it, on the line's place or between them.
+        if (!inCompact && grip == ResizeEdges.None && PointerOnPeek(cursor) && !Covered()) inCompact = true;
+        // The line that has just turned back from the capsule stays quiet until the pointer has left it.
         _peek.Observe(inCompact);
         if (_peek.Resting) { _cursorInCompact = inCompact; return; }
         if (inCompact != _cursorInCompact) { _cursorInCompact = inCompact; PointerChanged(inCompact); }
@@ -1189,15 +1191,14 @@ public partial class MainWindow : Window
             WatchOutsidePress(false);
             _popupReturnArea = null;
             _leave.Stop(); if (_expanded || IsSuppressed) return;
-            // The bubble beside the indicator opens the panel by a click only.
-            // ClickToExpand covers the full panel only; a peeking rule still peeks on hover.
-            _hover.Stop(); if (_peek.Active || Settings.ClickToExpand && !PeekShows) return;
+            // The capsule of the line opens the panel by a click only.
+            _hover.Stop(); if (CapsuleFromLine || Settings.ClickToExpand) return;
             _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
         {
             _hover.Stop();
-            if (_peek.Active && !_expanded) { StartPeekLeave(); return; }
+            if (CapsuleFromLine && !_expanded) { StartPeekLeave(); return; }
             if (_expanded && !_preview) WatchOutsidePress(true);
             if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) return;
             // A press outside closes the panel at once (MainWindow.OutsidePress.cs).
@@ -1210,8 +1211,8 @@ public partial class MainWindow : Window
     {
         if (IsHotkeyPinned || Resizing) { _leave.Stop(); return; }
         if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) { _leave.Stop(); return; }
-        // The pointer has been away from the indicator and its bubble: the bubble goes.
-        if (_peek.Active && !_expanded) { _leave.Stop(); EndPeek(); return; }
+        // The pointer has been away from the capsule of the line: it turns back into the line.
+        if (CapsuleFromLine && !_expanded) { _leave.Stop(); EndPeek(); return; }
         // Closing a calendar with either button must leave a path back to the results.
         // Keep checking until the cursor leaves that area; entering the island restores normal hover behavior.
         if (_popupReturnArea is { } area && area.Contains(screenPoint) && !_pressedOutside) return;

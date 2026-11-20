@@ -1,0 +1,70 @@
+namespace BrimDeck.Core;
+
+// The indicator that opens into the capsule (DeckSettings.LineOpensCapsule): hovering the line, or clicking it with ClickToExpand,
+// turns it into the capsule in its place (IndicatorCapsule), read-only; a click on the capsule opens the panel, and leaving it
+// turns it back into the line. It holds no timers; the window starts its open and close delays and tells this what happened.
+//   Line      the indicator at rest
+//   Active    the capsule shows in the indicator's place, and the panel a click on it opens
+// After the capsule ends, the pointer may still be on the line: the line rests until the pointer has left it, so that it does not
+// open again at once.
+public sealed class IndicatorPeek
+{
+    public bool Active { get; private set; }
+    public bool Resting { get; private set; }
+    // The pointer is on the indicator and the open delay has run out, or it was clicked: whether the capsule is to be shown.
+    public bool Begin()
+    {
+        if (Active || Resting) return false;
+        Active = true; return true;
+    }
+    // The pointer has been away from the capsule for the close delay, or the panel opened from it has closed: back to the line,
+    // which rests until the pointer has left it.
+    public bool End()
+    {
+        if (!Active) return false;
+        Active = false; Resting = true; return true;
+    }
+    // Each pointer check at rest: a resting line wakes once the pointer is off it.
+    public void Observe(bool overIndicator)
+    {
+        if (Resting && !overIndicator) Resting = false;
+    }
+    // The indicator no longer opens into the capsule (a setting, a window rule, the panels hidden).
+    public void Reset() { Active = false; Resting = false; }
+}
+
+// Where the capsule an indicator opens into sits. Every rectangle is in DIPs relative to the monitor's top-left corner (the
+// screen's frame, not the edge frame of EdgeFrame).
+public static class IndicatorCapsule
+{
+    // The capsule against the indicator's edge, gap from the work area's side there (at most CollapsedHover.BridgeMaxGap, so a
+    // capsule at the top or the bottom keeps its bridge to the edge), centred on the indicator along the edge and kept within the
+    // work area. A capsule larger than the work area is cut to it.
+    public static DipRect Place(DipRect line, ScreenEdge edge, double width, double height, double gap, DipRect work)
+    {
+        if (!(work.Width > 0) || !(work.Height > 0) || !double.IsFinite(work.X) || !double.IsFinite(work.Y)) return new(0, 0, 0, 0);
+        double w = Math.Min(Size(width), work.Width), h = Math.Min(Size(height), work.Height);
+        double g = double.IsFinite(gap) ? Math.Clamp(gap, 0, CollapsedHover.BridgeMaxGap) : 0;
+        double cx = Finite(line.X + line.Width / 2, work.X + work.Width / 2), cy = Finite(line.Y + line.Height / 2, work.Y + work.Height / 2);
+        double Along(double centre, double size, double start, double span) => Math.Clamp(centre - size / 2, start, start + span - size);
+        return edge switch
+        {
+            ScreenEdge.Bottom => new(Along(cx, w, work.X, work.Width), Math.Max(work.Y, work.Bottom - g - h), w, h),
+            ScreenEdge.Left => new(Math.Min(work.X + g, work.Right - w), Along(cy, h, work.Y, work.Height), w, h),
+            ScreenEdge.Right => new(Math.Max(work.X, work.Right - g - w), Along(cy, h, work.Y, work.Height), w, h),
+            _ => new(Along(cx, w, work.X, work.Width), Math.Min(work.Y + g, work.Bottom - h), w, h)
+        };
+    }
+
+    // The area that keeps the capsule while the pointer is in it: the capsule and the indicator it came from, and the room between
+    // them, so the pointer that opened it from the line does not have to reach the capsule first.
+    public static DipRect Holds(DipRect line, DipRect capsule)
+    {
+        if (!(line.Width > 0) || !(line.Height > 0)) return capsule;
+        double left = Math.Min(line.X, capsule.X), top = Math.Min(line.Y, capsule.Y);
+        return new(left, top, Math.Max(line.Right, capsule.Right) - left, Math.Max(line.Bottom, capsule.Bottom) - top);
+    }
+
+    private static double Size(double value) => double.IsFinite(value) ? Math.Max(0, value) : 0;
+    private static double Finite(double value, double fallback) => double.IsFinite(value) ? value : fallback;
+}

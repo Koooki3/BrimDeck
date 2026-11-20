@@ -84,7 +84,7 @@ public partial class MainWindow
     // Which form the grips take now: the open monitor page, the collapsed surface, or none (another page, a preview, hidden,
     // a quota alert widening the surface, powering off).
     private bool PanelResizable => _expanded && !_preview && IsVisible && !IsSuppressed && !_poweringOff;
-    private bool CompactResizable => !_expanded && !_preview && IsVisible && !IsSuppressed && _alert is null && !_poweringOff;
+    private bool CompactResizable => !_expanded && !_preview && IsVisible && !IsSuppressed && _alert is null && !_poweringOff && !CapsuleFromLine;
 
     // The island's box in the window's coordinates, where the grip layer draws.
     private DipRect IslandBox()

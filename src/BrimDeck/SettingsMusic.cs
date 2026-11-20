@@ -53,12 +53,28 @@ public sealed partial class SettingsWindow
         var enterMotion = Slide(0); enterMotion.Completed += (_, _) => { if (host.Children.Count == 1) host.ClipToBounds = false; };
         leave.BeginAnimation(TranslateTransform.XProperty, leaveMotion); enter.BeginAnimation(TranslateTransform.XProperty, enterMotion);
     }
+    // What hovering or clicking the indicator opens (DeckSettings.LineOpensCapsule): the panel, or first the capsule in its place.
+    private FrameworkElement LineOpensRow()
+    {
+        var title = Loc.T("展开为", "Opens");
+        var options = new UniformGrid { Columns = 2, Width = 216 };
+        foreach (var (capsule, label) in new[] { (false, Loc.T("面板", "Panel")), (true, Loc.T("胶囊", "Capsule")) })
+        {
+            var option = new RadioButton { Content = label, Style = (Style)FindResource("SettingsSegment"), GroupName = "LineOpens", IsChecked = S.LineOpensCapsule == capsule };
+            AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.LineOpensCapsule = capsule); options.Children.Add(option);
+        }
+        return Row(title, SegmentBorder(options), help: () => Loc.T(
+            "选“胶囊”时，按“常规”中的展开方式悬停或点击指示条，指示条会在原处变成胶囊，显示的内容与尺寸取“胶囊”样式的设置；点击胶囊打开面板，鼠标移开后变回指示条。窗口规则显示的指示条也是如此。",
+            "With \"Capsule\", hovering or clicking the indicator (as set by Expand on in General) turns it into the capsule in its place, with the content and size set for the capsule style; click the capsule to open the panel, and move away to turn it back into the indicator. This also applies to the indicator a window rule shows."));
+    }
     private void StyleOptions(CompactStyle style)
     {
         SectionTitle(Loc.T("显示内容 · ", "Content · ") + StyleName(style));
         if (style == CompactStyle.Line)
         {
             Group(Toggle(Loc.T("显示播放进度", "Show playback progress"), S.MusicIndicatorProgress, v => Change(s => s.MusicIndicatorProgress = v)));
+            SectionTitle(Loc.T("展开 · ", "Opening · ") + StyleName(style));
+            Group(LineOpensRow());
             return;
         }
         // The rows are in the order the collapsed row shows the parts, left to right; only the cover keeps its place at the left.

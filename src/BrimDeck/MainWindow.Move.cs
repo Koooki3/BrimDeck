@@ -235,7 +235,7 @@ public partial class MainWindow
     // dragged or resized are left alone.
     internal void MoveFromKeyboard(int arrow)
     {
-        if (_expanded || _preview || !IsVisible || IsSuppressed || _poweringOff || Resizing || _moveOverlay is not null) return;
+        if (_expanded || _preview || !IsVisible || IsSuppressed || _poweringOff || Resizing || _moveOverlay is not null || CapsuleFromLine) return;
         var style = EffectiveStyle;
         var (along, down) = KeyboardMove.Delta(arrow, style, _frame.Edge);
         double height = style switch { CompactStyle.Capsule => Settings.CapsuleHeight, CompactStyle.Line => Settings.LineThickness, _ => Settings.NotchHeight };

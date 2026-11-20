@@ -1,120 +1,76 @@
 using System.Windows;
-using System.Windows.Media;
 using BrimDeck.Core;
-using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// The indicator that peeks (WindowBehavior.Peek). It stays the line; hovering it shows a small read-only bubble of the chosen
-// system readings beside it (PeekBubbleWindow), placed on its inner side (PeekBubblePlacement). The bubble is a window of its own:
-// the collapsed surface, its edge and its place never change for it. The system is read only while the bubble shows
-// (UpdateMonitorDemand), so it shows dashes until the first reading arrives, never the figures of an earlier time.
+// The indicator that opens into the capsule (DeckSettings.LineOpensCapsule, IndicatorPeek). Hovering the line, or clicking it with
+// ClickToExpand, turns the panel's own surface into the capsule in the line's place (IndicatorCapsule): the capsule's content and
+// size, read-only. A click on it opens the panel from it; leaving it, or closing the panel opened from it, turns it back into the
+// line. It is the panel itself that changes its style (EffectiveStyle), so the shape morphs as a window rule's does, and the window's
+// order, the forced topmost mirror (TaskbarMirror) and the pointer checks all hold for the capsule as they do for the line.
 public partial class MainWindow
 {
-    private readonly WindowPeek _peek = new();
-    private PeekBubbleWindow? _peekBubble;
-    // The bubble and the room between it and the indicator, in DIPs from the monitor's corner.
-    private DipRect _peekRect, _peekBetween;
-    // What the bubble's strip was built without (StripAdmission), to build it again when a reading joins.
-    private CompactMonitorItems _peekHidden;
-    private string _peekLayout = "";
+    private readonly IndicatorPeek _peek = new();
+    // The line's place and the area that keeps the capsule (IndicatorCapsule.Holds), in DIPs from the monitor's corner, as the capsule
+    // was last placed.
+    private DipRect _peekHolds;
     // The monitor's top-left corner in device pixels (UpdateCollapsedGeometry).
     private Point _monitorOriginPx;
 
-    private void StartPeekLeave() { _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.CloseDelay)); _leave.Start(); }
+    // The style shown without the capsule: the line where a window rule asks for it, else the chosen style.
+    private CompactStyle RestStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    // The line shown opens into the capsule.
+    private bool LineOpensCapsule => !_preview && Settings.LineOpensCapsule && RestStyle == CompactStyle.Line;
+    // The capsule shows in the line's place, or the panel opened from it.
+    private bool CapsuleFromLine => _peek.Active && LineOpensCapsule;
 
-    // The open delay ran out on the indicator: the bubble appears.
+    // The open delay ran out on the line, or the line was clicked: it turns into the capsule.
     private void BeginPeek()
     {
-        if (!PeekShows || IsSuppressed || !IsVisible || DisplayPower.Off || !_peek.Begin()) return;
-        _hover.Stop();
-        if (!ShowPeekBubble()) _peek.End();
+        if (!LineOpensCapsule || _expanded || IsSuppressed || !IsVisible || _moveArmed || !_peek.Begin()) return;
+        _hover.Stop(); _leave.Stop();
+        ApplySettings(true);
     }
+    // Back to the line, which rests until the pointer has left it.
     private void EndPeek()
     {
         if (!_peek.End()) return;
         _hover.Stop(); _leave.Stop();
-        HidePeekBubble();
+        ApplySettings(true);
     }
-    // The peeking rule with readings to show. Without readings the indicator behaves as an ordinary one: hovering (or a click, with
-    // ClickToExpand) opens the panel.
-    private bool PeekShows => PeekRule && StripNeedsSystem;
-    // A context change, a new setting or hiding the panels (hotkey, tray, a hiding rule) may take the peek away. Hiding is immediate,
-    // so the bubble goes without its animation.
+    private void StartPeekLeave() { _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.CloseDelay)); _leave.Start(); }
+    // A new setting, window rule or hiding the panels may take the capsule away; ApplySettings then lays out the line.
     private void KeepPeekCurrent()
     {
-        if (IsSuppressed && (_peek.Active || _peek.Resting || _peekBubble is not null)) { _peek.Reset(); HidePeekBubble(animate: false); return; }
-        if ((_peek.Active || _peek.Resting) && !PeekShows) { _peek.Reset(); HidePeekBubble(); }
+        if ((_peek.Active || _peek.Resting) && (!LineOpensCapsule || IsSuppressed)) _peek.Reset();
     }
-    // Asked on every pointer check: the bubble goes at once when the panel is hidden, moved or opened, or the display is off.
-    private void GuardPeekBubble()
+    // The panel opened from the capsule has closed (to the capsule): the line comes back once that is laid out.
+    private void PeekPanelClosed()
     {
-        if (_peekBubble is null) return;
-        if (IsSuppressed || !IsVisible || _moveArmed || _expanded || !PeekShows || DisplayPower.Off) { _peek.Reset(); _hover.Stop(); _leave.Stop(); HidePeekBubble(); }
+        if (!_peek.Active) return;
+        Dispatcher.BeginInvoke(() => { if (!_expanded) EndPeek(); });
     }
 
-    private bool ShowPeekBubble()
+    // The capsule in the line's place, in DIPs from the monitor's corner (the screen's frame): the capsule's own size (its width as
+    // its content asks, with auto width), against the line's edge at the capsule's own distance from it.
+    private CollapsedShape PeekCapsule(double? wanted)
     {
-        if (_expanded || Collapsed.Style != CompactStyle.Line) return false;
-        if (_peekBubble is null)
-        {
-            var bubble = new PeekBubbleWindow(Look, _scale, Settings.WindowCapture);
-            bubble.Clicked += OpenFromPeekBubble;
-            _peekBubble = bubble;
-        }
-        BuildPeekBubble(_app.Monitor?.Latest);
-        _peekBubble.Appear(Animates && Settings.AnimationDuration > 0);
-        // The sampler starts for it.
-        UpdateMonitorDemand();
-        return true;
+        var own = CollapsedGeometry.Resolve(Settings, CompactStyle.Capsule, _screenMonitor, _screenWork, _pixelsPerDip, wanted, _compactRequired, _scale);
+        var (edge, overTaskbar) = Settings.Dock(CompactStyle.Line);
+        var frame = EdgeFrame.For(edge, _screenMonitor.Width, _screenMonitor.Height, _screenWork, overTaskbar);
+        var monitor = new DipRect(MonitorBoundsDip.X, MonitorBoundsDip.Y, frame.Monitor.Width, frame.Monitor.Height);
+        var line = frame.ToScreen(CollapsedGeometry.Resolve(Settings, CompactStyle.Line, monitor, frame.FromScreen(_screenWork), _pixelsPerDip,
+            null, 0, _scale, null, overTaskbar).Surface);
+        var surface = IndicatorCapsule.Place(line, edge, own.Surface.Width, own.Surface.Height, Settings.CapsuleTop, _screenWork);
+        _peekHolds = IndicatorCapsule.Holds(line, surface);
+        return own with { Surface = surface };
     }
 
-    // The readings and the window's place, made again when a reading joins (the drives, a temperature) and changes the width.
-    private void BuildPeekBubble(MonitorSnapshot? snapshot)
+    // Whether the pointer (device pixels) is on the capsule, on the line it came from or between them.
+    private bool PointerOnPeek(Point cursor)
     {
-        if (_peekBubble is not { } bubble) return;
-        double scale = CompactMusicLayout.SafeScale(_scale), dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        _peekHidden = _stripAdmission.Hidden; _peekLayout = _stripAdmission.Layout;
-        var strip = new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings, Look), scale, true, new StripPresence(), dpi, _peekHidden, _stripAdmission,
-            coreDisplay: Settings.CoreDisplay);
-        bubble.SetStrip(strip);
-        var (width, height) = bubble.Wanted;
-        var indicator = _frame.ToScreen(Collapsed.Surface);
-        _peekRect = PeekBubblePlacement.Place(indicator, _frame.Edge, width, height, _screenWork, _pixelsPerDip);
-        _peekBetween = PeekBubblePlacement.Between(indicator, _frame.Edge, _peekRect);
-        bubble.Place((int)Math.Round(_monitorOriginPx.X + _peekRect.X * _pixelsPerDip), (int)Math.Round(_monitorOriginPx.Y + _peekRect.Y * _pixelsPerDip),
-            (int)Math.Round(_peekRect.Width * _pixelsPerDip), (int)Math.Round(_peekRect.Height * _pixelsPerDip), dpi);
-        strip.Update(snapshot, false, (int)Settings.CompactSmoothing);
+        if (!CapsuleFromLine || !(_pixelsPerDip > 0)) return false;
+        double x = (cursor.X - _monitorOriginPx.X) / _pixelsPerDip, y = (cursor.Y - _monitorOriginPx.Y) / _pixelsPerDip;
+        return x >= _peekHolds.X && x <= _peekHolds.Right && y >= _peekHolds.Y && y <= _peekHolds.Bottom;
     }
-
-    // Each system reading: into the bubble, which is built again first when a reading joined or left it.
-    private void UpdatePeekBubble(MonitorSnapshot? snapshot)
-    {
-        if (_peekBubble is null) return;
-        if (_stripAdmission.Hidden != _peekHidden || _stripAdmission.Layout != _peekLayout) { BuildPeekBubble(snapshot); return; }
-        _peekBubble.Update(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off, (int)Settings.CompactSmoothing);
-    }
-
-    // The bubble goes; the system is no longer read for it (UpdateMonitorDemand), after the sampler's own pause.
-    private void HidePeekBubble(bool animate = true)
-    {
-        if (_peekBubble is not { } bubble) return;
-        _peekBubble = null;
-        bubble.Clicked -= OpenFromPeekBubble;
-        bubble.Dismiss(animate && Animates && Settings.AnimationDuration > 0);
-        UpdateMonitorDemand();
-    }
-
-    // A click on the bubble opens the panel, as one on the indicator does.
-    private void OpenFromPeekBubble()
-    {
-        if (_expanded || _preview || _moveArmed || IsSuppressed) return;
-        _hover.Stop(); _leave.Stop();
-        OpenAtPointer();
-    }
-
-    // Whether the pointer (device pixels) is on the bubble or on the way to it from the indicator.
-    private bool PointerOnPeekBubble(Point cursor)
-        => _peekBubble is not null && _pixelsPerDip > 0
-            && PeekBubblePlacement.Holds(_peekRect, _peekBetween, (cursor.X - _monitorOriginPx.X) / _pixelsPerDip, (cursor.Y - _monitorOriginPx.Y) / _pixelsPerDip);
 }
