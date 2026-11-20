@@ -13,9 +13,15 @@ namespace BrimDeck.Core;
 //   are compared with it. A new scene is taken at once instead: two measures in a row that agree with each other (within
 //   Agree) for at least JumpSpan and lie far from the average (beyond Jump, a factor of about three in brightness) move the average
 //   onto them, so a switch from a dark app to a white page turns the glass within a quarter of a second, while a flash still only
-//   nudges it. After a change the look holds for at least Dwell; a change that comes within Restless of the hold
-//   ending doubles the hold, up to MaxHold (a backdrop that keeps flipping), and a change after a quieter while starts from
-//   Dwell again.
+//   nudges it.
+//   The decision (review v2 U06) runs Stable -> Candidate -> InFlight -> SettledHold. Candidate: the smoothed measure is past
+//   the threshold, and since the earlier of that and the first raw measure past it the backdrop has stayed there for
+//   CandidateSpan (250 ms, the upper end of the 180-250 ms range: a page's 200 ms white flash never turns the look; the price is
+//   that a real new scene turns no sooner than 250 ms). A moved average alone (one bright measure after a grey backdrop) is
+//   not enough. InFlight: from the decision until the palette has arrived (Arrived, or MaxFlight at the latest); a candidate
+//   for the opposite look reverses it meanwhile without waiting for any hold. SettledHold: from the arrival the look holds for
+//   at least Dwell; a turn that starts within Restless of the hold ending doubles the hold, up to MaxHold (a backdrop that
+//   keeps flipping), and a turn after a quieter while starts from Dwell again.
 //   Video: while most of the backdrop changes from capture to capture (more than VideoShare of its pixels, answers no further
 //   apart than VideoGap) for longer than VideoAfter, the backdrop is a video (or a scroll, a fade) and the look holds: its
 //   cuts and flashes never turn it. Only a backdrop that stays past the threshold for VideoEscape turns it meanwhile (a video
@@ -34,6 +40,9 @@ public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = Gla
     // so a page's white flash between two dark pages does not turn the glass.
     public const long JumpSpan = 250;
     public const long Dwell = 1750, MaxHold = 8000, Restless = 4000, Settle = 250;
+    // How long the backdrop must stay past the threshold before the look turns (see above), and the longest a turn counts as
+    // under way when its arrival is never told (a panel hidden mid-way): the palette's turn takes about 365 ms.
+    public const long CandidateSpan = 250, MaxFlight = 1000;
     public const double VideoShare = .5;
     public const long VideoAfter = 1000, VideoGap = 400, VideoEscape = 5000;
     // The darkest measure the log is taken of (a black backdrop would otherwise weigh without bound).
@@ -80,31 +89,48 @@ public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = Gla
     public double ToDark => AppDark ? DarkModeToDark : LightModeToDark;
     // The smoothed measure (NaN before the first).
     public double Smoothed => double.IsNaN(_log) ? double.NaN : Math.Exp(_log);
-    // How long the look holds after its last change now.
+    // How long the look holds after it last settled now.
     public long HoldFor { get; private set; } = Dwell;
     // Whether the backdrop is a video now (see above).
     public bool Video => _movingSince >= 0 && _movedAt - _movingSince >= VideoAfter;
+    // Where the decision stands at the last measure, or at now (see above).
+    public GlassTurnState State => StateAt(_fedAt);
+    public GlassTurnState StateAt(long now)
+    {
+        if (InFlightAt(now)) return GlassTurnState.InFlight;
+        if (now - _settledAt < HoldFor) return GlassTurnState.SettledHold;
+        return _candidateSince >= 0 ? GlassTurnState.Candidate : GlassTurnState.Stable;
+    }
 
     private double _log = double.NaN, _lastLog = double.NaN, _runFrom = double.NaN;
     private long _fedAt, _agreeSince;
-    // The last change of either kind (the hold runs from it), the last one this decided (restlessness counts from it), since
-    // when the smoothed measure has been past the threshold (-1: it is not), and before when nothing turns (released).
-    private long _changedAt = long.MinValue / 2, _turnedAt = long.MinValue / 2, _pastSince = -1, _calmUntil = long.MinValue / 2;
-    private bool _held;
+    // When the look last settled (the hold runs from it), when it last began a turn (restlessness counts from it), before when
+    // nothing turns (released), since when the smoothed and the raw measure are past the threshold (-1: not), and the earlier
+    // of the two (the candidate's start).
+    private long _settledAt = long.MinValue / 2, _turnedAt = long.MinValue / 2, _calmUntil = long.MinValue / 2;
+    private long _smoothPastSince = -1, _rawPastSince = -1, _candidateSince = -1, _flightFrom = long.MinValue / 2;
+    private bool _held, _inFlight, _immediate;
     // Since when large changes have come no further apart than VideoGap (-1: none), and the last one.
     private long _movingSince = -1, _movedAt = long.MinValue / 2;
 
+    // A turn under way counts from its first decision, a reversal included, so reversals cannot keep one going.
+    private bool InFlightAt(long now) => _inFlight && now - _flightFrom < MaxFlight;
+
     // A measure at now (the same measure fed again while the backdrop holds still: the average still moves toward it). Held:
-    // the open panel shown or the island pressed. True when the look changed (Dark tells which).
+    // the open panel shown or the island pressed. True when the look changed (Dark tells which): a turn begins, or a turn
+    // under way reverses.
     public bool Feed(double luma, long now, bool held = false)
     {
         if (!double.IsFinite(luma)) return false;
+        // Prior's waiver holds for the next measure only.
+        bool immediate = _immediate;
+        _immediate = false;
         double log = Math.Log(Math.Max(luma, Floor));
         if (double.IsNaN(_log)) _log = log;
         else
         {
             // The distance is from the average where the run of agreeing measures began: meanwhile the average already follows it.
-            bool agrees = Math.Abs(log - _lastLog) < Agree;
+            bool agrees = !double.IsNaN(_lastLog) && Math.Abs(log - _lastLog) < Agree;
             if (!agrees) { _agreeSince = now; _runFrom = _log; }
             if (agrees && Math.Abs(log - _runFrom) > Jump && now - _agreeSince >= JumpSpan) _log = log;
             else _log += (1 - Math.Exp(-Math.Max(0, now - _fedAt) / Tau)) * (log - _log);
@@ -112,18 +138,48 @@ public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = Gla
         if (double.IsNaN(_lastLog)) { _agreeSince = now; _runFrom = _log; }
         _lastLog = log;
         _fedAt = now;
+        if (_inFlight && !InFlightAt(now)) Settled(_flightFrom + MaxFlight);
         if (_movingSince >= 0 && now - _movedAt > videoGap) _movingSince = -1;
         if (_held && !held) _calmUntil = now + Settle;
         _held = held;
         double smoothed = Math.Exp(_log);
         bool wants = Dark ? !(smoothed > ToLight) : smoothed < ToDark;
-        if (wants == Dark) { _pastSince = -1; return false; }
-        if (_pastSince < 0) _pastSince = now;
-        if (held || now < _calmUntil || now - _changedAt < HoldFor) return false;
-        if (Video && now - _pastSince < VideoEscape) return false;
-        HoldFor = now - _turnedAt < HoldFor + Restless ? Math.Min(HoldFor * 2, MaxHold) : Dwell;
-        Dark = wants; _changedAt = _turnedAt = now; _pastSince = -1;
+        bool rawPast = Dark ? luma > ToLight : luma < ToDark;
+        _rawPastSince = !rawPast ? -1 : _rawPastSince < 0 ? now : _rawPastSince;
+        if (wants == Dark) { _smoothPastSince = _candidateSince = -1; return false; }
+        if (_smoothPastSince < 0) _smoothPastSince = now;
+        _candidateSince = _rawPastSince >= 0 ? Math.Min(_rawPastSince, _smoothPastSince) : _smoothPastSince;
+        if (held || now < _calmUntil) return false;
+        bool reversal = InFlightAt(now);
+        if (!reversal && now - _settledAt < HoldFor) return false;
+        if (Video && now - _smoothPastSince < VideoEscape) return false;
+        if (!immediate && now - _candidateSince < CandidateSpan) return false;
+        // A reversal is a restless backdrop by definition: it doubles the hold that follows.
+        HoldFor = reversal || now - _turnedAt < HoldFor + Restless ? Math.Min(HoldFor * 2, MaxHold) : Dwell;
+        if (!reversal) _flightFrom = now;
+        Dark = wants; _turnedAt = now; _inFlight = true;
+        _smoothPastSince = _rawPastSince = _candidateSince = -1;
         return true;
+    }
+
+    // The palette has arrived at the look decided (its text swapped): the settled hold begins.
+    public void Arrived(long now)
+    {
+        if (_inFlight) Settled(now);
+    }
+
+    private void Settled(long at)
+    {
+        _inFlight = false;
+        _settledAt = at;
+    }
+
+    // The readings stopped being trustworthy (none fresh for a while, or late, or for another place): a candidate does not
+    // carry over the gap, and a new scene's measures must agree again from the next one on.
+    public void Invalidate()
+    {
+        _smoothPastSince = _rawPastSince = _candidateSince = -1;
+        _lastLog = double.NaN;
     }
 
     // How much of the backdrop changed since the capture before (0..1, the share of its pixels), when a capture compared it.
@@ -134,16 +190,23 @@ public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = Gla
         _movedAt = now;
     }
 
-    // Set from outside (a theme turned by someone else): counts as a change for the hold, without lengthening it.
+    // Set from outside (a theme turned by someone else): settled there now, which counts for the hold without lengthening it.
     public void Reset(bool dark, long now)
     {
-        Dark = dark; _changedAt = now; _pastSince = -1;
+        Dark = dark; Settled(now);
+        _smoothPastSince = _rawPastSince = _candidateSince = -1;
+        _immediate = false;
     }
 
     // The Windows app mode changed: the thresholds lean the other way, and the look may turn at once (no hold).
     public void Prior(bool appDark)
     {
         if (appDark == AppDark) return;
-        AppDark = appDark; _changedAt = long.MinValue / 2; _pastSince = -1;
+        // The measure is not new, only the thresholds moved: no hold, and no candidate's span for the next measure.
+        AppDark = appDark; Settled(long.MinValue / 2);
+        _smoothPastSince = _rawPastSince = _candidateSince = -1;
+        _immediate = true;
     }
 }
+
+public enum GlassTurnState { Stable, Candidate, InFlight, SettledHold }
