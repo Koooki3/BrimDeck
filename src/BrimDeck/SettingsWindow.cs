@@ -726,7 +726,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private void WindowRules()
     {
         SectionTitle(Loc.T("窗口行为", "Window behavior"));
-        // The window rules apply whether or not the panel is kept above other windows; Keep on top only concerns a panel above
+        // The window rules apply whether or not the panel is kept above other windows; Force on top only concerns a panel above
         // them, so it leaves with the switch.
         var rules = new StackPanel();
         foreach (var row in new[]
@@ -763,7 +763,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         });
         raise.BorderBrush = UI.Brush(_palette.Border);
         raise.Background = UI.Brush(_palette.Input);
-        keep.Children.Add(Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost, value => Change(s => s.ForceTopmost = value), help:
+        keep.Children.Add(Toggle(Loc.T("强制置顶", "Force on top"), S.ForceTopmost, value => Change(s => s.ForceTopmost = value), help:
             Loc.T("开启后，面板被其他置顶窗口遮住时仍显示在最上方，可以正常操作。其他应用的菜单除外。",
                 "When on, the panel stays above other always-on-top windows and works as usual. Menus from other apps are excepted.")));
         keep.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
