@@ -953,10 +953,12 @@ public partial class MainWindow
         rest = picked ? PickedFill : rest ?? Brushes.Transparent;
         Point? pressed = null;
         bool flashing() => _flash is { } flash && flash.Id == id && flash.Until > Environment.TickCount64;
-        // While the row's own menu is open the row stays lit, though the pointer is on the menu.
-        bool held = false;
+        // While the row's own menu is open the row stays lit, though the pointer is on the menu. The menu open now: a right click
+        // on the row with its menu open closes that menu and opens another, and the first one's Closed, which can come after the
+        // second has opened, must not put the row out; nor is there a MouseEnter to light it again, for the pointer never left.
+        ContextMenu? heldBy = null;
         frame.MouseEnter += (_, _) => { if (!flashing()) frame.Background = picked ? rest : UI.Brush(Look.Hex("hover")); if (!flashing()) ShowMore(aux, true); };
-        frame.MouseLeave += (_, _) => { pressed = null; if (!flashing() && !held) { frame.Background = rest; ShowMore(aux, false); } };
+        frame.MouseLeave += (_, _) => { pressed = null; if (!flashing() && heldBy is null) { frame.Background = rest; ShowMore(aux, false); } };
         frame.MouseLeftButtonDown += (_, e) => { pressed = e.GetPosition(frame); if (!flashing()) frame.Background = picked ? rest : UI.Brush(Look.Hex("pressed")); e.Handled = true; };
         frame.MouseLeftButtonUp += (_, e) =>
         {
@@ -969,8 +971,14 @@ public partial class MainWindow
         {
             e.Handled = true;
             var opened = menu();
-            held = true;
-            opened.Closed += (_, _) => { held = false; if (!frame.IsMouseOver && !flashing()) { frame.Background = rest; ShowMore(aux, false); } };
+            heldBy = opened;
+            if (!flashing()) { frame.Background = picked ? rest : UI.Brush(Look.Hex("hover")); ShowMore(aux, true); }
+            opened.Closed += (_, _) =>
+            {
+                if (!ReferenceEquals(heldBy, opened)) return;
+                heldBy = null;
+                if (!frame.IsMouseOver && !flashing()) { frame.Background = rest; ShowMore(aux, false); }
+            };
             OpenMenu(opened, frame, atPointer: true);
         };
         if (drag is not null)
