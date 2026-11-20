@@ -95,16 +95,19 @@ internal sealed class DeviceBatteries : IDisposable
     // What the open-source battery tools on Windows do (quiet-battery, HaloBattery, ChargeDock, Solaar on resume): the devices are
     // read again when the computer wakes, a couple of seconds on (they reconnect first), and when input comes after 20 seconds
     // without any (a mouse picked up again wakes from its sleep), at most once in five seconds. Only the time of the last input
-    // is looked at (GetLastInputInfo), never what it was.
+    // is looked at (GetLastInputInfo), never what it was. A device whose search for its read ran out is tried once more then
+    // (DeviceReadBook.Again): each waking, and on input within the book's own limits.
     private static readonly TimeSpan Away = TimeSpan.FromSeconds(20), Again = TimeSpan.FromSeconds(5);
     private readonly DispatcherTimer _idle;
     private bool _away;
     private long _readNowAt;
 
-    private void ReadNow()
+    // input: the user came back (Idle), which gives a search that ran out another try within the book's limits.
+    private void ReadNow(bool input = false)
     {
         if (_running != DeviceDemand.Watch || Environment.TickCount64 - _readNowAt < (long)Again.TotalMilliseconds) return;
         _readNowAt = Environment.TickCount64;
+        if (input) DeviceReadStore.Book.Again(_readNowAt, woke: false);
         foreach (var source in _sources) source.ReadNow();
     }
 
@@ -114,7 +117,7 @@ internal sealed class DeviceBatteries : IDisposable
         if (!GetLastInputInfo(ref info)) return;
         uint idle = unchecked((uint)Environment.TickCount - info.dwTime);
         if (idle >= Away.TotalMilliseconds) { _away = true; return; }
-        if (_away) { _away = false; ReadNow(); }
+        if (_away) { _away = false; ReadNow(input: true); }
     }
 
     private void PowerModeChanged(object? sender, PowerModeChangedEventArgs e)
@@ -123,7 +126,7 @@ internal sealed class DeviceBatteries : IDisposable
         _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
             var later = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = TimeSpan.FromSeconds(2) };
-            later.Tick += (_, _) => { later.Stop(); _readNowAt = 0; ReadNow(); };
+            later.Tick += (_, _) => { later.Stop(); DeviceReadStore.Book.Again(Environment.TickCount64, woke: true); _readNowAt = 0; ReadNow(); };
             later.Start();
         });
     }
