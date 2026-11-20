@@ -837,7 +837,7 @@ internal sealed class IslandNotice : Window
     // The song of a track change shown on the island (MainWindow.AttentionStarted); null for a notice.
     private TrackNoticeContent? Track => _item is { Kind: AttentionKind.Track } ? _item.Payload as TrackNoticeContent : null;
 
-    private NoticePrivacy Privacy(Notice notice) => Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
+    private NoticePrivacy Privacy(Notice notice) => Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
 
     // spoken: the words for a screen reader, in which a verification code is not dots but a note that it is hidden.
     private (string Title, string Summary) Texts(bool spoken = false)

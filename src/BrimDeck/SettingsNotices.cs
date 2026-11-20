@@ -343,7 +343,7 @@ public sealed partial class SettingsWindow
             SliderRow(Loc.T("停留时间", "Shown for"), S.NoticeDuration, 2, 30, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeDuration = (int)Math.Round(value))),
             MusicChoice(Loc.T("显示内容", "What shows"), S.NoticePrivacy,
                 [(NoticePrivacy.Full, Loc.T("标题和摘要", "Title and summary")), (NoticePrivacy.TitleOnly, Loc.T("仅标题", "Title only")), (NoticePrivacy.AppOnly, Loc.T("仅应用", "App only"))],
-                value => { Change(s => { s.NoticePrivacy = value; s.NoticeChatAppsFollowGlobal = true; }); ShowPage(NoticesSettingsPage); }),
+                value => Change(s => s.NoticePrivacy = value)),
             MusicChoice(Loc.T("点击岛上的提示", "Clicking a notice on the island"), S.NoticeClick,
                 [(NoticeClickTarget.Page, Loc.T("打开通知页", "Open the notices page")), (NoticeClickTarget.SourceApp, Loc.T("打开来源应用", "Open the source app"))],
                 value => Change(s => s.NoticeClick = value)));
@@ -360,10 +360,7 @@ public sealed partial class SettingsWindow
         var pauseStatus = StatusLine(() => center.Paused && S.NoticesPausedUntil is { } until
             ? (Loc.T($"已暂停至 {until.ToLocalTime():HH:mm}，期间的通知只进入通知页。", $"Paused until {until.ToLocalTime():HH:mm}; notices meanwhile only go to the notices page."), false)
             : center.Quiet ? (Loc.T("Windows 正处于专注、演示或锁定状态，提示暂时不显示。", "Windows is in focus, presentation or locked state; notices are held back for now."), false) : ("", false));
-        Group(Toggle(Loc.T("聊天应用也使用上面的设置", "Chat apps follow this setting too"), S.ChatAppsFollowGlobal, value => { Change(s => s.NoticeChatAppsFollowGlobal = value); ShowPage(NoticesSettingsPage); },
-                help: Loc.T("关闭时，微信、QQ、企业微信、飞书、钉钉、Telegram、Discord、WhatsApp、Signal、Slack、LINE、KakaoTalk 等聊天应用到达时只显示应用名和“有新消息”，不显示发送者和内容，因为聊天内容常含私人信息；其他应用按上面的设置。单个应用可在下方单独设置，优先于此开关。升级前已把上面改为“标题和摘要”以外选项的用户保持原样；其余用户升级后默认关闭此开关。",
-                    "When off, chat apps such as WeChat, QQ, WeCom, Feishu, DingTalk, Telegram, Discord, WhatsApp, Signal, Slack, LINE and KakaoTalk show only the app name and \"New message\" on arrival, without the sender or text, because chat often holds private details; other apps follow the setting above. Each app can be set below, which takes precedence over this switch. Users who had already chosen something other than \"Title and summary\" above before this existed keep their behavior; for everyone else the switch starts off.")),
-            Toggle(Loc.T("专注与演示时不打扰", "Quiet during focus and presentations"), S.NoticeRespectFocus, value => Change(s => s.NoticeRespectFocus = value),
+        Group(Toggle(Loc.T("专注与演示时不打扰", "Quiet during focus and presentations"), S.NoticeRespectFocus, value => Change(s => s.NoticeRespectFocus = value),
                 help: center.FocusSupported ? Loc.T("Windows 专注会话或演示模式期间不在岛上提示，结束后显示一次数量汇总。", "No notices show during a Windows focus session or presentation mode; afterwards one summary says how many arrived.")
                     : Loc.T("此 Windows 版本不提供专注会话接口，只识别演示模式。", "This version of Windows does not report focus sessions; only presentation mode is recognized.")),
             Row(Loc.T("暂停提醒", "Pause notices"), pause, pauseStatus));
@@ -414,9 +411,8 @@ public sealed partial class SettingsWindow
                     r.Level = chosen switch { 1 => NoticeLevel.Plain, 2 => NoticeLevel.Glow, 3 => NoticeLevel.Lively, _ => NoticeLevel.Auto };
                 });
             };
-            var chatDefault = !S.ChatAppsFollowGlobal && ChatApps.IsChat(key, name);
-            var privacy = new ComboBox { Width = chatDefault ? 168 : 112, Style = (Style)FindResource("SettingsCombo"), Margin = new Thickness(10, 0, 0, 0),
-                ItemsSource = new[] { chatDefault ? Loc.T("聊天应用默认：仅应用", "Chat default: app only") : Loc.T("默认内容", "Default"), Loc.T("标题和摘要", "Full"), Loc.T("仅标题", "Title only"), Loc.T("仅应用", "App only") },
+            var privacy = new ComboBox { Width = 112, Style = (Style)FindResource("SettingsCombo"), Margin = new Thickness(10, 0, 0, 0),
+                ItemsSource = new[] { Loc.T("默认内容", "Default"), Loc.T("标题和摘要", "Full"), Loc.T("仅标题", "Title only"), Loc.T("仅应用", "App only") },
                 SelectedIndex = rule?.Privacy is { } p ? (int)p + 1 : 0 };
             AutomationProperties.SetName(privacy, name + " · " + Loc.T("显示内容", "What shows"));
             privacy.SelectionChanged += (_, _) => Edit(r => r.Privacy = privacy.SelectedIndex <= 0 ? null : (NoticePrivacy)(privacy.SelectedIndex - 1));

@@ -18,7 +18,7 @@ internal static class NoticeLetter
     }
 
     // Whether a notice may show its picture: not when the user keeps it to the application's name.
-    public static bool ShowsPicture(Notice notice, DeckSettings settings) => notice.Picture is not null && settings.NoticePrivacyFor(notice.AppKey, notice.AppName) != NoticePrivacy.AppOnly;
+    public static bool ShowsPicture(Notice notice, DeckSettings settings) => notice.Picture is not null && (settings.NoticeRule(notice.AppKey)?.Privacy ?? settings.NoticePrivacy) != NoticePrivacy.AppOnly;
 
     // bell: a summary of notices, which has no application. icon: BrimDeck's own glyph (a device's) or one for the kind of application
     // (NoticeBadges.AppGlyph), shown instead of the initial.

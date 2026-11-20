@@ -38,7 +38,6 @@ try
     NoticeWindowsAppTests.Run(Check);
     NoticeFocusTests.Run(Check);
     NoticeFlashTests.Run(Check);
-    ChatAppsTests.Run(Check);
     NoticeChatRestoreTests.Run(Check);
     NoticeWindowsSyncTests.Run(Check);
     NoticeTimeTests.Run(Check);

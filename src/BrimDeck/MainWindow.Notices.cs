@@ -566,7 +566,7 @@ public partial class MainWindow
         // The words, scrolling within the column when they are long; the other messages of the same conversation under them.
         var words = new StackPanel { Margin = new Thickness(0, 0, 0, WordsFadeHeight) };
         if (NoticeTimeLine(notice, now) is { } timeLine) { timeLine.FontSize = TextSize.Strong; timeLine.FontWeight = FontWeights.SemiBold; timeLine.Margin = new Thickness(0, 0, 0, 4); words.Children.Add(timeLine); }
-        var privacy = Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
+        var privacy = Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
         if (notice.Body.Length > 0 && privacy == NoticePrivacy.Full)
         {
             var body = IslandNotice.Directed(new TextBlock { Text = shown.Body, FontFamily = UI.PanelFont, FontSize = group.Count > 1 ? 14 : TextSize.Strong, LineHeight = group.Count > 1 ? 22 : 21, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.Wrap });
@@ -934,7 +934,7 @@ public partial class MainWindow
         // A conversation's row says how many notices it stands for, before the time of its newest.
         var when = UI.Fixed((count > 1 ? Loc.T($"{count} 条 · ", $"{count} · ") : "") + NoticeText.Relative(notice.ReceivedAt, now), TextSize.Caption, NoticeLines.RowTitleLine, UI.Tertiary);
         texts.Children.Add(when);
-        var privacy = Settings.NoticePrivacyFor(notice.AppKey, notice.AppName);
+        var privacy = Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
         string preview = privacy == NoticePrivacy.Full && notice.Body.Length > 0 ? NoticeText.Summary(codeWords.Body) : notice.AppName;
         var second = new TextBlock { FontFamily = UI.PanelFont, FontSize = TextSize.Body, LineHeight = NoticeLines.RowPreviewLine, Foreground = UI.Brush(UI.Secondary), TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
         var (status, color) = notice.Call ? (Loc.T("来电", "Call"), CallColor) : notice.Category == NoticeCategory.Error ? (NoticeText.CategoryName(notice.Category), PanelTheme.Hex("danger"))

@@ -700,7 +700,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     PanelThemes.ApplyMatching(palette,s);break;}
                 // The switch itself, the chosen sources, the rules per application and where notices are kept stay as they are.
                 case NoticesSettingsPage:s.NoticeDuration=defaults.NoticeDuration;s.NoticeHighDuration=defaults.NoticeHighDuration;s.NoticeScreen=defaults.NoticeScreen;s.NoticeDefaultLevel=defaults.NoticeDefaultLevel;s.NoticeAlign=defaults.NoticeAlign;s.NoticeClick=defaults.NoticeClick;
-                    s.NoticePrivacy=defaults.NoticePrivacy;s.NoticeChatAppsFollowGlobal=null;s.NoticeCodes=defaults.NoticeCodes;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;
+                    s.NoticePrivacy=defaults.NoticePrivacy;s.NoticeCodes=defaults.NoticeCodes;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;
                     s.NoticeHotkey=defaults.NoticeHotkey;s.NoticesPage=defaults.NoticesPage;s.NoticesWidth=defaults.NoticesWidth;s.NoticesHeight=defaults.NoticesHeight;break;
             }
         });

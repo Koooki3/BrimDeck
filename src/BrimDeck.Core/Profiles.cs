@@ -84,7 +84,7 @@ public static class Profiles
         nameof(DeckSettings.NoticeRespectFocus), nameof(DeckSettings.NoticesPausedUntil), nameof(DeckSettings.NoticeHistory),
         nameof(DeckSettings.NoticeHistoryHours), nameof(DeckSettings.NoticeHistoryFolder),
         nameof(DeckSettings.NoticeAutoClear), nameof(DeckSettings.NoticeLastCleared), nameof(DeckSettings.NoticeHotkey),
-        nameof(DeckSettings.NoticeChatAppsFollowGlobal), nameof(DeckSettings.NoticeOpenReplay), nameof(DeckSettings.NoticeApps)
+        nameof(DeckSettings.NoticeOpenReplay), nameof(DeckSettings.NoticeApps)
     };
 
     public static bool IsProfileKey(string key) => !GlobalKeys.Contains(key);

@@ -27,6 +27,8 @@ internal static class SettingsMigrationTests
 
         var tolerant = SettingsMigrations.Read("""{"AppVersion":"0.1.0","Height":300,"NotYetKnown":{"a":1}}""", v010, out _);
         check("reading is tolerant of missing and unknown members", tolerant.Height == 300 && tolerant.Width == new DeckSettings().Width && tolerant.MusicPage);
+        var retired = SettingsMigrations.Read("""{"AppVersion":"0.1.0","NoticeCodes":true,"NoticeChatAppsFollowGlobal":false}""", v010, out _);
+        check("a setting removed since is ignored where an older file still has it", retired.NoticeCodes);
         var clock = SettingsMigrations.Read("""{"AppVersion":"0.1.0","NotchClock":true,"ClockStyle":42,"ClockColor":-1,"Clock24Hour":false}""", v010, out _);
         bool capsuleOff = !clock.ShowsClock(CompactStyle.Capsule);
         clock.CapsuleClock = true;
