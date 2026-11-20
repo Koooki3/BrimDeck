@@ -216,14 +216,14 @@ public partial class MainWindow
         GlassTargets(now, snap: !Animates);
         var material = GlassMaterialNow(now);
         var owner = new WindowInteropHelper(this).Handle;
-        if (!_glassSurface.Show(owner, _glassBounds, 0, HoverZone.Opacity * Island.MaterialOpacity, material, _glassContour))
+        if (!_glassSurface.Show(owner, _glassBounds, 0, HoverZone.Opacity * Island.MaterialOpacity, material, out var applied, _glassContour))
         {
             // Retry on a later settings or environment update instead of every layout pass.
             CloseGlass();
             return;
         }
         if (!_glassActive) { _glassActive = true; ApplySurface(); }
-        GlassTurnStep(material, now);
+        GlassTurnStep(applied.Material, now);
         GlassRenderingNeeded();
         ApplyGlassOptics();
         Island.Pattern = AcrylicNoise.Brush(VisualTreeHelper.GetDpi(Island).DpiScaleX, GlassMaterial.GrainStrength(Settings.GlassTransparency));
@@ -271,8 +271,8 @@ public partial class MainWindow
         if (_glassSurface is null || !_glassActive) { GlassRenderingNeeded(); return; }
         long now = Environment.TickCount64;
         var material = GlassMaterialNow(now);
-        if (!_glassSurface.Present(material)) { CloseGlass(); return; }
-        GlassTurnStep(material, now);
+        if (!_glassSurface.Present(material, out var applied)) { CloseGlass(); return; }
+        GlassTurnStep(applied.Material, now);
         GlassRenderingNeeded();
     }
 
