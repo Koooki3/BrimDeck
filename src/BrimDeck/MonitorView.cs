@@ -206,13 +206,9 @@ internal sealed class MonitorView : Grid
                     reading = _downloadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, upload: false);
                 else
                     reading = _uploadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, download: false);
-                bool fullRow = span == 2;
                 var frame = new Border { Child = reading, ClipToBounds = true,
-                    BorderThickness = new Thickness(fullRow ? 0 : 1),
-                    CornerRadius = new CornerRadius(fullRow ? 0 : 5),
-                    Padding = fullRow ? new Thickness(6, 4, 6, 4) : new Thickness(5, 3, 5, 3),
+                    Padding = new Thickness(6, 4, 6, 4),
                     Margin = new Thickness(column == 1 ? 3 : 0, 0, span == 1 && column == 0 ? 3 : 0, 4) };
-                if (!fullRow) frame.SetResourceReference(Border.BorderBrushProperty, "PanelTrack");
                 SetRow(frame, row); SetColumn(frame, column); SetColumnSpan(frame, span);
                 cards.Children.Add(frame);
             }
