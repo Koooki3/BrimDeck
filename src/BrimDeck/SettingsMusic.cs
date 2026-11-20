@@ -64,8 +64,8 @@ public sealed partial class SettingsWindow
             AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.LineOpensCapsule = capsule); options.Children.Add(option);
         }
         return Row(title, SegmentBorder(options), help: () => Loc.T(
-            "选“胶囊”时，按“常规”中的展开方式悬停或点击指示条，指示条会在原处变成胶囊，显示的内容与尺寸取“胶囊”样式的设置；点击胶囊打开面板，鼠标移开后变回指示条。窗口规则显示的指示条也是如此。",
-            "With \"Capsule\", hovering or clicking the indicator (as set by Expand on in General) turns it into the capsule in its place, with the content and size set for the capsule style; click the capsule to open the panel, and move away to turn it back into the indicator. This also applies to the indicator a window rule shows."));
+            "指示条先变成胶囊，点击胶囊再打开面板。胶囊的内容在“胶囊”样式中设置。",
+            "The indicator first turns into the capsule; click the capsule to open the panel. Set what the capsule shows under the Capsule style."));
     }
     private void StyleOptions(CompactStyle style)
     {
