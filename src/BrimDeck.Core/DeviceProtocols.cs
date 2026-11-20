@@ -2041,21 +2041,23 @@ public static class HidBattery
 // 0x07, length 0x19), in steps of ten; written from the layout OpenPods and AirPodsDesktop read (facts only). Byte 6 holds the
 // buds' levels, byte 7 the charging bits (high nibble) and the case (low); 15 is no reading. With byte 5's bit 0x20 set the
 // left bud is byte 6's low nibble; clear (flipped), its high one. Single-unit models (AirPods Max, the one-piece Beats) carry
-// their one level in byte 6's low nibble.
+// their one level in byte 6's low nibble. Model codes as AirPodsDesktop lists them; Beats Solo Pro, Studio Buds, Studio Buds+
+// and Studio Pro as AppleJuice lists them.
 public static class AppleAdvert
 {
     public const ushort Company = 0x004C;
     public static string? Model(byte[] data) => data.Length >= 5 ? ((data[3] << 8) | data[4]) switch
     {
-        0x0220 => "AirPods", 0x0F20 => "AirPods", 0x1320 => "AirPods", 0x0E20 => "AirPods Pro", 0x1420 or 0x2420 => "AirPods Pro", 0x2720 => "AirPods Pro",
-        0x0A20 => "AirPods Max", 0x0B20 => "Powerbeats Pro", 0x0520 => "BeatsX", 0x1020 => "Beats Flex", 0x0620 => "Beats Solo", 0x0920 => "Beats Studio",
-        0x0320 => "Powerbeats", _ => null
+        0x0220 or 0x0F20 or 0x1320 => "AirPods", 0x1920 or 0x1B20 => "AirPods 4", 0x0E20 or 0x1420 or 0x2420 or 0x2720 => "AirPods Pro",
+        0x0A20 or 0x1F20 => "AirPods Max", 0x0B20 => "Powerbeats Pro", 0x0520 => "BeatsX", 0x1020 => "Beats Flex", 0x0620 => "Beats Solo",
+        0x0C20 => "Beats Solo Pro", 0x0920 => "Beats Studio", 0x1720 => "Beats Studio Pro", 0x1120 or 0x1620 => "Beats Studio Buds",
+        0x1220 => "Beats Fit Pro", 0x0320 => "Powerbeats", _ => null
     } : null;
 
     private static bool IsProximity(byte[] data) => data.Length >= 8 && data[0] == 0x07 && data[1] == 0x19;
     private static int? Level(int nibble) => nibble <= 10 ? nibble * 10 : null;
-    // One piece, without buds or a case of its own: AirPods Max, Beats Solo, Studio and Flex, BeatsX, Powerbeats 3.
-    public static bool IsSingle(byte[] data) => data.Length >= 5 && ((data[3] << 8) | data[4]) is 0x0A20 or 0x0620 or 0x0920 or 0x0520 or 0x1020 or 0x0320;
+    // One piece, without buds or a case of its own: AirPods Max, Beats Solo, Solo Pro, Studio, Studio Pro and Flex, BeatsX, Powerbeats 3.
+    public static bool IsSingle(byte[] data) => data.Length >= 5 && ((data[3] << 8) | data[4]) is 0x0A20 or 0x1F20 or 0x0620 or 0x0C20 or 0x0920 or 0x1720 or 0x0520 or 0x1020 or 0x0320;
 
     // A single-unit model's one level, and charging (bit 0x01); null for earbuds, another advertisement, or no reading.
     public static BatteryRead? Single(byte[] data)

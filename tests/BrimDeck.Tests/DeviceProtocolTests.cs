@@ -647,6 +647,14 @@ static class DeviceProtocolTests
         byte[] max = [0x07, 0x19, 0x01, 0x0A, 0x20, 0x2B, 0x07, 0x1F, 0, 0];
         check("AirPods Max and the one-piece Beats: one level, no left and right", AppleAdvert.Model(max) == "AirPods Max" && AppleAdvert.Parts(max) is { Count: 0 }
             && AppleAdvert.Single(max) == new BatteryRead(70, true, BatteryAccuracy.Steps) && AppleAdvert.Single([0x07, 0x19, 0x01, 0x10, 0x20, 0x2B, 0x0F, 0x0F]) is null);
+        // AirPods 4 (0x1920) and its noise-cancelling model (0x1B20) are earbuds with a case; AirPods Max with USB-C (0x1F20)
+        // is one piece; Beats Fit Pro (0x1220) are earbuds of the Beats family.
+        byte[] four = [0x07, 0x19, 0x01, 0x19, 0x20, 0x2B, 0x86, 0x43, 0, 0], fourAnc = [0x07, 0x19, 0x01, 0x1B, 0x20, 0x2B, 0x86, 0x43, 0, 0];
+        check("AirPods 4: read as earbuds with a case", AppleAdvert.Model(four) == "AirPods 4" && AppleAdvert.Parts(four) is { Count: 3 } && AppleAdvert.Single(four) is null
+            && AppleAdvert.Model(fourAnc) == "AirPods 4" && AppleAdvert.Parts(fourAnc) is { Count: 3 });
+        byte[] maxUsbC = [0x07, 0x19, 0x01, 0x1F, 0x20, 0x2B, 0x07, 0x1F, 0, 0], fitPro = [0x07, 0x19, 0x01, 0x12, 0x20, 0x2B, 0x86, 0x43, 0, 0];
+        check("AirPods Max with USB-C: one level; Beats Fit Pro: earbuds", AppleAdvert.Model(maxUsbC) == "AirPods Max" && AppleAdvert.Single(maxUsbC) == new BatteryRead(70, true, BatteryAccuracy.Steps)
+            && AppleAdvert.Model(fitPro) == "Beats Fit Pro" && AppleAdvert.Parts(fitPro) is { Count: 3 });
         check("AirPods: another advertisement is none", AppleAdvert.Parts([0x10, 0x05, 0, 0, 0, 0, 0, 0]) is null && AppleAdvert.Model([0x07, 0x19, 0x01, 0x99, 0x99]) is null);
     }
 }
