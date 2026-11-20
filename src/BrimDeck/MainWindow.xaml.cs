@@ -425,6 +425,7 @@ public partial class MainWindow : Window
         ApplySurface();
         // A panel holding the keyboard stays one that can be active, whatever the setting (PanelKeyboard).
         WindowsHost.SetCapturable(this, Settings.WindowCapture || PanelKeys.Holding);
+        if (_noticeWindow is not null) WindowsHost.SetCapturable(_noticeWindow, Settings.WindowCapture);
         // Made ordinary, at startup too, the panel goes beneath the window in use like a closed one; so does an ordinary panel
         // whose indicator is no longer called for.
         if (Topmost != KeepsAbove) { Topmost = KeepsAbove; if (!Topmost && !_expanded) _host.Front(false); }

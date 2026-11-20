@@ -5,7 +5,7 @@ namespace BrimDeck.Core;
 
 // A named set of the panel's own settings: its looks, pages and what the collapsed row shows. What belongs to the whole app
 // (startup, language, hotkeys, the applications and their keys, the players' full control, the clipboard's recording, the
-// displays and the profile rules) is shared by every profile (Profiles.GlobalKeys). Every profile keeps its settings in Values,
+// displays, the profile rules, and the dynamic notices apart from their page) is shared by every profile (Profiles.GlobalKeys). Every profile keeps its settings in Values,
 // written as settings.json writes them. The current profile's settings are also the ordinary ones in settings.json; every change
 // to them is the profile's at once (Profiles.Keep).
 public sealed class DeckProfile
