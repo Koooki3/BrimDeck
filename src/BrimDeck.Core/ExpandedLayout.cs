@@ -258,7 +258,8 @@ public static class ExpandedLayout
             ? (previous.CardsTwoColumns ? Hysteresis : -Hysteresis) : 0;
         bool twoColumns = cards && ExpandedCards.TwoColumns(readingsW * scale + columnMargin, scale);
         int cardRows = cards ? Math.Max(1, ExpandedCards.Place(cardContent!.Cards, twoColumns).LastOrDefault().Row + 1 + (cardContent.AwaitingDrives && cardContent.Cards.Count > 0 ? 1 : 0)) : 0;
-        double cardRow = Math.Ceiling(body * 1.7 + 31);
+        // Memory is the tallest card; leave one extra DIP for layout rounding at fractional display scales.
+        double cardRow = Math.Ceiling(body * 1.7 + 31) + 1;
         List<Band> Build()
         {
             double restNow = Rest2(mode, memShown, netShown);

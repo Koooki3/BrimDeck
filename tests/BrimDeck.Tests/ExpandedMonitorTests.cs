@@ -146,7 +146,7 @@ internal static class ExpandedMonitorTests
             && moved.Count == readings.Count && moved.All(item => item.Visible));
         var minimum = ExpandedLayout.For(selected.Prepend(ExpandedItem.Gpu), 408, 102, new(1, 1), cardContent: mixed);
         check("Expanded customization: minimum panel fits one complete memory card with both gauges",
-            !minimum.CardsTwoColumns && minimum.CardsHeight >= Math.Ceiling(minimum.Body * 1.7 + 31) && minimum.Part(ExpandedItem.Cpu) is not null);
+            !minimum.CardsTwoColumns && minimum.CardsHeight >= Math.Ceiling(minimum.Body * 1.7 + 31) + 1 && minimum.Part(ExpandedItem.Cpu) is not null);
     }
 
     private static List<ExpandedItem> Subset(int mask) => [.. Every.Where((item, index) => (mask >> index & 1) != 0)];
