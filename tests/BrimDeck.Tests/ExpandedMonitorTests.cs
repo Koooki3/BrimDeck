@@ -78,6 +78,31 @@ internal static class ExpandedMonitorTests
         check("Expanded customization: hiding cores changes the page while retaining CPU demand",
             ExpandedLayout.For([ExpandedItem.Cpu], 560, 200, cpuCores: false) is { CpuCores: false } hidden &&
             hidden.Demand(false) == ExpandedDemand.Cpu && hidden.Signature != ExpandedLayout.For([ExpandedItem.Cpu], 560, 200).Signature);
+
+        ExpandedPlan Sized(double panelWidth, double height, ExpandedPlan? previous = null)
+            => ExpandedLayout.For(items, panelWidth - 40, height, null, null, MonitorMain.Cpu, previous, false, content);
+        var initial = Sized(766, 344);
+        var above = Sized(767, 344, initial);
+        var below = Sized(766, 344, above);
+        var expanded = Sized(800, 344, below);
+        var narrowAgain = Sized(766, 344, expanded);
+        var contracted = Sized(730, 344, narrowAgain);
+        check("Expanded customization: one-DIP jitter preserves card columns, and crossing the dead band still reflows",
+            initial.List == ExpandedList.Side && !initial.CardsTwoColumns && above.Signature == initial.Signature && below.Signature == initial.Signature
+            && expanded.CardsTwoColumns && narrowAgain.CardsTwoColumns && !contracted.CardsTwoColumns);
+        var shorter = Sized(767, 150, above);
+        check("Expanded customization: column hysteresis does not freeze the scroll viewport",
+            !shorter.CardsTwoColumns && shorter.CardsHeight < above.CardsHeight && shorter.Height == 150);
+
+        old.ExpandedCardOrder = [new(ExpandedItem.Memory) { CompactMemoryBar = true }, new(ExpandedItem.Download) { CompactMemoryBar = true }];
+        var compact = SettingsMigrations.Read(JsonSerializer.Serialize(old));
+        check("Expanded customization: compact memory independent of card width; unrelated readings ignore it",
+            compact.ExpandedCardOrder.SequenceEqual([new(ExpandedItem.Memory) { CompactMemoryBar = true }, new(ExpandedItem.Download)]));
+        ExpandedCardContent WithBar(bool compactBar) => new([new ExpandedCard(ExpandedItem.Memory) { CompactMemoryBar = compactBar }], false, false);
+        var normalBar = ExpandedLayout.For([ExpandedItem.Memory], 560, 200, cardContent: WithBar(false));
+        var compactBar = ExpandedLayout.For([ExpandedItem.Memory], 560, 200, cardContent: WithBar(true));
+        check("Expanded customization: changing memory bar length refreshes the view without changing the card allocation",
+            compactBar.Signature != normalBar.Signature && compactBar.Parts.SequenceEqual(normalBar.Parts));
     }
 
     private static List<ExpandedItem> Subset(int mask) => [.. Every.Where((item, index) => (mask >> index & 1) != 0)];

@@ -80,7 +80,7 @@ public sealed class ExpandedPlan
 
     // What makes two plans the same page, as far as building it goes.
     public string Signature => string.Join("|", Kind, Steps, List, Downloads, Uploads, UploadFirst, CpuCores, CardsTwoColumns,
-        CardContent?.AwaitingDrives, CardContent?.WatchDrives, CardContent is { } custom ? string.Join(",", custom.Cards.Select(card => $"{card.Item}/{card.Letter}/{card.Wide}")) : "",
+        CardContent?.AwaitingDrives, CardContent?.WatchDrives, CardContent is { } custom ? string.Join(",", custom.Cards.Select(card => $"{card.Item}/{card.Letter}/{card.Wide}/{card.CompactMemoryBar}")) : "",
         string.Join(",", Parts.Select(part => part.Item + ":" + part.Form)));
 }
 
@@ -121,9 +121,10 @@ public static class ExpandedLayout
         bool cpuCores = true, ExpandedCardContent? cardContent = null)
     {
         var items = (shown ?? []).ToList();
-        var next = For(items, width, height, content, font, main, cpuCores, cardContent);
         // The scrolling card section uses the actual viewport height, including while the panel is being resized.
-        if (cardContent is not null) return next;
+        if (cardContent is not null)
+            return BuildPlan(items, width, height, content, font, main, cpuCores, cardContent, previous);
+        var next = For(items, width, height, content, font, main, cpuCores);
         if (previous is null || next.Signature == previous.Signature) return next;
         foreach (double dw in new[] { 0, -Hysteresis, Hysteresis })
             foreach (double dh in new[] { 0, -Hysteresis, Hysteresis })
@@ -133,6 +134,10 @@ public static class ExpandedLayout
 
     public static ExpandedPlan For(IEnumerable<ExpandedItem>? shown, double width, double height, ExpandedContent? content = null, FontMetrics? font = null, MonitorMain main = MonitorMain.Cpu,
         bool cpuCores = true, ExpandedCardContent? cardContent = null)
+        => BuildPlan(shown, width, height, content, font, main, cpuCores, cardContent, null);
+
+    private static ExpandedPlan BuildPlan(IEnumerable<ExpandedItem>? shown, double width, double height, ExpandedContent? content, FontMetrics? font, MonitorMain main,
+        bool cpuCores, ExpandedCardContent? cardContent, ExpandedPlan? previous)
     {
         var order = (shown ?? []).Where(item => Enum.IsDefined(item)).Distinct().ToList();
         font = (font ?? FontMetrics.Default).Fit(); content ??= new();
@@ -222,7 +227,10 @@ public static class ExpandedLayout
         // Bands in the table's order.
         int Index(params ExpandedItem[] of) => of.Where(item => order.Contains(item)).Select(item => order.IndexOf(item)).DefaultIfEmpty(int.MaxValue).Min();
         double graphMin = minGraph;
-        bool twoColumns = cards && ExpandedCards.TwoColumns(readingsW * scale, scale);
+        // Keep the column count within the dead band while measuring the viewport at its real dimensions.
+        double columnMargin = previous is { CardContent.Cards.Count: > 0 } && previous.List == list && previous.Scale == scale
+            ? (previous.CardsTwoColumns ? Hysteresis : -Hysteresis) : 0;
+        bool twoColumns = cards && ExpandedCards.TwoColumns(readingsW * scale + columnMargin, scale);
         int cardRows = cards ? Math.Max(1, ExpandedCards.Place(cardContent!.Cards, twoColumns).LastOrDefault().Row + 1 + (cardContent.AwaitingDrives && cardContent.Cards.Count > 0 ? 1 : 0)) : 0;
         double cardRow = Math.Ceiling(body * 1.7 + 27);
         List<Band> Build()
