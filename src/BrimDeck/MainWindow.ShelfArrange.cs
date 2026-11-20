@@ -202,9 +202,8 @@ public partial class MainWindow
         public DeckCard Behind => Front == ShelfSide.Clipboard ? Files : Clips;
     }
     private Deck? _deck;
-    private DispatcherTimer? _deckHoverTimer;
-    private long _deckSwapCooldownUntil;
-    private readonly HorizontalSwipe _shelfSwipe = new();
+    private readonly HorizontalSwipe _shelfSwipe = new(), _stripScroll = new();
+    private long _stripTouchpadUntil;
     // The curves of the design: cubic-bezier(.22, 1, .36, 1) for the cards' size, and "ease" for what fades or changes color.
     private static readonly IEasingFunction DeckEase = FrozenEase(.22, 1, .36, 1), DeckFade = FrozenEase(.25, .1, .25, 1);
     private static IEasingFunction FrozenEase(double x1, double y1, double x2, double y2) { var ease = new BezierEase(x1, y1, x2, y2); ease.Freeze(); return ease; }
@@ -245,8 +244,6 @@ public partial class MainWindow
         ShelfShown.Files => Loc.T("搜索文件中转", "Search the file transfer"),
         _ => Loc.T("搜索剪贴板与文件中转", "Search the clipboard and file transfer")
     };
-
-    private void StopDeckHover() => _deckHoverTimer?.Stop();
 
     private bool CanQuickSwitchShelf => _expanded && !_preview && IsShelfPage && Settings.ShelfStacked()
         && _shelfDetail is null && _shelfEdit is null && !_dropping && _shelfMenu?.IsOpen != true;
@@ -379,26 +376,18 @@ public partial class MainWindow
         bool pressed = false;
         bool Live() => ReferenceEquals(_deck, deck) && !_dropping && _shelfEdit is null;
         ShelfSide Other() => deck.Front == ShelfSide.Clipboard ? ShelfSide.Files : ShelfSide.Clipboard;
-        hit.MouseEnter += (_, _) =>
+        hit.MouseEnter += (_, _) => { if (Live()) ShowStrip(deck, deck.Behind, true); };
+        hit.MouseLeave += (_, _) => { pressed = false; if (ReferenceEquals(_deck, deck)) ShowStrip(deck, deck.Behind, false); };
+        hit.MouseWheel += (_, e) =>
         {
-            if (!Live()) return;
-            ShowStrip(deck, deck.Behind, true);
-            if (!Settings.ShelfHoverSwitch || Environment.TickCount64 < _deckSwapCooldownUntil) return;
-            StopDeckHover();
-            var timer = _deckHoverTimer = new DispatcherTimer(DispatcherPriority.Input, Dispatcher) { Interval = TimeSpan.FromMilliseconds(160) };
-            EventHandler? tick = null;
-            tick = (_, _) =>
-            {
-                timer.Tick -= tick; timer.Stop();
-                if (ReferenceEquals(_deckHoverTimer, timer) && Live() && hit.IsMouseOver && Settings.ShelfHoverSwitch && _expanded && !_preview) BringForward(Other());
-            };
-            timer.Tick += tick; timer.Start();
+            if (!Settings.ShelfStripWheelSwitch || !Live() || !_expanded || _preview) return;
+            e.Handled = true;
+            if (StripWheel(e.Delta)) BringForward(ShelfFront == ShelfSide.Clipboard ? ShelfSide.Files : ShelfSide.Clipboard);
         };
-        hit.MouseLeave += (_, _) => { pressed = false; StopDeckHover(); if (ReferenceEquals(_deck, deck)) ShowStrip(deck, deck.Behind, false); };
         hit.MouseLeftButtonDown += (_, e) =>
         {
             if (!Live()) return;
-            e.Handled = true; pressed = true; StopDeckHover();
+            e.Handled = true; pressed = true;
             ShowStrip(deck, deck.Behind, true, down: true);
         };
         hit.MouseLeftButtonUp += (_, e) =>
@@ -420,11 +409,20 @@ public partial class MainWindow
         title.MouseLeftButtonUp += (_, e) => { e.Handled = true; BringForward(side == ShelfSide.Clipboard ? ShelfSide.Files : ShelfSide.Clipboard); };
     }
 
+    // The wheel turned over the side strip, either way, switches the cards: each notch of a mouse wheel, and each swipe of a
+    // touchpad's scroll, whose parts are no whole notches and go on as the scroll coasts (HorizontalSwipe). Every part is counted
+    // as a swipe's, so a scroll that begins with a whole notch by chance switches once, not again as its parts add up.
+    private bool StripWheel(int delta)
+    {
+        long now = Environment.TickCount64;
+        int step = _stripScroll.Feed(delta, DateTimeOffset.UtcNow);
+        if (delta % Mouse.MouseWheelDeltaForOneLine != 0) _stripTouchpadUntil = now + (long)HorizontalSwipe.Quiet.TotalMilliseconds;
+        return now < _stripTouchpadUntil ? step != 0 : delta != 0;
+    }
+
     private void BringForward(ShelfSide side)
     {
-        StopDeckHover();
         if (ShelfFront == side) return;
-        _deckSwapCooldownUntil = Environment.TickCount64 + 300;
         CloseMenu();
         _shelfFront = side; _picked.Clear();
         UpdateShelfPageButton();
@@ -432,7 +430,7 @@ public partial class MainWindow
         else RenderShelf();
     }
 
-    // ---- Quick-switching input gestures (middle-click, horizontal touchpad swipe) ----
+    // ---- Quick-switching input gestures (middle-click, horizontal touchpad swipe; the wheel over the strip is in WireDeckHit) ----
     private bool IsOverShelfTextInput(DependencyObject? source)
     {
         for (var at = source; at is not null; at = at is Visual ? VisualTreeHelper.GetParent(at) : LogicalTreeHelper.GetParent(at))

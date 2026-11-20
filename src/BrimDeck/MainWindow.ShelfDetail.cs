@@ -149,7 +149,6 @@ public partial class MainWindow
     // opening only when one of them was ended: a page closed as it was built opens as it is.
     private void ResetShelf()
     {
-        StopDeckHover();
         bool ended = _shelfEdit is not null || _shelfDetail is not null || _shelfSearching || _shelfQuery.Length > 0 || _picked.Count > 0;
         if (_shelfEdit is not null || _shelfSearching) EndTyping();
         _shelfEdit = null; _shelfDetail = null; _shelfSearching = false; _shelfQuery = ""; _picked.Clear();

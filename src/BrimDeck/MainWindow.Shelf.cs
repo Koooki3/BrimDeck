@@ -64,7 +64,7 @@ public partial class MainWindow
         Action tab = () => { _shelfStale = true; if (IsShelfPage && _expanded && !_preview) Dispatcher.BeginInvoke(() => RenderShelf(lazy: true)); };
         _app.Shelf.TabChanged += tab;
         ShelfFiles.Changed += figures;
-        Closed += (_, _) => { _app.Shelf.Changed -= changed; _app.Shelf.TabChanged -= tab; ShelfFiles.Changed -= figures; _movingTimer?.Stop(); StopDeckHover(); };
+        Closed += (_, _) => { _app.Shelf.Changed -= changed; _app.Shelf.TabChanged -= tab; ShelfFiles.Changed -= figures; _movingTimer?.Stop(); };
         HoverZone.AllowDrop = true;
         HoverZone.PreviewDragEnter += ShelfDragEnter;
         HoverZone.PreviewDragOver += ShelfDragOver;
