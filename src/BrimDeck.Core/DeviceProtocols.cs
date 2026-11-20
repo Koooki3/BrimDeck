@@ -576,6 +576,14 @@ public static class Dongles
     // The keyboards among them (the Teevolution Terra Pro's receiver); the rest are mice.
     // F809, Attack Shark's and DELUX's keyboard receiver, is one too.
     public static DeviceKind CompxKind(int vendor, int product) => (vendor, product) is (0x3554, 0xF523) or (0x3554, 0xF809) ? DeviceKind.Keyboard : DeviceKind.Mouse;
+    // The name a Compx device shows when its receiver gives no product string: Attack Shark's pairs by the brand (FB43 and FB44
+    // the R11 Ultra's, as damien1141's attack-shark-r11_ultra-linux lists them), the rest "Compx".
+    public static string CompxName(int vendor, int product) => (vendor, product) switch
+    {
+        (0x3554, 0xFB43 or 0xFB44) => "ATTACK SHARK R11 Ultra",
+        (0x3554, 0xF50E or 0xF516) => "ATTACK SHARK",
+        _ => "Compx",
+    };
     public static bool CompxFramedCollection(int usagePage, int usage, int inputLength, int outputLength)
         => usagePage == 0xFF02 && usage == 0x0002 && inputLength == 17 && outputLength == 17;
     // A reply counts only when its checksum holds and it answers command 0x04: the receivers push 0x03 frames of their own on
@@ -1587,8 +1595,15 @@ public static class SteelSeriesMice
 // collections open all the time (Native/PushEvents.cs) and each report is applied to the device's last state (Apply): a report
 // that carries only the charging state or the link keeps the level that came before.
 // - Beken receivers (Attack Shark 1D57:FA60 and the X6's FA62, interface 2, usage page 0x000A): 03 <device id> 40 <state>
-//   <percent>, about every 2 s; the device id names the mouse, the X6 (0x85) counts 1 to 10; state 02, 03 or 80 is charging
-//   on its dock (incconutwo's and misaka310's mouse-battery-tray; misaka310 verified the frame on an X1).
+//   <level>, about every 2 s (the V6 sends 41 for 40: 03 24 41 01 64, krisgfx9's Wireless-Device-Battery-Monitor #260; the
+//   vendor's web driver takes both); state 02, 03 or 80 is charging on its dock (incconutwo's and misaka310's
+//   mouse-battery-tray; misaka310 verified the frame on an X1). The device id names the mouse as the vendor's web driver's
+//   model table lists it (store.mouseNum, which JSjuan/LinShark's protocol.py copies; GPL, facts only: the ids and names).
+//   0x10 is the R1 there, but X3s send it too (measured here: 03 10 40 01 09 from an X3 its own X3 driver shows at 90 %;
+//   OpenMouse mouse-protocol #297), so it is named for both. The level of 0x10 and of the X6 (0x85) counts 1 to 10 (the R1
+//   at 90 % in HaloBattery #69; OpenMouse reads both in tenths); the others measured send a percent (X1, X11, the X3 Max
+//   0x4E in HaloBattery #228, the V3 Pro 0xE5, the V6), and the rest are taken as a percent too. The table's other brands
+//   on the same receiver (Inphic, DELUX) are named for theirs.
 // - DELUX M900 Pro (1D57:FA65, usage page 0x000A): 03 30 40 <state> <percent>, 03 charging, 02 full; Inphic ZHEN on the same
 //   receiver id (usage page 0xFF00 usage 1): 03 76 41 <state> <percent>, 03 charging. As vigil-watt documents both.
 // - Rapoo's second generation (24AE, usage page 0xFF00 usage 2, input report 0x07 of 19 bytes, every ~3 s while the mouse
@@ -1646,9 +1661,16 @@ public static class Pushes
 
     private static readonly Dictionary<int, string> BekenNames = new()
     {
-        [0xB1] = "ATTACK SHARK X1", [0x55] = "ATTACK SHARK X11", [0x10] = "ATTACK SHARK R1", [0x85] = "ATTACK SHARK X6", [0x4D] = "ATTACK SHARK X3",
-        [0xBE] = "ATTACK SHARK X11 Pro", [0x07] = "ATTACK SHARK X11 SE",
+        [0x01] = "ATTACK SHARK X3 Pro", [0x02] = "ATTACK SHARK X8 SE", [0x04] = "ATTACK SHARK G3", [0x06] = "ATTACK SHARK X8 Plus",
+        [0x07] = "ATTACK SHARK X11 SE", [0x08] = "ATTACK SHARK X8 Pro", [0x0E] = "ATTACK SHARK G3 Pro", [0x10] = "ATTACK SHARK X3 / R1",
+        [0x24] = "ATTACK SHARK V6", [0x4D] = "ATTACK SHARK X3", [0x4E] = "ATTACK SHARK X3 Max", [0x55] = "ATTACK SHARK X11",
+        [0x85] = "ATTACK SHARK X6", [0xB1] = "ATTACK SHARK X1", [0xBE] = "ATTACK SHARK X11 Pro", [0xE5] = "ATTACK SHARK V3 Pro",
+        [0xEA] = "ATTACK SHARK V3",
+        [0x30] = "DELUX M900 Pro", [0x41] = "Inphic IN6", [0x42] = "Inphic IN9", [0x90] = "Inphic IN9 Ultra", [0x92] = "Inphic IN6 SE",
+        [0x93] = "Inphic IN10", [0x99] = "Inphic INX",
     };
+    // The device ids whose level counts 1 to 10.
+    private static readonly HashSet<int> BekenTenths = [0x10, 0x85];
 
     // A report applied to the device's last state (null before anything was heard): the new state, or null when the report says
     // nothing about the battery. Asleep: the device says it is off, or its radio link is down; its level stands.
@@ -1656,9 +1678,10 @@ public static class Pushes
     {
         switch (kind)
         {
-            case Kind.Beken when r.Length >= 5 && r[0] == 0x03 && r[2] == 0x40:
-                int level = r[1] == 0x85 && r[4] is > 0 and <= 10 ? r[4] * 10 : r[4];
-                return level <= 100 ? new(level, r[3] is 0x02 or 0x03 or 0x80, Accuracy: r[1] == 0x85 ? BatteryAccuracy.Steps : BatteryAccuracy.Exact) : null;
+            case Kind.Beken when r.Length >= 5 && r[0] == 0x03 && r[2] is 0x40 or 0x41:
+                bool tenths = BekenTenths.Contains(r[1]) && r[4] is > 0 and <= 10;
+                int level = tenths ? r[4] * 10 : r[4];
+                return level <= 100 ? new(level, r[3] is 0x02 or 0x03 or 0x80, Accuracy: tenths ? BatteryAccuracy.Steps : BatteryAccuracy.Exact) : null;
             case Kind.Delux when r.Length >= 5 && r[0] == 0x03 && r[1] == 0x30 && r[2] == 0x40 && r[4] <= 100:
                 return new(r[3] == 0x02 ? 100 : r[4], r[3] == 0x03);
             case Kind.InphicZhen when r.Length >= 5 && r[0] == 0x03 && r[1] == 0x76 && r[2] == 0x41 && r[4] <= 100:

@@ -14,7 +14,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Codex | ✓ | ✓ | Sign in to Codex on this PC |
 | Cursor | ✓ | ✓ | Sign in to Cursor on this PC |
 | Grok Bot | ✓ | | Sign in to the Grok Bot desktop app on this PC |
-| Antigravity | ✓ | ✓ | The Antigravity desktop app must be running for its quota to be read |
+| Antigravity | ✓ | ✓ | The quota is read while the Antigravity desktop app or Antigravity IDE is running; when neither runs, it is read from the signed-in Antigravity CLI (`agy`) by running `agy -p /usage` at most every 5 minutes. Expand the row to turn off "Read via CLI" (on by default) |
 | ZCode | ✓ | ✓ | Sign in to ZCode on this PC |
 | DeepSeek Harness | ✓ | ✓ | Sign in to a DeepSeek account in the DeepSeek Harness desktop app or local web app, or save an API key there |
 | Kimi Code | ✓ | ✓ | Sign in to Kimi Code (CLI, desktop app or VS Code extension) on this PC |

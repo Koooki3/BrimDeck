@@ -66,7 +66,18 @@ public static class QianwenUsage
     // The sign-in is no longer accepted.
     public sealed class RejectedException() : Exception("Sign-in rejected");
 
-    public sealed record Reading(List<UsageMetric> Metrics, string Plan, List<string> Warnings);
+    // Failed names the parts that could not be read (Parts), one for each warning and in the same order; Plans names the plans each
+    // part found.
+    public sealed record Reading(List<UsageMetric> Metrics, string Plan, List<string> Warnings)
+    {
+        public List<string> Failed { get; init; } = [];
+        public List<(string Part, string Name)> Plans { get; init; } = [];
+    }
+
+    // The parts of a reading, each read on its own, in the order they are shown: the personal Token Plan, the team Token Plan (with its
+    // add-on packs), the balance and this month's charges.
+    public static readonly IReadOnlyList<string> Parts = ["personal", "team", "balance", "month"];
+    public static string PartOf(UsageMetric metric) => metric.Id switch { "personal-older" => "personal", "addon" => "team", var id => id };
 
     // Starts a sign-in. The address to open must be the edition's own account page, so a changed answer never sends the browser elsewhere.
     public static async Task<Login> StartLoginAsync(HttpClient http, Edition edition, DateTimeOffset now, CancellationToken ct)
@@ -132,29 +143,30 @@ public static class QianwenUsage
         var client = new Gateway(http, edition, session.AccessToken, ct);
         var metrics = new List<UsageMetric>();
         var warnings = new List<string>();
-        var plans = new List<string>();
+        var plans = new List<(string Part, string Name)>();
+        var failed = new List<string>();
         bool Failed(Exception ex) => ex is InvalidDataException or JsonException or HttpRequestException or FormatException or InvalidOperationException ||
             ex is OperationCanceledException && !ct.IsCancellationRequested;
-        async Task Part(Func<Task> read, string chinese, string english)
+        async Task Part(string part, Func<Task> read, string chinese, string english)
         {
             try { await read(); }
-            catch (Exception ex) when (Failed(ex)) { warnings.Add(Loc.T(chinese + "暂时无法读取", english + " cannot be read right now")); }
+            catch (Exception ex) when (Failed(ex)) { failed.Add(part); warnings.Add(Loc.T(chinese + "暂时无法读取", english + " cannot be read right now")); }
         }
 
-        await Part(async () =>
+        await Part("personal", async () =>
         {
             // The newer personal edition (China only) and the older one, each shown when the account has it. One that cannot be read
             // does not keep the other from being shown.
             Exception? solo = null;
             if (edition.China)
-                try { if (await SoloAsync(client) is { } plan) { plans.Add(plan.Name); metrics.Add(plan.Metric); } }
+                try { if (await SoloAsync(client) is { } plan) { plans.Add(("personal", plan.Name)); metrics.Add(plan.Metric); } }
                 catch (Exception ex) when (Failed(ex)) { solo = ex; }
             if (Instances(await client.CallAsync("DescribeFrInstances", PlanQuery(edition.PersonalCode, 10)), "个人版") is { } older)
-            { plans.Add(older.Name); metrics.Add(older.Metric with { Id = "personal-older" }); }
+            { plans.Add(("personal", older.Name)); metrics.Add(older.Metric with { Id = "personal-older" }); }
             if (solo is not null) throw new InvalidDataException(solo.Message, solo);
         }, "个人版 Token Plan ", "The personal Token Plan");
 
-        await Part(async () =>
+        await Part("team", async () =>
         {
             // Both requests describe the same team plan, as the CLIs read them: the seats when the account has them, otherwise the
             // plan as it was bought before seats. Seats that cannot be read still leave the older reading.
@@ -165,20 +177,20 @@ public static class QianwenUsage
                 try { team = Seats(await client.CallAsync("GetSeatSubscriptionSummary", new() { ["productCode"] = edition.TeamCode })); }
                 catch (Exception ex) when (Failed(ex)) { seats = ex; }
             team ??= Instances(await client.CallAsync("DescribeFrInstances", PlanQuery(edition.TeamCode, 10)), "团队版");
-            if (team is not null) { plans.Add(team.Name); metrics.Add(team.Metric); }
+            if (team is not null) { plans.Add(("team", team.Name)); metrics.Add(team.Metric); }
             var addon = AddonPacks(await client.CallAsync("DescribeFrInstances", PlanQuery(edition.AddonCode, 100)));
             if (addon is not null) metrics.Add(addon);
             if (team is null && seats is not null) throw new InvalidDataException(seats.Message, seats);
         }, "团队版 Token Plan ", "The team Token Plan");
 
         if (edition.China)
-            await Part(async () => metrics.Add(Balance(await client.CallAsync("GetFundAccountAvailableAmount", []), edition.Currency)), "账户余额", "The balance");
+            await Part("balance", async () => metrics.Add(Balance(await client.CallAsync("GetFundAccountAvailableAmount", []), edition.Currency)), "账户余额", "The balance");
 
-        await Part(async () => metrics.Add(edition.China
+        await Part("month", async () => metrics.Add(edition.China
             ? MonthCharge(CostAnalysisTotal(await client.CallAsync("MaasDescribeCostAnalysis", CostAnalysisQuery(now))), edition.Currency, now)
             : MonthCharge(await ConsumeTotalAsync(client, now), edition.Currency, now)), "本月扣费", "This month's charges");
 
-        return new(metrics, string.Join(" · ", plans), warnings);
+        return new(metrics, string.Join(" · ", plans.Select(plan => plan.Name)), warnings) { Failed = failed, Plans = plans };
     }
 
     // A plan in force: its name for the plan line, and its quota.

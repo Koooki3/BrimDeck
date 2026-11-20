@@ -208,7 +208,7 @@ public partial class MainWindow
         double wanted = DeckPages.Size(settings, DeckPages.FirstVisible(settings)).Height;
         double height = PageHeight(wanted, PanelFor(wanted));
         var header = page.WithControlsOf(PanelHeader.ForPanel(height));
-        bool gripBoundaryChanged = _header.Row != header.Row;
+        bool gripBoundaryChanged = _header.Height != header.Height;
         _header = header;
         ToolbarRow.Height = new GridLength(header.Row);
         Toolbar.Height = header.Height;
@@ -224,7 +224,7 @@ public partial class MainWindow
         SettingsButton.Height = header.SettingsHeight;
         ToolbarActions.Margin = new Thickness(0, 0, header.RightMargin, 0);
         ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(header.Side), 0, 0, 0);
-        // A same-size page switch can change the grip boundary without raising Island.SizeChanged.
+        // Refresh the grip boundary when the shared toolbar changes without resizing the island.
         if (gripBoundaryChanged) UpdateGrips();
     }
     private void RenderPageSwitch()
