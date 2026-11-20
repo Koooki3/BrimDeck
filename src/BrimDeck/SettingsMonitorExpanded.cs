@@ -27,7 +27,7 @@ public sealed partial class SettingsWindow
 
     private static string ExpandedHelp(ExpandedItem item) => item switch
     {
-        ExpandedItem.Cpu => Loc.T("CPU 总占用和各核心的占用。", "The CPU's total usage and each core's."),
+        ExpandedItem.Cpu => Loc.T("CPU 总占用，可单独隐藏各核心占用。", "Total CPU usage, with an option to hide the individual cores."),
         ExpandedItem.Gpu => Loc.T("GPU 占用和各引擎的占用。", "The GPU's usage and each engine's."),
         ExpandedItem.Memory => Loc.T("内存占用与提交量。", "Memory in use and the commit charge."),
         ExpandedItem.Download => Loc.T("下载速率。", "The download rate."),
@@ -81,9 +81,123 @@ public sealed partial class SettingsWindow
         switches.Children.Add(title);
         switches.Children.Add(cells);
 
-        var sketch = ExpandedSketch(refresh);
+        var layout = new StackPanel();
+        layout.Children.Add(MusicChoice(Loc.T("各 CPU 核心", "Individual CPU cores"), S.ExpandedCpuCores,
+            [(true, Loc.T("显示", "Show")), (false, Loc.T("隐藏", "Hide"))],
+            value => Resize(s => s.ExpandedCpuCores = value, DeckPage.Monitor), keepPreview: true,
+            help: Loc.T("隐藏各核心占用图，保留 CPU 总占用。仅影响展开页。", "Hides the per-core graph and keeps total CPU usage on the expanded page.")));
+        var editor = ExpandedCardEditor(refresh);
+        layout.Children.Add(MusicChoice(Loc.T("读数布局", "Reading layout"), S.ExpandedCustomCards,
+            [(false, Loc.T("自动", "Automatic")), (true, Loc.T("自定义卡片", "Custom cards"))],
+            value => { Resize(s => s.ExpandedCustomCards = value, DeckPage.Monitor); Refresh(); }, keepPreview: true,
+            help: Loc.T("卡片区域从页面顺序中内存、网速或硬盘最先出现的位置开始。",
+                "The card section starts at the first position used by memory, network, or drives in the page order.")));
+        layout.Children.Add(editor);
+        layout.Children.Add(ExpandedSketch(refresh));
         Refresh();
-        return (KeepPreview(switches), sketch);
+        return (KeepPreview(switches), layout);
+    }
+
+    private FrameworkElement ExpandedCardEditor(List<Action> refresh)
+    {
+        var panel = new StackPanel();
+        var hint = TextLine(Loc.T("移动内存、下载、上传或盘符，设置半宽或整行。窄面板自动排为一列。",
+            "Move memory, download, upload, and drive letters and choose half width or full row. Narrow panels use one column."), 12, TextSecondary);
+        hint.TextWrapping = TextWrapping.Wrap;
+        hint.Margin = new Thickness(0, 8, 0, 6);
+        var rows = new StackPanel();
+        panel.Children.Add(hint);
+        panel.Children.Add(rows);
+        ExpandedCard[] built = [];
+        string availability = "";
+        (ExpandedCard Card, int Direction)? focus = null;
+        string Name(ExpandedCard card) => card.Letter ?? ExpandedName(card.Item);
+
+        Button? reset = null;
+        reset = ActionButton(Loc.T("重置卡片顺序和宽度", "Reset card order and width"), () =>
+        {
+            Resize(s => s.ExpandedCardOrder = [], DeckPage.Monitor);
+            Build();
+        });
+        reset.Style = (Style)FindResource("SettingsLink");
+        reset.HorizontalAlignment = HorizontalAlignment.Left;
+        panel.Children.Add(reset);
+
+        void Build()
+        {
+            panel.Visibility = S.ExpandedCustomCards ? Visibility.Visible : Visibility.Collapsed;
+            if (!S.ExpandedCustomCards) return;
+            if (reset is not null) reset.IsEnabled = S.ExpandedCardOrder.Count > 0;
+            var readings = S.ExpandedReadings;
+            var shown = ExpandedMonitor.Shown(readings);
+            var letters = (_app.Monitor?.Latest?.Storage ?? []).SelectMany(drive => drive.Volumes).Select(volume => volume.Letter).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var cards = ExpandedCards.Resolve(S.ExpandedCardOrder, readings.Select(reading => reading.Item), letters);
+            var nextAvailability = string.Join(",", shown) + "|" + string.Join(",", letters.Order(StringComparer.OrdinalIgnoreCase));
+            if (cards.SequenceEqual(built) && nextAvailability == availability) return;
+            built = [.. cards];
+            availability = nextAvailability;
+            rows.Children.Clear();
+            foreach (var (card, index) in cards.Select((card, index) => (card, index)))
+            {
+                var line = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+                var controls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                DockPanel.SetDock(controls, Dock.Right);
+                line.Children.Add(controls);
+                string status = !shown.Contains(card.Item) ? Loc.T("（已隐藏）", " (hidden)") :
+                    card.Letter is { } letter && !letters.Contains(letter) ? Loc.T("（暂无读数）", " (unavailable)") : "";
+                line.Children.Add(new TextBlock { Text = Name(card) + status, Foreground = UI.Brush(TextSecondary), VerticalAlignment = VerticalAlignment.Center,
+                    TextTrimming = TextTrimming.CharacterEllipsis });
+
+                void Move(int offset)
+                {
+                    int to = index + offset;
+                    focus = (card, to + offset >= 0 && to + offset < cards.Count ? offset : -offset);
+                    (cards[index], cards[to]) = (cards[to], cards[index]);
+                    Resize(s => s.ExpandedCardOrder = cards, DeckPage.Monitor);
+                    Build();
+                }
+                Button Arrow(string glyph, int offset, string label)
+                {
+                    var button = ActionButton(glyph, () => Move(offset));
+                    button.Style = (Style)FindResource("SettingsOutlineButton");
+                    button.Padding = new Thickness(8, 3, 8, 3);
+                    button.Margin = new Thickness(0, 0, 4, 0);
+                    button.IsEnabled = index + offset >= 0 && index + offset < cards.Count;
+                    button.ToolTip = label;
+                    AutomationProperties.SetName(button, label);
+                    return button;
+                }
+                var up = Arrow("↑", -1, Loc.T($"上移 {Name(card)}", $"Move {Name(card)} up"));
+                var down = Arrow("↓", 1, Loc.T($"下移 {Name(card)}", $"Move {Name(card)} down"));
+                controls.Children.Add(up);
+                controls.Children.Add(down);
+                var width = new ComboBox { Width = 126, Style = (Style)FindResource("SettingsCombo"),
+                    ItemsSource = new[] { Loc.T("半宽", "Half width"), Loc.T("整行", "Full row") }, SelectedIndex = card.Wide ? 1 : 0 };
+                AutomationProperties.SetName(width, Loc.T($"{Name(card)} 的宽度", $"Width of {Name(card)}"));
+                width.SelectionChanged += (_, _) =>
+                {
+                    if (width.SelectedIndex < 0) return;
+                    var wide = width.SelectedIndex == 1;
+                    if (cards[index].Wide == wide) return;
+                    cards[index] = cards[index] with { Wide = wide };
+                    built = [.. cards];
+                    Resize(s => s.ExpandedCardOrder = [.. cards], DeckPage.Monitor);
+                    if (reset is not null) reset.IsEnabled = true;
+                };
+                controls.Children.Add(width);
+                rows.Children.Add(line);
+                if (focus is { } target && target.Card == card)
+                {
+                    (target.Direction < 0 ? up : down).Focus();
+                    focus = null;
+                }
+            }
+        }
+        void OnReading(MonitorSnapshot _) => Build();
+        panel.Loaded += (_, _) => { _app.MonitorUpdated += OnReading; Build(); };
+        panel.Unloaded += (_, _) => _app.MonitorUpdated -= OnReading;
+        refresh.Add(Build);
+        return KeepPreview(panel);
     }
 
     // A chip that is on or off: a dot in each of its colors (one neutral dot without any), its name, its help on hover.
