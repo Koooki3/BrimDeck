@@ -223,6 +223,8 @@ public sealed partial class SettingsWindow
                 {
                     var width = new ComboBox { Width = 126, Style = (Style)FindResource("SettingsCombo"),
                         ItemsSource = new[] { Loc.T("半宽", "Half width"), Loc.T("整行", "Full row") }, SelectedIndex = card.Wide ? 1 : 0 };
+                    width.ToolTip = Loc.T("相邻的半宽读数并排。单独一项会填满该行，顺序保持原样。",
+                        "Adjacent half-width readings share a row. An unpaired reading fills its row in the same order.");
                     AutomationProperties.SetName(width, Loc.T($"{Name(card)} 的宽度", $"Width of {Name(card)}"));
                     width.SelectionChanged += (_, _) =>
                     {

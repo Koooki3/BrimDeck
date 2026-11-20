@@ -58,9 +58,14 @@ internal static class ExpandedMonitorTests
         check("Expanded customization: saved drive choice survives a disconnect and new drive letters append",
             cards.SequenceEqual([new(ExpandedItem.Storage, "D:", true), new(ExpandedItem.Upload), new(ExpandedItem.Memory),
                 new(ExpandedItem.Download), new(ExpandedItem.Storage, "C:"), new(ExpandedItem.Storage, "E:")]));
-        check("Expanded customization: each card gets its own grid slot and full rows do not overlap half-width cards",
-            ExpandedCards.Place([cards[1], cards[0], .. cards.Skip(2)], true).SequenceEqual([(0, 0, 1), (1, 0, 2), (2, 0, 1), (2, 1, 1), (3, 0, 1), (3, 1, 1)]) &&
+        check("Expanded customization: an unpaired half fills its row without crossing a full-width card",
+            ExpandedCards.Place([cards[1], cards[0], .. cards.Skip(2)], true).SequenceEqual([(0, 0, 2), (1, 0, 2), (2, 0, 1), (2, 1, 1), (3, 0, 1), (3, 1, 1)]) &&
             ExpandedCards.Place(cards, false).SequenceEqual(Enumerable.Range(0, cards.Count).Select(row => (row, 0, 2))));
+        var ends = new ExpandedCard[] { new(ExpandedItem.Power), new(ExpandedItem.Download), new(ExpandedItem.Upload), new(ExpandedItem.Memory) };
+        check("Expanded customization: the last half fills its row, and an unavailable reading re-pairs remaining neighbors in saved order",
+            ExpandedCards.Place(ends, true).SequenceEqual([(0, 0, 2), (1, 0, 1), (1, 1, 1), (2, 0, 2)]) &&
+            ExpandedCards.Place([ends[0], ends[2], ends[3]], true).SequenceEqual([(0, 0, 2), (1, 0, 1), (1, 1, 1)]) &&
+            !ends[3].Wide);
 
         var content = new ExpandedCardContent(cards, AwaitingDrives: false, WatchDrives: true);
         var wide = ExpandedLayout.For(items, 1200, 320, cpuCores: false, cardContent: content);
@@ -126,7 +131,7 @@ internal static class ExpandedMonitorTests
         var mixed = new ExpandedCardContent(inline, false, true);
         var arranged = ExpandedLayout.For(selected, 800, 344, new(1, 1), cardContent: mixed);
         check("Expanded customization: inserted sections use full rows between cards, without duplicate bands or lost demand",
-            ExpandedCards.Place(inline, true).SequenceEqual([(0, 0, 1), (1, 0, 2), (2, 0, 1), (3, 0, 2)])
+            ExpandedCards.Place(inline, true).SequenceEqual([(0, 0, 2), (1, 0, 2), (2, 0, 2), (3, 0, 2)])
             && arranged.CardContent!.Cards.SequenceEqual(inline) && arranged.Parts.All(part => part.Item is not (ExpandedItem.Power or ExpandedItem.Frames))
             && arranged.Demand(false).HasFlag(ExpandedDemand.Power | ExpandedDemand.Frames));
         var unavailablePower = ExpandedLayout.For(selected, 800, 344, new(1, 0), cardContent: mixed);
@@ -147,6 +152,12 @@ internal static class ExpandedMonitorTests
         var minimum = ExpandedLayout.For(selected.Prepend(ExpandedItem.Gpu), 408, 102, new(1, 1), cardContent: mixed);
         check("Expanded customization: minimum panel fits one complete memory card with both gauges",
             !minimum.CardsTwoColumns && minimum.CardsHeight >= Math.Ceiling(minimum.Body * 1.7 + 31) + 1 && minimum.Part(ExpandedItem.Cpu) is not null);
+        var pairedRows = ExpandedLayout.For([ExpandedItem.Download, ExpandedItem.Memory, ExpandedItem.Storage, ExpandedItem.Upload], 760, 400,
+            cardContent: new([new(ExpandedItem.Download), new(ExpandedItem.Memory), new(ExpandedItem.Storage, "C:"), new(ExpandedItem.Upload)], false, true));
+        double line = ExpandedCards.LineHeight(pairedRows.Steps.Body), spacing = 2 * ExpandedCards.VerticalPadding + ExpandedCards.RowGap + 1;
+        check("Expanded customization: only the memory row gets additional height and the cards start at the top",
+            pairedRows.CardsTwoColumns && pairedRows.Parts.Single().Box.Y == 0 &&
+            Math.Abs(pairedRows.CardsHeight - (ExpandedCards.MemoryHeight(pairedRows.Steps.Body) + line + 2 * spacing)) < 1);
     }
 
     private static List<ExpandedItem> Subset(int mask) => [.. Every.Where((item, index) => (mask >> index & 1) != 0)];

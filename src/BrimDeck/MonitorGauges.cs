@@ -601,7 +601,7 @@ internal sealed class MemoryBlock : FrameworkElement
     public MemoryBlock(MonitorColors colors, bool compact, double body, double caption, bool free = false, bool compactBar = false)
     {
         _colors = colors; _compact = compact; _body = body; _caption = caption; _free = free; _compactBar = compactBar;
-        Height = compact ? Math.Ceiling(body * 1.7) : Math.Ceiling(body * 1.7 + 6 + 5 + 5 + 3);
+        Height = compact ? ExpandedCards.LineHeight(body) : ExpandedCards.MemoryHeight(body);
     }
 
     // For screen readers: "物理内存 63% · 正常", the memory in use (or free) as its value.
@@ -631,7 +631,7 @@ internal sealed class MemoryBlock : FrameworkElement
 
     protected override void OnRender(DrawingContext drawing)
     {
-        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), now = Eased.Now, line = Math.Ceiling(_body * 1.7), badge = Math.Round(_body + 5);
+        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), now = Eased.Now, line = ExpandedCards.LineHeight(_body), badge = Math.Round(_body + 5);
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
         string color = _memory is null ? Look.Tertiary : _colors.Memory;
         MonitorDraw.Dial(drawing, new Point(badge / 2, line / 2), badge, FigureGauge.DialRing(badge), FigureGauge.DialLetter(badge), _memory is null ? null : Shown(_used.At(now)), color, "M", ppd, look: Look);
@@ -716,7 +716,7 @@ internal sealed class NetworkBlock : FrameworkElement
     {
         _colors = colors; _mode = mode == MetricsMode.Blocks ? MetricsMode.Lines : mode; _body = body; _caption = caption;
         _download = download || !upload; _upload = upload || !download; _uploadFirst = uploadFirst;
-        Height = Math.Ceiling(body * 1.7);
+        Height = ExpandedCards.LineHeight(body);
     }
 
     // For screen readers: "网络 · 下载 1.2 MB/s · 上传 85 KB/s".
@@ -738,7 +738,7 @@ internal sealed class NetworkBlock : FrameworkElement
 
     protected override void OnRender(DrawingContext drawing)
     {
-        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), line = Math.Ceiling(_body * 1.7), half = Math.Floor((w - 12) / 2);
+        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), line = ExpandedCards.LineHeight(_body), half = Math.Floor((w - 12) / 2);
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
         if (_download && _upload)
         {
@@ -808,7 +808,7 @@ internal sealed class StorageBlock : FrameworkElement
     // Between the columns.
     private const double ColumnGap = 20;
     private readonly MonitorColors _colors;
-    private readonly double _body, _caption, _row;
+    private readonly double _body, _caption, _row, _baselineOffset;
     private readonly int _columns, _room;
     private readonly bool _temperatures, _free;
     private IReadOnlyList<StorageRow> _rows = [];
@@ -817,9 +817,10 @@ internal sealed class StorageBlock : FrameworkElement
 
     // lines and columns: the places the page keeps for the volumes; temperatures: whether entries carry temperatures; free: the
     // entries show the space free in place of the space in use.
-    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int columns, bool temperatures, bool free = false)
+    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int columns, bool temperatures, bool free = false, bool alignCardBaseline = false)
     {
         _colors = colors; _body = body; _caption = caption; _row = row; _columns = Math.Max(1, columns);
+        _baselineOffset = body * (alignCardBaseline ? .38 : .36);
         _room = Math.Max(1, lines) * _columns; _temperatures = temperatures; _free = free;
         Height = Math.Max(1, lines) * row;
         SnapsToDevicePixels = true;
@@ -911,7 +912,7 @@ internal sealed class StorageBlock : FrameworkElement
         for (int i = 0; i < _rows.Count; i++)
         {
             var row = _rows[i]; var t = texts[i];
-            double left = i % _columns * (cell + ColumnGap), top = i / _columns * _row, baseline = Math.Round(top + _row / 2 + _body * .36), middle = top + _row / 2;
+            double left = i % _columns * (cell + ColumnGap), top = i / _columns * _row, baseline = Math.Round(top + _row / 2 + _baselineOffset), middle = top + _row / 2;
             MonitorDraw.Arrow(drawing, new Point(left + (badge - glyph) / 2, middle - glyph / 2), glyph, Math.Max(1, glyph * .13), MonitorGlyph.Drive, Look.Secondary);
             MonitorDraw.Baseline(drawing, t.Label, left + labelX, baseline);
             MonitorDraw.Baseline(drawing, t.Used, left + figureX, baseline);

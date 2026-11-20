@@ -257,9 +257,7 @@ public static class ExpandedLayout
         double columnMargin = previous is { CardContent.Cards.Count: > 0 } && previous.List == list && previous.Scale == scale
             ? (previous.CardsTwoColumns ? Hysteresis : -Hysteresis) : 0;
         bool twoColumns = cards && ExpandedCards.TwoColumns(readingsW * scale + columnMargin, scale);
-        int cardRows = cards ? Math.Max(1, ExpandedCards.Place(cardContent!.Cards, twoColumns).LastOrDefault().Row + 1 + (cardContent.AwaitingDrives && cardContent.Cards.Count > 0 ? 1 : 0)) : 0;
-        // Memory is the tallest card; leave one extra DIP for layout rounding at fractional display scales.
-        double cardRow = Math.Ceiling(body * 1.7 + 31) + 1;
+        var (cardHeight, tallestCardRow) = cards ? ExpandedCards.MeasureRows(cardContent!, twoColumns, body) : (0d, 0d);
         List<Band> Build()
         {
             double restNow = Rest2(mode, memShown, netShown);
@@ -267,7 +265,7 @@ public static class ExpandedLayout
             if (gaugeShown) bands.Add(new Band { Kind = BandKind.Gauge, Index = Index(ExpandedItem.Cpu, ExpandedItem.Gpu), Height = head + margins + graphMin });
             if (restNow > 0) bands.Add(new Band { Kind = BandKind.Metrics, Index = Index(ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload), Height = restNow, Stretch = StretchBlocks });
             if (cards) bands.Add(new Band { Kind = BandKind.Cards, Index = cardIndex < 0 ? int.MaxValue : cardIndex, Height = ln,
-                Stretch = cardRows * cardRow / ln });
+                Stretch = cardHeight / ln });
             if (frameLine) bands.Add(new Band { Kind = BandKind.Frames, Index = Index(ExpandedItem.Frames), Height = rowS, Stretch = StretchRows });
             if (storageLines > 0) bands.Add(new Band { Kind = BandKind.Storage, Index = Index(ExpandedItem.Storage), Height = storageLines * rowS, Stretch = StretchDrives });
             if (powerLines > 0) bands.Add(new Band { Kind = BandKind.Power, Index = Index(ExpandedItem.Power), Height = powerLines * rowS, Stretch = StretchRows });
@@ -290,7 +288,7 @@ public static class ExpandedLayout
         if (cards && gaugeShown && graphMin > GraphFloor)
         {
             // Give the scroll viewport room to show a complete reading before using the extra height for graphs.
-            double shortage = cardRow - ln - (readingsH - Total(all));
+            double shortage = tallestCardRow - ln - (readingsH - Total(all));
             if (shortage > 0)
             {
                 squeezed = true;
@@ -334,7 +332,7 @@ public static class ExpandedLayout
             if (cardBand is not null)
             {
                 double spare = Math.Max(0, readingsH - Total(all));
-                double grow = Math.Min(spare, Math.Max(0, cardRows * cardRow - cardBand.Height));
+                double grow = Math.Min(spare, Math.Max(0, cardHeight - cardBand.Height));
                 cardBand.Height += grow;
                 fixedTotal += grow;
             }
@@ -361,7 +359,7 @@ public static class ExpandedLayout
                 }
             }
             hole = Math.Max(0, readingsH - Total(all));
-            offset = Math.Floor(hole / 2);
+            offset = cards ? 0 : Math.Floor(hole / 2);
         }
 
         // Places.

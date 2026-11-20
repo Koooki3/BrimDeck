@@ -188,6 +188,7 @@ internal sealed class MonitorView : Grid
             cards.ColumnDefinitions.Add(new ColumnDefinition());
             cards.ColumnDefinitions.Add(new ColumnDefinition());
             var slots = ExpandedCards.Place(custom.Cards, plan.CardsTwoColumns);
+            double line = ExpandedCards.LineHeight(layout.Body);
             for (int i = 0; i < custom.Cards.Count; i++)
             {
                 var card = custom.Cards[i];
@@ -197,12 +198,12 @@ internal sealed class MonitorView : Grid
                 if (card.Item == ExpandedItem.Memory)
                     reading = _memory = new MemoryBlock(colors, false, layout.Body, layout.Caption, free, compactBar: card.CompactMemoryBar);
                 else if (card.Item == ExpandedItem.Power)
-                    reading = _power = new PowerBlock(colors, power, layout.Body, layout.Caption, layout.StorageRow);
+                    reading = _power = new PowerBlock(colors, power, layout.Body, layout.Caption, line);
                 else if (card.Item == ExpandedItem.Frames)
-                    reading = _frames = new FramesBlock(colors[MonitorRole.Frames], layout.Body, layout.Caption, layout.StorageRow);
+                    reading = _frames = new FramesBlock(colors[MonitorRole.Frames], layout.Body, layout.Caption, line);
                 else if (card.Letter is { } letter)
                 {
-                    var drive = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, 1, 1, temperatures, free);
+                    var drive = new StorageBlock(colors, layout.Body, layout.Caption, line, 1, 1, temperatures, free, alignCardBaseline: true);
                     _driveCards.Add((letter, drive));
                     reading = drive;
                 }
@@ -211,9 +212,11 @@ internal sealed class MonitorView : Grid
                 else if (card.Item == ExpandedItem.Upload)
                     reading = _uploadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, download: false);
                 else continue;
+                // A two-line memory card adds room below the shared text baseline.
+                reading.VerticalAlignment = VerticalAlignment.Top;
                 var frame = new Border { Child = reading, ClipToBounds = true,
-                    Padding = new Thickness(6, 4, 6, 4),
-                    Margin = new Thickness(column == 1 ? 3 : 0, 0, span == 1 && column == 0 ? 3 : 0, 4) };
+                    Padding = new Thickness(6, ExpandedCards.VerticalPadding, 6, ExpandedCards.VerticalPadding),
+                    Margin = new Thickness(column == 1 ? 3 : 0, 0, span == 1 && column == 0 ? 3 : 0, ExpandedCards.RowGap) };
                 SetRow(frame, row); SetColumn(frame, column); SetColumnSpan(frame, span);
                 cards.Children.Add(frame);
             }
@@ -308,7 +311,7 @@ internal sealed class MonitorView : Grid
             }
             SetRow(bands[i].Element, i); readings.Children.Add(bands[i].Element);
         }
-        if (!hasGraphs) readings.VerticalAlignment = VerticalAlignment.Center;
+        if (!hasGraphs) readings.VerticalAlignment = _cardScroll is null ? VerticalAlignment.Center : VerticalAlignment.Top;
 
         if (plan.List == ExpandedList.Full)
         {
