@@ -495,9 +495,16 @@ static class DeviceProtocolTests
         check("Nordic receivers: only the Ninjutso Sora V2's, on its vendor collection", Dongles.Find(0x1915, 0xAE1C, 0xFFA0, "", 33) == Dongles.Protocol.Nordic
             && Dongles.Find(0x1915, 0xAE1C, 0x0001, "", 0) is null && Dongles.Find(0x1915, 0x7777, 0xFFA0, "", 33) is null);
         var inphic = new byte[33]; inphic[0] = 0x0C; inphic[2] = 0x20; inphic[6] = 1; inphic[0x12] = 66; inphic[0x13] = 2;
-        check("Inphic IN9: the handshake with its payload, the query, a reply", Dongles.InphicRequest(0xF0, 3, Dongles.InphicHandshake)[..9].SequenceEqual(new byte[] { 0x0C, 0x01, 0xF0, 0x00, 0x03, 0x01, 0x01, 0xFF, 0 })
-            && Dongles.InphicRequest(0x20, 3)[..6].SequenceEqual(new byte[] { 0x0C, 0x01, 0x20, 0x00, 0x03, 0 }) && Dongles.InphicRequest(0x20, 3).Length == 33
-            && Dongles.InphicBattery(inphic) == new BatteryRead(66, true));
+        static byte[] With(byte[] frame, int at, byte value) { var copy = (byte[])frame.Clone(); copy[at] = value; return copy; }
+        check("Inphic IN9 and Machenike's M7 Pro, M720, M840: the query, a reply charging (2, InphicBatteryTray-IN9) or charging and full (1 and 2, Machenike), on battery, and an empty one",
+            Dongles.InphicRequest(0x20, 3)[..6].SequenceEqual(new byte[] { 0x0C, 0x01, 0x20, 0x00, 0x03, 0 }) && Dongles.InphicRequest(0x20, 3).Length == 33
+            && Dongles.InphicRequest(0x20, 3)[5..].All(b => b == 0)
+            && Dongles.InphicBattery(inphic) == new BatteryRead(66, true) && Dongles.InphicBattery(With(inphic, 0x13, 1)) == new BatteryRead(66, true)
+            && Dongles.InphicBattery(With(inphic, 0x13, 0)) == new BatteryRead(66) && Dongles.InphicBattery(With(inphic, 0x13, 3)) == new BatteryRead(66)
+            && Dongles.InphicBattery(With(inphic, 6, 0)) is null && Dongles.InphicBattery(With(inphic, 0x12, 101)) is null);
+        check("Inphic: Machenike's mice on 248A:5B2E and 5B2F, read only on the 33-byte feature collection",
+            Dongles.Find(0x248A, 0x5B2E, 0xFF00, "", 33) == Dongles.Protocol.Inphic && Dongles.Find(0x248A, 0x5B2F, 0xFF00, "", 33) == Dongles.Protocol.Inphic
+            && Dongles.Find(0x248A, 0x5B2F, 0x0001, "", 0) is null);
         check("MCHOSE: the device info request with its checksum", Dongles.MchoseRequest()[..9].SequenceEqual(new byte[] { 0x4D, 0x01, 0x01, 0x00, 0x00, 0x09, 0x00, 0x00, 0x08 }));
         // mitsimi/mchose-tray's capture from a K7 V2 Ultra+ (3837:1014): 83 %, not charging, and that frame changed (its XOR
         // recomputed) for the other states.

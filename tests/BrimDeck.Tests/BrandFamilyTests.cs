@@ -14,6 +14,50 @@ static class BrandFamilyTests
         VgnV108(check);
         VgnV98ProV3(check);
         LangtuLeobog(check);
+        Machenike(check);
+    }
+
+    // Machenike's mice on other brands' platforms: only the pairs its drivers list, each on its own collection.
+    private static void Machenike(Action<string, bool> check)
+    {
+        HidShape Telink(int product, int page) => Shape(0x248A, product, page, 1, 1, 21, 21, 21, featureIds: [0x51]);
+        check("Machenike: the L7 Mix on 0x8C and the L8 Pro 2K on 0xFF01 take the identity read, the receivers after the bond read, not on the other page",
+            new[] { (0xFF4E, 0x008C, false), (0xFF4C, 0x008C, true), (0xFFE1, 0xFF01, false), (0xFFE2, 0xFF01, true) }.All(p => BrandFamilies.Find(Telink(p.Item1, p.Item2)) is { Family.Brand: "Machenike mouse" } f
+                && f.Ways.Select(way => way.Name).SequenceEqual(["machenike.identity"]) && f.Ways[0].FeatureLength == 21
+                && f.Ways[0].Request.SequenceEqual(DarmosharkMice.IdentityRequest())
+                && (p.Item3 ? f.Ways[0].Before.Single().SequenceEqual(DarmosharkMice.BondRequest()) : f.Ways[0].Before.Count == 0))
+            && BrandFamilies.Find(Telink(0xFF4C, 0xFF01)) is null && BrandFamilies.Find(Telink(0xFFE2, 0x008C)) is null && BrandFamilies.Find(Telink(0xFF4D, 0x008C)) is null
+            && BrandFamilies.Find(Telink(0xFF4C, 0x008C))!.Value.Family.DisplayName(Telink(0xFF4C, 0x008C)) == "Machenike L7 Mix"
+            && BrandFamilies.Find(Telink(0xFFE1, 0xFF01))!.Value.Family.DisplayName(Telink(0xFFE1, 0xFF01)) == "Machenike L8 Pro");
+        var g7 = Shape(0x320F, 0x22A4, 0xFF1C, 0x92, -1, 64, 64, outputIds: [0x04]);
+        var answer = new byte[64]; answer[0] = 0x04; answer[3] = 0x1A; answer[8] = 57; answer[9] = 1;
+        check("Machenike G7: VGN's 1A 06 on report 4 of 0xFF1C / 0x92, the level alone; 0 or another frame is none; 226F is not asked",
+            BrandFamilies.Find(g7) is { Family.Brand: "Machenike mouse" } g && g.Ways.Select(way => way.Name).SequenceEqual(["machenike.g7"])
+            && g.Ways[0].Request.SequenceEqual(Dongles.VgnRequest()) && MachenikeMice.G7Battery(answer) == new BatteryRead(57)
+            && MachenikeMice.G7Battery(answer[..3]) is null && MachenikeMice.G7Battery(Dongles.VgnRequest()) is null
+            && BrandFamilies.Find(g7 with { Product = 0x226F }) is null && BrandFamilies.Find(g7 with { UsagePage = 0xFF1D }) is null);
+        var l7Mix8K = Shape(0x0BDA, 0xFFE6, 0xFFC1, 1, 1, 64, 64, outputIds: [0xB3]);
+        check("Machenike L7 Mix 8K: its receiver takes Keychron's B3 06, its cable does not",
+            BrandFamilies.Find(l7Mix8K) is { Family.Brand: "Machenike 8K mouse" } m && m.Ways.Select(way => way.Name).SequenceEqual(["machenike.status"])
+            && m.Family.DisplayName(l7Mix8K) == "Machenike L7 Mix 8K" && BrandFamilies.Find(l7Mix8K with { Product = 0xFFD4 }) is null);
+        var hub = Shape(0x089D, 0x062F, 0xFF01, 0x10, -1, 33, 33, outputIds: [0x00]);
+        var info10 = new byte[32]; info10[0] = 0x10; "M603"u8.ToArray().CopyTo(info10, 4); info10[12] = 1; info10[13] = 64; info10[14] = 1;
+        var off = (byte[])info10.Clone(); off[14] = 0;
+        check("EWEADN's ids: the 0x30 info first, Machenike's 0x10 after; the 0x10 answer read from 4 on, offline asleep, other frames none",
+            BrandFamilies.Find(hub) is { } e && e.Ways.Select(way => way.Name).SequenceEqual(["eweadn.info", "eweadn.info10"])
+            && EweadnMice.Info10Request().Length == 33 && EweadnMice.Info10Request()[..2].SequenceEqual(new byte[] { 0x00, 0x10 }) && EweadnMice.Info10Request()[2..].All(b => b == 0)
+            && EweadnMice.Info10(info10) == new BatteryRead(100 - 36, true) && EweadnMice.Info10(off) == new BatteryRead(null, Asleep: true)
+            && EweadnMice.CableInfo10(off) == new BatteryRead(64, true) && EweadnMice.CableInfo10(info10) == new BatteryRead(64, true)
+            && EweadnMice.Info10(info10[..14]) is null && EweadnMice.Info(info10) is null && EweadnMice.Info10([0x30, .. info10[1..]]) is null);
+        var beiyin = Shape(0x372E, 0x101F, 0xFF00, 1, -1, 0, 0, 64, featureIds: [0x03]);
+        check("EWEADN's beiyin read: Machenike's L9 X1 8K receiver 101F and cables 1020 and 104F",
+            new[] { 0x101F, 0x1020, 0x104F }.All(p => BrandFamilies.Find(beiyin with { Product = p }) is { } b && b.Ways.Select(way => way.Name).SequenceEqual(["eweadn.beiyin"])));
+        var nearlink = Shape(0x369B, 0x0043, 0xFFA0, 2, -1, 64, 64, outputIds: [0xA0]);
+        check("NearLink: Machenike's 369B products are asked as other products, shown as mice; another product's kind is left to its name",
+            BrandFamilies.Find(nearlink) is { Family.Brand: "NearLink receiver" } n && n.Family.Kind(nearlink) == DeviceKind.Mouse
+            && n.Family.Kind(nearlink with { Product = 0x0999 }) is null);
+        check("Compx: Machenike's L7 Air 4K and its receivers on the official list",
+            Dongles.IsCompxOfficial(0x3554, 0xF54D) && Dongles.IsCompxOfficial(0x3554, 0xF54C) && Dongles.IsCompxOfficial(0x3554, 0xF54F));
     }
 
     // #349: LANGTU's T98 RGB on Shinetek's platform, LEOBOG's and LANGTU's models behind 3554:FA09, LANGTU's Huafenda cables.
@@ -21,13 +65,41 @@ static class BrandFamilyTests
     {
         HidShape Shinetek(int product, int page = 0xFF02, int usage = 2, int length = 65) => Shape(0x1A2C, product, page, usage, 0, length, length, outputIds: [0x00]);
         check("Shinetek: the T98 RGB's and T75's cables, the AK820 Max Plus's and their receiver, on the 65-byte 0xFF02 collection alone, named but the receiver",
-            new[] { 0xA047, 0xA071, 0xA036, 0x8FFF }.All(p => BrandFamilies.Find(Shinetek(p)) is { Family.Brand: "Shinetek keyboard" } f
-                && f.Ways.Select(way => way.Name).SequenceEqual(["shinetek.status"]) && f.Ways[0].Request.Length == 65
+            new[] { 0xA047, 0xA071, 0xA036, 0x8FFF }.All(p => BrandFamilies.Find(Shinetek(p)) is { Family.Brand: "Shinetek" } f
+                && f.Ways[0].Name == "shinetek.status" && f.Ways[0].Request.Length == 65
                 && f.Ways[0].Request[..6].SequenceEqual(new byte[] { 0x00, 0xAA, 0x55, 0xCC, 0x33, 0x0E }) && f.Ways[0].Request[6..].All(b => b == 0))
             && BrandFamilies.Find(Shinetek(0xA047)) is { } t98 && t98.Family.DisplayName(Shinetek(0xA047)) == "LANGTU T98 RGB"
+            && t98.Ways.Count == 1 && t98.Family.Kind(Shinetek(0xA047)) == DeviceKind.Keyboard
             && t98.Family.DisplayName(Shinetek(0x8FFF)) is null
             && BrandFamilies.Find(Shinetek(0xAFFF)) is null && BrandFamilies.Find(Shinetek(0xA047, 0xFF01, 1, 4)) is null
             && BrandFamilies.Find(Shinetek(0xA047, length: 33)) is null && BrandFamilies.Find(Shinetek(0xA047, 0x0001, 6)) is null);
+        // Machenike's M7 Pro (9015, 9016) and M721 (9018) on the same platform: 08 FD on the cable, BB AA 99 88 09 FD through the
+        // shared receiver, which tries the keyboards' read first; a mouse read answering makes the receiver a mouse.
+        static bool Zeros(byte[] frame, int from) => frame[from..].All(b => b == 0);
+        check("Shinetek: Machenike's mice on their cables take the mouse status read alone, named, as mice; the receiver takes both reads",
+            new[] { 0x9015, 0x9016, 0x9018 }.All(p => BrandFamilies.Find(Shinetek(p)) is { Family.Brand: "Shinetek" } f
+                && f.Ways.Select(way => way.Name).SequenceEqual(["shinetek.mouse"]) && f.Ways[0].Request.Length == 65
+                && f.Ways[0].Request[..3].SequenceEqual(new byte[] { 0x00, 0x08, 0xFD }) && Zeros(f.Ways[0].Request, 3)
+                && f.Family.Kind(Shinetek(p)) == DeviceKind.Mouse)
+            && BrandFamilies.Find(Shinetek(0x9015)) is { } m7 && m7.Family.DisplayName(Shinetek(0x9015)) == "Machenike M7 Pro"
+            && m7.Family.DisplayName(Shinetek(0x9016)) == "Machenike M7 Pro" && m7.Family.DisplayName(Shinetek(0x9018)) == "Machenike M721"
+            && BrandFamilies.Find(Shinetek(0x8FFF)) is { } receiver && receiver.Ways.Select(way => way.Name).SequenceEqual(["shinetek.status", "shinetek.mouse"])
+            && receiver.Ways[1].Request[..7].SequenceEqual(new byte[] { 0x00, 0xBB, 0xAA, 0x99, 0x88, 0x09, 0xFD }) && Zeros(receiver.Ways[1].Request, 7)
+            && receiver.Family.WayKind("shinetek.mouse") == DeviceKind.Mouse && receiver.Family.WayKind("shinetek.status") is null
+            && receiver.Ways[0].ProbeOnAsleep && !receiver.Ways[1].ProbeOnAsleep && !BrandFamilies.Find(Shinetek(0xA047))!.Value.Ways[0].ProbeOnAsleep
+            && receiver.Family.Kind(Shinetek(0x8FFF)) == DeviceKind.Keyboard
+            && BrandFamilies.Find(Shinetek(0x9017)) is null && BrandFamilies.Find(Shinetek(0x9015, length: 33)) is null);
+        check("Shinetek: the mice's status answer with any fifth byte (but a keyboard's 0E through the receiver), charging on the cable and through the receiver, the mouse gone from the receiver, and other frames",
+            BrimDeck.Core.Shinetek.MouseBattery([0xAA, 0x55, 0xCC, 0x33, 0xFD, 0x50, 0x02, 0x00], true) == new BatteryRead(80)
+            && BrimDeck.Core.Shinetek.MouseBattery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x64, 0x03], false) == new BatteryRead(100, true)
+            && BrimDeck.Core.Shinetek.MouseBattery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x64, 0x02], true) is null
+            && BrimDeck.Core.Shinetek.MouseBattery([0xAA, 0x55, 0xCC, 0x33, 0x00, 0x21, 0x01], true) == new BatteryRead(33, true)
+            && BrimDeck.Core.Shinetek.MouseBattery([0xAA, 0x55, 0xCC, 0x33, 0xFD, 0x00, 0x00], true) == new BatteryRead(null, Asleep: true)
+            && BrimDeck.Core.Shinetek.MouseBattery([0xAA, 0x55, 0xCC, 0x33, 0xFD, 0x00, 0x00], false) is null
+            && BrimDeck.Core.Shinetek.MouseBattery([0xAA, 0x55, 0xCC, 0x33, 0xFD, 0x65, 0x02], true) is null
+            && BrimDeck.Core.Shinetek.MouseBattery([0xAA, 0x55, 0xCC, 0x33, 0xFD, 0x50, 0x04], true) is null
+            && BrimDeck.Core.Shinetek.MouseBattery([0xBB, 0xAA, 0x99, 0x88, 0x09, 0xFD, 0x00], true) is null
+            && BrimDeck.Core.Shinetek.MouseBattery([0xAA, 0x55, 0xCC, 0x33, 0xFD, 0x50], true) is null);
         check("Shinetek: the status answer (ajazz-linux's measured 64 03, full on the cable), charging and on battery, the keyboard gone from the receiver, and other frames",
             BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x64, 0x03, 0x00], false) == new BatteryRead(100, true)
             && BrimDeck.Core.Shinetek.Battery([0xAA, 0x55, 0xCC, 0x33, 0x0E, 0x61, 0x01], true) == new BatteryRead(97, true)

@@ -565,6 +565,8 @@ public static class Dongles
         // and sends M1, M2, X, X Air and X Pro to Compx's Control HUB (controlhub.top/gravastar), whose cfg.json lists receivers
         // F54B, F575, F548, F577 and cables F576, F549 (F577 is the one GS HUB names no model for; the X Air's, unconfirmed).
         (0x3554, 0xF54B), (0x3554, 0xF575), (0x3554, 0xF548), (0x3554, 0xF577), (0x3554, 0xF576), (0x3554, 0xF549),
+        // Machenike's L7 Air 4K (machenike.com, its driver 1.0.0.4): the mouse F54D and its receivers F54C and F54F.
+        (0x3554, 0xF54D), (0x3554, 0xF54C), (0x3554, 0xF54F),
     ];
     private static readonly HashSet<(int, int)> CompxOfficialSet = [.. CompxOfficial];
     public static bool IsCompxOfficial(int vendor, int product) => CompxOfficialSet.Contains((vendor, product));
@@ -1178,10 +1180,16 @@ public static class Dongles
     }
 
     // Inphic IN9 (248A:5B2E cable, 5B2F receiver; on 2.4 GHz vendor 0x249A, whose product is not fixed; feature 0x0C, 33
-    // bytes): [0x0C, 0x01, command, 0, sequence, payload...]; 0xF0 the handshake (payload 01 01 FF), 0x20 the battery, the two
-    // with one sequence number. The reply echoes 0x20 at 2, is valid with byte 6 set, the percentage at 0x12, 2 at 0x13 charging.
+    // bytes): [0x0C, 0x01, command, 0, sequence, payload...]; 0x20 the battery. The reply echoes 0x20 at 2, is valid with byte 6
+    // set, the percentage at 0x12, the power state at 0x13. Machenike's (机械师) M7 Pro (its PAW3104 and 3395 models, and the
+    // Hatsune Miku edition), M720 and M840 use the same ids and frame: their app ("M800DB DRIVER", one build for all four, from
+    // machenike.com) sets 0C 01 20 00 <sequence> and zeros, gets report 0x0C back 10 ms later, asks again once when byte 6 is 0,
+    // and takes 0x12 as the percent (over 100 shown as 0) and 0x13 as 1 charging, 2 full on the cable (shown as 100), else on
+    // battery. InphicBatteryTray-IN9 reads 2 there as charging; both are taken as on the cable, the level kept as read. The
+    // InphicBatteryTray projects send a "handshake" 0C 01 F0 00 <seq> 01 01 FF before it, which neither says the read needs;
+    // Machenike's app never sends F0, and on its firmware the same payload under command 0x0F is the factory reset (sent only
+    // from its firmware-reset dialog). So only 0x20 is sent. Not measured by us on either brand.
     public const int InphicVendor = 0x248A, InphicWireless = 0x249A;
-    public static readonly byte[] InphicHandshake = [0x01, 0x01, 0xFF];
     public static byte[] InphicRequest(byte command, byte sequence, params byte[] payload)
     {
         var frame = new byte[33];
@@ -1189,7 +1197,7 @@ public static class Dongles
         Array.Copy(payload, 0, frame, 5, Math.Min(payload.Length, frame.Length - 5));
         return frame;
     }
-    public static BatteryRead? InphicBattery(byte[] reply) => reply.Length >= 0x14 && reply[0] == 0x0C && reply[2] == 0x20 && reply[6] != 0 && reply[0x12] <= 100 ? new(reply[0x12], reply[0x13] == 2) : null;
+    public static BatteryRead? InphicBattery(byte[] reply) => reply.Length >= 0x14 && reply[0] == 0x0C && reply[2] == 0x20 && reply[6] != 0 && reply[0x12] <= 100 ? new(reply[0x12], reply[0x13] is 1 or 2) : null;
 
     // MCHOSE mice (VID 0x3837; usage page 0xFF01 or 0xFF0B; output report 0x4D, 64 bytes), from the vendor's web driver. Not
     // tested by us on a receiver. Realtek's 0x0BDA:0x4762 is not sent to: Realtek's id is on countless products and the pair is

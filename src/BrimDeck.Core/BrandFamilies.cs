@@ -83,6 +83,9 @@ public sealed record BrandWay(string Name, WayTransport Transport, byte[] Reques
     // as read. Not for Listen (nothing is sent).
     public byte[]? Then { get; init; }
     public Func<byte[], bool?>? Charging { get; init; }
+    // A first try of this read that finds the device asleep does not settle the reads (a receiver that answers it for itself
+    // whatever is behind it): the ones after it are tried, and it is kept only if none of them gives a level.
+    public bool ProbeOnAsleep { get; init; }
     // WayTransport.Converse: the whole exchange, its reading or null. It must keep to its own time limit.
     public Func<IHidExchange, BatteryRead?>? Converse { get; init; }
 
@@ -149,6 +152,8 @@ public static class GetInputExchange
 public sealed record BrandFamily(string Brand, Func<HidShape, bool> Takes, Func<HidShape, IReadOnlyList<BrandWay>> Ways)
 {
     public Func<HidShape, DeviceKind?> Kind { get; init; } = _ => null;
+    // What the device is, by the read that answered (a receiver shared by keyboards and mice), before Kind.
+    public Func<string, DeviceKind?> WayKind { get; init; } = _ => null;
     public string Prefix { get; init; } = "brand";
     public Func<HidShape, string?> DisplayName { get; init; } = _ => null;
     // Read only while none of these processes runs (the brand's own software would lose its answers to us).
