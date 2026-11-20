@@ -71,6 +71,8 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
     private (DateTimeOffset Time, IReadOnlyList<WslHome> Homes)? _wsl;
     private bool _includeWsl;
     private readonly AntigravityUsage _antigravity = new();
+    // Whether any enabled Antigravity row reads via the CLI (AppEntry.AntigravityCli); turning it off forgets the CLI reading.
+    private bool _antigravityCli = true;
     private DateTimeOffset? _antigravityCliAttempt;
     private (DateTimeOffset Time, List<Quota> Quotas)? _antigravityCliReading;
     private readonly DshSessions _dsh = new();
@@ -188,6 +190,8 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             bool claudeLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && ProviderCatalog.ReadsLocalQuota(app));
             bool grokBotOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && app.QuotaOnline);
             bool grokBotLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && ProviderCatalog.ReadsLocalQuota(app));
+            _antigravityCli = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Antigravity && app.AntigravityCli);
+            if (!_antigravityCli) { _antigravityCliAttempt = null; _antigravityCliReading = null; }
             // A stalled source ends with a timeout status instead of holding every later refresh behind this gate.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             deadline.CancelAfter(Deadline);
@@ -1245,6 +1249,27 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException) { }
         }
         ct.ThrowIfCancellationRequested();
+        if (!_antigravityCli)
+        {
+            if (endpoints.Count == 0 && !desktop.AntigravityUnreadable)
+            { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到 Antigravity 应用或 IDE 的本地用量服务", "The local usage service of the Antigravity app or IDE was not found."); return; }
+        }
+        else if (await ReadAntigravityCliAsync(snapshot, now, ct)) return;
+        if (endpoints.Count == 0 && desktop.AntigravityUnreadable)
+        {
+            snapshot.StatusLabel = Loc.T("无法读取", "Cannot read");
+            snapshot.Status = Loc.T("Antigravity 以管理员身份运行，BrimDeck 无法读取。请以普通权限启动 Antigravity", "Antigravity runs as administrator, so BrimDeck cannot read it. Start Antigravity without administrator rights.");
+            return;
+        }
+        if (endpoints.Count == 0)
+        { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到 Antigravity 应用或 IDE 的本地服务，CLI 也未返回额度。请检查 agy 是否已安装并登录", "No local service of the Antigravity app or IDE was found, and the CLI returned no quota. Check that agy is installed and signed in."); return; }
+        snapshot.StatusLabel = Loc.T("服务暂不可用", "Service unavailable"); snapshot.Status = Loc.T("检测到 Antigravity，但本地用量服务暂不可用", "Antigravity was found, but its local usage service is unavailable.");
+    }
+
+    // The CLI is run at most every five minutes, counting runs that failed or timed out; in between, and after a failed run,
+    // the last reading is shown with the time it was read. Returns whether a reading was shown.
+    private async Task<bool> ReadAntigravityCliAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
         var attemptTime = _clock();
         if (_antigravityCliAttempt is not { } attempted || attemptTime - attempted >= TimeSpan.FromMinutes(5))
         {
@@ -1254,20 +1279,9 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             var quotas = QuotaParser.AntigravityCli(report);
             if (quotas.Count > 0) _antigravityCliReading = (attemptTime, quotas);
         }
-        if (_antigravityCliReading is { } reading)
-        {
-            ShowAntigravityCli(snapshot, reading, now, reading.Time != _antigravityCliAttempt);
-            return;
-        }
-        if (endpoints.Count == 0 && desktop.AntigravityUnreadable)
-        {
-            snapshot.StatusLabel = Loc.T("无法读取", "Cannot read");
-            snapshot.Status = Loc.T("Antigravity 以管理员身份运行，BrimDeck 无法读取。请以普通权限启动 Antigravity", "Antigravity runs as administrator, so BrimDeck cannot read it. Start Antigravity without administrator rights.");
-            return;
-        }
-        if (endpoints.Count == 0)
-        { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到本地服务，CLI 也未返回额度。请检查 agy 是否已安装并登录", "No local service or CLI quota. Check that agy is installed and signed in."); return; }
-        snapshot.StatusLabel = Loc.T("服务暂不可用", "Service unavailable"); snapshot.Status = Loc.T("检测到 Antigravity，但本地用量服务暂不可用", "Antigravity was found, but its local usage service is unavailable.");
+        if (_antigravityCliReading is not { } reading) return false;
+        ShowAntigravityCli(snapshot, reading, now, reading.Time != _antigravityCliAttempt);
+        return true;
     }
 
     // A ZCode column combines the signed-in account's Coding Plan (the same template as the 智谱 GLM / Z.ai GLM

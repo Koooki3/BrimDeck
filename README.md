@@ -190,7 +190,7 @@ For the files BrimDeck reads and the addresses it connects to, see [Data and pri
 ## FAQ
 
 **A tool shows "Not connected" or "Waiting for update". What should I do?**
-Make sure the tool is signed in on this PC; for example, Antigravity needs its desktop app running for its quota to be read. When BrimDeck cannot read the data, it shows the actual status and never makes up numbers.
+Make sure the tool is signed in on this PC; for example, Antigravity needs its desktop app or IDE running, or its CLI signed in, for its quota to be read. When BrimDeck cannot read the data, it shows the actual status and never makes up numbers.
 
 **Is the cost shown what I actually pay?**
 No. Costs come from the amounts reported by each service or from public model prices, and are meant to show how much you use. Your actual subscription charges are on each provider's bill.
