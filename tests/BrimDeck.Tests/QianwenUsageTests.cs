@@ -124,6 +124,8 @@ static class QianwenUsageTests
         var calls = new List<string>();
         int polls = 0, consoleTokens = 0; bool consoleRefused = true; string? csAuthorization = null, region = null, challenge = null;
         bool signInRefused = false;
+        // The account action that answers with an error ("*": every one but the console token), to read the other parts without it.
+        string? failing = null;
         // The kind of account the server answers for: "full" has the newer personal edition and team seats; "new" was just opened and
         // has nothing; "older" bought its personal and team plans before seats, and seats cannot be read; "both" has both personal editions.
         string account = "full";
@@ -161,6 +163,7 @@ static class QianwenUsageTests
             if (request.Headers.Authorization?.ToString() != "Bearer access") return (HttpStatusCode.Unauthorized, "{}");
             string Ok(string data) => $$"""{"code":"200","successResponse":true,"data":{{data}}}""";
             var parameters = doc.RootElement.Get("params");
+            if (failing is not null && action != "GenerateCLIAccessToken" && (failing == "*" || failing == action)) return (HttpStatusCode.OK, """{"code":"InternalError","successResponse":false}""");
             return action switch
             {
                 "GenerateCLIAccessToken" => (HttpStatusCode.OK, Ok($$"""{"cliAccessToken":"console{{++consoleTokens}}"}""")),
@@ -216,6 +219,23 @@ static class QianwenUsageTests
             both.Metrics.Select(m => m.Label).Take(3).SequenceEqual(["个人版 · 每月额度", "个人版 · 套餐额度", "团队版 · 每月额度"]) && both.Metrics[0].Id != both.Metrics[1].Id &&
             both.Plan == "Lite · 个人版 Pro · 团队版 标准席位");
         account = "full";
+
+        // A part that cannot be read shows its last reading in its place, saying when it was read; the others show their own.
+        string[] labels = ["个人版 · 每月额度", "团队版 · 每月额度", "账户余额", "本月扣费"];
+        var whole = (await service.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Qianwen);
+        var readAt = now.LocalDateTime.ToString("HH:mm");
+        failing = "GetFundAccountAvailableAmount";
+        var part = (await service.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Qianwen);
+        check("A Qianwen part that cannot be read shows its last reading in its place, the others their own",
+            whole.Metrics.Select(m => m.Label).SequenceEqual(labels) && part is { LiveQuota: true, IsStale: false } && part.Metrics.Select(m => m.Label).SequenceEqual(labels)
+            && part.Metrics[2] is { Amount: 88.80m } && part.Plan == "Lite · 团队版 标准席位" && part.StatusLabel == "已连接"
+            && part.Status == $"账户余额暂时无法读取，显示 {readAt} 读取的数值");
+        failing = "*";
+        var none = (await service.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Qianwen);
+        check("When no Qianwen part can be read, every one shows its last reading and the whole reading is old",
+            none is { LiveQuota: true, IsStale: true } && none.Metrics.Select(m => m.Label).SequenceEqual(labels) && none.QuotaTime == now
+            && none.StatusLabel == "稍后重试" && none.Status.Contains("团队版 Token Plan 暂时无法读取，显示 " + readAt));
+        failing = null;
 
         signInRefused = true; calls.Clear();
         var expired = (await service.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Qianwen);

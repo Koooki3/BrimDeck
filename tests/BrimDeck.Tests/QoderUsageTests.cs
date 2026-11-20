@@ -383,6 +383,40 @@ static class QoderUsageTests
             check("That round shows the reading without starting another read", calls.Count == 0 && snapshot is { LiveQuota: true, Source: "Qoder CLI" });
         }
         gate = null;
+
+        // After a restart the previous run's reading stands in until a read of this run ends: while the read is under way, and when it fails.
+        var earlier = now.AddHours(-1);
+        var restored = new ProviderSnapshot(ProviderId.Qoder)
+        {
+            Metrics = [new UsageMetric(MetricKind.Count, "积分") { Id = "plan", Unit = "积分", Total = 300, Used = 30 }], Plan = "Pro", QuotaTime = earlier, LastSeenAt = earlier, IsStale = true
+        };
+        release = new TaskCompletionSource();
+        gate = () => release.Task;
+        using (var service = Service(TimeSpan.FromMilliseconds(200)))
+        {
+            service.RestoreLastReadings([restored]);
+            var finished = new TaskCompletionSource<bool>();
+            service.BackgroundReadFinished += first => finished.TrySetResult(first);
+            var snapshot = await Refresh(service);
+            check("While the first Qoder read of a run is under way, the previous run's reading shows, marked as old",
+                snapshot is { LiveQuota: true, IsStale: true, Plan: "Pro" } && snapshot.QuotaTime == earlier && snapshot.Metrics.Single().Used == 30m
+                && snapshot.Status.Contains(Loc.T("正在读取", "Reading")));
+            release.SetResult();
+            check("The first reading of the run still asks for a round of its own", await finished.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            now = now.AddSeconds(5);
+            snapshot = await Refresh(service);
+            check("It then replaces the previous run's reading", snapshot is { LiveQuota: true, IsStale: false, Source: "Qoder CLI" } && snapshot.QuotaTime != earlier);
+        }
+        gate = null;
+        cliFailure = new QoderUsage.DaemonException("DAEMON_COMMAND_FAILED", "Local login has expired. Run \"qodercli login\" to refresh.");
+        using (var service = Service())
+        {
+            service.RestoreLastReadings([restored]);
+            var snapshot = await Refresh(service);
+            check("A first Qoder read that fails shows the previous run's reading, marked as old",
+                snapshot is { LiveQuota: true, IsStale: true } && snapshot.QuotaTime == earlier && snapshot.StatusLabel == Loc.T("稍后重试", "Retrying later"));
+        }
+        cliFailure = null;
     }
 
     // Qoder's API: the credits and the plan, refusing every request with Status.

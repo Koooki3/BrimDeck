@@ -716,6 +716,8 @@ public partial class MainWindow : Window
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); return; }
         if (restored.Count == 0) return;
         _app.RestoredUsage = restored;
+        // A source whose first read fails keeps showing what it read last time (UsageService.RestoreLastReadings).
+        _app.Usage.RestoreLastReadings(restored);
         foreach (var deck in _app.Decks) deck.ShowRestored(restored);
     }
     private void ShowRestored(IReadOnlyList<ProviderSnapshot> restored)
