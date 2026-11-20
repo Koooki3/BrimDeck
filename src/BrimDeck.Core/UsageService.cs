@@ -12,6 +12,7 @@ public interface IDesktopSources
     GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => new(false, "");
     string? ReadCursorToken(string database);
     Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation);
+    Task<string?> ReadAntigravityCliAsync(CancellationToken cancellation) => Task.FromResult<string?>(null);
     // Whether the last FindAntigravityAsync found Antigravity's language server without endpoints because its command line
     // could not be read (Antigravity runs as administrator) and it wrote no service file.
     bool AntigravityUnreadable => false;
@@ -72,6 +73,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private (DateTimeOffset Time, IReadOnlyList<WslHome> Homes)? _wsl;
     private bool _includeWsl;
     private readonly AntigravityUsage _antigravity = new();
+    private DateTimeOffset? _antigravityCliAttempt;
+    private (DateTimeOffset Time, List<Quota> Quotas)? _antigravityCliReading;
     private readonly DshSessions _dsh = new();
     private readonly KimiSessions _kimi = new();
     // The Kimi Code membership level, read from /me at most every few hours, for the hash of the token it was read with.
@@ -1189,14 +1192,6 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private async Task ReadAntigravityAsync(ProviderSnapshot snapshot, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
         var endpoints = await desktop.FindAntigravityAsync(ct);
-        if (endpoints.Count == 0 && desktop.AntigravityUnreadable)
-        {
-            snapshot.StatusLabel = Loc.T("无法读取", "Cannot read");
-            snapshot.Status = Loc.T("Antigravity 以管理员身份运行，BrimDeck 无法读取。请以普通权限启动 Antigravity", "Antigravity runs as administrator, so BrimDeck cannot read it. Start Antigravity without administrator rights.");
-            return;
-        }
-        if (endpoints.Count == 0)
-        { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到 Antigravity 本地用量服务", "The Antigravity local usage service was not found."); return; }
         foreach (var endpoint in endpoints)
         {
             ct.ThrowIfCancellationRequested();
@@ -1226,6 +1221,37 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             }
             catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException) { }
         }
+        ct.ThrowIfCancellationRequested();
+        if (_antigravityCliAttempt is not { } attempted || now - attempted >= TimeSpan.FromMinutes(5))
+        {
+            var report = await desktop.ReadAntigravityCliAsync(ct);
+            ct.ThrowIfCancellationRequested();
+            var quotas = QuotaParser.AntigravityCli(report);
+            _antigravityCliAttempt = now;
+            if (quotas.Count > 0) _antigravityCliReading = (now, quotas);
+        }
+        if (_antigravityCliReading is { } reading)
+        {
+            snapshot.Quotas = [.. reading.Quotas];
+            snapshot.Plan = snapshot.PlanSource = "";
+            Connected(snapshot, "Antigravity CLI", reading.Time);
+            if (reading.Time != _antigravityCliAttempt)
+            {
+                snapshot.IsStale = true;
+                snapshot.StatusLabel = Loc.T("上次读取", "Last reading");
+                var time = Clock(reading.Time, now);
+                snapshot.Status = Loc.T($"CLI 刷新失败，显示 {time} 读取的额度", $"CLI refresh failed, showing quota read at {time}");
+            }
+            return;
+        }
+        if (endpoints.Count == 0 && desktop.AntigravityUnreadable)
+        {
+            snapshot.StatusLabel = Loc.T("无法读取", "Cannot read");
+            snapshot.Status = Loc.T("Antigravity 以管理员身份运行，BrimDeck 无法读取。请以普通权限启动 Antigravity", "Antigravity runs as administrator, so BrimDeck cannot read it. Start Antigravity without administrator rights.");
+            return;
+        }
+        if (endpoints.Count == 0)
+        { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到本地服务，CLI 也未返回额度。请检查 agy 是否已安装并登录", "No local service or CLI quota. Check that agy is installed and signed in."); return; }
         snapshot.StatusLabel = Loc.T("服务暂不可用", "Service unavailable"); snapshot.Status = Loc.T("检测到 Antigravity，但本地用量服务暂不可用", "Antigravity was found, but its local usage service is unavailable.");
     }
 
