@@ -67,6 +67,8 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
             UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetTempPath(),
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
         } };
+        // The CLI updater can open its own console during an otherwise hidden quota poll.
+        process.StartInfo.Environment["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
         try
         {
             if (!process.Start()) return null;
