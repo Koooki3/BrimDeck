@@ -25,8 +25,8 @@ namespace BrimDeck.Native;
 //
 // The mouse over a lens reaches the window it shows: a clear spot lets the mouse through to what lies beneath (the taskbar);
 // moves are handed on so hover states follow (Hover), and presses, releases and wheel turns are raised in the window at the
-// same place (Pointer). After a flyout closes, the taskbar can stay lifted for a few seconds while the pointer is over it, and
-// the lenses stay with it.
+// same place (Pointer). Files dragged over a lens go to the window it shows (DropRelay). After a flyout closes, the taskbar can
+// stay lifted for a few seconds while the pointer is over it, and the lenses stay with it.
 internal sealed class TaskbarMirror : IDisposable
 {
     private const uint DesktopBand = 1, SwitcherBand = 16;
@@ -169,6 +169,8 @@ internal sealed class TaskbarMirror : IDisposable
     {
         public readonly TaskbarMirror Mirror = mirror;
         public IntPtr Window, Target, Thumbnail;
+        // The window that files dropped on the lens go to; kept while the lens is hidden.
+        public IntPtr Drops;
         public Rect Area = Rect.Empty;
     }
     private static readonly Dictionary<IntPtr, Lens> Lenses = [];
@@ -184,6 +186,11 @@ internal sealed class TaskbarMirror : IDisposable
             if (lens.Thumbnail != IntPtr.Zero) DwmUnregisterThumbnail(lens.Thumbnail);
             lens.Thumbnail = IntPtr.Zero; lens.Target = target;
             if (DwmRegisterThumbnail(lens.Window, target, out lens.Thumbnail) != 0) { lens.Thumbnail = IntPtr.Zero; return false; }
+            if (lens.Drops != target)
+            {
+                if (lens.Drops != IntPtr.Zero) DropRelay.Revoke(lens.Window);
+                lens.Drops = DropRelay.Register(lens.Window, target) ? target : IntPtr.Zero;
+            }
         }
         int left = (int)Math.Round(area.X), top = (int)Math.Round(area.Y);
         int width = (int)Math.Round(area.Right) - left, height = (int)Math.Round(area.Bottom) - top;
@@ -211,7 +218,15 @@ internal sealed class TaskbarMirror : IDisposable
         if (lens.Thumbnail != IntPtr.Zero) DwmUnregisterThumbnail(lens.Thumbnail);
         lens.Thumbnail = IntPtr.Zero; lens.Target = IntPtr.Zero; lens.Area = Rect.Empty;
         // A pop-up's lens is not kept: the pop-up is gone or will be another.
-        if (lens != lens.Mirror._panelLens) { Lenses.Remove(lens.Window); DestroyWindow(lens.Window); lens.Window = IntPtr.Zero; }
+        if (lens != lens.Mirror._panelLens) Destroy(lens);
+    }
+
+    private static void Destroy(Lens lens)
+    {
+        if (lens.Drops != IntPtr.Zero) DropRelay.Revoke(lens.Window);
+        Lenses.Remove(lens.Window);
+        DestroyWindow(lens.Window);
+        lens.Window = lens.Drops = IntPtr.Zero;
     }
 
     private bool Create(Lens lens)
@@ -381,7 +396,7 @@ internal sealed class TaskbarMirror : IDisposable
         _frame.Stop(); _follow.Stop();
         Hide();
         if (_inputHooked) InputManager.Current.PreProcessInput -= KeepForwarded;
-        if (_panelLens.Window != IntPtr.Zero) { Lenses.Remove(_panelLens.Window); DestroyWindow(_panelLens.Window); _panelLens.Window = IntPtr.Zero; }
+        if (_panelLens.Window != IntPtr.Zero) Destroy(_panelLens);
     }
 
     private readonly List<IntPtr> _popups = [];
