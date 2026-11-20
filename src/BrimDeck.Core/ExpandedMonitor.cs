@@ -29,6 +29,21 @@ public static class ExpandedCards
     public static bool IsCard(ExpandedItem item) => item is ExpandedItem.Memory or ExpandedItem.Download or ExpandedItem.Upload or ExpandedItem.Storage;
     public static bool IsInline(ExpandedItem item) => item is ExpandedItem.Power or ExpandedItem.Frames;
 
+    public static ExpandedItem PageSection(ExpandedItem item, bool inlinePower, bool inlineFrames)
+        => IsCard(item) || item == ExpandedItem.Power && inlinePower || item == ExpandedItem.Frames && inlineFrames
+            ? ExpandedItem.Memory : item == ExpandedItem.Gpu ? ExpandedItem.Cpu : item;
+
+    public static List<ExpandedReading> ArrangePageSections(IEnumerable<ExpandedReading> readings, IEnumerable<ExpandedItem> order,
+        bool inlinePower, bool inlineFrames)
+    {
+        var groups = ExpandedMonitor.Normalize(readings).GroupBy(reading => PageSection(reading.Item, inlinePower, inlineFrames)).ToList();
+        var bySection = groups.ToDictionary(group => group.Key);
+        var requested = order.Where(bySection.ContainsKey).Distinct().ToArray();
+        var moved = requested.ToHashSet();
+        var next = new Queue<ExpandedItem>(requested);
+        return [.. groups.SelectMany(group => moved.Contains(group.Key) ? bySection[next.Dequeue()] : group)];
+    }
+
     public static List<ExpandedCard> Normalize(IEnumerable<ExpandedCard?>? cards)
     {
         var seen = new HashSet<(ExpandedItem, string?)>();
@@ -54,7 +69,8 @@ public static class ExpandedCards
         return Normalize((cards ?? []).Concat(defaults));
     }
 
-    public static bool TwoColumns(double width, double scale) => width >= 400 * scale;
+    // Allow two usable columns after spacing and a scrollbar. The minimum-width panel stays in one column.
+    public static bool TwoColumns(double width, double scale) => width >= 430 * scale;
 
     // Pack in reading order. A wide card starts a new row, and narrow displays give each card its own row.
     public static IReadOnlyList<(int Row, int Column, int Span)> Place(IReadOnlyList<ExpandedCard> cards, bool twoColumns)

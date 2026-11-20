@@ -181,6 +181,19 @@ public static class ExpandedLayout
         }
 
         var list = !processes ? ExpandedList.None : !readings ? ExpandedList.Full : (ExpandedList)(int)basis.List;
+        const double stackedListGap = 10;
+        bool belowFits = h - MonitorLayout.StackedReadings - stackedListGap >= MonitorLayout.ListHead + MonitorLayout.MinimumRows * row;
+        if (cards && list == ExpandedList.Below && !belowFits) list = ExpandedList.None;
+        if (cards && list is ExpandedList.Side or ExpandedList.Below
+            && previous is { CardContent.Cards.Count: > 0, List: ExpandedList.Side or ExpandedList.Below } && previous.Scale == scale
+            && previous.List != list && (previous.List != ExpandedList.Below || belowFits))
+        {
+            // The process list can change the width available to the cards by much more than the pointer moved.
+            // Keep its previous position near a boundary, but use the actual width and height for the boxes below.
+            double margin = Hysteresis / scale;
+            double nearbyWidth = w + (previous.List == ExpandedList.Side ? margin : -margin);
+            if ((ExpandedList)(int)MonitorLayout.For(nearbyWidth, h, true).List == previous.List) list = previous.List;
+        }
         double readingsH = list == ExpandedList.Below ? MonitorLayout.StackedReadings : h;
         double readingsW = list == ExpandedList.Side ? w - ListGap - MonitorLayout.SideListWidth(w) : w;
         if (!readings)
@@ -238,21 +251,21 @@ public static class ExpandedLayout
 
         // Bands in the table's order.
         int Index(params ExpandedItem[] of) => of.Where(item => order.Contains(item)).Select(item => order.IndexOf(item)).DefaultIfEmpty(int.MaxValue).Min();
+        int cardIndex = cards ? order.FindIndex(item => ExpandedCards.PageSection(item, inlinePower, inlineFrames) == ExpandedItem.Memory) : -1;
         double graphMin = minGraph;
         // Keep the column count within the dead band while measuring the viewport at its real dimensions.
         double columnMargin = previous is { CardContent.Cards.Count: > 0 } && previous.List == list && previous.Scale == scale
             ? (previous.CardsTwoColumns ? Hysteresis : -Hysteresis) : 0;
         bool twoColumns = cards && ExpandedCards.TwoColumns(readingsW * scale + columnMargin, scale);
         int cardRows = cards ? Math.Max(1, ExpandedCards.Place(cardContent!.Cards, twoColumns).LastOrDefault().Row + 1 + (cardContent.AwaitingDrives && cardContent.Cards.Count > 0 ? 1 : 0)) : 0;
-        double cardRow = Math.Ceiling(body * 1.7 + 27);
+        double cardRow = Math.Ceiling(body * 1.7 + 31);
         List<Band> Build()
         {
             double restNow = Rest2(mode, memShown, netShown);
             var bands = new List<Band>();
             if (gaugeShown) bands.Add(new Band { Kind = BandKind.Gauge, Index = Index(ExpandedItem.Cpu, ExpandedItem.Gpu), Height = head + margins + graphMin });
             if (restNow > 0) bands.Add(new Band { Kind = BandKind.Metrics, Index = Index(ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload), Height = restNow, Stretch = StretchBlocks });
-            if (cards) bands.Add(new Band { Kind = BandKind.Cards, Index = Index(ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Storage,
-                inlinePower ? ExpandedItem.Power : ExpandedItem.Memory, inlineFrames ? ExpandedItem.Frames : ExpandedItem.Memory), Height = ln,
+            if (cards) bands.Add(new Band { Kind = BandKind.Cards, Index = cardIndex < 0 ? int.MaxValue : cardIndex, Height = ln,
                 Stretch = cardRows * cardRow / ln });
             if (frameLine) bands.Add(new Band { Kind = BandKind.Frames, Index = Index(ExpandedItem.Frames), Height = rowS, Stretch = StretchRows });
             if (storageLines > 0) bands.Add(new Band { Kind = BandKind.Storage, Index = Index(ExpandedItem.Storage), Height = storageLines * rowS, Stretch = StretchDrives });
@@ -273,6 +286,17 @@ public static class ExpandedLayout
             return total;
         }
         var all = Build();
+        if (cards && gaugeShown && graphMin > GraphFloor)
+        {
+            // Give the scroll viewport room to show a complete reading before using the extra height for graphs.
+            double shortage = cardRow - ln - (readingsH - Total(all));
+            if (shortage > 0)
+            {
+                squeezed = true;
+                graphMin = Math.Max(GraphFloor, graphMin - shortage);
+                all = Build();
+            }
+        }
         if (Total(all) > readingsH + .001 && gaugeShown)
         {
             squeezed = true; graphMin = Math.Min(graphMin, GraphFloor); all = Build();
@@ -384,14 +408,14 @@ public static class ExpandedLayout
             y += bh;
         }
 
-        var steps = new MonitorLayout(figure, body, caption, mode, (ListPlacement)(int)(list == ExpandedList.Full ? ExpandedList.None : list), row)
+        var steps = new MonitorLayout(figure, body, caption, mode, (ListPlacement)(int)list, row)
         {
             StorageLines = storageLines, StorageColumns = storageLines > 0 ? columns : 0, PowerLines = inlinePower ? 1 : powerLines, FrameLine = frameLine || inlineFrames
         };
         var listBox = list switch
         {
             ExpandedList.Side => new ExpandedBox(readingsW + ListGap, 0, MonitorLayout.SideListWidth(w), h),
-            ExpandedList.Below => new ExpandedBox(0, MonitorLayout.StackedReadings + 10, w, Math.Max(0, h - MonitorLayout.StackedReadings - 10)),
+            ExpandedList.Below => new ExpandedBox(0, MonitorLayout.StackedReadings + stackedListGap, w, Math.Max(0, h - MonitorLayout.StackedReadings - stackedListGap)),
             _ => default
         };
         var plan = new ExpandedPlan

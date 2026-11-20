@@ -86,7 +86,7 @@ public sealed partial class SettingsWindow
             [(true, Loc.T("显示", "Show")), (false, Loc.T("隐藏", "Hide"))],
             value => Resize(s => s.ExpandedCpuCores = value, DeckPage.Monitor), keepPreview: true,
             help: Loc.T("隐藏各核心占用图，保留 CPU 总占用。仅影响展开页。", "Hides the per-core graph and keeps total CPU usage on the expanded page.")));
-        var editor = ExpandedCardEditor(refresh);
+        var editor = ExpandedCardEditor(refresh, Refresh);
         layout.Children.Add(MusicChoice(Loc.T("读数布局", "Reading layout"), S.ExpandedCustomCards,
             [(false, Loc.T("自动", "Automatic")), (true, Loc.T("自定义卡片", "Custom cards"))],
             value => { Resize(s => s.ExpandedCustomCards = value, DeckPage.Monitor); Refresh(); }, keepPreview: true,
@@ -98,7 +98,7 @@ public sealed partial class SettingsWindow
         return (KeepPreview(switches), layout);
     }
 
-    private FrameworkElement ExpandedCardEditor(List<Action> refresh)
+    private FrameworkElement ExpandedCardEditor(List<Action> refresh, Action refreshAll)
     {
         var panel = new StackPanel();
         var hint = TextLine(Loc.T("移动内存、下载、上传或盘符，设置半宽或整行；内存条可选常规或紧凑。窄面板自动排为一列。",
@@ -135,8 +135,7 @@ public sealed partial class SettingsWindow
             if (include) cards.Add(new ExpandedCard(item));
             else cards.RemoveAll(card => card.Item == item);
             Resize(s => s.ExpandedCardOrder = [.. cards], DeckPage.Monitor);
-            Build();
-            RefreshInlineChoices();
+            refreshAll();
         }
         foreach (var item in new[] { ExpandedItem.Power, ExpandedItem.Frames })
         {
@@ -166,8 +165,7 @@ public sealed partial class SettingsWindow
         reset = ActionButton(Loc.T("重置卡片布局", "Reset card layout"), () =>
         {
             Resize(s => s.ExpandedCardOrder = [], DeckPage.Monitor);
-            Build();
-            RefreshInlineChoices();
+            refreshAll();
         });
         reset.Style = (Style)FindResource("SettingsLink");
         reset.HorizontalAlignment = HorizontalAlignment.Left;
@@ -472,9 +470,19 @@ public sealed partial class SettingsWindow
         void Build()
         {
             var readings = ExpandedMonitor.Normalize(S.ExpandedReadings);
-            var blocks = ExpandedMonitor.BlocksIn(readings).Where(block => block[0] != ExpandedItem.Processes && BlockName(block, readings).Length > 0).ToList();
+            bool cards = S.ExpandedCustomCards;
+            bool inlinePower = cards && S.ExpandedCardOrder.Any(card => card.Item == ExpandedItem.Power);
+            bool inlineFrames = cards && S.ExpandedCardOrder.Any(card => card.Item == ExpandedItem.Frames);
+            List<IReadOnlyList<ExpandedItem>> blocks = cards
+                ? [.. ExpandedMonitor.Shown(readings).Where(item => item != ExpandedItem.Processes)
+                    .Select(item => ExpandedCards.PageSection(item, inlinePower, inlineFrames)).Distinct().Select(item => ExpandedMonitor.BlockOf(item))]
+                : ExpandedMonitor.BlocksIn(readings).Where(block => block[0] != ExpandedItem.Processes && BlockName(block, readings).Length > 0).ToList();
+            string NameOf(IReadOnlyList<ExpandedItem> block) => cards && block[0] == ExpandedItem.Memory
+                ? Loc.T("自定义卡片", "Custom cards") : BlockName(block, readings);
             bool processes = ExpandedOf(S, ExpandedItem.Processes).Visible;
-            string key = string.Join("|", blocks.Select(block => BlockName(block, readings))) + "|" + processes + "|" + Loc.Language;
+            string Key(IEnumerable<IReadOnlyList<ExpandedItem>> list) =>
+                string.Join("|", list.Select(NameOf)) + $"|{processes}|{Loc.Language}|{cards}|{inlinePower}|{inlineFrames}";
+            string key = Key(blocks);
             if (key == built) return;
             built = key;
             var grid = new Grid();
@@ -492,9 +500,15 @@ public sealed partial class SettingsWindow
             {
                 // Memory and the network show their parts when there is more than one, to be changed round by dragging.
                 var grip = new SketchGrip();
-                var inside = block[0] == ExpandedItem.Memory && BlockName(block, readings).Contains('+') ? MetricsInside(readings, Swap, grip) : null;
-                stack.Children.Add(SketchBlock(block, BlockName(block, readings), inside, grip, stack,
-                    order => { built = SketchKey(order, readings, processes); Change(s => s.ExpandedReadings = ExpandedMonitor.Arrange(s.ExpandedReadings, order)); Restorable(); }));
+                var inside = !cards && block[0] == ExpandedItem.Memory && NameOf(block).Contains('+') ? MetricsInside(readings, Swap, grip) : null;
+                stack.Children.Add(SketchBlock(block, NameOf(block), inside, grip, stack, order =>
+                {
+                    built = Key(order.Select(ExpandedMonitor.BlockOf));
+                    Change(s => s.ExpandedReadings = cards
+                        ? ExpandedCards.ArrangePageSections(s.ExpandedReadings, order, inlinePower, inlineFrames)
+                        : ExpandedMonitor.Arrange(s.ExpandedReadings, order));
+                    Restorable();
+                }));
             }
             if (blocks.Count > 0) { grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.Children.Add(stack); }
             if (processes)
@@ -521,9 +535,6 @@ public sealed partial class SettingsWindow
         panel.Children.Add(title); panel.Children.Add(host);
         return KeepPreview(panel);
     }
-
-    private static string SketchKey(IEnumerable<ExpandedItem> order, IReadOnlyList<ExpandedReading> readings, bool processes)
-        => string.Join("|", order.Select(item => BlockName(ExpandedMonitor.BlockOf(item), readings))) + "|" + processes + "|" + Loc.Language;
 
     // How a part inside a block hands its drag on to the block: the block sets Start once it is made.
     // pending: a change made inside the block on the way (memory and the network changed round), saved when the block is let go.

@@ -84,15 +84,29 @@ internal static class ExpandedMonitorTests
         var initial = Sized(766, 344);
         var above = Sized(767, 344, initial);
         var below = Sized(766, 344, above);
-        var expanded = Sized(800, 344, below);
-        var narrowAgain = Sized(766, 344, expanded);
-        var contracted = Sized(730, 344, narrowAgain);
+        var expanded = Sized(850, 344, below);
+        var narrowAgain = Sized(812, 344, expanded);
+        var contracted = Sized(770, 344, narrowAgain);
         check("Expanded customization: one-DIP jitter preserves card columns, and crossing the dead band still reflows",
             initial.List == ExpandedList.Side && !initial.CardsTwoColumns && above.Signature == initial.Signature && below.Signature == initial.Signature
             && expanded.CardsTwoColumns && narrowAgain.CardsTwoColumns && !contracted.CardsTwoColumns);
         var shorter = Sized(767, 150, above);
         check("Expanded customization: column hysteresis does not freeze the scroll viewport",
             !shorter.CardsTwoColumns && shorter.CardsHeight < above.CardsHeight && shorter.Height == 150);
+        var listBelow = Sized(599, 344);
+        var nearListBoundary = Sized(600, 344, listBelow);
+        var listSide = Sized(640, 344, nearListBoundary);
+        var nearFromSide = Sized(599, 344, listSide);
+        check("Expanded customization: process list keeps its place during one-DIP jitter and still changes across the dead band",
+            listBelow.List == ExpandedList.Below && nearListBoundary.Signature == listBelow.Signature
+            && listSide.List == ExpandedList.Side && nearFromSide.Signature == listSide.Signature);
+        var listHidden = ExpandedLayout.For(items.Where(item => item != ExpandedItem.Processes), 510, 254, cpuCores: false, cardContent: content);
+        var justEnabled = Sized(550, 254, listHidden);
+        check("Expanded customization: explicitly enabling the process list is not held back by size hysteresis",
+            listHidden.List == ExpandedList.None && justEnabled.List == ExpandedList.Below);
+        var tooShortForList = Sized(550, 244, justEnabled);
+        check("Expanded customization: a process list below the cards leaves no empty region when too short for its minimum rows",
+            tooShortForList.List == ExpandedList.None && tooShortForList.ListBox == default);
 
         old.ExpandedCardOrder = [new(ExpandedItem.Memory) { CompactMemoryBar = true }, new(ExpandedItem.Download) { CompactMemoryBar = true }];
         var compact = SettingsMigrations.Read(JsonSerializer.Serialize(old));
@@ -122,6 +136,17 @@ internal static class ExpandedMonitorTests
         var separate = ExpandedLayout.For(selected, 800, 344, new(1, 1), cardContent: mixed with { Cards = defaults });
         check("Expanded customization: removing inline rows restores their normal bands",
             separate.Part(ExpandedItem.Power) is not null && separate.Part(ExpandedItem.Frames) is not null);
+
+        var readings = ExpandedMonitor.Defaults(frames: true);
+        var moved = ExpandedCards.ArrangePageSections(readings, [ExpandedItem.Memory, ExpandedItem.Frames, ExpandedItem.Cpu], inlinePower: true, inlineFrames: false);
+        var visible = ExpandedMonitor.Shown(ExpandedMonitor.Normalize(moved));
+        check("Expanded customization: page order sketch moves the cards as one band and keeps the inline power row in that band",
+            visible.Select(item => ExpandedCards.PageSection(item, true, false)).Distinct()
+                .SequenceEqual([ExpandedItem.Memory, ExpandedItem.Frames, ExpandedItem.Cpu, ExpandedItem.Processes])
+            && moved.Count == readings.Count && moved.All(item => item.Visible));
+        var minimum = ExpandedLayout.For(selected.Prepend(ExpandedItem.Gpu), 408, 102, new(1, 1), cardContent: mixed);
+        check("Expanded customization: minimum panel fits one complete memory card with both gauges",
+            !minimum.CardsTwoColumns && minimum.CardsHeight >= Math.Ceiling(minimum.Body * 1.7 + 31) && minimum.Part(ExpandedItem.Cpu) is not null);
     }
 
     private static List<ExpandedItem> Subset(int mask) => [.. Every.Where((item, index) => (mask >> index & 1) != 0)];
