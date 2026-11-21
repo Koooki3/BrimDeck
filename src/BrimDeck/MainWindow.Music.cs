@@ -525,6 +525,9 @@ public partial class MainWindow
         // timeline that may go and come back); the first starts the change and the rest carry it on instead of starting it
         // again, and a form that changes during it is taken at once rather than morphed twice.
         bool newCover = shown && !ReferenceEquals(_mediaCover, _musicCoverShown);
+        // The picture already on screen stays under the new one while it fades in, so the rebuild does not blink through
+        // the placeholder first. Only an animated change keeps it; otherwise the new picture is simply there.
+        var coverUnder = newCover && animate ? _musicCoverShown : null;
         _musicCoverShown = _mediaCover;
         if (shown && song != _musicSong && Environment.TickCount64 - _songArrived >= Soft.Move) _songArrived = Environment.TickCount64;
         long sinceSong = Environment.TickCount64 - _songArrived;
@@ -554,7 +557,7 @@ public partial class MainWindow
         }
         var body = new Grid();
         bool synchronized = playerLyrics || _lyrics.CanSynchronize(track);
-        if (splitLyrics || bare) MusicColumns(body, layout, track, lyricColumn, hasLyrics, synchronized, playerLyrics, message, shown && songChanging, lyricsArrive);
+        if (splitLyrics || bare) MusicColumns(body, layout, track, lyricColumn, hasLyrics, synchronized, playerLyrics, message, shown && songChanging, lyricsArrive, coverUnder);
         else
         {
             // Without the cover the titles' column can sit against the page's left edge or be centred (MusicLyricsAlign).
@@ -564,14 +567,19 @@ public partial class MainWindow
             upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Settings.MusicPageCover ? c.Gap : 0) });
             upper.ColumnDefinitions.Add(new ColumnDefinition());
             body.Children.Add(upper);
-            var art = MusicVisuals.Cover(_mediaCover, layout.Cover, layout.CoverRadius, outlined: true, look: Look);
+            var art = MusicVisuals.Cover(_mediaCover, layout.Cover, layout.CoverRadius, outlined: true, look: Look, under: coverUnder);
             art.Visibility = Settings.MusicPageCover ? Visibility.Visible : Visibility.Collapsed;
             art.RenderTransformOrigin = new Point(.5, .5); art.RenderTransform = _musicCoverScale;
             Soft.Glide(_musicCoverScale, ScaleTransform.ScaleXProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
             Soft.Glide(_musicCoverScale, ScaleTransform.ScaleYProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
             AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover")); upper.Children.Add(art);
             AttachCoverFocus(art);
-            if (newCover && animate) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; art.BeginAnimation(OpacityProperty, fade); }
+            if (newCover && animate)
+            {
+                // Over the previous picture only the new one fades in; without one the whole cover fades in from the placeholder.
+                var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
+                (art.Tag as UIElement ?? art).BeginAnimation(OpacityProperty, fade);
+            }
             var right = new Grid(); Grid.SetColumn(right, 2); upper.Children.Add(right);
             int lyricLines = playerLyrics ? Math.Min(1, layout.LyricLines) : layout.LyricLines;
             // With the lyrics switched off no line comes under the titles, so they stand at the middle of the upper part's height
@@ -857,7 +865,7 @@ public partial class MainWindow
     // (or at the right, read from the left). The page with neither the cover nor the lyrics is drawn here too, as the titles
     // alone.
     private void MusicColumns(Grid body, MusicLayout layout, MediaTrack track, bool lyricColumn, bool hasLyrics, bool synchronized, bool playerLyrics,
-        string message, bool rise, bool lyricsArrive)
+        string message, bool rise, bool lyricsArrive, BitmapSource? coverUnder)
     {
         var c = layout.Metrics;
         var columns = layout.Columns(lyricColumn, Settings.MusicPageCover);
@@ -874,12 +882,17 @@ public partial class MainWindow
         var info = new StackPanel { Width = columns.InfoWidth, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
         FrameworkElement Art(double size, bool over)
         {
-            var art = MusicVisuals.Cover(_mediaCover, size, layout.CoverRadius, outlined: true, look: Look);
+            var art = MusicVisuals.Cover(_mediaCover, size, layout.CoverRadius, outlined: true, look: Look, under: coverUnder);
             art.HorizontalAlignment = over ? HorizontalAlignment.Center : HorizontalAlignment.Left;
             art.VerticalAlignment = over ? VerticalAlignment.Top : VerticalAlignment.Center;
             if (over) art.Margin = new Thickness(0, 0, 0, c.MiddleGap);
             AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover"));
             AttachCoverFocus(art);
+            if (coverUnder is not null && Animates)
+            {
+                var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
+                (art.Tag as UIElement ?? art).BeginAnimation(OpacityProperty, fade);
+            }
             return art;
         }
         if (coverAbove) info.Children.Add(Art(artSize, over: true));
