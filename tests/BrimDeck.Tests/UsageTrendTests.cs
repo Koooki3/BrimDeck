@@ -36,5 +36,19 @@ internal static class UsageTrendTests
         check("Usage trend for today alone is one day",
             UsageTrend.Days([Entry(today, 10)], single).Single() is { Tokens: 10 } &&
             UsageTrend.Days([Entry(today.AddDays(-1), 10)], single).Single() is { Tokens: 0 });
+
+        var priced = new CostSummary(1.25m, 1, 0, 0);
+        var unpriced = new CostSummary(0, 0, 0, 2);
+        var mixed = new CostSummary(0.80m, 1, 0, 1);
+        var marked = UsageTrend.Days(
+            [Entry(today.AddDays(-2), 10), Entry(today.AddDays(-1), 20), Entry(today, 30)],
+            range,
+            list => list.Count == 0 ? new CostSummary(0, 0, 0, 0)
+                : list[0].Time.Date == today.AddDays(-2) ? priced
+                : list[0].Time.Date == today.AddDays(-1) ? unpriced
+                : mixed);
+        check("Usage trend keeps unpriced counts so a day is not drawn as a confirmed zero",
+            marked[0] is { Cost: 1.25m, Unpriced: 0 } && marked[1] is { Cost: 0, Unpriced: 2 } && marked[2] is { Cost: 0.80m, Unpriced: 1 }
+            && marked[1].Tokens == 20);
     }
 }

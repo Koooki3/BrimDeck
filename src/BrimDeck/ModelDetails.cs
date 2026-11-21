@@ -515,7 +515,7 @@ public partial class MainWindow
 
     private FrameworkElement ModelTrendChart(IReadOnlyList<TokenEntry> entries, UsageDateRange range)
     {
-        var days = UsageTrend.Days(entries, range, list => _app.Prices.Summarize(list).Amount);
+        var days = UsageTrend.Days(entries, range, list => _app.Prices.Summarize(list));
         long peakTokens = 0; decimal peakCost = 0;
         foreach (var day in days) { if (day.Tokens > peakTokens) peakTokens = day.Tokens; if (day.Cost > peakCost) peakCost = day.Cost; }
         // Peak figure changes with the toggle so Tokens vs Cost is obvious even when daily shapes look alike.

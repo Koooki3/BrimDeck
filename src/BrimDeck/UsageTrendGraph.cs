@@ -40,10 +40,21 @@ internal sealed class UsageTrendGraph : FrameworkElement
         _hot = index;
         if (index < 0 || index >= _days.Count) { _tip.IsOpen = false; InvalidateVisual(); return; }
         var day = _days[index];
-        _tip.Content = day.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "\n"
-            + (_cost
-                ? "$" + day.Cost.ToString("N2", CultureInfo.InvariantCulture)
-                : Loc.T($"{UI.Number(day.Tokens)} Token（{day.Tokens:N0}）", $"{UI.Number(day.Tokens)} tokens ({day.Tokens:N0})"));
+        string date = day.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        if (!_cost)
+        {
+            _tip.Content = date + "\n" + Loc.T($"{UI.Number(day.Tokens)} Token（{day.Tokens:N0}）", $"{UI.Number(day.Tokens)} tokens ({day.Tokens:N0})");
+        }
+        else
+        {
+            var cost = new CostSummary(day.Cost, day.Cost > 0 ? 1 : 0, 0, day.Unpriced);
+            string tip = UI.Cost(cost);
+            if (day.Unpriced > 0)
+                tip += "\n" + (day.Cost == 0
+                    ? Loc.T("未匹配到完整价格", "Prices could not be matched for every record")
+                    : Loc.T($"{day.Unpriced} 条记录未计价", Loc.Count(day.Unpriced, "record has", "records have") + " no price"));
+            _tip.Content = date + "\n" + tip;
+        }
         _tip.IsOpen = true;
         InvalidateVisual();
     }
@@ -56,7 +67,7 @@ internal sealed class UsageTrendGraph : FrameworkElement
     private int Hit(double x)
     {
         if (_days.Count == 0 || ActualWidth <= 0) return -1;
-        double gap = Gap(), bar = BarWidth(gap);
+        var (gap, bar) = Layout();
         if (bar <= 0) return -1;
         double at = Pad;
         for (int i = 0; i < _days.Count; i++)
@@ -67,14 +78,26 @@ internal sealed class UsageTrendGraph : FrameworkElement
         return -1;
     }
 
-    private const double Pad = 2, LabelBand = 16, MinGap = 2;
-    private double Gap() => _days.Count <= 1 ? 0 : Math.Max(MinGap, Math.Min(6, (ActualWidth - Pad * 2) / _days.Count * .18));
-    private double BarWidth(double gap) => _days.Count == 0 ? 0 : Math.Max(1, (ActualWidth - Pad * 2 - gap * (_days.Count - 1)) / _days.Count);
+    private const double Pad = 2, LabelBand = 16;
+    // Shrink the gap, down to zero, so every day of a long range still fits at a 1px bar.
+    private (double Gap, double Bar) Layout()
+    {
+        int n = _days.Count;
+        if (n == 0 || ActualWidth <= 0) return (0, 0);
+        double available = Math.Max(0, ActualWidth - Pad * 2);
+        if (n == 1) return (0, Math.Max(1, available));
+        double gap = Math.Min(6, available / n * .18);
+        if (n + gap * (n - 1) > available)
+            gap = Math.Max(0, (available - n) / (n - 1));
+        return (gap, Math.Max(1, (available - gap * (n - 1)) / n));
+    }
 
     protected override void OnRender(DrawingContext dc)
     {
+        // A transparent ground makes zero-height days and the gaps around the labels hit-testable.
+        dc.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
         if (_days.Count == 0 || ActualWidth <= 0 || ActualHeight <= LabelBand) return;
-        double gap = Gap(), bar = BarWidth(gap);
+        var (gap, bar) = Layout();
         double chartTop = 2, chartBottom = ActualHeight - LabelBand, chartHeight = Math.Max(1, chartBottom - chartTop);
         double max = 0;
         foreach (var day in _days) max = Math.Max(max, _cost ? (double)day.Cost : day.Tokens);
@@ -88,10 +111,14 @@ internal sealed class UsageTrendGraph : FrameworkElement
         double x = Pad;
         for (int i = 0; i < _days.Count; i++)
         {
-            double value = _cost ? (double)_days[i].Cost : _days[i].Tokens;
-            double height = Math.Max(value > 0 ? 2 : 0, chartHeight * (value / max));
+            var day = _days[i];
+            bool unknownCost = _cost && day.Unpriced > 0 && day.Cost == 0;
+            double value = _cost ? (double)day.Cost : day.Tokens;
+            double height = unknownCost ? 2 : Math.Max(value > 0 ? 2 : 0, chartHeight * (value / max));
             var rect = new Rect(Math.Round(x), Math.Round(chartBottom - height), Math.Max(1, Math.Round(bar)), Math.Round(height));
+            if (unknownCost) dc.PushOpacity(0.45);
             dc.DrawRoundedRectangle(i == _hot ? hot : fill, null, rect, 2, 2);
+            if (unknownCost) dc.Pop();
             if (labelDays || i == 0 || i == _days.Count - 1 || (_days.Count > 14 && i % 7 == 0))
             {
                 var text = new FormattedText(_days[i].Day.ToString("MM-dd", CultureInfo.InvariantCulture), CultureInfo.CurrentUICulture,
