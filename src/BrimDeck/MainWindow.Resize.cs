@@ -339,9 +339,10 @@ public partial class MainWindow
         DeckPages.SetSize(Settings, _resizePage, width, height);
         _pageWidth = width;
         SetExpanded(true, instant: true);
-        // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
-        // layout step and stretch in between, so they follow too; the model details and the media page are built again whole,
-        // about 25 times a second during the drag, and once more when it ends (FinishResize saves the size).
+        // The surface follows every frame. The monitor page, the usage page's columns and the model details are built again only
+        // where they cross a layout step (ModelDetailsFit) and stretch in between, so they follow too; the media page is built
+        // again whole, about 25 times a second during the drag. Each is built once more when the drag ends (FinishResize saves
+        // the size).
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
         else if (_resizePage == DeckPage.Devices) RenderDevices();
         // The clipboard page is built again only where its sizes step; in between its columns stretch (StretchShelf). It is built
@@ -351,7 +352,7 @@ public partial class MainWindow
         {
             _resizeRendered = Environment.TickCount64;
             // Columns that stay within their size step stretch; nothing else in the panel changes meanwhile.
-            if (_resizePage != DeckPage.Usage || _details || ColumnsBuild() != _usageBuilt) RenderUsage();
+            if (_resizePage != DeckPage.Usage || (_details ? !ModelDetailsFit() : ColumnsBuild() != _usageBuilt)) RenderUsage();
         }
         _grips.Light(LitEdges, true, SizeLabel(width, height));
     }
