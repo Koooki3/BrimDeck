@@ -50,8 +50,9 @@ The file transfer holds files you will need shortly. It keeps only where each fi
 
 - **Put in**: drag files or folders onto the notch, the capsule or the open panel. Dragged onto the collapsed panel, it opens on this page; move away without dropping and the panel goes back to how it was. You can also drop onto a category's name.
 - **Click**: pastes the file into the current window. It becomes an attachment in a chat window, and a copy in the current folder in File Explorer.
-- **Select several**: hold Ctrl or Shift and click to select several files, then paste, drag out or remove them together.
-- **Right-click**: Paste, Open, Show in folder, Copy path, Details, Add to category, Remove from the file transfer, Delete the original.
+- **Select several**: hold Ctrl or Shift and click to select several files, then paste, share, drag out or remove them together.
+- **Right-click**: Paste, Share, Open, Show in folder, Copy path, Details, Add to category, Remove from the file transfer, Delete the original.
+- **Share**: choose "Share" in the right-click menu or in a file's details to open the Windows share sheet and send files to WeChat, mail, a nearby PC and so on. Which apps it lists depends on the installed apps that accept shares. Folders and shortcuts cannot be shared.
 - **Drag out**: drag a file to where you need it; a button in the column's title row drags out all files at once. By default the left button copies and the right button moves; Settings › File transfer › Drag files out swaps them. While you drag, a word beside the pointer says whether letting go there copies or moves.
 - A file whose original has been moved or deleted is marked "Missing".
 - The notch and capsule can show how many files the file transfer holds.
