@@ -123,6 +123,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
         Program.SetField(devices, "_roster", roster);
         Program.SetField(devices, "_disposed", true);
         Program.SetProperty(devices, "Settled", true);
+        Program.SetProperty(devices, "Showing", roster.All);
+        _devices = devices; _roster = roster;
         Program.SetProperty(app, "Devices", devices);
 
         _deck = new MainWindow(app) { Opacity = 0, IsHitTestVisible = false };
@@ -185,6 +187,9 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (scenes.Contains("config-backup")) { await ConfigBackupScene(); await SettingsPage("backup-settings", 16, 1500); }
             // The indicator that opens into the capsule or the notch on each edge: the line, that style in its place, the panel opened from it, and
             // the line after the panel closes; its option on the collapsed view page. For checking, not for the README.
+            // The last time's readings, faded, while the devices are read again: the page as tiles, as one device and as a list,
+            // and the collapsed row. For checking, not for the README.
+            if (scenes.Contains("devices-earlier")) await DevicesEarlier();
             if (scenes.Contains("line-capsule")) { await LineCapsule(); _settings.Style = CompactStyle.Line; await SettingsPage("line-capsule-settings", 1, 1300, tips: true); }
         }
         finally { Directory.Delete(folder, true); }
@@ -807,6 +812,64 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Save("compact-devices", scale);
         _settings.NotchOrder = order;
         _settings.NotchDevices = false; _settings.NotchTransfer = false; _settings.NotchMusic = true; Refresh();
+        Program.SetProperty(app, "Exiting", false);
+        _settings.Animations = true;
+        await Settle();
+    }
+
+    private object _devices = null!;
+    private DeviceRoster _roster = null!;
+    // What the panels show (DeviceBatteries.Showing), told to the open page and the collapsed row.
+    private void ShowDevices(IReadOnlyList<DeviceBattery> showing)
+    {
+        Program.SetProperty(_devices, "Showing", showing);
+        Program.Call(_deck, "DevicesChanged", []);
+    }
+
+    // The mouse and the controller read again, the others still the last time's; then one device alone and a list, all the last
+    // time's; then the collapsed row with the earlier ones among the read.
+    private async Task DevicesEarlier()
+    {
+        const double scale = 2;
+        Program.SetProperty(app, "Exiting", true);
+        _settings.Animations = false;
+        var all = _roster.All;
+        var some = DeviceRoster.WithEarlier([.. all.Where(device => device.Key is "demo:mouse" or "demo:controller")], all);
+        _settings.DevicesWidth = 760; _settings.DevicesHeight = 240;
+        SelectPage(DeckPage.Devices);
+        _deck.SetExpanded(true, true);
+        ShowDevices(some);
+        await Settle();
+        await Save("devices-earlier-tiles", scale);
+        ShowDevices(DeviceRoster.WithEarlier([], [all[0]]));
+        await Settle();
+        await Save("devices-earlier-single", scale);
+        foreach (var (width, height) in new[] { (440, 150), (380, 140) })
+        {
+            _settings.DevicesWidth = width; _settings.DevicesHeight = height;
+            SelectPage(DeckPage.Usage); SelectPage(DeckPage.Devices);
+            ShowDevices(some);
+            await Settle();
+            await Save($"devices-earlier-{width}x{height}", scale);
+        }
+        SelectPage(DeckPage.Usage);
+        _deck.SetExpanded(false, true);
+        // The collapsed row's devices drawn by themselves on the notch's black, with and without figures.
+        foreach (bool figures in new[] { true, false })
+        {
+            _settings.DeviceFigures = figures;
+            var devices = Program.Call(_deck, "CurrentStripDevices", [])!;
+            var strip = (FrameworkElement)Activator.CreateInstance(Type.GetType("BrimDeck.DeviceStrip, BrimDeck")!, Program.Any, null, [devices, 1.0], null)!;
+            strip.Width = (double)Program.GetProperty(strip, "PreferredWidth")!;
+            var row = new System.Windows.Controls.Border { Background = Brushes.Black, Padding = new Thickness(14, 4, 14, 4), Child = strip };
+            row.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            row.Arrange(new Rect(row.DesiredSize));
+            var picture = new RenderTargetBitmap((int)Math.Ceiling(row.ActualWidth * 4), (int)Math.Ceiling(row.ActualHeight * 4), 96 * 4, 96 * 4, PixelFormats.Pbgra32);
+            picture.Render(row);
+            Write(picture, Path.Combine(output, $"compact-devices-earlier-{(figures ? "figures" : "rings")}.png"));
+        }
+        _settings.DeviceFigures = true;
+        ShowDevices(all);
         Program.SetProperty(app, "Exiting", false);
         _settings.Animations = true;
         await Settle();

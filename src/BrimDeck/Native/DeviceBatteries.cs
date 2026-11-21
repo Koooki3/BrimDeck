@@ -64,11 +64,16 @@ internal sealed class DeviceBatteries : IDisposable
         if (_disposed || _running == DeviceDemand.None) return;
         bool changed = _roster.Set(source, devices);
         if (source == DeviceSource.Bluetooth) { _apple.Consider(_roster.Of(DeviceSource.Bluetooth)); _encoDeck.Consider(_roster.Of(DeviceSource.Bluetooth)); }
-        if (changed) Changed?.Invoke();
+        if (changed) { Show(); Changed?.Invoke(); }
     }
 
     // Every device read now, hidden ones included; empty while nothing runs.
     public IReadOnlyList<DeviceBattery> All => _roster.All;
+    // What the panels show: All, and until the sources have listed what is connected (Settled), the readings of the last run for
+    // the devices without one yet, faded (DeviceRoster.WithEarlier). Kept in memory only, from the last time the sources stopped.
+    public IReadOnlyList<DeviceBattery> Showing { get; private set; } = [];
+    private IReadOnlyList<DeviceBattery> _earlier = [];
+    private void Show() => Showing = Settled || _running == DeviceDemand.None ? _roster.All : DeviceRoster.WithEarlier(_roster.All, _earlier);
     // Whether the sources have run long enough to have listed what is connected (the page says "no devices" only then).
     public bool Settled { get; private set; }
     public DeviceDemand Demand => _running;
@@ -144,9 +149,18 @@ internal sealed class DeviceBatteries : IDisposable
         if (demand == DeviceDemand.None)
         {
             foreach (var source in _sources) source.Stop();
+            _earlier = [.. Showing.Where(device => device.Lowest is not null)];
             _roster.Clear(); Settled = false; _settle?.Stop();
+            Show();
             Changed?.Invoke();
             return;
+        }
+        // The last run's readings show at once (Showing); the change is told after this call, as the demand is set while a panel
+        // builds its collapsed row.
+        if (was == DeviceDemand.None)
+        {
+            Show();
+            if (Showing.Count > 0) _dispatcher.BeginInvoke(() => { if (!_disposed) Changed?.Invoke(); });
         }
         foreach (var source in _sources) source.Start(demand);
         if (was == DeviceDemand.None)
@@ -164,7 +178,7 @@ internal sealed class DeviceBatteries : IDisposable
         if (_running == DeviceDemand.None || Settled) { _settle?.Stop(); return; }
         if (!_sources.All(source => source.Listed) && DateTime.UtcNow - _settleStarted < TimeSpan.FromSeconds(10)) return;
         _settle?.Stop();
-        Settled = true; Changed?.Invoke();
+        Settled = true; _earlier = []; Show(); Changed?.Invoke();
     }
 
     public void Dispose()

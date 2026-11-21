@@ -26,7 +26,7 @@ public partial class MainWindow
     {
         get
         {
-            var all = _app.Devices?.All ?? [];
+            var all = _app.Devices?.Showing ?? [];
             var choices = Settings.DeviceChoices;
             if (!ReferenceEquals(all, _shownFrom.All) || !ReferenceEquals(choices, _shownFrom.Choices))
             {
@@ -97,7 +97,7 @@ public partial class MainWindow
     private StripDevices CurrentStripDevices()
     {
         var inks = Inks;
-        return new([.. DeviceLists.Collapsed(_app.Devices?.All ?? [], Settings.DeviceChoices).Select(device => StripDevice.Of(device, inks))], Settings.DeviceFigures);
+        return new([.. DeviceLists.Collapsed(_app.Devices?.Showing ?? [], Settings.DeviceChoices).Select(device => StripDevice.Of(device, inks))], Settings.DeviceFigures);
     }
     // What the collapsed row shows: the devices as they are, kept while they are being listed again (the display came back on, a
     // suppression ended), so the part does not drop out for the moment the sources take to report.

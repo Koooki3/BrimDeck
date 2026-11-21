@@ -7,7 +7,8 @@ namespace BrimDeck;
 // The devices' batteries in the collapsed notch or capsule (CompactPart.Devices), a part of the row of its own: each device a ring
 // whose arc is its charge with the device's icon in it, then its figure when the settings show figures (DeckSettings.DeviceFigures).
 // The ring takes the device's color for its state (DeviceInks); while charging a bolt sits on it at its lower right; with no reading
-// the track alone, the icon faint and a dash. The icon tells the devices apart, so it stays whatever the state. It draws itself once
+// the track alone, the icon faint and a dash. A reading of the last time, shown while the devices are read again, is drawn faded
+// (DeviceBattery.Earlier). The icon tells the devices apart, so it stays whatever the state. It draws itself once
 // per reading; a device more or fewer builds the row again (Holds), as it changes the part's width. In the column of a notch on a
 // side edge (MainWindow.CompactColumn) the devices stand one below the other instead, a line each (Stack).
 internal sealed class DeviceStrip : FrameworkElement
@@ -62,6 +63,7 @@ internal sealed class DeviceStrip : FrameworkElement
         foreach (var device in _devices.Devices)
         {
             var middle = new Point(x + ring / 2, center);
+            if (device.Earlier) drawing.PushOpacity(DevicesView.EarlierOpacity);
             DevicesView.Ring(drawing, middle, ring, stroke, device.Percent is { } p ? Devices.Clamp(p) / 100.0 : null, device.Ring, look: Look);
             if (device.Percent is null) drawing.PushOpacity(.5);
             DeviceGlyphs.Draw(drawing, device.Kind, new Rect(middle.X - icon / 2, middle.Y - icon / 2, icon, icon), Look.Primary);
@@ -72,6 +74,7 @@ internal sealed class DeviceStrip : FrameworkElement
                 var figure = MonitorDraw.Text(Devices.Figure(device.Percent), _font, device.Percent is null ? Look.Tertiary : device.Figure, ppd);
                 MonitorDraw.Baseline(drawing, figure, x + ring + Math.Round(4 * _scale), Math.Round(center + _font * .36));
             }
+            if (device.Earlier) drawing.Pop();
             if (Stacked) center += row + _lineGap;
             else x += Slot + Gap;
         }
@@ -79,16 +82,16 @@ internal sealed class DeviceStrip : FrameworkElement
 
     // For screen readers: each device, its charge and its state.
     protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new SpokenPeer(this, () => string.Join(Loc.T("；", "; "),
-        _devices.Devices.Select(device => device.Name + " " + Devices.Figure(device.Percent) + (device.Charging ? Loc.T("，充电中", ", charging")
+        _devices.Devices.Select(device => device.Name + " " + Devices.Figure(device.Percent) + (device.Earlier ? Loc.T("，上次的读数", ", last reading") : "") + (device.Charging ? Loc.T("，充电中", ", charging")
             : device.Level == MemoryLevel.Critical ? Loc.T("，低电量", ", low") : device.Level == MemoryLevel.Elevated ? Loc.T("，电量偏低", ", getting low") : ""))));
 }
 
 // A device as the collapsed row shows it: its name (spoken only), its kind for the icon, its lowest charge, whether it charges (only
-// with a charge), its level, and its ring's and figure's colors (DeviceInks).
-internal readonly record struct StripDevice(string Name, DeviceKind Kind, int? Percent, bool Charging, MemoryLevel Level, string Ring, string Figure)
+// with a charge), its level, its ring's and figure's colors (DeviceInks), and whether the reading is the last time's.
+internal readonly record struct StripDevice(string Name, DeviceKind Kind, int? Percent, bool Charging, MemoryLevel Level, string Ring, string Figure, bool Earlier = false)
 {
     public static StripDevice Of(DeviceBattery device, DeviceInks inks)
-        => new(device.Name, device.Kind, device.Lowest, device.Charging && device.Lowest is not null, inks.Level(device), inks.Ring(device), inks.Figure(device));
+        => new(device.Name, device.Kind, device.Lowest, device.Charging && device.Lowest is not null, inks.Level(device), inks.Ring(device), inks.Figure(device), device.Earlier);
 }
 // The devices the collapsed row shows, and whether each shows its figure after its ring.
 internal sealed record StripDevices(IReadOnlyList<StripDevice> Devices, bool Figures)
