@@ -106,14 +106,35 @@ public static class GlassRecipe
         return (R(0), R(1), R(2));
     }
 
-    // What the persistent graph shows (GlassEffect.Graph), for the offscreen checks: A_dark (kept within 0..1, as an 8-bit
-    // intermediate would keep it), the luma, the composite, clamped once at the end.
+    // What the persistent graph shows (GlassEffect.Graph), for the offscreen checks and the readability guard of every material
+    // frame: A_dark (kept within 0..1, as an 8-bit intermediate would keep it), the luma, the composite, clamped once at the end.
+    // A_dark is the base matrix, whose entries (as Composition gets them, in single precision) are constants: per channel
+    // own x c + cross x (the other two channels) + tint, with no array built per call.
     public static (double R, double G, double B) Shown((double R, double G, double B) backdrop, double darkVeil, double lightVeil, double palette)
     {
-        var a = Apply(BaseMatrix(), backdrop);
-        double g = Math.Clamp(.2126 * backdrop.R + .7152 * backdrop.G + .0722 * backdrop.B, 0, 1);
         var (slope, offset) = Coefficients(darkVeil, lightVeil, palette);
-        double C(double v) => Math.Clamp(v + slope * g + offset, 0, 1);
-        return (C(a.R), C(a.G), C(a.B));
+        return Shown(backdrop, slope, offset);
+    }
+
+    // The same with the composite's amounts already worked out (one material frame over several backdrops).
+    public static (double R, double G, double B) Shown((double R, double G, double B) backdrop, double slope, double offset)
+    {
+        var m = Base;
+        double r = backdrop.R, gr = backdrop.G, b = backdrop.B;
+        double ar = Math.Clamp(r * m.M00 + gr * m.M10 + b * m.M20 + m.T0, 0, 1);
+        double ag = Math.Clamp(r * m.M01 + gr * m.M11 + b * m.M21 + m.T1, 0, 1);
+        double ab = Math.Clamp(r * m.M02 + gr * m.M12 + b * m.M22 + m.T2, 0, 1);
+        double shift = slope * Math.Clamp(.2126 * r + .7152 * gr + .0722 * b, 0, 1) + offset;
+        return (Math.Clamp(ar + shift, 0, 1), Math.Clamp(ag + shift, 0, 1), Math.Clamp(ab + shift, 0, 1));
+    }
+
+    // BaseMatrix's entries, read once.
+    private readonly record struct Rows(double M00, double M01, double M02, double M10, double M11, double M12, double M20, double M21, double M22,
+        double T0, double T1, double T2);
+    private static readonly Rows Base = BaseRows();
+    private static Rows BaseRows()
+    {
+        var m = BaseMatrix();
+        return new(m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10], m[16], m[17], m[18]);
     }
 }

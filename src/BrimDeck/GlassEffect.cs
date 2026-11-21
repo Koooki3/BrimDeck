@@ -6,6 +6,9 @@ using WinRT;
 
 namespace BrimDeck;
 
+// The graph backend's state (GlassEffect.GraphState).
+internal enum GlassBackendState { Uninitialized, Loading, Ready, Recovering, Degraded }
+
 // The glass's Direct2D effects over the host backdrop (DWM's blur of what lies behind). Composition takes an effect as an
 // IGraphicsEffect that also answers IGraphicsEffectD2D1Interop; Win2D, which normally provides those, is not available to a WPF
 // app, so this is that object, built in native memory from delegates: one identity with two interface pointers, the effect
@@ -15,7 +18,7 @@ namespace BrimDeck;
 // (Slope, Offset) are named, animatable scalar properties, and a last matrix that only sets the alpha to one (the composite
 // works on every channel, alpha too). The material moves by setting the two amounts on the brush: the factory is compiled
 // once for the run and no frame compiles anything (Stats.Compiled stays at one). Where Composition refuses the graph, the
-// recipe falls back to one fixed matrix per look in steps (Acrylic), with a bounded cache.
+// recipe falls back to one fixed matrix per look in steps (Acrylic), with a bounded least-recently-used cache.
 internal static class GlassEffect
 {
     private static readonly Guid IidUnknown = new("00000000-0000-0000-C000-000000000046");
@@ -35,60 +38,195 @@ internal static class GlassEffect
     public const string Slope = "linear.Source2Amount", Offset = "linear.Offset";
 
     // Counters for the resource checks (Windows tests, diagnostics): factories compiled, brushes made and native effect
-    // objects alive now.
+    // objects alive now; effect brushes not yet released and factories not yet disposed.
     internal static (int Compiled, int Brushes, int Live) Stats => (_compiled, _brushes, States.Count);
-    private static int _compiled, _brushes;
+    internal static (int Brushes, int Factories) Held => (Owners.Count, _liveFactories);
+    // Whether a brush made here still has its factory (not disposed under it).
+    internal static bool FactoryLive(CompositionBrush? brush) => brush is not null && Owners.TryGetValue(brush, out var factory) && !factory.Disposed;
+    private static int _compiled, _brushes, _liveFactories;
 
-    // Used on the UI thread only, as the compositor is.
-    private static CompositionEffectFactory? _graph;
-    private static bool _graphRefused;
-    // Failures that may pass (the device lost while the display changed) are retried a few times before the graph is given up.
-    private const int GraphTries = 3;
+    // Test-only fault injection (G12). Inject is called before each step that can fail ("CreateFactory", "CreateBrush",
+    // "SetSource", "Present", "CreateFallback") and may throw; InjectStatus replaces a factory's load status as it is read
+    // (told whether it is the graph's); Clock gives the milliseconds the backoff and the loading limit count in.
+    internal static Action<string>? Inject { get; set; }
+    internal static Func<bool, CompositionEffectFactoryLoadStatus, CompositionEffectFactoryLoadStatus>? InjectStatus { get; set; }
+    internal static Func<long> Clock = static () => Environment.TickCount64;
+
+    // A compiled factory and the brushes made from it that are not yet released. A factory leaves the cache (retired) when it
+    // failed, its compositor went or the fallback cache evicted it; it is disposed only once no brush of it is left, so no
+    // surface loses the brush it shows to another surface's failure.
+    private sealed class Factory(CompositionEffectFactory value, bool graph)
+    {
+        public readonly CompositionEffectFactory Value = value;
+        public readonly bool Graph = graph;
+        public int Brushes;
+        public long Used;
+        public bool Retired, Disposed, Failed;
+    }
+    private static readonly Dictionary<CompositionBrush, Factory> Owners = new(ReferenceEqualityComparer.Instance);
+
+    // The graph's state for the current compositor and capability generation (spec 7.1): Loading while its factory is
+    // Pending, Recovering while a failure that may pass backs off (100, 300, 1000 ms), Degraded once Composition refused it or
+    // the retries ran out. Used on the UI thread only, as the compositor is; only Renew may come from another thread.
+    private static Factory? _graph;
+    private static Compositor? _compositor;
+    private static int _generation, _seenGeneration = -1;
+    private static bool _graphRefused, _fallbackRefused;
     private static int _graphFailures;
-    // Whether the persistent graph can be used on this system (false once Composition refused it).
+    private static long _retryAt;
+    private static readonly int[] Backoff = [100, 300, 1000];
+    // The first try and one retry after each backoff.
+    public const int GraphTries = 4;
+    internal static GlassBackendState GraphState { get; private set; }
+    // Whether the persistent graph can be used now (false once Composition refused it for this generation).
     public static bool GraphAvailable => !_graphRefused;
-    // Diagnostics only: makes Graph refuse, so the stepped fallback is used.
-    internal static void RefuseGraph() => _graphRefused = true;
 
-    // A brush of the persistent graph over a new host backdrop, or null where Composition refuses the graph (the caller then
-    // uses Acrylic). The weights start at the dark look at its base veil.
+    // The display, a resume or the capabilities changed: what was refused may work now, and the failure streak starts again.
+    // Safe from any thread; the UI thread takes it up at its next request.
+    public static void Renew() => Interlocked.Increment(ref _generation);
+    // Diagnostics and tests only: makes Graph refuse for this generation, so the stepped fallback is used.
+    internal static void RefuseGraph() { _graphRefused = true; GraphState = GlassBackendState.Degraded; }
+
+    private static void Sync(Compositor compositor)
+    {
+        int generation = Volatile.Read(ref _generation);
+        bool sameCompositor = ReferenceEquals(compositor, _compositor);
+        if (generation == _seenGeneration && sameCompositor) return;
+        if (!sameCompositor)
+        {
+            // Another compositor: nothing compiled for the old one is used again (brushes still out keep their factory alive).
+            if (_graph is { } old) Retire(old);
+            _graph = null;
+            foreach (var factory in AcrylicFactories.Values) Retire(factory);
+            AcrylicFactories.Clear();
+            _compositor = compositor;
+        }
+        _seenGeneration = generation;
+        _graphRefused = _fallbackRefused = false;
+        _fallbackRetryAt = 0;
+        _graphFailures = 0;
+        _retryAt = 0;
+        GraphState = _graph is null ? GlassBackendState.Uninitialized : GlassBackendState.Ready;
+    }
+
+    // Whether Graph would try now: not refused for this generation and not backing off. Cheap enough for every frame.
+    public static bool CanTryGraph(Compositor compositor)
+    {
+        Sync(compositor);
+        return !_graphRefused && Clock() >= _retryAt;
+    }
+
+    // A brush of the persistent graph over a new host backdrop, or null where Composition refuses the graph or a failure is
+    // backing off (the caller then shows the fallback). The brush may still be loading: StatusOf tells, and only Success may
+    // be shown. The weights start at the dark look at its base veil.
     public static CompositionEffectBrush? Graph(Compositor compositor)
     {
-        if (_graphRefused) return null;
+        if (!CanTryGraph(compositor)) return null;
+        CompositionEffectBrush? brush = null;
+        CompositionBrush? backdrop = null;
         try
         {
-            if (_graph is null)
-            {
-                var backdrop = new CompositionEffectSourceParameter("backdrop");
-                // The matrices leave their output unclamped, so a compositor with float intermediates keeps a vivid colour's
-                // saturation overshoot; the composite clamps once.
-                var bare = Create("base", ColorMatrixEffect, [backdrop], GlassRecipe.BaseMatrix(), clamp: false);
-                var luma = Create("luma", ColorMatrixEffect, [backdrop], GlassRecipe.LumaMatrix(), clamp: false);
-                var linear = Create("linear", ArithmeticEffect, [bare, luma], coefficients: [0, 1, -.28f, .1f]);
-                var opaque = Create("opaque", ColorMatrixEffect, [linear], OpaqueMatrix, straight: true);
-                _graph = compositor.CreateEffectFactory((IGraphicsEffect)opaque, [Slope, Offset]);
-                _compiled++;
-                // A graph the compositor took but cannot draw would show as clear or black glass: the fallback instead.
-                if (_graph.LoadStatus is not (CompositionEffectFactoryLoadStatus.Success or CompositionEffectFactoryLoadStatus.Pending))
-                    throw new NotSupportedException($"the glass graph did not load: {_graph.LoadStatus}");
-            }
-            var brush = _graph.CreateBrush();
-            brush.SetSourceParameter("backdrop", compositor.CreateHostBackdropBrush());
-            _brushes++;
+            EnsureFactory(compositor);
+            var factory = _graph!;
+            Inject?.Invoke("CreateBrush");
+            brush = factory.Value.CreateBrush();
+            Inject?.Invoke("SetSource");
+            backdrop = compositor.CreateHostBackdropBrush();
+            brush.SetSourceParameter("backdrop", backdrop);
+            Own(brush, factory);
+            var status = Status(factory);
+            if (status == CompositionEffectFactoryLoadStatus.Success) Succeeded();
+            else if (status == CompositionEffectFactoryLoadStatus.Pending) GraphState = GlassBackendState.Loading;
+            else throw new NotSupportedException($"the glass graph did not load: {status}");
             return brush;
         }
-        catch (Exception error) when (error is COMException or ArgumentException or InvalidOperationException or InvalidCastException or NotSupportedException)
+        catch (Exception error) when (Expected(error))
         {
-            if (error is ArgumentException or InvalidCastException or NotSupportedException || ++_graphFailures >= GraphTries) _graphRefused = true;
-            _graph?.Dispose();
-            _graph = null;
+            Discard(brush, backdrop);
+            Fail(_graph, Permanent(error));
             return null;
+        }
+    }
+
+    // Compiles the persistent graph ahead of the first panel that shows it: a new factory loads asynchronously (it stays Pending
+    // until the UI thread has pumped messages, about 70-100 ms), and a panel shown meanwhile would show its opaque base first.
+    // Called when liquid glass is chosen; harmless when the graph exists, is refused or is backing off.
+    public static void Prewarm(Compositor compositor)
+    {
+        if (_graph is not null || !CanTryGraph(compositor)) return;
+        try { EnsureFactory(compositor); }
+        catch (Exception error) when (Expected(error)) { Fail(_graph, Permanent(error)); }
+    }
+
+    private static void EnsureFactory(Compositor compositor)
+    {
+        if (_graph is not null) return;
+        Inject?.Invoke("CreateFactory");
+        var source = new CompositionEffectSourceParameter("backdrop");
+        // The matrices leave their output unclamped, so a compositor with float intermediates keeps a vivid colour's
+        // saturation overshoot; the composite clamps once.
+        var bare = Create("base", ColorMatrixEffect, [source], GlassRecipe.BaseMatrix(), clamp: false);
+        var luma = Create("luma", ColorMatrixEffect, [source], GlassRecipe.LumaMatrix(), clamp: false);
+        var linear = Create("linear", ArithmeticEffect, [bare, luma], coefficients: [0, 1, -.28f, .1f]);
+        var opaque = Create("opaque", ColorMatrixEffect, [linear], OpaqueMatrix, straight: true);
+        _graph = Compile(compositor, (IGraphicsEffect)opaque, [Slope, Offset]);
+        GraphState = GlassBackendState.Loading;
+        // A graph the compositor took but cannot draw would show as clear or black glass: the fallback instead.
+        if (Status(_graph) is not (CompositionEffectFactoryLoadStatus.Success or CompositionEffectFactoryLoadStatus.Pending))
+            throw new NotSupportedException($"the glass graph did not load: {Status(_graph)}");
+    }
+
+    // A brush's factory's load status as it is now (Other for a brush not made here or a factory that cannot be read).
+    public static CompositionEffectFactoryLoadStatus StatusOf(CompositionBrush brush)
+    {
+        if (!Owners.TryGetValue(brush, out var factory)) return CompositionEffectFactoryLoadStatus.Other;
+        try { return Status(factory); }
+        catch (Exception error) when (Expected(error)) { return CompositionEffectFactoryLoadStatus.Other; }
+    }
+
+    // A graph brush drew (its factory loaded, its weights were taken): the failure streak starts again.
+    public static void Succeeded()
+    {
+        _graphFailures = 0;
+        _retryAt = 0;
+        if (!_graphRefused) GraphState = GlassBackendState.Ready;
+    }
+
+    // A graph brush failed after it was made (its factory never loaded, or its weights were refused): counted once per factory,
+    // which leaves the cache. The caller releases the brush.
+    public static void Failed(CompositionBrush brush, bool permanent)
+    {
+        if (Owners.TryGetValue(brush, out var factory)) Fail(factory, permanent);
+        else Fail(null, permanent);
+    }
+
+    private static void Fail(Factory? factory, bool permanent)
+    {
+        if (factory is not null)
+        {
+            if (factory.Failed && !permanent) return;
+            factory.Failed = true;
+            if (ReferenceEquals(factory, _graph)) _graph = null;
+            Retire(factory);
+        }
+        if (_graphRefused) return;
+        _graphFailures++;
+        if (permanent || _graphFailures >= GraphTries)
+        {
+            _graphRefused = true;
+            GraphState = GlassBackendState.Degraded;
+        }
+        else
+        {
+            _retryAt = Clock() + Backoff[Math.Min(_graphFailures, Backoff.Length) - 1];
+            GraphState = GlassBackendState.Recovering;
         }
     }
 
     // Sets the graph brush's amounts for each look's luminosity opacity and the light look's share (0 dark, 1 light).
     public static void Present(CompositionEffectBrush brush, double darkVeil, double lightVeil, double palette)
     {
+        Inject?.Invoke("Present");
         var (slope, offset) = GlassRecipe.Coefficients(darkVeil, lightVeil, palette);
         brush.Properties.InsertScalar(Slope, (float)slope);
         brush.Properties.InsertScalar(Offset, (float)offset);
@@ -98,36 +236,79 @@ internal static class GlassEffect
     // added its offset to the alpha as well.
     private static readonly float[] OpaqueMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1];
 
-    // The fallback: the recipe for one look, compiled once per look and kept for the run. The looks it is asked for come in
-    // steps (StepLook), so the cache is bounded.
-    private static readonly Dictionary<GlassRecipe.Look, CompositionEffectFactory> AcrylicFactories = [];
-    public const int FallbackLimit = 96;
-    public static CompositionBrush Acrylic(Compositor compositor, GlassRecipe.Look look)
+    // The fallback: the recipe for one look, compiled once per look. The looks it is asked for come in steps (StepLook), and
+    // the cache keeps the most recently used ones: past the limit the least recently used look no brush shows is let go (one
+    // at a time, so the looks in use stay compiled). Null where the look is still loading or Composition refuses it (the
+    // caller then shows an opaque ground).
+    private static readonly Dictionary<GlassRecipe.Look, Factory> AcrylicFactories = [];
+    internal static int FallbackLimit = 96;
+    internal static int FallbackCached => AcrylicFactories.Count;
+    private static long _used, _fallbackRetryAt;
+    public static bool FallbackAvailable(Compositor compositor)
     {
-        if (!AcrylicFactories.TryGetValue(look, out var factory))
+        Sync(compositor);
+        return !_fallbackRefused;
+    }
+
+    public static CompositionBrush? Acrylic(Compositor compositor, GlassRecipe.Look look)
+    {
+        Sync(compositor);
+        if (_fallbackRefused || Clock() < _fallbackRetryAt) return null;
+        CompositionEffectBrush? brush = null;
+        CompositionBrush? backdrop = null;
+        Factory? factory = null;
+        try
         {
-            if (AcrylicFactories.Count >= FallbackLimit)
+            if (!AcrylicFactories.TryGetValue(look, out factory))
             {
-                foreach (var old in AcrylicFactories.Values) old.Dispose();
-                AcrylicFactories.Clear();
+                Evict();
+                Inject?.Invoke("CreateFallback");
+                factory = Compile(compositor,
+                    (IGraphicsEffect)Create("glass", ColorMatrixEffect, [new CompositionEffectSourceParameter("backdrop")], GlassRecipe.Matrix(look)), null);
+                AcrylicFactories[look] = factory;
             }
-            AcrylicFactories[look] = factory = compositor.CreateEffectFactory(
-                (IGraphicsEffect)Create("glass", ColorMatrixEffect, [new CompositionEffectSourceParameter("backdrop")], GlassRecipe.Matrix(look)));
-            _compiled++;
+            factory.Used = ++_used;
+            var status = Status(factory);
+            if (status == CompositionEffectFactoryLoadStatus.Pending) return null;
+            if (status != CompositionEffectFactoryLoadStatus.Success) throw new NotSupportedException($"the glass fallback did not load: {status}");
+            brush = factory.Value.CreateBrush();
+            backdrop = compositor.CreateHostBackdropBrush();
+            brush.SetSourceParameter("backdrop", backdrop);
+            Own(brush, factory);
+            return brush;
         }
-        var brush = factory.CreateBrush();
-        brush.SetSourceParameter("backdrop", compositor.CreateHostBackdropBrush());
-        _brushes++;
-        return brush;
+        catch (Exception error) when (Expected(error))
+        {
+            Discard(brush, backdrop);
+            if (factory is not null && AcrylicFactories.Remove(look)) Retire(factory);
+            // Refused for this generation, or (a device that is changing) not asked again for a second.
+            if (Permanent(error)) _fallbackRefused = true;
+            else _fallbackRetryAt = Clock() + Backoff[^1];
+            return null;
+        }
+    }
+
+    private static void Evict()
+    {
+        while (AcrylicFactories.Count >= FallbackLimit)
+        {
+            GlassRecipe.Look oldest = default;
+            Factory? least = null;
+            foreach (var (look, factory) in AcrylicFactories)
+                if (factory.Brushes == 0 && (least is null || factory.Used < least.Used)) { oldest = look; least = factory; }
+            // Every cached look is on screen: the cache stays over its limit by at most the surfaces shown.
+            if (least is null) return;
+            AcrylicFactories.Remove(oldest);
+            Retire(least);
+        }
     }
 
     // The fallback's look for the graph's weights, in .05 opacity steps and twelfths of a turn.
     public static GlassRecipe.Look StepLook(double darkVeil, double lightVeil, double palette)
     {
-        double share = Math.Round(Math.Clamp(palette, 0, 1) * 12) / 12;
-        static double Step(double veil) => Math.Ceiling(Math.Clamp(veil, 0, GlassRecipe.LuminosityMost) * 20 - 1e-9) / 20;
-        var dark = GlassRecipe.Dark with { LuminosityOpacity = Step(darkVeil) };
-        var light = GlassRecipe.Light with { LuminosityOpacity = Step(lightVeil) };
+        var (darkStep, lightStep, share) = StepMaterial(darkVeil, lightVeil, palette);
+        var dark = GlassRecipe.Dark with { LuminosityOpacity = darkStep };
+        var light = GlassRecipe.Light with { LuminosityOpacity = lightStep };
         if (share <= 0) return dark;
         if (share >= 1) return light;
         double veil = dark.LuminosityOpacity + (light.LuminosityOpacity - dark.LuminosityOpacity) * share;
@@ -136,12 +317,75 @@ internal static class GlassEffect
         return dark with { LuminosityOpacity = veil, Luminosity = neutral, TintR = neutral, TintG = neutral, TintB = neutral };
     }
 
-    // Lets a glass window's brush go, with the backdrop brush inside it.
+    // The weights the fallback's stepped look stands for: each veil up to the next .05, the share to the nearest twelfth.
+    public static (double DarkVeil, double LightVeil, double Palette) StepMaterial(double darkVeil, double lightVeil, double palette)
+    {
+        static double Step(double veil) => Math.Ceiling(Math.Clamp(veil, 0, GlassRecipe.LuminosityMost) * 20 - 1e-9) / 20;
+        return (Step(darkVeil), Step(lightVeil), Math.Round(Math.Clamp(palette, 0, 1) * 12) / 12);
+    }
+
+    // Lets a glass window's brush go, with the backdrop brush inside it; its factory goes too once retired and unused.
     public static void Release(CompositionBrush? brush)
     {
-        if (brush is CompositionEffectBrush held) held.GetSourceParameter("backdrop")?.Dispose();
-        brush?.Dispose();
+        if (brush is null) return;
+        if (brush is CompositionEffectBrush held)
+        {
+            try { held.GetSourceParameter("backdrop")?.Dispose(); }
+            catch (Exception error) when (Expected(error)) { }
+        }
+        brush.Dispose();
+        if (Owners.Remove(brush, out var factory))
+        {
+            factory.Brushes--;
+            if (factory.Retired) Retire(factory);
+        }
     }
+
+    private static Factory Compile(Compositor compositor, IGraphicsEffect effect, string[]? animatable)
+    {
+        var compiled = animatable is null ? compositor.CreateEffectFactory(effect) : compositor.CreateEffectFactory(effect, animatable);
+        _compiled++;
+        _liveFactories++;
+        return new Factory(compiled, animatable is not null);
+    }
+
+    private static CompositionEffectFactoryLoadStatus Status(Factory factory)
+    {
+        var status = factory.Value.LoadStatus;
+        return InjectStatus is { } inject ? inject(factory.Graph, status) : status;
+    }
+
+    private static void Own(CompositionEffectBrush brush, Factory factory)
+    {
+        Owners.Add(brush, factory);
+        factory.Brushes++;
+        _brushes++;
+    }
+
+    // A brush (and its backdrop) that never reached a caller.
+    private static void Discard(CompositionEffectBrush? brush, CompositionBrush? backdrop)
+    {
+        if (brush is not null && Owners.ContainsKey(brush)) { Release(brush); return; }
+        try { backdrop?.Dispose(); brush?.Dispose(); }
+        catch (Exception error) when (Expected(error)) { }
+    }
+
+    // Out of the cache; disposed once no brush of it is left.
+    private static void Retire(Factory factory)
+    {
+        factory.Retired = true;
+        if (factory.Brushes > 0 || factory.Disposed) return;
+        factory.Disposed = true;
+        _liveFactories--;
+        try { factory.Value.Dispose(); }
+        catch (Exception error) when (Expected(error)) { }
+    }
+
+    // What Composition throws for an effect it cannot take (permanent for this device generation: the effect, its arguments
+    // or the interface are refused) or for a device that is changing (COMException, InvalidOperationException: may pass).
+    private static bool Expected(Exception error) => error is COMException or ArgumentException or InvalidOperationException or InvalidCastException
+        or NotSupportedException or NotImplementedException;
+    private static bool Permanent(Exception error) => error is ArgumentException or InvalidCastException or NotSupportedException or NotImplementedException;
 
     // One native effect: its Direct2D effect id, its name (the prefix of its animatable properties), its sources (owned
     // references) and, for a color matrix, its matrix.

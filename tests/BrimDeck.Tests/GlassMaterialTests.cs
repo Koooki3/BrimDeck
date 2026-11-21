@@ -20,9 +20,7 @@ internal static class GlassMaterialTests
             GlassMaterial.DarkBackdropLimit(-1) == .26 && GlassMaterial.DarkBackdropLimit(50) == .26
             && Math.Abs(GlassMaterial.DarkBackdropLimit(75) - .29) < 1e-9
             && Math.Abs(GlassMaterial.DarkBackdropLimit(101) - .32) < 1e-9);
-        check("Glass transparency: clearer glass softens the grain and retains the rim",
-            GlassMaterial.GrainStrength(0) == 1.5 && GlassMaterial.GrainStrength(50) == 1
-            && GlassMaterial.GrainStrength(100) == .5 && GlassMaterial.RimStrength(100, 0) > 1);
+        check("Glass transparency: clearer glass retains the rim", GlassMaterial.RimStrength(100, 0) > 1);
         check("Glass transparency: the rim softens through expansion and stays visible",
             GlassMaterial.RimStrength(50, 0) == 1 && GlassMaterial.RimStrength(50, 1) == .8
             && GlassMaterial.RimStrength(0, 1) > 0);

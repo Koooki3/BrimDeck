@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -17,20 +19,24 @@ namespace BrimDeck;
 //     state and the open panel's hold; a decision moves the palette spring (0 dark, 1 light). A new decision mid-way retargets
 //     it from where it is, at its speed: nothing queues, nothing restarts.
 //   Readability: the text swaps once, at the frame its new colours read at least as well as the old ones over the glass then
-//     shown (GlassReadability.SwapNow); only the leading panel of a shared look publishes it.
+//     shown (GlassReadability.SwapNow); only the leading panel of a shared look publishes it, for the turn's current epoch
+//     (GlassLookGroup: one decision per shared look, kept across a change of leader).
+// Readings (GlassSampleValidity): trusted by their capture's start, dropped when late or for a place the panel has left; a
+// watchdog of its own (a one-shot timer, never waiting for the worker) widens the tails the glass answers for toward the worst
+// range when readings stop, and only two fresh readings that agree let it go back. At most GlassReadBudget captures run in the
+// app at once.
 // Optics: the rim's gradient and an inner bevel glow start on the brighter side of the desktop around the island (GlassLight,
 // from the probe's four strips), turning there slowly; the bevel widens and the rim softens as the panel opens.
 // The springs run on the display's frames (CompositionTarget.Rendering) only while one moves, and set the persistent graph's
 // weights (GlassSurface.Present): nothing is compiled while the material moves. Sampling never stops for a turn. It runs
 // twice a second at rest and in a short burst after a hint that the backdrop may have changed (another window came to the
-// front, the window in front changed its title - a browser's tab or page -, the panel moved or began to open or close, a
-// reading that changed a lot), one reading at a time.
+// front, the window in front changed its title - a browser's tab or page, told by GlassHintBroker -, the panel moved or began
+// to open or close, a reading that changed a lot), one reading at a time.
 public partial class MainWindow
 {
-    private const int GlassProbeInterval = 500, GlassBurstInterval = 80, GlassBurstMs = 700, GlassStaleMs = 1500;
-    // Soft hints (a title change, a reading that moved a lot) start a burst at most this often, and one window's title changes
-    // count once per GlassTitleGap: a player's progress, a download's percentage or a chat's unread count retitle every second.
-    private const int GlassHintGap = 2000, GlassTitleGap = 3000;
+    private const int GlassProbeInterval = 500, GlassBurstInterval = 80, GlassBurstMs = 700;
+    // Soft hints (a title change, a reading that moved a lot) start a burst at most this often.
+    private const int GlassHintGap = 2000;
     // Stiffness (rad/s): the veil thickens within 5 % in about 180 ms and thins in about 300 ms; a palette turn about 365 ms.
     private const double GlassVeilAttack = 26, GlassVeilRelease = 16, GlassPaletteOmega = 13;
     // A turn passes through greys where neither palette's text reaches 4.5:1; while it is there the palette's spring is stiffened
@@ -38,37 +44,45 @@ public partial class MainWindow
     private const double GlassPaletteHurry = 26, GlassReadable = 4.5;
     private AcrylicProbe _acrylicProbe = new();
     private GlassSurface? _glassSurface;
-    private GlassAppearance? _glassAppearance;
-    private PanelLook? _glassAppearanceLook;
-    private DispatcherTimer? _glassProbe;
-    private bool _glassActive, _glassQueued, _glassReading, _glassRendering;
-    private long _glassGeneration;
+    // The panels that share a look share its palette decision (keyed by the look, gone with it).
+    private static readonly ConditionalWeakTable<PanelLook, GlassLookGroup<MainWindow>> GlassGroups = new();
+    private static readonly GlassReadBudget<MainWindow> GlassReads = new();
+    private GlassLookGroup<MainWindow> GlassGroup => GlassGroups.GetValue(Look, _ => new());
+    private DispatcherTimer? _glassProbe, _glassWatchdog;
+    private GlassSampleValidity _glassValidity = new(0);
+    private bool _glassActive, _glassQueued, _glassRendering, _glassProtected;
+    private long _glassGeneration, _glassTurnEpoch;
     private Int32Rect _glassBounds;
     private double _glassOpenHeight;
     // The material's channels (GlassSurface.Material) and what they head for.
     private FluidSpring _glassDarkVeil, _glassLightVeil, _glassPalette;
-    private bool _glassMaterialReady, _glassFirstSample, _glassTurning, _glassLeads, _glassGoalDark, _glassWasExpanded, _glassHurried;
+    private bool _glassMaterialReady, _glassFirstSample, _glassTurning, _glassGoalDark, _glassWasExpanded, _glassHurried;
     private double _glassRequiredDark, _glassRequiredLight, _glassWantedDark = double.NaN, _glassWantedLight = double.NaN;
-    private long _glassSampledAt, _glassBurstUntil, _glassReadAt, _glassSoftBurstAt = long.MinValue / 2, _glassTitleAt = long.MinValue / 2;
-    private IntPtr _glassTitleWindow;
+    private long _glassBurstUntil, _glassReadAt, _glassSoftBurstAt = long.MinValue / 2;
     private double _glassLastMiddle = double.NaN;
+    // The luminosity each look asks for over the area the opening panel covers (read as it began; NaN: none), reached in step with
+    // the opening shown (GlassOpening), and the openness the veils last followed.
+    private double _glassCoverDark = double.NaN, _glassCoverLight = double.NaN, _glassVeilOpenness = double.NaN;
+    private AcrylicProbe? _glassCoverProbe;
     private (double Bright, double Dark) _glassTails = (1, 0);
-    private (GlassSampleArea Area, long Generation, long At, AcrylicProbe.Reading Reading)? _glassLatestSample;
     private readonly record struct GlassSampleArea(nint Monitor, Rect Screen, Int32Rect Bounds, double Scale, PanelLook Look);
-    private (double X, double Y) _glassLight = GlassLight.Default;
-    private long _glassLightAt;
-    private (double X, double Y, double Rim, double Width, bool Dark)? _glassOptics;
-    private (Size Size, double Shoulder, CornerRadius Corners, Point Origin, Point Along, Point Depth)? _glassOutline;
+    // The light's direction shown (moved toward the target on the display's frames, GlassOpticsFrame) and the one the latest
+    // reading asks for.
+    private (double X, double Y) _glassLight = GlassLight.Default, _glassLightTarget = GlassLight.Default;
+    private double _glassLightAt;
+    private bool _glassOpticsRendering;
+    private GlassEdge? _glassEdge;
+    private IReadOnlyList<ThemeColor>? _glassEdgeStops;
+    // The outline's shape in the window's pixels apart from where it is (a move keeps it), its points in the island's own
+    // units for a contour, and the contour for the place's fraction of a pixel.
+    private (Size Size, double Shoulder, CornerRadius Corners, Vector Along, Vector Depth)? _glassOutline;
+    private Point[]? _glassOutlinePoints;
+    private (double X, double Y) _glassContourAt;
     private GlassSurface.PixelPoint[]? _glassContour;
 
-    // EVENT_OBJECT_NAMECHANGE out of context: a title change of the window in front (a browser's tab or page) hints at a new backdrop.
-    private IntPtr _glassTitleHook;
-    private WinEventProc? _glassTitleEvent;
+    // A title change of the window in front (GlassHintBroker) hints at a new backdrop.
+    private Action? _glassTitleHint;
     private bool _glassTitlePending;
-    private delegate void WinEventProc(IntPtr hook, uint winEvent, IntPtr window, int idObject, int idChild, uint thread, uint time);
-    [DllImport("user32")] private static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc callback, uint process, uint thread, uint flags);
-    [DllImport("user32")] private static extern bool UnhookWinEvent(IntPtr hook);
-    [DllImport("user32")] private static extern IntPtr GetForegroundWindow();
 
     internal static bool GlassAvailable => PanelTheme.GlassAvailable;
     // A palette turn is under way: the palette still moves, or the text has not yet swapped to the goal.
@@ -76,30 +90,31 @@ public partial class MainWindow
 
     internal void UpdateGlassTheme()
     {
-        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) { _glassAppearance = null; EndGlassTurn(); }
-        // The theme was applied again (Dress set the rim back to the theme's own): the optics are drawn anew.
-        _glassOptics = null;
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) { GlassGroup.Decision = null; EndGlassTurn(); }
+        // The theme was applied again: the edge takes its light's shape from it anew.
+        _glassEdgeStops = null;
         bool enabled = Look.Current.Effects.Glass is not null && !Look.HighContrast && GlassAvailable && !_retiring;
         if (enabled == (_glassSurface is not null)) { QueueGlass(); return; }
         if (!enabled) { CloseGlass(); return; }
+        if (GlassComposition.Compositor is { } compositor) GlassEffect.Prewarm(compositor);
         _glassSurface = new GlassSurface();
         _glassProbe = new DispatcherTimer(TimeSpan.FromMilliseconds(GlassProbeInterval), DispatcherPriority.Background, SampleGlass, Dispatcher);
         _glassProbe.Stop();
+        // The watchdog (U05): Normal priority, so a busy Background queue does not delay the text's protection.
+        _glassWatchdog = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher);
+        _glassWatchdog.Tick += GlassWatchdogTick;
         LayoutUpdated += GlassLayout;
         LocationChanged += GlassLocation;
         IsVisibleChanged += GlassVisibility;
         _host.ForegroundSwitched += GlassForeground;
-        _glassTitleEvent ??= GlassTitle;
-        _glassTitleHook = SetWinEventHook(0x800C, 0x800C, IntPtr.Zero, _glassTitleEvent, 0, 0, 0x0002); // OUTOFCONTEXT | SKIPOWNPROCESS
+        _glassTitleHint ??= GlassTitle;
+        GlassHintBroker.Subscribe(_glassTitleHint);
         QueueGlass();
     }
 
-    private void GlassTitle(IntPtr hook, uint winEvent, IntPtr window, int idObject, int idChild, uint thread, uint time)
+    private void GlassTitle()
     {
-        if (idObject != 0 || idChild != 0 || _glassTitlePending || !_glassActive || window != GetForegroundWindow()) return;
-        long now = Environment.TickCount64;
-        if (window == _glassTitleWindow && now - _glassTitleAt < GlassTitleGap) return;
-        _glassTitleWindow = window; _glassTitleAt = now;
+        if (_glassTitlePending || !_glassActive) return;
         _glassTitlePending = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { _glassTitlePending = false; GlassBurst(soft: true); });
     }
@@ -109,6 +124,7 @@ public partial class MainWindow
     {
         if (!_glassTurning) return;
         _glassTurning = false; _glassHurried = false;
+        GlassGroup.Abandon();
         _glassGoalDark = Look.Current.IsDark;
         _glassPalette.Reset(_glassGoalDark ? 0 : 1, Environment.TickCount64);
         QueueGlass();
@@ -117,7 +133,6 @@ public partial class MainWindow
     private void GlassLayout(object? sender, EventArgs e) => QueueGlass();
     private void GlassLocation(object? sender, EventArgs e)
     {
-        _glassLatestSample = null;
         _glassGeneration++;
         GlassBurst();
         QueueGlass();
@@ -165,30 +180,48 @@ public partial class MainWindow
         int right = (int)Math.Ceiling(Math.Max(Math.Max(origin.X, along.X), Math.Max(depth.X, far.X)));
         int bottom = (int)Math.Ceiling(Math.Max(Math.Max(origin.Y, along.Y), Math.Max(depth.Y, far.Y)));
         _glassBounds = new Int32Rect(left, top, right - left, bottom - top);
-        var shape = (size, Island.ShoulderRadius, Island.CornerRadius, origin, along, depth);
-        if (_glassOutline != shape)
+        // A rounded outline is the glass layer's own clip (no region); one with shoulders is a contour, built from the outline only
+        // for a new shape and placed anew only for a new fraction of a pixel, so a move by whole pixels changes neither.
+        var corners = Island.CornerRadius;
+        var layout = GlassBoundaryMath.Measure(size.Width, size.Height, Island.ShoulderRadius, corners.TopLeft, corners.TopRight, corners.BottomRight, corners.BottomLeft, 0);
+        (double X, double Y) at = (origin.X - left, origin.Y - top);
+        GlassBoundaryMath.GlassClip? clip = GlassBoundaryMath.TryRoundedClip(layout, at, (along.X - left, along.Y - top), (depth.X - left, depth.Y - top), out var rounded)
+            ? rounded : null;
+        if (clip is null)
         {
-            _glassOutline = shape;
-            var outline = IslandBorder.BuildOutline(size.Width, size.Height, shape.ShoulderRadius, shape.CornerRadius, 0).GetFlattenedPathGeometry(.25, ToleranceType.Absolute);
-            var points = new List<GlassSurface.PixelPoint>();
-            void Add(Point point)
+            var shape = (size, Island.ShoulderRadius, corners, along - origin, depth - origin);
+            if (_glassOutline != shape || _glassOutlinePoints is null)
             {
-                var pixel = Island.PointToScreen(point);
-                points.Add(new GlassSurface.PixelPoint((int)Math.Round(pixel.X - left), (int)Math.Round(pixel.Y - top)));
+                _glassOutline = shape;
+                // Flattened to about a seventh of a pixel.
+                double perDip = (along - origin).Length / size.Width;
+                var flat = IslandBorder.BuildOutline(size.Width, size.Height, shape.ShoulderRadius, corners, 0).GetFlattenedPathGeometry(.15 / perDip, ToleranceType.Absolute);
+                var local = new List<Point>();
+                foreach (var figure in flat.Figures)
+                {
+                    local.Add(figure.StartPoint);
+                    foreach (var segment in figure.Segments)
+                        if (segment is PolyLineSegment lines) local.AddRange(lines.Points);
+                        else if (segment is LineSegment line) local.Add(line.Point);
+                }
+                _glassOutlinePoints = [.. local];
+                _glassContour = null;
             }
-            foreach (var figure in outline.Figures)
+            if (_glassContour is null || _glassContourAt != at)
             {
-                Add(figure.StartPoint);
-                foreach (var segment in figure.Segments)
-                    if (segment is PolyLineSegment lines) foreach (var point in lines.Points) Add(point);
-                    else if (segment is LineSegment line) Add(line.Point);
+                _glassContourAt = at;
+                var points = _glassOutlinePoints;
+                Vector u = (along - origin) / size.Width, v = (depth - origin) / size.Height;
+                var contour = new GlassSurface.PixelPoint[points.Length];
+                for (int i = 0; i < points.Length; i++)
+                    contour[i] = new((int)Math.Round(at.X + points[i].X * u.X + points[i].Y * v.X), (int)Math.Round(at.Y + points[i].X * u.Y + points[i].Y * v.Y));
+                _glassContour = contour.Length >= 3 ? contour : null;
             }
-            _glassContour = points.Count >= 3 ? points.ToArray() : null;
-        }
-        if (_glassContour is null)
-        {
-            HideGlass();
-            return;
+            if (_glassContour is null)
+            {
+                HideGlass();
+                return;
+            }
         }
         long now = Environment.TickCount64;
         bool dark = Look.Current.IsDark;
@@ -196,12 +229,15 @@ public partial class MainWindow
         {
             // Shown anew: the current palette at rest, both looks at the floor for the brightest backdrop until a reading comes.
             _glassMaterialReady = true;
-            _glassGoalDark = dark; _glassTurning = false; _glassLeads = false;
+            _glassGoalDark = dark; _glassTurning = false;
             _glassPalette.Reset(dark ? 0 : 1, now);
             _glassRequiredDark = GlassRecipe.LuminosityFor(true, 1, 0, Settings.GlassTransparency);
             _glassRequiredLight = GlassRecipe.LuminosityFor(false, 1, 0, Settings.GlassTransparency);
             _glassWantedDark = _glassWantedLight = double.NaN;
             _glassFirstSample = true;
+            _glassValidity.Restart(now);
+            _glassProtected = false;
+            _glassTails = (1, 0);
             _glassGeneration++;
             GlassTargets(now, snap: true);
         }
@@ -212,21 +248,25 @@ public partial class MainWindow
             _glassPalette.Reset(dark ? 0 : 1, now);
         }
         bool expanded = _expanded;
-        if (expanded != _glassWasExpanded) { _glassWasExpanded = expanded; GlassBurst(); }
+        if (expanded != _glassWasExpanded)
+        {
+            _glassWasExpanded = expanded;
+            if (expanded) ReadGlassCover();
+            GlassBurst();
+        }
         GlassTargets(now, snap: !Animates);
         var material = GlassMaterialNow(now);
         var owner = new WindowInteropHelper(this).Handle;
-        if (!_glassSurface.Show(owner, _glassBounds, 0, HoverZone.Opacity * Island.MaterialOpacity, material, _glassContour))
+        if (!_glassSurface.Show(owner, _glassBounds, clip, clip is null ? _glassContour : null, HoverZone.Opacity * Island.MaterialOpacity, material, out var applied))
         {
             // Retry on a later settings or environment update instead of every layout pass.
             CloseGlass();
             return;
         }
         if (!_glassActive) { _glassActive = true; ApplySurface(); }
-        GlassTurnStep(material, now);
+        GlassTurnStep(applied.Material, now);
         GlassRenderingNeeded();
         ApplyGlassOptics();
-        Island.Pattern = AcrylicNoise.Brush(VisualTreeHelper.GetDpi(Island).DpiScaleX, GlassMaterial.GrainStrength(Settings.GlassTransparency));
         if (_glassProbe is { IsEnabled: false } probe)
         {
             probe.Start();
@@ -234,19 +274,24 @@ public partial class MainWindow
         }
     }
 
-    // Each look's veil heads for what the backdrop asks for at the opening shown now; a target that moved retargets its spring
-    // from where it is (faster when thickening). Snap: at rest on the target at once (reduced motion, a first frame).
+    // Each look's veil heads for what the backdrop asks for at the opening shown now (with the covered area's share growing with
+    // the opening, GlassOpening); a target that moved retargets its spring from where it is (faster when thickening). A veil at
+    // rest whose target moved only with the opening follows the opening shown exactly, frame by frame, instead of a spring
+    // catching up after it. Snap: at rest on the target at once (reduced motion, a first frame).
     private void GlassTargets(long now, bool snap)
     {
         int transparency = Settings.GlassTransparency;
         double openness = GlassOpenness();
-        Head(ref _glassDarkVeil, GlassMaterial.LuminosityOpacity(_glassRequiredDark, openness, transparency));
-        Head(ref _glassLightVeil, GlassMaterial.LuminosityOpacity(_glassRequiredLight, openness, transparency));
+        if (!_expanded && openness <= 0) _glassCoverDark = _glassCoverLight = double.NaN;
+        bool opening = openness != _glassVeilOpenness;
+        _glassVeilOpenness = openness;
+        Head(ref _glassDarkVeil, GlassMaterial.LuminosityOpacity(GlassOpening.Required(_glassRequiredDark, _glassCoverDark, openness), openness, transparency));
+        Head(ref _glassLightVeil, GlassMaterial.LuminosityOpacity(GlassOpening.Required(_glassRequiredLight, _glassCoverLight, openness), openness, transparency));
         if (snap) _glassPalette.Reset(_glassGoalDark ? 0 : 1, now);
 
         void Head(ref FluidSpring spring, double target)
         {
-            if (snap) { spring.Reset(target, now); return; }
+            if (snap || opening && !spring.Moving) { spring.Reset(target, now); return; }
             if (Math.Abs(spring.Target - target) < 1e-6) return;
             double current = spring.Evaluate(now).Position;
             spring.Retarget(target, now, target > current ? GlassVeilAttack : GlassVeilRelease);
@@ -271,29 +316,40 @@ public partial class MainWindow
         if (_glassSurface is null || !_glassActive) { GlassRenderingNeeded(); return; }
         long now = Environment.TickCount64;
         var material = GlassMaterialNow(now);
-        if (!_glassSurface.Present(material)) { CloseGlass(); return; }
-        GlassTurnStep(material, now);
+        if (!_glassSurface.Present(material, out var applied)) { CloseGlass(); return; }
+        GlassTurnStep(applied.Material, now);
         GlassRenderingNeeded();
     }
 
-    // A turn's text swap, by the leading panel only (the panels of a shared look follow its published palette), and its end.
+    // A turn's text swap, by the leading panel only and only for the group's current epoch (the panels of a shared look follow
+    // its published palette; a follower whose palette arrives first waits for it), and its end.
     private void GlassTurnStep(GlassSurface.Material material, long now)
     {
         if (!_glassTurning) return;
         if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) { EndGlassTurn(); return; }
+        var group = GlassGroup;
         bool showingDark = Look.Current.IsDark, arrived = !_glassPalette.Moving;
+        bool leads = ReferenceEquals(group.Leader, this) && _glassTurnEpoch == group.Epoch;
         if (!arrived && !_glassHurried && GlassReadability.Worst(showingDark, material.DarkVeil, material.LightVeil, material.Palette,
                 _glassTails.Bright, _glassTails.Dark) < GlassReadable)
         {
             _glassHurried = true;
             _glassPalette.Retarget(_glassPalette.Target, now, GlassPaletteHurry);
         }
-        // The leader swaps at the readable frame; any panel whose palette has arrived publishes the goal if nobody did (a leader
-        // hidden mid-way), which is the same palette again for the others.
-        if (showingDark != _glassGoalDark && (!Animates || arrived || _glassLeads && GlassReadability.SwapNow(showingDark, _glassGoalDark,
-                material.DarkVeil, material.LightVeil, material.Palette, _glassTails.Bright, _glassTails.Dark)))
+        // The leader swaps at the readable frame (at the latest when its palette arrived); a leader hidden mid-way hands the turn
+        // to the next panel (HideGlass elects it), which publishes the same epoch's goal.
+        if (leads && showingDark != _glassGoalDark && (!Animates || arrived || GlassReadability.SwapNow(showingDark, _glassGoalDark,
+                material.DarkVeil, material.LightVeil, material.Palette, _glassTails.Bright, _glassTails.Dark))
+            && group.TryPublish(this, _glassTurnEpoch, _glassGoalDark))
             PublishGlassPalette(_glassGoalDark, coordinated: true);
-        if (arrived && Look.Current.IsDark == _glassGoalDark) _glassTurning = false;
+        if (!arrived) return;
+        if (Look.Current.IsDark == _glassGoalDark)
+        {
+            _glassTurning = false;
+            if (leads) group.Decision?.Arrived(now);
+        }
+        // A turn of an epoch the group has left (reversed, abandoned) ends where it is; ShowGlass sets the palette to the look shown.
+        else if (_glassTurnEpoch != group.Epoch) { _glassTurning = false; QueueGlass(); }
     }
 
     // A hint that the backdrop may have changed: read at once (unless a reading runs or one was taken within a burst's interval)
@@ -309,19 +365,45 @@ public partial class MainWindow
         }
         _glassBurstUntil = now + GlassBurstMs;
         if (_glassProbe.Interval.TotalMilliseconds != GlassBurstInterval) _glassProbe.Interval = TimeSpan.FromMilliseconds(GlassBurstInterval);
-        if (_glassActive && !_glassReading && now - _glassReadAt >= GlassBurstInterval) SampleGlass(this, EventArgs.Empty);
+        if (_glassActive && !_glassValidity.Reading && now - _glassReadAt >= GlassBurstInterval) SampleGlass(this, EventArgs.Empty);
     }
 
-    // No usable reading for a while (none came, or each was for a place the panel has left, as in a long drag): keep the text safe
-    // over a backdrop we can no longer see, and let only readings that agree again thin the veil.
-    private void GlassStale(long now)
+    private void GlassWatchdogTick(object? sender, EventArgs e) => GlassWatch(Environment.TickCount64);
+
+    // The watchdog (U05): however the readings fail (none starts, none answers, each is late or for a place the panel has left),
+    // the tails the glass answers for widen toward the worst range (1 and 0) as GlassSampleValidity's protection rises, the veils
+    // thicken for them at once, the decision drops its candidate, and only fresh readings that agree thin them again. Then it
+    // sets itself for the next deadline.
+    private void GlassWatch(long now)
     {
-        if (_glassFirstSample || now - _glassSampledAt <= GlassStaleMs) return;
-        int transparency = Settings.GlassTransparency;
-        _glassRequiredDark = Math.Max(_glassRequiredDark, GlassRecipe.LuminosityFor(true, .85, .15, transparency));
-        _glassRequiredLight = Math.Max(_glassRequiredLight, GlassRecipe.LuminosityFor(false, .85, .15, transparency));
-        _glassWantedDark = _glassWantedLight = double.NaN;
-        QueueGlass();
+        if (_glassWatchdog is not { } watchdog) return;
+        watchdog.Stop();
+        if (!_glassActive) return;
+        if (_glassValidity.Protection(now) > 0 || _glassValidity.Protecting)
+        {
+            if (!_glassProtected)
+            {
+                _glassProtected = true;
+                _glassWantedDark = _glassWantedLight = double.NaN;
+                if (ReferenceEquals(GlassGroup.Leader, this)) GlassGroup.Decision?.Invalidate();
+            }
+            var safe = _glassValidity.SafeTails(now);
+            _glassTails = (Math.Max(_glassTails.Bright, safe.Bright), Math.Min(_glassTails.Dark, safe.Dark));
+            int transparency = Settings.GlassTransparency;
+            double dark = GlassRecipe.LuminosityFor(true, _glassTails.Bright, _glassTails.Dark, transparency);
+            double light = GlassRecipe.LuminosityFor(false, _glassTails.Bright, _glassTails.Dark, transparency);
+            if (dark > _glassRequiredDark || light > _glassRequiredLight)
+            {
+                _glassRequiredDark = Math.Max(_glassRequiredDark, dark);
+                _glassRequiredLight = Math.Max(_glassRequiredLight, light);
+                QueueGlass();
+            }
+        }
+        else _glassProtected = false;
+        long next = _glassValidity.NextDeadline(now);
+        if (next == long.MaxValue) return;
+        watchdog.Interval = TimeSpan.FromMilliseconds(Math.Max(1, next - now));
+        watchdog.Start();
     }
 
     private GlassSampleArea? CurrentGlassSampleArea()
@@ -336,89 +418,163 @@ public partial class MainWindow
     {
         // The reading's continuation and everything it starts (the springs' frames, a turn) belong on this window's thread.
         if (!Dispatcher.CheckAccess()) { _ = Dispatcher.BeginInvoke(() => SampleGlass(sender, e)); return; }
+        long start = Environment.TickCount64;
+        bool bursting = start < _glassBurstUntil;
         if (_glassProbe is { } timer)
         {
-            int interval = Environment.TickCount64 < _glassBurstUntil ? GlassBurstInterval : GlassProbeInterval;
+            int interval = bursting ? GlassBurstInterval : GlassProbeInterval;
             if (timer.Interval.TotalMilliseconds != interval) timer.Interval = TimeSpan.FromMilliseconds(interval);
         }
-        if (!_glassActive || _glassReading || CurrentGlassSampleArea() is not { } area) return;
-        _glassReading = true;
-        _glassReadAt = Environment.TickCount64;
-        long generation = _glassGeneration;
+        var validity = _glassValidity;
+        validity.Mode(bursting, start);
+        GlassWatch(start);
+        if (!_glassActive || CurrentGlassSampleArea() is not { } area) return;
+        int abandoned = validity.Abandoned;
+        if (validity.Begin(start, _glassGeneration) is not { } ticket) return;
+        if (validity.Abandoned != abandoned)
+        {
+            // The capture given up still holds its probe on its worker: the next ones read with a new one.
+            _acrylicProbe.Dispose();
+            _acrylicProbe = new AcrylicProbe();
+        }
+        if (!GlassReads.TryEnter(this, ticket.Id)) { validity.Cancel(ticket); return; }
+        _glassReadAt = start;
         var monitor = area.Screen;
         var screen = new Int32Rect((int)monitor.X, (int)monitor.Y, (int)monitor.Width, (int)monitor.Height);
         var probe = _acrylicProbe;
-        try
-        {
-            var reading = await Task.Run(() => probe.Read(area.Bounds, screen, (int)(24 * area.Scale), (int)(40 * area.Scale)));
-            if (!_glassActive) return;
-            long now = Environment.TickCount64;
-            int transparency = Settings.GlassTransparency;
-            if (reading is not { } sample || generation != _glassGeneration || area != CurrentGlassSampleArea()) { GlassStale(now); return; }
-            double openness = GlassOpenness();
-            _glassSampledAt = now;
-            _glassLatestSample = (area, generation, now, sample);
-            _glassTails = (sample.BrightFor(openness), sample.DarkFor(openness));
-            // A video's frames change most pixels every time and are no new scene: only the middle's brightness moving a lot hints at
-            // one, and not while the backdrop is a video.
-            if (double.IsFinite(_glassLastMiddle) && Math.Abs(sample.MiddleMean - _glassLastMiddle) > .12 && _glassAppearance?.Video != true) GlassBurst(soft: true);
-            _glassLastMiddle = sample.MiddleMean;
-            _glassLight = GlassLight.Follow(_glassLight, GlassLight.Direction(sample.Sides, _glassLight), _glassLightAt == 0 ? 0 : now - _glassLightAt);
-            _glassLightAt = now;
-            ApplyGlassOptics();
-            double wantedDark = GlassRecipe.LuminosityFor(true, _glassTails.Bright, _glassTails.Dark, transparency);
-            double wantedLight = GlassRecipe.LuminosityFor(false, _glassTails.Bright, _glassTails.Dark, transparency);
-            double dark = _glassFirstSample ? wantedDark : GlassMaterial.Settle(wantedDark, _glassWantedDark, _glassRequiredDark);
-            double light = _glassFirstSample ? wantedLight : GlassMaterial.Settle(wantedLight, _glassWantedLight, _glassRequiredLight);
-            _glassFirstSample = false;
-            _glassWantedDark = wantedDark; _glassWantedLight = wantedLight;
-            bool changed = dark != _glassRequiredDark || light != _glassRequiredLight;
-            _glassRequiredDark = dark; _glassRequiredLight = light;
-            UpdateAutomaticGlass(sample, now);
-            if (changed) QueueGlass();
-        }
-        finally { _glassReading = false; }
+        AcrylicProbe.Reading? reading;
+        try { reading = await Task.Run(() => probe.Read(area.Bounds, screen, (int)(24 * area.Scale), (int)(40 * area.Scale))); }
+        finally { GlassReads.Leave(this, ticket.Id); }
+        if (!_glassActive || !ReferenceEquals(validity, _glassValidity)) return;
+        long now = Environment.TickCount64;
+        int transparency = Settings.GlassTransparency;
+        double openness = GlassOpenness();
+        (double, double)? tails = reading is { } read ? (read.BrightFor(openness), read.DarkFor(openness)) : null;
+        bool first = _glassFirstSample;
+        var verdict = validity.Complete(ticket, now, _glassGeneration, area == CurrentGlassSampleArea(), tails);
+        GlassWatch(now);
+        if (verdict is not (GlassSampleValidity.Verdict.Accepted or GlassSampleValidity.Verdict.Recovering) || reading is not { } sample) return;
+        // Recovering (the first fresh reading after the protection rose): the glass may thicken for it, not thin yet.
+        bool recovering = verdict == GlassSampleValidity.Verdict.Recovering;
+        _glassTails = recovering ? (Math.Max(_glassTails.Bright, tails!.Value.Item1), Math.Min(_glassTails.Dark, tails.Value.Item2)) : tails!.Value;
+        // A video's frames change most pixels every time and are no new scene: only the middle's brightness moving a lot hints at
+        // one, and not while the backdrop is a video.
+        if (double.IsFinite(_glassLastMiddle) && Math.Abs(sample.MiddleMean - _glassLastMiddle) > .12 && GlassGroup.Decision?.Video != true) GlassBurst(soft: true);
+        _glassLastMiddle = sample.MiddleMean;
+        _glassLightTarget = GlassLight.Direction(sample.Sides, _glassLight);
+        GlassOpticsNeeded();
+        double wantedDark = GlassRecipe.LuminosityFor(true, tails!.Value.Item1, tails.Value.Item2, transparency);
+        double wantedLight = GlassRecipe.LuminosityFor(false, tails.Value.Item1, tails.Value.Item2, transparency);
+        double dark = first ? wantedDark : recovering ? Math.Max(_glassRequiredDark, wantedDark) : GlassMaterial.Settle(wantedDark, _glassWantedDark, _glassRequiredDark);
+        double light = first ? wantedLight : recovering ? Math.Max(_glassRequiredLight, wantedLight) : GlassMaterial.Settle(wantedLight, _glassWantedLight, _glassRequiredLight);
+        _glassFirstSample = false;
+        _glassWantedDark = wantedDark; _glassWantedLight = wantedLight;
+        bool changed = dark != _glassRequiredDark || light != _glassRequiredLight;
+        _glassRequiredDark = dark; _glassRequiredLight = light;
+        if (!recovering) UpdateAutomaticGlass(sample, now);
+        if (changed) QueueGlass();
+    }
+
+    // The leader of this panel's shared look among the panels shown now (GlassLookGroup.Elect).
+    private MainWindow? ElectGlassLeader()
+    {
+        var look = Look;
+        return GlassGroup.Elect(_app.Decks.Where(deck => ReferenceEquals(deck.Look, look)).Select(deck => new GlassLookGroup<MainWindow>.Member(deck,
+            deck._glassActive && deck.IsVisible && PanelThemes.NormalizeId(deck.Settings.PanelTheme) == PanelThemes.GlassAuto, deck.Animates)).ToList());
     }
 
     private void UpdateAutomaticGlass(AcrylicProbe.Reading sample, long now)
     {
         if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) return;
-        var publisher = _app.Decks.FirstOrDefault(deck => deck._glassActive && deck.IsVisible && ReferenceEquals(deck.Look, Look)
-            && PanelThemes.NormalizeId(deck.Settings.PanelTheme) == PanelThemes.GlassAuto);
-        if (!ReferenceEquals(publisher, this)) return;
+        var group = GlassGroup;
+        if (!ReferenceEquals(ElectGlassLeader(), this)) return;
         bool appDark = SettingsPalette.IsDark(SettingsTheme.System);
-        // A new decision object only for a new look or a palette set from outside, not for a turn of our own still under way.
-        if (_glassAppearance is null || !ReferenceEquals(_glassAppearanceLook, Look) || _glassAppearance.Dark != _glassGoalDark)
+        // One decision per shared look, kept across leaders; a palette set from outside (no turn of ours under way) resets it to
+        // the look shown, with its measures' history.
+        if (group.Decision is not { } decision) decision = group.Decision = new GlassAppearance(Look.Current.IsDark, appDark, videoGap: 2 * GlassProbeInterval);
+        else if (decision.StateAt(now) != GlassTurnState.InFlight && decision.Dark != Look.Current.IsDark)
         {
-            _glassAppearanceLook = Look;
-            _glassAppearance = new GlassAppearance(_glassGoalDark, appDark, videoGap: 2 * GlassProbeInterval);
+            decision.Reset(Look.Current.IsDark, now);
+            group.Abandon();
         }
-        _glassAppearance.Prior(appDark);
-        _glassAppearance.Changed(sample.Changed, now);
+        decision.Prior(appDark);
+        decision.Changed(sample.Changed, now);
         bool held = _expanded || _app.Decks.Any(deck => ReferenceEquals(deck.Look, Look) && (deck._expanded
             || deck._glassActive && deck.GlassOpenness() > .001));
-        if (!_glassAppearance.Feed(sample.MiddleMean, now, held: held)) return;
-        bool dark = _glassAppearance.Dark;
-        if (!Animates || _glassSurface?.Visible != true)
+        if (!decision.Feed(sample.MiddleMean, now, held: held)) return;
+        StartGlassTurn(decision, now);
+    }
+
+    // The decision turned (or reversed): a new epoch for the shared look; the panels that animate head their palettes for it and
+    // the leader publishes it at the readable frame; a leader that does not animate (or shows no glass) publishes it at once.
+    private void StartGlassTurn(GlassAppearance decision, long now)
+    {
+        var group = GlassGroup;
+        bool dark = decision.Dark;
+        long epoch = group.Begin(dark);
+        var leader = group.Leader ?? this;
+        if (!leader.Animates || leader._glassSurface?.Visible != true)
         {
-            _glassGoalDark = dark;
-            PublishGlassPalette(dark, coordinated: false);
+            leader._glassGoalDark = dark; leader._glassTurnEpoch = epoch;
+            if (group.TryPublish(leader, epoch, dark)) leader.PublishGlassPalette(dark, coordinated: false);
+            decision.Arrived(now);
             return;
         }
         foreach (var deck in _app.Decks.ToList())
         {
             if (!ReferenceEquals(deck.Look, Look) || PanelThemes.NormalizeId(deck.Settings.PanelTheme) != PanelThemes.GlassAuto
                 || !deck.Animates || deck._glassSurface?.Visible != true) continue;
-            deck.BeginGlassPaletteTurn(dark, now, leads: ReferenceEquals(deck, this));
+            deck.BeginGlassPaletteTurn(dark, now, epoch);
         }
     }
 
-    // Heads the palette for dark or light from wherever it is now (a reversal mid-way included). The veils of both looks are
-    // already following the backdrop, so the goal's branch is ready.
-    private void BeginGlassPaletteTurn(bool dark, long now, bool leads)
+    // The panel begins to open (user 11-21): read the desktop it is about to cover before it does, so the veils reach what that
+    // area asks for in step with the opening (a failed read: the worst range), and a clearly light or dark area turns the shared
+    // look with the opening, before the open panel's lock holds it. Where the area cannot be told (no larger open height known,
+    // nothing of it on the display), the opening goes on as before.
+    private async void ReadGlassCover()
+    {
+        if (!_glassActive || CurrentGlassSampleArea() is not { } area || GlassCoveredArea() is not { } covered) return;
+        var monitor = area.Screen;
+        var screen = new Int32Rect((int)monitor.X, (int)monitor.Y, (int)monitor.Width, (int)monitor.Height);
+        var probe = _glassCoverProbe ??= new AcrylicProbe();
+        var reading = await Task.Run(() => probe.ReadArea(covered, screen));
+        if (!_glassActive || !_expanded) return;
+        long now = Environment.TickCount64;
+        int transparency = Settings.GlassTransparency;
+        var (bright, dark) = reading is { } read ? (read.Bright, read.Dark) : (1d, 0d);
+        _glassCoverDark = GlassRecipe.LuminosityFor(true, bright, dark, transparency);
+        _glassCoverLight = GlassRecipe.LuminosityFor(false, bright, dark, transparency);
+        QueueGlass();
+        if (reading is not { } sample || PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) return;
+        ElectGlassLeader();
+        if (GlassGroup.Decision is { } decision && decision.Open(sample.MiddleMean, now)) StartGlassTurn(decision, now);
+    }
+
+    // The screen pixels the open panel will cover beyond the island shown now (a margin past it, as the ring keeps from its
+    // shadow): the open panel's height away from the edge, its width along it (the island's own on a side edge, where the open
+    // width is not kept), centred on the island; null when nothing of it can be told.
+    private Int32Rect? GlassCoveredArea()
+    {
+        if (Island.RenderSize is not { Width: > 1, Height: > 1 } size || PresentationSource.FromVisual(Island) is null) return null;
+        double open = _glassOpenHeight, from = size.Height + 24;
+        if (!double.IsFinite(open) || open - from < 8) return null;
+        double width = _frame.Across ? size.Width : Math.Max(size.Width, _pageWidth * _scale), left = (size.Width - width) / 2;
+        Point[] corners = [new(left, from), new(left + width, from), new(left, open), new(left + width, open)];
+        var screen = corners.Select(Island.PointToScreen).ToArray();
+        int x = (int)Math.Floor(screen.Min(p => p.X)), y = (int)Math.Floor(screen.Min(p => p.Y));
+        var rect = new Int32Rect(x, y, (int)Math.Ceiling(screen.Max(p => p.X)) - x, (int)Math.Ceiling(screen.Max(p => p.Y)) - y);
+        return WindowsHost.MonitorScreen(MonitorHandle) is { Bounds: var monitor }
+            && AcrylicProbe.Clip(rect, new Int32Rect((int)monitor.X, (int)monitor.Y, (int)monitor.Width, (int)monitor.Height)) is { IsEmpty: false } clipped
+            ? clipped : null;
+    }
+
+    // Heads the palette for dark or light from wherever it is now (a reversal mid-way included), for the group's epoch. The veils
+    // of both looks are already following the backdrop, so the goal's branch is ready.
+    private void BeginGlassPaletteTurn(bool dark, long now, long epoch)
     {
         _glassGoalDark = dark;
-        _glassLeads = leads;
+        _glassTurnEpoch = epoch;
         _glassTurning = true;
         _glassHurried = false;
         _glassPalette.Retarget(dark ? 0 : 1, now, GlassPaletteOmega);
@@ -426,37 +582,54 @@ public partial class MainWindow
         QueueGlass();
     }
 
-    // The rim and the bevel glow for the light's direction, the opening and the look; rebuilt only when one of them moved enough to
-    // see (the brushes are frozen): the light turns slowly, and an opening or closing passes in about ten steps of the rim and the
-    // bevel, which are exact again at rest.
+    // The optical edge (GlassEdge) for the light's direction, the opening and the palette shown now. The edge's brushes are moved
+    // in place, so this runs on any frame without a new brush; the island draws anew only when the rings change (a new width).
     private void ApplyGlassOptics()
     {
         if (!_glassActive) return;
         double openness = GlassOpenness();
-        bool dark = Look.Current.IsDark, atRest = openness is <= 0 or >= 1;
-        double rim = Math.Min(1, GlassMaterial.RimStrength(Settings.GlassTransparency, openness)), width = GlassLight.BevelWidth(openness);
-        double rimStep = atRest ? .005 : .06, widthStep = atRest ? .01 : .35;
-        if (_glassOptics is { } shown && shown.Dark == dark && Math.Abs(shown.Rim - rim) < rimStep && Math.Abs(shown.Width - width) < widthStep
-            && Math.Abs(Math.IEEERemainder(Math.Atan2(shown.Y, shown.X) - Math.Atan2(_glassLight.Y, _glassLight.X), 2 * Math.PI)) < .03) return;
-        _glassOptics = (_glassLight.X, _glassLight.Y, rim, width, dark);
-        var (start, end) = GlassLight.Gradient(_glassLight);
+        double strength = Math.Min(1, GlassMaterial.RimStrength(Settings.GlassTransparency, openness));
+        var (peak, baseline) = GlassBoundaryMath.Light(_glassPalette.Evaluate(Environment.TickCount64).Position);
+        var edge = _glassEdge ??= new GlassEdge();
         var stops = Look.Current.Effects.RimGradient;
-        Brush rimBrush = stops.Count >= 2
-            ? new LinearGradientBrush(new GradientStopCollection(stops.Select((stop, i) => new GradientStop(PanelTheme.ToColor(stop), (double)i / (stops.Count - 1)))),
-                new Point(start.X, start.Y), new Point(end.X, end.Y))
-            : Look.RimBrush();
-        rimBrush = rimBrush.CloneCurrentValue();
-        rimBrush.Opacity = rim;
-        rimBrush.Freeze();
-        Island.RimBrush = rimBrush;
-        byte peak = dark ? (byte)26 : (byte)36;
-        var glow = new LinearGradientBrush(new GradientStopCollection
+        if (!ReferenceEquals(_glassEdgeStops, stops))
         {
-            new(Color.FromArgb(peak, 255, 255, 255), 0), new(Color.FromArgb((byte)(peak * .35), 255, 255, 255), .6), new(Color.FromArgb((byte)(peak * .15), 255, 255, 255), 1)
-        }, new Point(start.X, start.Y), new Point(end.X, end.Y));
-        glow.Freeze();
-        Island.BevelGlow = glow;
-        Island.BevelGlowWidth = width;
+            _glassEdgeStops = stops;
+            edge.Stops([.. stops.Select(PanelTheme.ToColor)]);
+        }
+        var (start, end) = GlassLight.Gradient(_glassLight);
+        edge.Light(start, end);
+        bool rings = edge.Shape(GlassBoundaryMath.BevelWidth(openness), 1 / VisualTreeHelper.GetDpi(Island).PixelsPerDip, peak, baseline, strength);
+        if (!ReferenceEquals(Island.Edge, edge)) Island.Edge = edge;
+        else if (rings) Island.InvalidateVisual();
+    }
+
+    // The light turns toward the latest reading's direction on the display's frames (GlassLight.Follow by the time passed), and the
+    // edge follows a palette turn as it goes; neither waits for the next reading, and nothing runs once both are at rest.
+    private void GlassOpticsNeeded()
+    {
+        bool moving = _glassActive && (_glassPalette.Moving
+            || Math.Abs(Math.IEEERemainder(Math.Atan2(_glassLight.Y, _glassLight.X) - Math.Atan2(_glassLightTarget.Y, _glassLightTarget.X), 2 * Math.PI)) > .002);
+        if (moving == _glassOpticsRendering) return;
+        _glassOpticsRendering = moving;
+        if (moving)
+        {
+            _glassLightAt = Stopwatch.GetTimestamp() * 1000d / Stopwatch.Frequency;
+            CompositionTarget.Rendering += GlassOpticsFrame;
+        }
+        else CompositionTarget.Rendering -= GlassOpticsFrame;
+    }
+
+    private void GlassOpticsFrame(object? sender, EventArgs e)
+    {
+        if (_glassActive)
+        {
+            double now = Stopwatch.GetTimestamp() * 1000d / Stopwatch.Frequency;
+            _glassLight = GlassLight.Follow(_glassLight, _glassLightTarget, now - _glassLightAt);
+            _glassLightAt = now;
+            ApplyGlassOptics();
+        }
+        GlassOpticsNeeded();
     }
 
     private void PublishGlassPalette(bool dark, bool coordinated)
@@ -471,26 +644,29 @@ public partial class MainWindow
     private void HideGlass()
     {
         _glassProbe?.Stop();
-        _glassLatestSample = null;
+        _glassWatchdog?.Stop();
         _glassSurface?.Hide();
         if (!_glassActive) return;
         _glassActive = false;
         GlassRenderingNeeded();
         _glassMaterialReady = false;
         _glassTurning = false;
-        _glassAppearance = null;
+        // A hidden leader hands its look's turn and decision over (U08); the heir looks at its turn on its next pass.
+        if (ElectGlassLeader() is { } heir && !ReferenceEquals(heir, this)) heir.QueueGlass();
+        GlassReads.Drop(this);
+        // A worker still reading keeps the old probe until it answers (then it is released); late answers are dropped.
+        _acrylicProbe.Dispose();
         _acrylicProbe = new AcrylicProbe();
+        _glassCoverProbe?.Dispose();
+        _glassCoverProbe = null;
+        _glassCoverDark = _glassCoverLight = _glassVeilOpenness = double.NaN;
+        _glassValidity = new GlassSampleValidity(Environment.TickCount64);
         _glassLastMiddle = double.NaN;
         _glassGeneration++;
-        _glassLight = GlassLight.Default; _glassLightAt = 0; _glassOptics = null;
-        Island.RimBrush = Look.RimBrush();
-        Island.BevelGlow = null;
+        _glassLight = _glassLightTarget = GlassLight.Default;
+        GlassOpticsNeeded();
+        Island.Edge = null;
         ApplySurface();
-        if (AcrylicNoise.Is(Island.Pattern))
-        {
-            double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-            Island.Pattern = Look.Texture(dpiScale: dpi) ?? Look.Scanlines(dpiScale: dpi);
-        }
     }
 
     private void CloseGlass()
@@ -500,16 +676,16 @@ public partial class MainWindow
         LocationChanged -= GlassLocation;
         IsVisibleChanged -= GlassVisibility;
         _host.ForegroundSwitched -= GlassForeground;
-        if (_glassTitleHook != IntPtr.Zero) { UnhookWinEvent(_glassTitleHook); _glassTitleHook = IntPtr.Zero; }
+        if (_glassTitleHint is not null) GlassHintBroker.Unsubscribe(_glassTitleHint);
         HideGlass();
         _glassActive = false;
         GlassRenderingNeeded();
         _glassSurface.Dispose();
         _glassSurface = null;
         _glassProbe = null;
-        _glassAppearance = null;
-        _glassAppearanceLook = null;
+        if (_glassWatchdog is not null) { _glassWatchdog.Stop(); _glassWatchdog.Tick -= GlassWatchdogTick; _glassWatchdog = null; }
         _glassOutline = null;
+        _glassOutlinePoints = null;
         _glassContour = null;
         _glassMaterialReady = false;
     }
