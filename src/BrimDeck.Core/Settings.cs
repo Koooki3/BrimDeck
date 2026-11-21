@@ -542,7 +542,7 @@ public sealed class DeckSettings
     public bool MusicPageCover { get; set; } = true;
     public bool MusicIndicatorProgress { get; set; } = true;
     public bool LyricsEnabled { get; set; } = true;
-    public bool MusicSimulatedKaraoke { get; set; }
+    public bool MusicSimulatedKaraoke { get; set; } = true;
     // Where the lyrics sit on the page, chosen apart from the cover: under the artist in the titles' column, or in a column of
     // their own right of the titles (the cover then stands above the titles). Without the cover the titles' column may sit at the
     // page's left edge or be centred.

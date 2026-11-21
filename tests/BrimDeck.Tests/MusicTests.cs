@@ -37,7 +37,7 @@ internal static class MusicTests
         check("A non-numeric credit time is skipped without aborting the rest of the lyric", badCreditTime.Lines.Count == 1 && badCreditTime.Lines[0].Text == "正文");
         var simulated = Lyrics.Parse("[00:00]一二三四\n[00:04]下一行", null, 10, "test");
         var simulationTrack = new MediaTrack { End = TimeSpan.FromSeconds(10), ReportedPosition = TimeSpan.FromSeconds(2), PositionAt = now, State = MediaState.Playing };
-        check("Simulated karaoke defaults off", !new DeckSettings().MusicSimulatedKaraoke && simulated.Karaoke(simulationTrack, now).Words is null);
+        check("Simulated karaoke defaults on in settings but off in Karaoke itself", new DeckSettings().MusicSimulatedKaraoke && simulated.Karaoke(simulationTrack, now).Words is null);
         var simulation = simulated.Karaoke(simulationTrack, now, simulate: true);
         check("Simulated karaoke sweeps half the line at its midpoint", simulation.Words is not null && Math.Abs(simulation.Sweep.Sung - 2) < 0.001);
         check("Simulated karaoke pauses with playback", simulated.Karaoke(simulationTrack with { State = MediaState.Paused }, now, simulate: true).Sweep.Rate == 0);
