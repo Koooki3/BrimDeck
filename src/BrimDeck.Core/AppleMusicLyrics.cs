@@ -128,18 +128,6 @@ public sealed partial class LyricsService
         return new();
     }
 
-    // LRCLIB, QQ Music and NetEase in turn until one has synced lyrics; plain lyrics are used only when none has.
-    private async Task<Lyrics> FindAppleFallback(MediaTrack track, Lyrics plain, CancellationToken token)
-    {
-        foreach (var find in new Func<MediaTrack, CancellationToken, Task<Lyrics>>[] { FindLrclib, FindQq, FindNetease })
-        {
-            var lyrics = await find(track, token);
-            if (lyrics.Synced && lyrics.Lines.Count > 0) return lyrics;
-            if (plain.Lines.Count == 0 && !plain.Instrumental && (lyrics.Lines.Count > 0 || lyrics.Instrumental)) plain = lyrics;
-        }
-        return plain;
-    }
-
     private static IEnumerable<string> AppleCacheRoots()
     {
         string packages = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Packages");

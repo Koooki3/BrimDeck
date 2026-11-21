@@ -83,6 +83,7 @@ internal static class LyricMatchTests
             {
                 Content = new StringContent(uri.Host switch
                 {
+                    "mobiles.kugou.com" => "{\"data\":{\"info\":[{\"hash\":\"" + Hash.ToUpperInvariant() + "\",\"songname\":\"测试歌\",\"singername\":\"歌手\",\"duration\":200}]}}",
                     "krcs.kugou.com" => "{\"candidates\":[{\"id\":\"1\",\"accesskey\":\"0123456789ABCDEF\",\"song\":\"测试歌\",\"singer\":\"歌手\",\"duration\":200000}]}",
                     "lyrics.kugou.com" => "{\"content\":\"" + online + "\"}",
                     _ => "{}"

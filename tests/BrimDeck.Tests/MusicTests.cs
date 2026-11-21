@@ -141,14 +141,15 @@ internal static class MusicTests
         using var handler = new LyricsHandler(); using var http = new HttpClient(handler); using var service = new LyricsService(http);
         check("Lyrics disabled sends no request", (await service.FindAsync(track, false, default)).Lines.Count == 0 && handler.Calls == 0);
         var result = await service.FindAsync(track, true, default);
-        check("Lyrics provider uses identified requests without credentials", result.Lines.Count == 1 && handler.Calls == 1 && handler.Identified && !handler.Authorization);
+        int calls = handler.Calls;
+        check("Lyrics provider uses identified requests without credentials", result.Lines.Count == 1 && handler.Lrclib == 1 && handler.Identified && !handler.Authorization);
         await service.FindAsync(track, true, default);
-        check("Repeated tracks are served from the lyrics cache", handler.Calls == 1);
+        check("Repeated tracks are served from the lyrics cache", handler.Calls == calls);
         using var canceled = new CancellationTokenSource(); canceled.Cancel(); bool cancelled = false;
         try { await service.FindAsync(track with { Title = "另一首" }, true, canceled.Token); } catch (OperationCanceledException) { cancelled = true; }
-        check("Cancelled lyrics queries do not issue requests", cancelled && handler.Calls == 1);
+        check("Cancelled lyrics queries do not issue requests", cancelled && handler.Calls == calls);
         var nativeLyrics = await service.FindAsync(track with { EmbeddedLyrics = "[00:02]播放器提供的完整歌词" }, true, default);
-        check("Native full lyrics bypass online lookup", nativeLyrics.At(2).Current == "播放器提供的完整歌词" && handler.Calls == 1);
+        check("Native full lyrics bypass online lookup", nativeLyrics.At(2).Current == "播放器提供的完整歌词" && handler.Calls == calls);
         using var versioned = new NeteaseLyricHandler(); using var versionedHttp = new HttpClient(versioned); using var versionedService = new LyricsService(versionedHttp);
         var firstVersion = await versionedService.FindAsync(track with { Source = "NetEase", SongId = "netease:2692035029" }, true, default);
         check("A NetEase lyric still at its first version is requested in full, word timing included, in one request",
@@ -161,13 +162,14 @@ internal static class MusicTests
             lineOnlyLyrics.At(1.5).Current == "first" && lineOnlyLyrics.Lines[0].Words is null && lineOnly.Requested.Count == 1);
         async Task<(Lyrics Lyrics, List<Uri> Requested)> Served(Func<Uri, HttpResponseMessage> reply)
         {
-            using var served = new ReplyHandler(reply); using var servedHttp = new HttpClient(served); using var servedService = new LyricsService(servedHttp);
+            // LRCLIB is asked last; the providers before it answer with nothing.
+            using var served = new ReplyHandler(uri => uri.Host == "lrclib.net" ? reply(uri) : new(HttpStatusCode.NotFound)); using var servedHttp = new HttpClient(served); using var servedService = new LyricsService(servedHttp);
             return (await servedService.FindAsync(track, true, default), served.Requested);
         }
         const string LrclibReply = "{\"trackName\":\"测试曲目\",\"artistName\":\"测试歌手\",\"duration\":200,\"syncedLyrics\":\"[00:01]歌词\"}";
         HttpResponseMessage Moved(string location) { var moved = new HttpResponseMessage(HttpStatusCode.Found); moved.Headers.Location = new Uri(location, UriKind.RelativeOrAbsolute); return moved; }
         var sameHost = await Served(uri => uri.AbsolutePath == "/moved" ? new(HttpStatusCode.OK) { Content = new StringContent(LrclibReply) } : Moved("/moved"));
-        check("A lyrics redirect to HTTPS on the same host is followed", sameHost.Lyrics.Lines.Count == 1 && sameHost.Requested[1].ToString() == "https://lrclib.net/moved");
+        check("A lyrics redirect to HTTPS on the same host is followed", sameHost.Lyrics.Lines.Count == 1 && sameHost.Requested.Where(uri => uri.Host == "lrclib.net").ElementAt(1).ToString() == "https://lrclib.net/moved");
         var elsewhere = await Served(uri => uri.Host == "lrclib.net" ? Moved("https://lyrics.example/get") : new(HttpStatusCode.OK) { Content = new StringContent(LrclibReply) });
         check("A lyrics redirect to another host or to HTTP is not followed",
             elsewhere.Lyrics.Lines.Count == 0 && elsewhere.Requested.All(uri => uri.Host != "lyrics.example")
@@ -332,10 +334,13 @@ internal static class MusicTests
     }
     private sealed class LyricsHandler : HttpMessageHandler
     {
-        public int Calls; public bool Identified, Authorization;
+        // LRCLIB answers; the providers asked before it have nothing.
+        public int Calls, Lrclib; public bool Identified = true, Authorization;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Calls++; Identified = request.Headers.UserAgent.ToString().Contains("BrimDeck"); Authorization |= request.Headers.Authorization is not null;
+            Calls++; Identified &= request.Headers.UserAgent.ToString().Contains("BrimDeck"); Authorization |= request.Headers.Authorization is not null;
+            if (request.RequestUri!.Host != "lrclib.net") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            Lrclib++;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"trackName\":\"测试曲目\",\"artistName\":\"测试歌手\",\"duration\":200,\"syncedLyrics\":\"[00:01]歌词\"}") });
         }
     }

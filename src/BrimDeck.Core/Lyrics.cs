@@ -409,29 +409,45 @@ public sealed partial class LyricsService : IDisposable
             if (lyrics.Lines.Count > 0 || lyrics.Instrumental) { Remember(cacheKey, lyrics); return lyrics; }
             if (hit && (!track.IsAppleMusic || cached!.Source == AppleSource))
             { _order.Remove(cacheKey); _order.AddLast(cacheKey); return cached!; }
-            // QQ tracks must stay within QQ, including when lookup fails or metadata is incomplete.
-            if (track.IsQqMusic) lyrics = await FindQq(track, token);
-            else if (track.IsAppleMusic)
-            {
-                lyrics = await FindApple(track, token);
-                if (!lyrics.Synced || lyrics.Lines.Count == 0) lyrics = hit ? cached! : await FindAppleFallback(track, lyrics, token);
-            }
-            else
-            {
-                if (track.SongId.StartsWith("netease:", StringComparison.Ordinal))
-                    lyrics = await FindNeteaseId(track.SongId[8..], track.Duration.TotalSeconds, token);
-                // KuGou's songs ask KuGou first; for the others it is the last provider asked.
-                if (track.IsKugou) lyrics = await FindKugou(track, token);
-                if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindLrclib(track, token);
-                if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindNetease(track, token);
-                if (lyrics.Lines.Count == 0 && !lyrics.Instrumental && !track.IsKugou) lyrics = await FindKugou(track, token);
-            }
+            // First the player's own lyrics: Apple Music's cache, and the lyrics KuGou, NetEase and QQ Music keep for the song's ID.
+            // A player without an ID (or without its own lyrics) has none of these.
+            bool kugou = false, qq = false, netease = false;
+            if (track.IsAppleMusic) lyrics = await FindApple(track, token);
+            else if (track.IsQqMusic) { lyrics = await FindQq(track, token); qq = true; }
+            else if (track.SongId.StartsWith("netease:", StringComparison.Ordinal)) { lyrics = await FindNeteaseId(track.SongId[8..], track.Duration.TotalSeconds, token); netease = true; }
+            else if (track.SongId.StartsWith("kugou:", StringComparison.Ordinal)) { lyrics = await FindKugou(track, token); kugou = true; }
+            // A third-party result kept for Apple Music stays until Apple Music caches its own lyrics. A QQ preview keeps QQ's
+            // lyrics, which follow the clip by QQ's current line. A QQ song without its length is not matched elsewhere yet: a
+            // preview reports the clip's length, which keeps other providers from taking the whole song's lyrics for it.
+            bool done = Timed(lyrics) || lyrics.QqPreview || track.IsQqMusic && track.Duration <= TimeSpan.Zero;
+            if (!done && track.IsAppleMusic && hit) lyrics = cached!;
+            else if (!done) lyrics = await FindShared(track, lyrics, kugou, qq, netease, token);
             token.ThrowIfCancellationRequested();
             // An empty result can be a temporary provider failure. Do not keep it for the entire app session.
             if (lyrics.Lines.Count > 0 || lyrics.Instrumental) Remember(cacheKey, lyrics);
             return lyrics;
         }
         finally { _gate.Release(); }
+    }
+    // Lyrics that need no further search: timed ones, or a song known to have no words.
+    private static bool Timed(Lyrics lyrics) => lyrics.Instrumental || lyrics.Synced && lyrics.Lines.Count > 0;
+    // Every player then asks the same providers in the same order, leaving out one it has already asked by the song's ID:
+    // KuGou, QQ Music and NetEase, whose catalogs hold most Chinese songs and many others, then LRCLIB. The first timed lyrics are taken;
+    // untimed ones (the player's own first) only when no provider has timed ones.
+    private async Task<Lyrics> FindShared(MediaTrack track, Lyrics untimed, bool kugou, bool qq, bool netease, CancellationToken token)
+    {
+        var providers = new List<Func<Task<Lyrics>>>();
+        if (!kugou) providers.Add(() => FindKugouSearch(track, token));
+        if (!qq) providers.Add(() => FindQq(track, token));
+        if (!netease) providers.Add(() => FindNetease(track, token));
+        providers.Add(() => FindLrclib(track, token));
+        foreach (var find in providers)
+        {
+            var lyrics = await find();
+            if (Timed(lyrics)) return lyrics;
+            if (untimed.Lines.Count == 0) untimed = lyrics;
+        }
+        return untimed;
     }
     private void Remember(string cacheKey, Lyrics lyrics)
     {
