@@ -29,6 +29,7 @@ internal static class Program
             if (args is ["--only", "popup"]) { PopupGhostChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themecards"]) { ThemeCardChecks.Run(Check); return Finish(); }
             if (args is ["--only", "glass"]) { GlassChecks.Run(Check); AcrylicProbeChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "edge"]) { EdgeRingChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themelook"]) { ThemeLookChecks.Run(Check); return Finish(); }
             if (args is ["--only", "hoverowners"]) { HoverOwnerChecks.Run(Check); return Finish(); }
             if (args is ["--only", "fonts"]) { FontFollowTests.Run(Check); return Finish(); }
@@ -53,6 +54,7 @@ internal static class Program
             HoverOwnerChecks.Run(Check);
             PopupGhostChecks.Run(Check);
             GlassChecks.Run(Check);
+            EdgeRingChecks.Run(Check);
             PanelKeyboardTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);

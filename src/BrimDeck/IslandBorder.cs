@@ -147,8 +147,9 @@ public sealed class IslandBorder : Border
     }
 
     // The optical edge as its rings (GlassEdge): ring k lies between the outline drawn k and k + 1 steps inside, so each pixel of
-    // the edge is covered by one ring once. Each ring is the two outlines filled even-odd: no widened or combined geometry to
-    // compute, and on an animation's frames a new size costs the few outlines only.
+    // the edge is covered by one ring once. Each ring is the two outlines written into one StreamGeometry filled even-odd (BuildRing):
+    // no widened or combined geometry to compute, and its bounds, which the render pass reads, need no conversion to a path (a
+    // GeometryGroup's cost about 18 KB of path objects per ring on every frame of an animation).
     private void DrawEdge(DrawingContext drawingContext, GlassEdge edge)
     {
         var key = (_outline, edge.Count, edge.Step, edge.Width);
@@ -156,13 +157,11 @@ public sealed class IslandBorder : Border
         {
             _ringsKey = key;
             _rings ??= new Geometry[GlassEdge.MaxBands];
-            Geometry outer = BuildOutline(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset);
+            double outer = Inset;
             for (int k = 0; k < edge.Count; k++)
             {
-                var inner = BuildOutline(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset + Math.Min((k + 1) * edge.Step, edge.Width));
-                var ring = new GeometryGroup { FillRule = FillRule.EvenOdd, Children = new GeometryCollection(2) { outer, inner } };
-                ring.Freeze();
-                _rings[k] = ring;
+                double inner = Inset + Math.Min((k + 1) * edge.Step, edge.Width);
+                _rings[k] = BuildRing(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, outer, inner);
                 outer = inner;
             }
         }
@@ -170,6 +169,9 @@ public sealed class IslandBorder : Border
     }
     private Geometry[]? _rings;
     private (Geometry Outline, int Count, double Step, double Width)? _ringsKey;
+    // The rings drawn last and the edge width they were made for (for the checks).
+    internal Geometry? Ring(int k) => _rings is { } rings && _ringsKey is { } key && k < key.Count ? rings[k] : null;
+    internal double RingsWidth => _ringsKey?.Width ?? double.NaN;
 
     // The visible surface owns input; its decorative shadow is a separate, non-interactive sibling.
     // At rest collapsed (SettledClip, set by the window), the content keeps clear of the corners and shoulders and is clipped to
@@ -296,54 +298,71 @@ public sealed class IslandBorder : Border
         return (light, shade);
     }
 
+    // The band between the outline drawn outerInset and innerInset inside the bounds: both outlines as two figures of one
+    // StreamGeometry, filled even-odd, each placed where BuildOutline's own transform puts it. Frozen.
+    internal static Geometry BuildRing(double w, double h, double shoulderRadius, CornerRadius corners, double outerInset, double innerInset)
+    {
+        if (!(w > 0) || !(h > 0)) return Geometry.Empty;
+        var geometry = new StreamGeometry { FillRule = FillRule.EvenOdd };
+        using (var path = geometry.Open())
+        {
+            WriteOutline(path, GlassBoundaryMath.Measure(w, h, shoulderRadius, corners.TopLeft, corners.TopRight, corners.BottomRight, corners.BottomLeft, outerInset), true);
+            WriteOutline(path, GlassBoundaryMath.Measure(w, h, shoulderRadius, corners.TopLeft, corners.TopRight, corners.BottomRight, corners.BottomLeft, innerInset), true);
+        }
+        geometry.Freeze();
+        return geometry;
+    }
+
     // The island's smooth outline for a size, shoulder and corners; insetBy draws it that far inside the bounds (Inset). Frozen.
     // The parts are GlassBoundaryMath's (Measure, RightShoulder), where the clamps and the shoulder curves are tested.
     internal static Geometry BuildOutline(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy)
     {
         if (!(w > 0) || !(h > 0)) return Geometry.Empty;
         var o = GlassBoundaryMath.Measure(w, h, shoulderRadius, corners.TopLeft, corners.TopRight, corners.BottomRight, corners.BottomLeft, insetBy);
-        double shoulder = o.Shoulder, shoulderDepth = o.ShoulderDepth, left = o.Left, right = o.Right;
-        double tl = o.TopLeft, tr = o.TopRight, br = o.BottomRight, bl = o.BottomLeft;
-        w = o.Width; h = o.Height;
-        const double k = GlassBoundaryMath.Kappa;
         var geometry = new StreamGeometry();
-        using (var path = geometry.Open())
-        {
-            path.BeginFigure(new Point(shoulder > 0 ? 0 : tl, 0), true, true);
-            path.LineTo(new Point(shoulder > 0 ? w : w - tr, 0), true, false);
-            if (shoulder > 0)
-            {
-                var s = GlassBoundaryMath.RightShoulder(w, shoulder, shoulderDepth);
-                path.BezierTo(P(s.A1), P(s.A2), P(s.Mid), true, true);
-                path.BezierTo(P(s.B1), P(s.B2), P(s.End), true, true);
-            }
-            else
-                path.BezierTo(new Point(w - tr * (1 - k), 0), new Point(w, tr * (1 - k)),
-                    new Point(w, tr), true, true);
-            path.LineTo(new Point(right, h - br), true, false);
-            path.BezierTo(new Point(right, h - br * (1 - k)), new Point(right - br * (1 - k), h),
-                new Point(right - br, h), true, true);
-            path.LineTo(new Point(left + bl, h), true, false);
-            path.BezierTo(new Point(left + bl * (1 - k), h), new Point(left, h - bl * (1 - k)),
-                new Point(left, h - bl), true, true);
-            path.LineTo(new Point(left, shoulder > 0 ? shoulderDepth : tl), true, false);
-            if (shoulder > 0)
-            {
-                // The right shoulder mirrored, run backwards.
-                var s = GlassBoundaryMath.RightShoulder(w, shoulder, shoulderDepth);
-                path.BezierTo(M(s.B2), M(s.B1), M(s.Mid), true, true);
-                path.BezierTo(M(s.A2), M(s.A1), new Point(0, 0), true, true);
-            }
-            else
-                path.BezierTo(new Point(0, tl * (1 - k)), new Point(tl * (1 - k), 0),
-                    new Point(tl, 0), true, true);
-        }
+        using (var path = geometry.Open()) WriteOutline(path, o, false);
         if (o.Inset > 0) geometry.Transform = new TranslateTransform(o.Inset, o.Top);
         geometry.Freeze();
         return geometry;
+    }
 
-        static Point P((double X, double Y) p) => new(p.X, p.Y);
-        Point M((double X, double Y) p) => new(w - p.X, p.Y);
+    // One outline as a closed figure; placed: moved by the inset (o.Inset, o.Top) in its points, where BuildOutline gives the
+    // geometry that move as its transform instead.
+    private static void WriteOutline(StreamGeometryContext path, GlassBoundaryMath.Layout o, bool placed)
+    {
+        double dx = placed && o.Inset > 0 ? o.Inset : 0, dy = placed && o.Inset > 0 ? o.Top : 0;
+        double shoulder = o.Shoulder, shoulderDepth = o.ShoulderDepth, left = o.Left, right = o.Right;
+        double tl = o.TopLeft, tr = o.TopRight, br = o.BottomRight, bl = o.BottomLeft;
+        double w = o.Width, h = o.Height;
+        const double k = GlassBoundaryMath.Kappa;
+        path.BeginFigure(Q(shoulder > 0 ? 0 : tl, 0), true, true);
+        path.LineTo(Q(shoulder > 0 ? w : w - tr, 0), true, false);
+        if (shoulder > 0)
+        {
+            var s = GlassBoundaryMath.RightShoulder(w, shoulder, shoulderDepth);
+            path.BezierTo(P(s.A1), P(s.A2), P(s.Mid), true, true);
+            path.BezierTo(P(s.B1), P(s.B2), P(s.End), true, true);
+        }
+        else
+            path.BezierTo(Q(w - tr * (1 - k), 0), Q(w, tr * (1 - k)), Q(w, tr), true, true);
+        path.LineTo(Q(right, h - br), true, false);
+        path.BezierTo(Q(right, h - br * (1 - k)), Q(right - br * (1 - k), h), Q(right - br, h), true, true);
+        path.LineTo(Q(left + bl, h), true, false);
+        path.BezierTo(Q(left + bl * (1 - k), h), Q(left, h - bl * (1 - k)), Q(left, h - bl), true, true);
+        path.LineTo(Q(left, shoulder > 0 ? shoulderDepth : tl), true, false);
+        if (shoulder > 0)
+        {
+            // The right shoulder mirrored, run backwards.
+            var s = GlassBoundaryMath.RightShoulder(w, shoulder, shoulderDepth);
+            path.BezierTo(M(s.B2), M(s.B1), M(s.Mid), true, true);
+            path.BezierTo(M(s.A2), M(s.A1), Q(0, 0), true, true);
+        }
+        else
+            path.BezierTo(Q(0, tl * (1 - k)), Q(tl * (1 - k), 0), Q(tl, 0), true, true);
+
+        Point Q(double x, double y) => new(x + dx, y + dy);
+        Point P((double X, double Y) p) => Q(p.X, p.Y);
+        Point M((double X, double Y) p) => Q(w - p.X, p.Y);
     }
 }
 
