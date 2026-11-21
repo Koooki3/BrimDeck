@@ -7,19 +7,20 @@ internal static class GlassMaterialTests
 
     public static void Run(Action<string, bool> check)
     {
-        check("Glass transparency: default keeps the current collapsed and expanded veil",
+        check("Glass clarity: the default keeps the collapsed and expanded veil",
             Near(GlassMaterial.LuminosityOpacity(0, 0, 50), .30) && Near(GlassMaterial.LuminosityOpacity(0, 1, 50), .35));
-        check("Glass transparency: the clear end keeps a veil and the ends are distinct",
-            Near(GlassMaterial.LuminosityOpacity(0, 0, 100), .20) && Near(GlassMaterial.LuminosityOpacity(0, 0, 0), .55));
-        check("Glass transparency: the readability veil takes priority even at full clarity, without rounding to a step",
-            Enumerable.Range(0, 101).All(level => GlassMaterial.LuminosityOpacity(.87, .5, level) == .87));
-        check("Glass transparency: the veil never thickens as the slider moves toward clear",
+        check("Glass clarity: the clear end keeps a thin veil and the ends are far apart",
+            Near(GlassMaterial.LuminosityOpacity(0, 0, 100), .02) && Near(GlassMaterial.LuminosityOpacity(0, 0, 0), .82));
+        check("Glass clarity: the text's readability is weighed by the clarity (whole at 0, half at 50, none at 100)",
+            Near(GlassMaterial.LuminosityOpacity(.87, 0, 0), .87) && Near(GlassMaterial.LuminosityOpacity(.87, 0, 50), (.87 + .30) / 2)
+            && Near(GlassMaterial.LuminosityOpacity(.87, 0, 100), .02));
+        check("Glass clarity: forced readability takes the text's veil at every clarity",
+            Enumerable.Range(0, 101).All(level => GlassMaterial.LuminosityOpacity(.87, .5, level, force: true) >= .87 - 1e-12));
+        check("Glass clarity: the veil never thickens as the slider moves toward clear",
             Enumerable.Range(0, 100).All(level => GlassMaterial.LuminosityOpacity(.25, .35, level + 1)
-                <= GlassMaterial.LuminosityOpacity(.25, .35, level)));
-        check("Clearer glass relaxes the dark limit only above the default preference",
-            GlassMaterial.DarkBackdropLimit(-1) == .26 && GlassMaterial.DarkBackdropLimit(50) == .26
-            && Math.Abs(GlassMaterial.DarkBackdropLimit(75) - .29) < 1e-9
-            && Math.Abs(GlassMaterial.DarkBackdropLimit(101) - .32) < 1e-9);
+                <= GlassMaterial.LuminosityOpacity(.25, .35, level) + 1e-12));
+        check("Glass clarity: the text's own limits do not move with the slider",
+            GlassRecipe.DarkMost == .26 && GlassRecipe.LightLeast == .82);
         check("Glass transparency: clearer glass retains the rim", GlassMaterial.RimStrength(100, 0) > 1);
         check("Glass transparency: the rim softens through expansion and stays visible",
             GlassMaterial.RimStrength(50, 0) == 1 && GlassMaterial.RimStrength(50, 1) == .8
@@ -45,7 +46,7 @@ internal static class GlassMaterialTests
                 PanelThemes.Build(id, theme.File).Effects.Glass is null);
         }
         var settings = JsonSerializer.Deserialize<DeckSettings>("{}")!;
-        check("Glass transparency: older settings use the current look", settings.GlassTransparency == 50);
+        check("Glass clarity: older settings keep the default 50", settings.GlassTransparency == 50);
         settings.GlassTransparency = 101;
         settings.Normalize();
         var copy = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(settings))!;

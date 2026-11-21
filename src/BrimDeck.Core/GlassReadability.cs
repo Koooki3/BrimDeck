@@ -41,27 +41,31 @@ public static class GlassReadability
 
     // The weakest body text of a palette over the glass shown over each of the grey backdrops. Every material frame runs it, so
     // it allocates nothing: the backdrops come as a span (a few arguments stay on the stack) and the composite's amounts are
-    // worked out once for all of them.
+    // worked out once for all of them (Amounts: the glass's tint opacity and saturation included).
     public static double Worst(bool darkLook, double darkVeil, double lightVeil, double palette, params ReadOnlySpan<double> backdrops)
+        => Worst(darkLook, GlassRecipe.Coefficients(darkVeil, lightVeil, palette), backdrops);
+
+    public static double Worst(bool darkLook, GlassRecipe.Amounts amounts, params ReadOnlySpan<double> backdrops)
     {
-        var (slope, offset) = GlassRecipe.Coefficients(darkVeil, lightVeil, palette);
-        if (backdrops.IsEmpty) return Weakest(darkLook, Ground(.5, slope, offset));
+        if (backdrops.IsEmpty) return Weakest(darkLook, Ground(.5, amounts));
         double least = double.MaxValue;
-        foreach (double b in backdrops) least = Math.Min(least, Weakest(darkLook, Ground(b, slope, offset)));
+        foreach (double b in backdrops) least = Math.Min(least, Weakest(darkLook, Ground(b, amounts)));
         return least;
     }
 
     // Whether the text should now show the goal palette's colours, the glass shown over each of the grey backdrops (the
     // probe's bright and dark tails): the goal's weakest text over its worst backdrop reads at least as well as the current one's.
     public static bool SwapNow(bool showingDark, bool goalDark, double darkVeil, double lightVeil, double palette, params ReadOnlySpan<double> backdrops)
+        => SwapNow(showingDark, goalDark, GlassRecipe.Coefficients(darkVeil, lightVeil, palette), backdrops);
+
+    public static bool SwapNow(bool showingDark, bool goalDark, GlassRecipe.Amounts amounts, params ReadOnlySpan<double> backdrops)
     {
         if (showingDark == goalDark) return false;
-        var (slope, offset) = GlassRecipe.Coefficients(darkVeil, lightVeil, palette);
         if (backdrops.IsEmpty) backdrops = [.5];
         double current = double.MaxValue, goal = double.MaxValue;
         foreach (double b in backdrops)
         {
-            var ground = Ground(b, slope, offset);
+            var ground = Ground(b, amounts);
             current = Math.Min(current, Weakest(showingDark, ground));
             goal = Math.Min(goal, Weakest(goalDark, ground));
         }
@@ -69,9 +73,9 @@ public static class GlassReadability
     }
 
     // The glass over a grey backdrop (an unreadable reading taken as mid grey).
-    private static (double R, double G, double B) Ground(double backdrop, double slope, double offset)
+    private static (double R, double G, double B) Ground(double backdrop, GlassRecipe.Amounts amounts)
     {
         double g = double.IsFinite(backdrop) ? Math.Clamp(backdrop, 0, 1) : .5;
-        return GlassRecipe.Shown((g, g, g), slope, offset);
+        return GlassRecipe.Shown((g, g, g), amounts);
     }
 }

@@ -299,7 +299,8 @@ public partial class MainWindow
     }
 
     private GlassSurface.Material GlassMaterialNow(long now)
-        => new(_glassDarkVeil.Sample(now), _glassLightVeil.Sample(now), _glassPalette.Sample(now));
+        => new(_glassDarkVeil.Sample(now), _glassLightVeil.Sample(now), _glassPalette.Sample(now),
+            GlassClarityPolicy.Tint(Settings.GlassTransparency), GlassClarityPolicy.Saturation(Settings.GlassTransparency));
 
     // The display's frames while a channel moves: the springs' values to the graph, the text swap checked; then it stops.
     private void GlassRenderingNeeded()
@@ -330,8 +331,8 @@ public partial class MainWindow
         var group = GlassGroup;
         bool showingDark = Look.Current.IsDark, arrived = !_glassPalette.Moving;
         bool leads = ReferenceEquals(group.Leader, this) && _glassTurnEpoch == group.Epoch;
-        if (!arrived && !_glassHurried && GlassReadability.Worst(showingDark, material.DarkVeil, material.LightVeil, material.Palette,
-                _glassTails.Bright, _glassTails.Dark) < GlassReadable)
+        var amounts = GlassRecipe.Coefficients(material.DarkVeil, material.LightVeil, material.Palette, material.Tint, material.Saturation);
+        if (!arrived && !_glassHurried && GlassReadability.Worst(showingDark, amounts, _glassTails.Bright, _glassTails.Dark) < GlassReadable)
         {
             _glassHurried = true;
             _glassPalette.Retarget(_glassPalette.Target, now, GlassPaletteHurry);
@@ -339,7 +340,7 @@ public partial class MainWindow
         // The leader swaps at the readable frame (at the latest when its palette arrived); a leader hidden mid-way hands the turn
         // to the next panel (HideGlass elects it), which publishes the same epoch's goal.
         if (leads && showingDark != _glassGoalDark && (!Animates || arrived || GlassReadability.SwapNow(showingDark, _glassGoalDark,
-                material.DarkVeil, material.LightVeil, material.Palette, _glassTails.Bright, _glassTails.Dark))
+                amounts, _glassTails.Bright, _glassTails.Dark))
             && group.TryPublish(this, _glassTurnEpoch, _glassGoalDark))
             PublishGlassPalette(_glassGoalDark, coordinated: true);
         if (!arrived) return;

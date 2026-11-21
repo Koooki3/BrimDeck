@@ -29,7 +29,9 @@ internal sealed class GlassSurface : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     internal readonly record struct PixelPoint(int X, int Y);
     // The material asked for: each look's luminosity opacity and the light look's share (GlassEffect.Graph's weights).
-    internal readonly record struct Material(double DarkVeil, double LightVeil, double Palette);
+    // Tint and Saturation: the clarity's (GlassClarityPolicy), the same for both looks.
+    internal readonly record struct Material(double DarkVeil, double LightVeil, double Palette,
+        double Tint = GlassRecipe.DefaultTint, double Saturation = GlassRecipe.DefaultSaturation);
     // What draws the glass: the persistent graph, the stepped fallback, an opaque ground (while the graph loads, or where
     // neither effect can be used), or nothing (no compositor).
     internal enum Backend { None, Opaque, Fallback, Graph }
@@ -101,7 +103,7 @@ internal sealed class GlassSurface : IDisposable
             {
                 try
                 {
-                    GlassEffect.Present(graph, material.DarkVeil, material.LightVeil, material.Palette);
+                    GlassEffect.Present(graph, material.DarkVeil, material.LightVeil, material.Palette, material.Tint, material.Saturation);
                     if (!ReferenceEquals(sprite.Brush, graph)) sprite.Brush = graph;
                     ReleaseFallback();
                     return _applied = new(Backend.Graph, material);
