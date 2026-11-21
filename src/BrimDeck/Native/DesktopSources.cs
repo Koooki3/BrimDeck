@@ -7,10 +7,11 @@ using BrimDeck.Core;
 
 namespace BrimDeck.Native;
 
-public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
+public sealed class DesktopSources(MiMoAccount? mimo = null, DoubaoQuotaAccount? doubaoQuota = null) : IDesktopSources
 {
     public string? ReadMiMoSession() => mimo?.Read();
     public void SaveMiMoSession(string session) => mimo?.Save(session);
+    public string? ReadDoubaoQuotaSession(ProviderId id) => doubaoQuota?.Read(id);
     public ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => ClaudeDesktopReader.Read(locations);
     public GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => GrokBotDesktopReader.Read(locations);
     public string? ReadQoderDesktopSignIn(string folder) => QoderDesktopReader.ReadSignIn(folder);
@@ -141,11 +142,50 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
     public IReadOnlyList<string?[]>? QueryDatabase(string database, string sql)
     {
         if (!File.Exists(database)) return null;
-        IntPtr db = IntPtr.Zero, statement = IntPtr.Zero;
+        IntPtr db = IntPtr.Zero;
         try
         {
             if (sqlite3_open_v2(database, out db, 1, IntPtr.Zero) != 0) return null; // SQLITE_OPEN_READONLY
             sqlite3_busy_timeout(db, 1000);
+            return ExecuteQuery(db, sql);
+        }
+        finally
+        {
+            if (db != IntPtr.Zero) sqlite3_close(db);
+        }
+    }
+
+    // Decrypts Trae's SQLCipher 4 database (plus committed WAL frames) into a sqlite3_malloc64 buffer and queries it
+    // read-only in memory via sqlite3_deserialize; no plaintext database is ever written to disk.
+    public IReadOnlyList<string?[]>? QueryTraeDatabase(string database, string sql)
+    {
+        byte[]? image = TraeUsage.DecryptDatabase(database);
+        if (image is null || image.Length == 0) return null;
+        IntPtr db = IntPtr.Zero, buffer = IntPtr.Zero;
+        bool ownedBySqlite = false;
+        try
+        {
+            buffer = sqlite3_malloc64((ulong)image.Length);
+            if (buffer == IntPtr.Zero) return null;
+            Marshal.Copy(image, 0, buffer, image.Length);
+            if (sqlite3_open_v2(":memory:", out db, 6, IntPtr.Zero) != 0) return null; // SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
+            if (sqlite3_deserialize(db, "main", buffer, image.Length, image.Length, 5) != 0) return null; // FREEONCLOSE | READONLY
+            ownedBySqlite = true;
+            return ExecuteQuery(db, sql);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(image);
+            if (!ownedBySqlite && buffer != IntPtr.Zero) sqlite3_free(buffer);
+            if (db != IntPtr.Zero) sqlite3_close(db);
+        }
+    }
+
+    private static List<string?[]>? ExecuteQuery(IntPtr db, string sql)
+    {
+        IntPtr statement = IntPtr.Zero;
+        try
+        {
             if (sqlite3_prepare_v2(db, sql, -1, out statement, IntPtr.Zero) != 0) return null;
             var rows = new List<string?[]>();
             int columns = sqlite3_column_count(statement), step;
@@ -160,7 +200,6 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
         finally
         {
             if (statement != IntPtr.Zero) sqlite3_finalize(statement);
-            if (db != IntPtr.Zero) sqlite3_close(db);
         }
     }
 
@@ -298,4 +337,7 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
     [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_close(IntPtr db);
     [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_busy_timeout(IntPtr db, int milliseconds);
     [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_column_count(IntPtr statement);
+    [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr sqlite3_malloc64(ulong size);
+    [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern void sqlite3_free(IntPtr pointer);
+    [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_deserialize(IntPtr db, [MarshalAs(UnmanagedType.LPUTF8Str)] string schema, IntPtr data, long dbSize, long bufferSize, uint flags);
 }

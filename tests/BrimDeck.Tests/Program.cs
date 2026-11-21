@@ -23,6 +23,9 @@ try
     await MiMoApiTests.Run(root, Check);
     await QianwenUsageTests.Run(root, Check);
     await QwenWorkUsageTests.Run(root, Check);
+    await TraeUsageTests.Run(root, Check);
+    await DoubaoQuotaUsageTests.Run(root, Check);
+    await VolcengineArkUsageTests.Run(root, Check);
     MaasPricingTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);

@@ -37,6 +37,18 @@ public sealed partial class SettingsWindow
             ex => ex is QianwenUsage.RejectedException, Loc.T("登录请求已过期，请重试。", "The sign-in request expired. Try again."));
     }
 
+    // The Volcengine Ark and BytePlus ModelArk rows sign in via OAuth Device Code in the default browser (UsageService.ConnectVolcengineAsync).
+    private FrameworkElement VolcengineDetails(AppEntry entry)
+    {
+        var id = entry.QuotaSource;
+        var edition = VolcengineArkUsage.For(id);
+        string name = ProviderCatalog.Name(id), host = edition.OpenApiHost;
+        string help = Loc.T($"在默认浏览器中登录 {name} 账户并授权后，自动读取个人、团队与企业的 Coding Plan、Agent Plan 额度及账户余额。凭据加密保存在本机，自动续期，只发往 {edition.SignInHost} 与 {host}。",
+            $"Sign in to your {name} account in the default browser to read personal, team, and enterprise Coding Plan, Agent Plan quotas, and account balance. The sign-in is stored encrypted on this PC, renews automatically, and is sent only to {edition.SignInHost} and {host}.");
+        return BrowserSignInDetails(entry, "volcengine", help, () => _app.Usage.VolcengineConnected(id), _app.Usage.ConnectVolcengineAsync, _app.Usage.DisconnectVolcengine,
+            ex => ex is VolcengineArkUsage.RejectedException, Loc.T("登录请求已过期，请重试。", "The sign-in request expired. Try again."));
+    }
+
     // A line that shows whether the row is signed in and offers to sign in or out; the sign-in is saved encrypted on this PC.
     private FrameworkElement BrowserSignInDetails(AppEntry entry, string automation, string help, Func<bool> isConnected,
         Func<ProviderId, Func<string, bool>, CancellationToken, Task<bool>> connect, Action<ProviderId> disconnect, Func<Exception, bool> refused, string timedOut)

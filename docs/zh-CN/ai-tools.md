@@ -27,8 +27,12 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | Xiaomi MiMo | ✓ | | 在 Xiaomi MiMo 桌面版或 MiMo Code CLI 中关联开放平台 API 密钥或 Token Plan |
 | 千问、QwenCloud | ✓ | | 在设置中通过浏览器登录千问 AI 平台或 QwenCloud 账户 |
 | 千问办公、QwenWork | ✓ | ✓ | 在本机登录千问办公或 QwenWork 桌面版 |
+| TRAE、TRAE CN | ✓ | ✓ | 在本机登录 TRAE（含 TRAE SOLO）或 TRAE CN（含 TRAE SOLO CN） |
+| 豆包、Dola | ✓ | | 在设置中通过浏览器登录豆包（含豆包工作）或 Dola 账号 |
+| 火山方舟、BytePlus ModelArk | ✓ | | 在设置中通过浏览器登录火山引擎或 BytePlus 账号 |
 | Qoder、Qoder CN | ✓ | ✓ | 在本机登录 Qoder CLI 或 Qoder 桌面版，或打开已登录的 Qoder IDE（Qoder CN 同理）。CLI 与桌面版的 Token 统计需要在设置中开启 |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
+| 火山方舟（AK/SK）、BytePlus ModelArk（AK/SK） | ✓ | | 在设置中填写 AccessKey ID 和 Secret Access Key |
 | Xiaomi MiMo API | ✓ | | 在设置中填写小米 MiMo 开放平台按量计费 API 密钥 |
 | Xiaomi MiMo Token Plan | ✓ | | 在设置中填写小米 MiMo Token Plan 密钥 |
 | DeepSeek | ✓ | | 在设置中填写 API 密钥 |
@@ -168,6 +172,17 @@ Qoder（qoder.com）与 Qoder CN（qoder.com.cn）是两套独立的账号，在
 - **Token 用量**：读取桌面版对话引擎的本机记录，每次模型回复计一次。千问办公中按档位选择的模型显示档位名称，例如“标准”“高级”；其他模型显示原名。费用为按公开单价的估算，两个版本实际都按积分扣费。
 - **安装位置**：装在哪个文件夹都可以，BrimDeck 只读取当前用户目录下的数据。
 
+## TRAE 与 TRAE CN
+
+TRAE（国际版，trae.ai）与 TRAE CN（国内版，trae.com.cn）账号与数据各自独立，在“配额来源”与“统计应用”中分别选择。
+
+- **配额**：
+  - **TRAE（国际版）**：显示当前套餐（Free、Lite、Pro、Pro+、Ultra）的美元套餐额度、赠送额度（有赠送时）、加油包以及按量计费（On-Demand Usage）消费，并显示账期重置时间。
+  - **TRAE CN（国内版）**：显示账户的全部积分（已用与总额）及重置时间；账户同时包含多个积分来源（例如套餐积分、每月登录积分、每日签到、用户福利、加购积分）时，按类别分别显示各自的已用量、总额与到期时间。
+- **登录**：直接读取 TRAE / TRAE SOLO（或 TRAE CN / TRAE SOLO CN）保存在用户目录的登录，不需要在 BrimDeck 中另外登录。BrimDeck 不续期登录，也不修改客户端文件；登录过期后状态显示“登录已失效”，打开对应的客户端即可续期。
+- **团队版与企业版**：使用 SaaS 团队或企业账号登录的客户端没有提供个人用量余额接口，暂不支持读取其配额。
+- **Token 用量**：以只读方式在内存中解密读取本机对话数据库中的每次模型请求与 Token 数量，不向磁盘写入任何解密后的数据库文件。费用为按公开单价的估算。
+
 ## 千问与 QwenCloud
 
 千问 AI 平台（platform.qianwenai.com）与它的国际版 QwenCloud（www.qwencloud.com）是两套独立的账号，在“配额来源”中分别选择，分别登录。
@@ -179,9 +194,25 @@ Qoder（qoder.com）与 Qoder CN（qoder.com.cn）是两套独立的账号，在
 - **本月扣费**：本月按量计费的消费，与两个平台的官方 CLI 一样按 UTC 的自然月统计，可能与控制台中按北京时间的账单月略有差异。
 - **登录**：在设置中展开千问或 QwenCloud 行，点击“在浏览器中登录”，在打开的授权页登录并确认授权，需在 5 分钟内完成。授权页显示的应用为 QianWen CLI 或 QwenCloud CLI，这是平台账户接口唯一提供的登录方式。BrimDeck 获得自己的登录凭据，加密保存在本机。凭据不能续期，过期后状态显示“登录已失效”，重新登录即可。点击“退出登录”删除本机保存的凭据。
 
+## 豆包与 Dola
+
+豆包与豆包工作共用同一账号、订阅与额度体系（www.doubao.com），在“配额来源”中合并为“豆包”。海外版 Dola（www.dola.com）使用独立账号，在“配额来源”中单独选择。两者均只提供配额，不提供 Token 统计。
+
+- **配额**：同时展示该账号下所有生效中的订阅与额度，包括个人订阅窗口（5 小时、7 日、每月等）、团队版与企业版订阅额度（含企业多分组明细）、创作额度包与活动奖励；账号同时拥有个人订阅与团队/企业订阅时一并显示。
+- **登录**：在设置中展开豆包或 Dola 行，点击“在浏览器中登录”。BrimDeck 会以独立的临时配置目录打开浏览器窗口，登录完成后自动捕获会话并关闭窗口、删除临时目录，不触碰日常浏览器。登录凭据按当前 Windows 用户加密保存在本机。
+
+## 火山方舟与 BytePlus ModelArk
+
+火山方舟（中国站）与 BytePlus ModelArk（国际站）支持“浏览器登录”与“手动填写 AK/SK”两种方式，均只提供配额，不提供 Token 统计。
+
+- **为什么不能用模型 API 密钥**：方舟推理 API Key 仅用于调用模型，无法查询 Coding Plan、Agent Plan 用量或账户余额。
+- **自动识别多种套餐**：无论是浏览器登录还是 AK/SK，都会在同一列中自动探测并同时显示当前账号下全部生效的项目，包括个人 Coding Plan（5 小时、每周、每月）、个人 Agent Plan（AFP 5 小时、每周、每月）、团队/企业 Coding Plan 席位、团队/企业 Agent Plan 席位，以及账户余额（中国站为人民币，国际站为美元）。未开通或无权限的部分会自动跳过，不影响其他套餐显示。
+- **浏览器登录**：在设置中展开“火山方舟”或“BytePlus ModelArk”行，点击“在浏览器中登录”，在默认浏览器中完成火山引擎或 BytePlus 账号授权。BrimDeck 获取可自动续期的临时凭据并加密保存在本机。
+- **手动填写 AK/SK**：选择“火山方舟（AK/SK）”或“BytePlus ModelArk（AK/SK）”，在展开的行中分别填写火山引擎或 BytePlus 访问控制（IAM）的 AccessKey ID 与 Secret Access Key，加密保存在本机。
+
 ## 手动填写的来源
 
-在"配额来源"中选择智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、Kimi 开放平台、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
+在"配额来源"中选择智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、火山方舟（AK/SK）、BytePlus ModelArk（AK/SK）、DeepSeek、Kimi Code API、Kimi 开放平台、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
 
 - **密钥**：使用 Windows 的加密功能保存在本机，不写入设置文件。删除该列或更换配额来源时，密钥一并删除。
 - **站点地址**：填写站点首页地址即可。末尾的 `/v1`，以及直接粘贴的控制台页面路径，会自动去掉。请求会带上 API 密钥，所以站点地址须使用 HTTPS；HTTP 仅限本机地址（`localhost`、`127.0.0.1`、`[::1]`）。
