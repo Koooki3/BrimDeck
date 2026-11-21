@@ -183,6 +183,24 @@ public sealed class GlassAppearance(bool dark, bool appDark, long videoGap = Gla
         return true;
     }
 
+    // How much of the covered area must be clearly light (or dark) by area, with how much trust, for the look to turn with the
+    // opening when the middle mean alone falls short (V306: a white page under a wide orange bar), and how little of the other.
+    public const double OpenShare = .6, OpenConfidence = .6, OpenOpposite = .2;
+
+    // The same as Open over the covered area's grid: the middle mean past the threshold as before, or a clear majority of the area
+    // by its cells, trusted enough, with little of the other kind. A mixed or untrustworthy area changes nothing.
+    public bool Open(GlassSceneSnapshot scene, long now)
+    {
+        if (!(scene.Confidence > 0)) return false;
+        bool byArea = Dark
+            ? scene.LightShare >= OpenShare && scene.DarkShare < OpenOpposite && scene.Confidence >= OpenConfidence
+            : scene.DarkShare >= OpenShare && scene.LightShare < OpenOpposite && scene.Confidence >= OpenConfidence;
+        // Past the threshold by area: open with a measure past it, so the turn and its average start the same way.
+        double measure = byArea ? (Dark ? Math.Max(scene.MiddleMean, ToLight + OpenMargin + 1e-6) : Math.Min(scene.MiddleMean, ToDark - OpenMargin - 1e-6))
+            : scene.Confidence >= OpenConfidence ? scene.MiddleMean : double.NaN;
+        return Open(measure, now);
+    }
+
     // The palette has arrived at the look decided (its text swapped): the settled hold begins.
     public void Arrived(long now)
     {
