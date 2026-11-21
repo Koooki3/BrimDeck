@@ -68,14 +68,14 @@ internal static class AntigravityUsageTests
 
     private static void CliSwitch(string root, DateTimeOffset now, Action<string, bool> check)
     {
-        check("Reading Antigravity via the CLI is on by default", new AppEntry().AntigravityCli);
+        check("Reading Antigravity via the CLI is off by default", !new AppEntry().AntigravityCli);
         var saved = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity }] }))!;
         foreach (var app in saved["Apps"]!.AsArray()) app!.AsObject().Remove("AntigravityCli");
-        check("A settings file without the CLI switch reads via the CLI", SettingsMigrations.Read(saved.ToJsonString()).Apps.Single().AntigravityCli);
+        check("A settings file without the CLI switch does not read via the CLI", !SettingsMigrations.Read(saved.ToJsonString()).Apps.Single().AntigravityCli);
 
         var fake = new Databases { Report = "Gemini Models\tWeekly Limit Remaining\t96%\t2026-11-25T02:00:10Z" };
         using var service = new UsageService(fake, DataLocations.Resolve(root, root, root, null, null), clock: () => now);
-        var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity }] };
+        var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity, AntigravityCli = true }] };
         settings.Normalize();
         ProviderSnapshot Read() => service.RefreshAsync(settings).GetAwaiter().GetResult().Single(x => x.Id == ProviderId.Antigravity);
         check("The CLI is read while the switch is on", Read().Source == "Antigravity CLI" && fake.Calls == 1);
@@ -86,7 +86,7 @@ internal static class AntigravityUsageTests
         settings.Apps[0].AntigravityCli = true;
         now = now.AddMinutes(1);
         check("Turning the switch back on runs the CLI at once", Read().Source == "Antigravity CLI" && fake.Calls == 2);
-        settings.Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity, AntigravityCli = false }, new AppEntry { QuotaSource = ProviderId.Antigravity }];
+        settings.Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity, AntigravityCli = false }, new AppEntry { QuotaSource = ProviderId.Antigravity, AntigravityCli = true }];
         settings.Normalize();
         now = now.AddMinutes(5);
         check("The CLI is run while any Antigravity row has the switch on", Read().Source == "Antigravity CLI" && fake.Calls == 3);
@@ -98,7 +98,7 @@ internal static class AntigravityUsageTests
             + "bad row\nClaude and GPT models\tFive Hour Limit Remaining\t0%\t2026-11-20T13:28:20Z" };
         var locations = DataLocations.Resolve(root, root, root, null, null);
         using var service = new UsageService(fake, locations, clock: () => now) { Deadline = TimeSpan.FromSeconds(1) };
-        var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity }] };
+        var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity, AntigravityCli = true }] };
         settings.Normalize();
         ProviderSnapshot Read() => service.RefreshAsync(settings).GetAwaiter().GetResult().Single(x => x.Id == ProviderId.Antigravity);
         var first = Read();

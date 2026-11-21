@@ -78,7 +78,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
     private bool _includeWsl;
     private readonly AntigravityUsage _antigravity = new();
     // Whether any enabled Antigravity row reads via the CLI (AppEntry.AntigravityCli); turning it off forgets the CLI reading.
-    private bool _antigravityCli = true;
+    private bool _antigravityCli;
     private DateTimeOffset? _antigravityCliAttempt;
     private (DateTimeOffset Time, List<Quota> Quotas)? _antigravityCliReading;
     private readonly DshSessions _dsh = new();
