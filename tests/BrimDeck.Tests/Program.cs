@@ -131,9 +131,11 @@ try
     ExpandBounceTests.Run(Check);
     SurfaceTransparencyTests.Run(Check);
     GlassMaterialTests.Run(Check);
+    GlassClarityTests.Run(Check);
     GlassLookTests.Run(Check);
     GlassSampleValidityTests.Run(Check);
     GlassLookGroupTests.Run(Check);
+    GlassOpeningSessionTests.Run(Check);
     FluidMotionTests.Run(Check);
     GlassGraphTests.Run(Check);
     GlassHotPathTests.Run(Check);

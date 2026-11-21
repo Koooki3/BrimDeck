@@ -18,7 +18,7 @@ internal sealed class AcrylicProbe : IDisposable
 {
     // Sides: the mean luma of the left, right, top and bottom strips (NaN for a strip off the display), for the rim's light.
     public readonly record struct Reading(double Mean, double Bright, double Dark, double Changed, double Median, double MiddleMean,
-        (double Left, double Right, double Top, double Bottom) Sides = default)
+        (double Left, double Right, double Top, double Bottom) Sides = default, GlassSceneSnapshot? Scene = null, long Started = 0)
     {
         // The brightest and darkest the glass has to answer for, by its openness: the collapsed island's ring is small, so one
         // bright neighbour would hold its 90th percentile up; the capsule answers to the ring's middle, the open panel (a
@@ -85,11 +85,12 @@ internal sealed class AcrylicProbe : IDisposable
     }
 
     // The area itself (the part of the desktop an opening panel is about to cover, read before it does), shrunk to at most Cells a
-    // side; its Changed is 0 and its Sides NaN but the first.
-    public Reading? ReadArea(Int32Rect area, Int32Rect display)
+    // side; its Changed is 0 and its Sides NaN but the first; its Scene the area's grid (GlassSceneSnapshot), Started when the
+    // screen was read (Stopwatch.GetTimestamp, finer than the 15.6 ms tick so a read and a frame are ordered). Nothing is read once cancelled (an opening that has ended).
+    public Reading? ReadArea(Int32Rect area, Int32Rect display, CancellationToken cancel = default)
     {
-        if (Interlocked.CompareExchange(ref _state, 1, 0) != 0) return null;
-        try { return ReadOnce([Clip(area, display), Int32Rect.Empty, Int32Rect.Empty, Int32Rect.Empty], (area, display, -1, 0)); }
+        if (cancel.IsCancellationRequested || Interlocked.CompareExchange(ref _state, 1, 0) != 0) return null;
+        try { return cancel.IsCancellationRequested ? null : ReadOnce([Clip(area, display), Int32Rect.Empty, Int32Rect.Empty, Int32Rect.Empty], (area, display, -1, 0)); }
         finally
         {
             Volatile.Write(ref _state, 0);
@@ -114,7 +115,8 @@ internal sealed class AcrylicProbe : IDisposable
     private Reading? ReadOnce(Int32Rect[] strips, (Int32Rect Island, Int32Rect Display, int Gap, int Band) key)
     {
         var (island, display, gap, band) = key;
-        int valid = 0, count = 0, moved = 0;
+        int valid = 0, count = 0, moved = 0, gridWidth = 0, gridHeight = 0;
+        long started = 0;
         var buffers = _buffers ??= new Buffers();
         var sideSum = buffers.SideSum;
         var sideCount = buffers.SideCount;
@@ -127,6 +129,7 @@ internal sealed class AcrylicProbe : IDisposable
         if (screen == IntPtr.Zero) { _lastCount = 0; return null; }
         try
         {
+            started = System.Diagnostics.Stopwatch.GetTimestamp();
             if (!Prepare(screen)) { _lastCount = 0; return null; }
             for (int i = 0; i < strips.Length; i++)
             {
@@ -138,6 +141,7 @@ internal sealed class AcrylicProbe : IDisposable
                 if (!GdiFlush()) continue;
                 Marshal.Copy(_bits, data, 0, h * Cells * 4);
                 valid |= 1 << i;
+                if (i == 0) (gridWidth, gridHeight) = (w, h);
                 for (int row = 0; row < h; row++)
                 for (int x = 0, offset = row * Cells * 4; x < w; x++, offset += 4)
                 {
@@ -163,13 +167,15 @@ internal sealed class AcrylicProbe : IDisposable
         double changed = _layout == layout && _lastCount == count ? moved / (double)count : 0;
         _lastCount = count;
         _layout = layout;
+        // The area's grid, from its pixels before they are sorted away (an area read is a single strip, read whole).
+        var scene = gap == -1 && valid == 1 ? GlassSceneSnapshot.FromPixels(pixels.AsSpan(0, count * 3), gridWidth, gridHeight) : null;
         var lumas = buffers.Luma;
         Array.Sort(lumas, 0, count);
         double sum = 0;
         for (int i = 0; i < count; i++) sum += lumas[i];
         double Side(int i) => sideCount[i] > 0 ? sideSum[i] / sideCount[i] : double.NaN;
         return new Reading(sum / count, lumas[(int)(count * Tail)], lumas[(int)(count * (1 - Tail))],
-            changed, lumas[count / 2], GlassAppearance.SortedRangeMean(lumas.AsSpan(0, count)), (Side(0), Side(1), Side(2), Side(3)));
+            changed, lumas[count / 2], GlassAppearance.SortedRangeMean(lumas.AsSpan(0, count)), (Side(0), Side(1), Side(2), Side(3)), scene, started);
     }
 
     // The memory DC with the DIB section selected, made once; false (and nothing kept) when any step fails.

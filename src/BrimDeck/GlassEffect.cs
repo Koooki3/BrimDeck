@@ -35,7 +35,7 @@ internal static class GlassEffect
     private static readonly string[] ArithmeticNames = ["MultiplyAmount", "Source1Amount", "Source2Amount", "Offset"];
 
     // The animatable properties of the graph's brush.
-    public const string Slope = "linear.Source2Amount", Offset = "linear.Offset";
+    public const string Through = "linear.Source1Amount", Slope = "linear.Source2Amount", Offset = "linear.Offset";
 
     // Counters for the resource checks (Windows tests, diagnostics): factories compiled, brushes made and native effect
     // objects alive now; effect brushes not yet released and factories not yet disposed.
@@ -165,11 +165,12 @@ internal static class GlassEffect
         var source = new CompositionEffectSourceParameter("backdrop");
         // The matrices leave their output unclamped, so a compositor with float intermediates keeps a vivid colour's
         // saturation overshoot; the composite clamps once.
-        var bare = Create("base", ColorMatrixEffect, [source], GlassRecipe.BaseMatrix(), clamp: false);
+        // Review v3 V312: the backdrop itself and its luma, so the tint opacity and the saturation move with the veils (three
+        // amounts, GlassRecipe.Coefficients) on the same compiled factory.
         var luma = Create("luma", ColorMatrixEffect, [source], GlassRecipe.LumaMatrix(), clamp: false);
-        var linear = Create("linear", ArithmeticEffect, [bare, luma], coefficients: [0, 1, -.28f, .1f]);
+        var linear = Create("linear", ArithmeticEffect, [source, luma], coefficients: [0, 1, -.28f, .1f]);
         var opaque = Create("opaque", ColorMatrixEffect, [linear], OpaqueMatrix, straight: true);
-        _graph = Compile(compositor, (IGraphicsEffect)opaque, [Slope, Offset]);
+        _graph = Compile(compositor, (IGraphicsEffect)opaque, [Through, Slope, Offset]);
         GraphState = GlassBackendState.Loading;
         // A graph the compositor took but cannot draw would show as clear or black glass: the fallback instead.
         if (Status(_graph) is not (CompositionEffectFactoryLoadStatus.Success or CompositionEffectFactoryLoadStatus.Pending))
@@ -224,12 +225,14 @@ internal static class GlassEffect
     }
 
     // Sets the graph brush's amounts for each look's luminosity opacity and the light look's share (0 dark, 1 light).
-    public static void Present(CompositionEffectBrush brush, double darkVeil, double lightVeil, double palette)
+    public static void Present(CompositionEffectBrush brush, double darkVeil, double lightVeil, double palette,
+        double tint = GlassRecipe.DefaultTint, double saturation = GlassRecipe.DefaultSaturation)
     {
         Inject?.Invoke("Present");
-        var (slope, offset) = GlassRecipe.Coefficients(darkVeil, lightVeil, palette);
-        brush.Properties.InsertScalar(Slope, (float)slope);
-        brush.Properties.InsertScalar(Offset, (float)offset);
+        var amounts = GlassRecipe.Coefficients(darkVeil, lightVeil, palette, tint, saturation);
+        brush.Properties.InsertScalar(Through, (float)amounts.Source);
+        brush.Properties.InsertScalar(Slope, (float)amounts.Slope);
+        brush.Properties.InsertScalar(Offset, (float)amounts.Offset);
     }
 
     // The colour as it is, the alpha set to one: applied to the stored values (straight mode), after the composite has
