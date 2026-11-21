@@ -8,29 +8,29 @@ namespace BrimDeck;
 // (Enter, PageUp, PageDown, CapsLock, PrintScreen).
 public static class HotkeyGesture
 {
-    public static bool TryParse(string text, out ModifierKeys modifiers, out Key key)
+    public static bool TryParse(string text, out ModifierKeys modifiers, out Key key, bool bareKeyOk = false)
     {
         modifiers = ModifierKeys.None; key = Key.None;
-        if (!HotkeyText.TryParse(text, out var flags, out var name) || !TryKey(name, out var parsed) || !IsAllowed(ToWpf(flags), parsed)) return false;
+        if (!HotkeyText.TryParse(text, out var flags, out var name, bareKeyOk) || !TryKey(name, out var parsed) || !IsAllowed(ToWpf(flags), parsed, bareKeyOk)) return false;
         modifiers = ToWpf(flags); key = parsed;
         return true;
     }
 
     // The canonical text, or "" for a combination that cannot be a hotkey.
-    public static string Format(ModifierKeys modifiers, Key key)
-        => IsAllowed(modifiers, key) ? HotkeyText.Format(FromWpf(modifiers), Name(key)) : "";
+    public static string Format(ModifierKeys modifiers, Key key, bool bareKeyOk = false)
+        => IsAllowed(modifiers, key, bareKeyOk) ? HotkeyText.Format(FromWpf(modifiers), Name(key)) : "";
 
-    // A real, non-modifier key with a virtual-key code and, unless it is F1 to F24, at least one modifier.
-    public static bool IsAllowed(ModifierKeys modifiers, Key key)
+    // A real, non-modifier key with a virtual-key code and, unless it is F1 to F24 (or bareKeyOk for a non-typing key), at least one modifier.
+    public static bool IsAllowed(ModifierKeys modifiers, Key key, bool bareKeyOk = false)
         => IsMainKey(key) && (modifiers & ~(ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift | ModifierKeys.Windows)) == 0
-           && HotkeyText.IsAllowed(FromWpf(modifiers), Name(key));
+           && HotkeyText.IsAllowed(FromWpf(modifiers), Name(key), bareKeyOk);
 
     // RegisterHotKey's modifier flags (with MOD_NOREPEAT, so holding the keys acts once, unless repeat asks for every repeat of a
     // held key, as resizing does) and virtual-key code.
-    public static bool ToNative(ModifierKeys modifiers, Key key, out uint fsModifiers, out uint vk, bool repeat = false)
+    public static bool ToNative(ModifierKeys modifiers, Key key, out uint fsModifiers, out uint vk, bool repeat = false, bool bareKeyOk = false)
     {
         fsModifiers = 0; vk = 0;
-        if (!IsAllowed(modifiers, key)) return false;
+        if (!IsAllowed(modifiers, key, bareKeyOk)) return false;
         if (modifiers.HasFlag(ModifierKeys.Alt)) fsModifiers |= 0x0001;
         if (modifiers.HasFlag(ModifierKeys.Control)) fsModifiers |= 0x0002;
         if (modifiers.HasFlag(ModifierKeys.Shift)) fsModifiers |= 0x0004;
