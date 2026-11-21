@@ -46,7 +46,8 @@ public partial class MainWindow
     private GlassSurface? _glassSurface;
     // The panels that share a look share its palette decision (keyed by the look, gone with it).
     private static readonly ConditionalWeakTable<PanelLook, GlassLookGroup<MainWindow>> GlassGroups = new();
-    private static readonly GlassReadBudget<MainWindow> GlassReads = new();
+    // Keyed by the panel for its ring reads and by its _glassCoverKey for its covered area's.
+    private static readonly GlassReadBudget<object> GlassReads = new();
     private GlassLookGroup<MainWindow> GlassGroup => GlassGroups.GetValue(Look, _ => new());
     private DispatcherTimer? _glassProbe, _glassWatchdog;
     private GlassSampleValidity _glassValidity = new(0);
@@ -64,6 +65,14 @@ public partial class MainWindow
     // the opening shown (GlassOpening), and the openness the veils last followed.
     private double _glassCoverDark = double.NaN, _glassCoverLight = double.NaN, _glassVeilOpenness = double.NaN;
     private AcrylicProbe? _glassCoverProbe;
+    // The panel's openings (V302/V304/V308): a cover read belongs to one; the cancel of the one running; when the panel's first
+    // frame after the open intent began (a read that began later may show our own glass, V303/V319).
+    private readonly GlassOpeningSession _glassOpening = new();
+    private readonly object _glassCoverKey = new();
+    private CancellationTokenSource? _glassCoverCancel;
+    private long _glassIntentAt, _glassIntentFrameAt;
+    // Diagnostics for the isolated harness (one line per cover read's outcome); null in normal use.
+    internal static Action<string>? GlassCoverTrace { get; set; }
     private (double Bright, double Dark) _glassTails = (1, 0);
     private readonly record struct GlassSampleArea(nint Monitor, Rect Screen, Int32Rect Bounds, double Scale, PanelLook Look);
     // The light's direction shown (moved toward the target on the display's frames, GlassOpticsFrame) and the one the latest
@@ -251,7 +260,8 @@ public partial class MainWindow
         if (expanded != _glassWasExpanded)
         {
             _glassWasExpanded = expanded;
-            if (expanded) ReadGlassCover();
+            // An opening or closing SetExpanded did not see (a new foreground context closes the panel directly).
+            if (expanded != _glassOpening.IsOpen) GlassOpenChanged(expanded);
             GlassBurst();
         }
         GlassTargets(now, snap: !Animates);
@@ -528,27 +538,82 @@ public partial class MainWindow
         }
     }
 
-    // The panel begins to open (user 11-21): read the desktop it is about to cover before it does, so the veils reach what that
-    // area asks for in step with the opening (a failed read: the worst range), and a clearly light or dark area turns the shared
-    // look with the opening, before the open panel's lock holds it. Where the area cannot be told (no larger open height known,
-    // nothing of it on the display), the opening goes on as before.
+    // The panel begins to open or close (SetExpanded, as the intent comes: before the opening's first frame). Opening: a new
+    // epoch of the panel's GlassOpeningSession and a read of the desktop the panel is about to cover, so the veils reach what
+    // that area asks for in step with the opening and a clearly light or dark area turns the shared look with it. Closing: the
+    // opening's cover and any read still running for it are void at once (V308), whatever the closing motion still shows.
+    private void GlassOpenChanged(bool open)
+    {
+        if (!open)
+        {
+            _glassOpening.Close();
+            _glassCoverCancel?.Cancel();
+            _glassCoverDark = _glassCoverLight = double.NaN;
+            if (_glassActive) QueueGlass();
+            return;
+        }
+        _glassOpening.Intent();
+        _glassCoverDark = _glassCoverLight = double.NaN;
+        _glassIntentAt = Environment.TickCount64;
+        _glassIntentFrameAt = long.MaxValue;
+        CompositionTarget.Rendering -= GlassIntentFrame;
+        CompositionTarget.Rendering += GlassIntentFrame;
+        ReadGlassCover();
+    }
+
+    private void GlassIntentFrame(object? sender, EventArgs e)
+    {
+        CompositionTarget.Rendering -= GlassIntentFrame;
+        if (_glassIntentFrameAt == long.MaxValue) _glassIntentFrameAt = Environment.TickCount64;
+    }
+
+    // One read of the area for the opening under way (at most one runs; one asked for meanwhile follows it, the latest). A read
+    // for an opening that has ended, or for another display or scale, is dropped with its reason; one that read nothing (refused
+    // by the app's read budget, the probe busy, the area off the display) is Unknown: the veils keep what the capsule asks for,
+    // never the worst range (V304). A read that began after the opening's first frame may show the panel's own glass: its grid
+    // is trusted less (GlassSceneSnapshot.Occluded).
     private async void ReadGlassCover()
     {
         if (!_glassActive || CurrentGlassSampleArea() is not { } area || GlassCoveredArea() is not { } covered) return;
+        if (_glassOpening.Begin(area.Monitor, covered.X, covered.Y, covered.Width, covered.Height, area.Scale, Environment.TickCount64) is not { } ticket) return;
         var monitor = area.Screen;
         var screen = new Int32Rect((int)monitor.X, (int)monitor.Y, (int)monitor.Width, (int)monitor.Height);
         var probe = _glassCoverProbe ??= new AcrylicProbe();
-        var reading = await Task.Run(() => probe.ReadArea(covered, screen));
-        if (!_glassActive || !_expanded) return;
+        _glassCoverCancel?.Dispose();
+        var cancel = _glassCoverCancel = new CancellationTokenSource();
+        var token = cancel.Token;
+        bool refused = !GlassReads.TryEnter(_glassCoverKey, ticket.OpenEpoch);
+        AcrylicProbe.Reading? reading = null;
+        if (!refused)
+        {
+            try { reading = await Task.Run(() => probe.ReadArea(covered, screen, token)); }
+            finally { GlassReads.Leave(_glassCoverKey, ticket.OpenEpoch); }
+        }
         long now = Environment.TickCount64;
+        var current = CurrentGlassSampleArea();
+        var outcome = _glassOpening.Finish(ticket, current?.Monitor ?? 0, current?.Scale ?? double.NaN, reading is not null, refused);
+        bool occluded = reading is { } read && read.Started >= _glassIntentFrameAt;
+        var scene = reading?.Scene is { } grid ? occluded ? grid.Occluded() : grid : null;
+        GlassCoverTrace?.Invoke(FormattableString.Invariant(
+            $"cover epoch={ticket.OpenEpoch} outcome={outcome} frame={(_glassIntentFrameAt == long.MaxValue ? -1 : _glassIntentFrameAt - _glassIntentAt)} gdi={(reading is { } g ? g.Started - _glassIntentAt : -1)} done={now - _glassIntentAt} area={covered.X},{covered.Y},{covered.Width}x{covered.Height} middle={reading?.MiddleMean ?? double.NaN:0.000} bright={reading?.Bright ?? double.NaN:0.000} dark={reading?.Dark ?? double.NaN:0.000} {scene}"));
+        if (outcome == GlassOpeningSession.Outcome.Applied && reading is { } sample && _glassActive) ApplyGlassCover(sample, scene, now);
+        if (_glassOpening.TakePending()) ReadGlassCover();
+    }
+
+    private void ApplyGlassCover(AcrylicProbe.Reading sample, GlassSceneSnapshot? scene, long now)
+    {
         int transparency = Settings.GlassTransparency;
-        var (bright, dark) = reading is { } read ? (read.Bright, read.Dark) : (1d, 0d);
-        _glassCoverDark = GlassRecipe.LuminosityFor(true, bright, dark, transparency);
-        _glassCoverLight = GlassRecipe.LuminosityFor(false, bright, dark, transparency);
+        _glassCoverDark = GlassRecipe.LuminosityFor(true, sample.Bright, sample.Dark, transparency);
+        _glassCoverLight = GlassRecipe.LuminosityFor(false, sample.Bright, sample.Dark, transparency);
         QueueGlass();
-        if (reading is not { } sample || PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) return;
-        ElectGlassLeader();
-        if (GlassGroup.Decision is { } decision && decision.Open(sample.MiddleMean, now)) StartGlassTurn(decision, now);
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) return;
+        // Only the shared look's leader turns it (V314/V317): a follower opening over another backdrop keeps the shared look and
+        // answers it with its veils. A leader without a decision yet (opened before its first ring reading) makes it now.
+        if (!ReferenceEquals(ElectGlassLeader(), this)) { GlassCoverTrace?.Invoke("cover decision=follower"); return; }
+        var decision = GlassGroup.Decision ??= new GlassAppearance(Look.Current.IsDark, SettingsPalette.IsDark(SettingsTheme.System), videoGap: 2 * GlassProbeInterval);
+        bool turned = scene is not null ? decision.Open(scene, now) : decision.Open(sample.MiddleMean, now);
+        GlassCoverTrace?.Invoke($"cover decision={(turned ? decision.Dark ? "turn-dark" : "turn-light" : "kept")} dark={decision.Dark}");
+        if (turned) StartGlassTurn(decision, now);
     }
 
     // The screen pixels the open panel will cover beyond the island shown now (a margin past it, as the ring keeps from its
@@ -659,6 +724,9 @@ public partial class MainWindow
         _acrylicProbe = new AcrylicProbe();
         _glassCoverProbe?.Dispose();
         _glassCoverProbe = null;
+        GlassReads.Drop(_glassCoverKey);
+        _glassCoverCancel?.Cancel();
+        _glassOpening.SceneChanged();
         _glassCoverDark = _glassCoverLight = _glassVeilOpenness = double.NaN;
         _glassValidity = new GlassSampleValidity(Environment.TickCount64);
         _glassLastMiddle = double.NaN;
