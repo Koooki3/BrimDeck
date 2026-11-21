@@ -251,7 +251,8 @@ internal sealed class PanelLook
     }
 
     // Everything a palette draws, by value: a file theme is built anew for every reading, so an edit shows as a new signature.
-    private static string Signature(PanelThemeInfo theme, PanelPalette palette)
+    // Internal for the checks that an edit of each part is seen (ThemeLookChecks).
+    internal static string Signature(PanelThemeInfo theme, PanelPalette palette)
     {
         var e = palette.Effects;
         var clock = palette.Clock;
@@ -259,7 +260,7 @@ internal sealed class PanelLook
             string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}/{e.Cut}/{e.Glass}/{e.Decor}"),
             $"{clock?.Style}/{clock?.Color}/{clock?.Custom}/{string.Join(",", clock?.Gradient ?? [])}",
             string.Join(",", ClockColors.Swatches.Select(palette.ClockPreset)), string.Join(";", palette.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops))),
-            string.Join(",", palette.Swatches), palette.Motion.ToString());
+            string.Join(",", palette.Swatches), palette.Motion.ToString()); // every motion field (record text), so an edit of only the motion section is a new look
     }
     private static Dictionary<string, string> Hexes(PanelPalette palette) => palette.Colors.ToDictionary(pair => pair.Key, pair => pair.Value.ToString());
 
