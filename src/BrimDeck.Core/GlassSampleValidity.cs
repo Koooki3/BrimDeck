@@ -13,6 +13,9 @@ namespace BrimDeck.Core;
 //   Recovery: once protection has risen, it falls back to 0 only after two fresh readings in a row agree (within RecoverAgree on
 //     both tails); a single one only starts the recovery.
 //   A capture still running Abandon after it began is given up, so a worker that never returns cannot stop all later readings.
+//   Pause (V3 C4): while the island moves the ring is not read (GlassMotionGate); the time paused, up to GlassMotionGate.MaxPause,
+//     is no age: the TTLs and WorstBy count from the last reading as if the pause had not been. A capture under way when the pause
+//     began keeps its HardSafety (a stuck capture is not hidden), and a protection already risen holds its level while paused.
 // The TTLs are trial values (review v2 §5: 250 ms active / 750 ms idle), to be tuned by measurement.
 // Times are milliseconds on any steady clock.
 public sealed class GlassSampleValidity
@@ -23,7 +26,8 @@ public sealed class GlassSampleValidity
     public readonly record struct Ticket(long Id, long Start, long Epoch, bool Active);
     public enum Verdict { Accepted, Recovering, Late, Mismatch, Empty, Stale }
 
-    private long _nextId, _validStart, _activeSince;
+    private long _nextId, _validStart, _activeSince, _pausedSince;
+    private bool _paused;
     private Ticket? _inFlight;
     private bool _active, _protecting;
     private (double Bright, double Dark)? _recoverFrom;
@@ -44,7 +48,7 @@ public sealed class GlassSampleValidity
     // Shown anew: the worst range until a first reading, with the clock running from now.
     public void Restart(long now)
     {
-        _validStart = now; _inFlight = null; _protecting = false; _recoverFrom = null;
+        _validStart = now; _inFlight = null; _protecting = false; _recoverFrom = null; _paused = false;
         Tails = (1, 0); First = true;
     }
 
@@ -98,12 +102,35 @@ public sealed class GlassSampleValidity
         return Verdict.Accepted;
     }
 
+    public bool Paused => _paused;
+
+    // The readings pause for the island's motion from now (see above).
+    public void Pause(long now)
+    {
+        if (_paused) return;
+        Rise(now);
+        _paused = true;
+        _pausedSince = now;
+    }
+
+    // The readings resume at now: the pause (up to its ceiling) is taken off the last reading's age for good.
+    public void Resume(long now)
+    {
+        if (!_paused) return;
+        long credit = Credit(now);
+        _paused = false;
+        _validStart += credit;
+        _activeSince += credit;
+    }
+
+    private long Credit(long now) => _paused ? Math.Clamp(now - _pausedSince, 0, GlassMotionGate.MaxPause) : 0;
+
     // How much the glass guards the text at now (see above); latches the protection once it has risen.
     public double Protection(long now)
     {
         Rise(now);
         if (!_protecting) return 0;
-        long from = ProtectFrom(), by = _validStart + WorstBy;
+        long from = ProtectFrom(now), by = _validStart + Credit(now) + WorstBy;
         return by <= from ? 1 : Math.Clamp((now - from) / (double)(by - from), 0, 1);
     }
 
@@ -121,21 +148,27 @@ public sealed class GlassSampleValidity
     {
         long next = long.MaxValue;
         if (_inFlight is { } running && running.Start + Abandon > now) next = running.Start + Abandon;
-        long from = ProtectFrom(), by = _validStart + WorstBy;
+        // While paused the deadlines only move later until the pause reaches its ceiling: look at the earliest they can be then
+        // (a resume looks again).
+        long at = _paused ? Math.Max(now, _pausedSince + GlassMotionGate.MaxPause) : now;
+        long from = ProtectFrom(at), by = _validStart + Credit(at) + WorstBy;
+        if (_protecting) from = Math.Min(from, now);
         if (!First && now < by) next = Math.Min(next, now < from ? from + 1 : Math.Min(by, now + Step));
         return next;
     }
 
-    private long ProtectFrom()
+    private long ProtectFrom(long now)
     {
+        long credit = Credit(now);
         long from = _validStart + IdleTtl;
         if (_active) from = Math.Min(from, Math.Max(_validStart, _activeSince) + ActiveTtl);
+        from += credit;
         if (_inFlight is { } running) from = Math.Min(from, running.Start + HardSafety);
         return Math.Max(from, _validStart);
     }
 
     private void Rise(long now)
     {
-        if (!_protecting && !First && now > ProtectFrom()) { _protecting = true; _recoverFrom = null; }
+        if (!_protecting && !First && now > ProtectFrom(now)) { _protecting = true; _recoverFrom = null; }
     }
 }
