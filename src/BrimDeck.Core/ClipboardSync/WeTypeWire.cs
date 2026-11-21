@@ -13,9 +13,63 @@ public sealed class WeTypeWire
     public WeTypeWire Text(int field, string value) => Bytes(field, SyncTransport.Utf8.GetBytes(value));
     public WeTypeWire Message(int field, WeTypeWire value) => Bytes(field, value.Encode());
     public bool Has(int field) => _fields.Any(f => f.Number == field);
-    public ulong GetNumber(int field) => _fields.FirstOrDefault(f => f.Number == field).Value is ulong n ? n : 0;
+    internal IEnumerable<int> FieldNumbers() => _fields.Select(f => f.Number).Distinct().Order();
+
+    // The layout of a message for diagnostics: field numbers, numbers, nested messages and JSON keys. Text is shown only
+    // by its length, and a 64-digit hex string as "id", so no file names or contents reach the log.
+    internal static string Describe(byte[] bytes, int depth = 0)
+    {
+        if (bytes.Length > 0 && bytes[0] == (byte)'{') return DescribeJson(bytes);
+        WeTypeWire wire;
+        try { wire = Parse(bytes); }
+        catch (Exception ex) when (ex is InvalidDataException or OverflowException) { return $"bytes({bytes.Length})"; }
+        if (wire._fields.Count == 0 || !wire.Encode().AsSpan().SequenceEqual(bytes)) return $"bytes({bytes.Length})";
+        var parts = wire._fields.Select(f => f.Value switch
+        {
+            ulong n => $"{f.Number}={n}",
+            byte[] b when b.Length == 64 && b.All(c => Uri.IsHexDigit((char)c)) => $"{f.Number}=id",
+            byte[] b when depth < 4 && b.Length > 0 && Describe(b, depth + 1) is var inner && !inner.StartsWith("bytes(") => $"{f.Number}={inner}",
+            byte[] b => $"{f.Number}=bytes({b.Length})",
+            _ => $"{f.Number}=?"
+        });
+        string text = "{" + string.Join(" ", parts) + "}";
+        return text.Length > 600 ? text[..600] + "…" : text;
+    }
+
+    private static string DescribeJson(byte[] bytes)
+    {
+        try
+        {
+            using var json = System.Text.Json.JsonDocument.Parse(bytes);
+            static string Element(System.Text.Json.JsonElement e, int depth) => e.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.Object when depth < 4 =>
+                    "{" + string.Join(" ", e.EnumerateObject().Select(p => p.Name + "=" + Element(p.Value, depth + 1))) + "}",
+                System.Text.Json.JsonValueKind.Array when depth < 4 =>
+                    "[" + string.Join(" ", e.EnumerateArray().Take(8).Select(v => Element(v, depth + 1))) + (e.GetArrayLength() > 8 ? " …" : "") + "]",
+                System.Text.Json.JsonValueKind.String => $"s({e.GetString()!.Length})",
+                System.Text.Json.JsonValueKind.Number or System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False => e.GetRawText(),
+                _ => e.ValueKind.ToString()
+            };
+            string text = "json" + Element(json.RootElement, 0);
+            return text.Length > 600 ? text[..600] + "…" : text;
+        }
+        catch (System.Text.Json.JsonException) { return $"bytes({bytes.Length})"; }
+    }
+    internal bool TryGetNumber(int field, out ulong value)
+    {
+        if (_fields.FirstOrDefault(f => f.Number == field).Value is ulong number)
+        {
+            value = number;
+            return true;
+        }
+        value = 0;
+        return false;
+    }
+    public ulong GetNumber(int field) => TryGetNumber(field, out var value) ? value : 0;
     public byte[] GetBytes(int field) => _fields.FirstOrDefault(f => f.Number == field).Value as byte[] ?? [];
     public string GetText(int field) => SyncTransport.Utf8.GetString(GetBytes(field));
+    internal IEnumerable<string> Texts(int field) => _fields.Where(f => f.Number == field && f.Value is byte[]).Select(f => SyncTransport.Utf8.GetString((byte[])f.Value));
     public WeTypeWire GetMessage(int field) => Parse(GetBytes(field));
     public IEnumerable<WeTypeWire> Messages(int field) => _fields.Where(f => f.Number == field && f.Value is byte[]).Select(f => Parse((byte[])f.Value));
     private static void WriteVar(Stream output, ulong n)
@@ -47,9 +101,11 @@ public sealed class WeTypeWire
         }
         return output.ToArray();
     }
-    public static WeTypeWire Parse(ReadOnlySpan<byte> input)
+    public static WeTypeWire Parse(ReadOnlySpan<byte> input) => Parse(input, 2 * 1024 * 1024);
+
+    internal static WeTypeWire Parse(ReadOnlySpan<byte> input, int maxBytes)
     {
-        if (input.Length > 2 * 1024 * 1024) throw new InvalidDataException("Packet too large.");
+        if (input.Length > maxBytes) throw new InvalidDataException("Packet too large.");
         var result = new WeTypeWire(); int at = 0;
         while (at < input.Length)
         {

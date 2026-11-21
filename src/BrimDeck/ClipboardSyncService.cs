@@ -134,6 +134,7 @@ internal sealed partial class ClipboardSyncService : IDisposable
         Accounts.WeType.DeviceName = Accounts.DeviceName;
         using var client = new WeTypeSyncClient(Accounts.WeType, Save) { Trace = Log };
         await client.PairAsync(code, ct);
+        ApplyFileOffers();
         Changed?.Invoke();
     }
     // Signing in and being allowed to sync are separate: the account's devices each have a switch of their own.
@@ -211,6 +212,7 @@ internal sealed partial class ClipboardSyncService : IDisposable
             DoubaoCapability = null;
         }
         else Accounts.WeType = new() { DeviceName = Accounts.DeviceName };
+        ApplyFileOffers();
         _status.Remove(doubao);
         Save(); Changed?.Invoke();
     }
@@ -228,6 +230,7 @@ internal sealed partial class ClipboardSyncService : IDisposable
             }
             else if ((!enabled || !Connected(doubao)) && _workers.ContainsKey(doubao)) Stop(doubao);
         }
+        ApplyFileOffers();
         if ((_workers.Count > 0 || _lanStop is not null) && _watch is null)
         {
             try { _watch = new ClipboardWatch(Copied, name => ClipboardExclusions.Excludes(_app.Settings.ClipboardExcluded, name)); }
@@ -311,7 +314,8 @@ internal sealed partial class ClipboardSyncService : IDisposable
 
     private async Task RunAsync(bool doubao, CancellationTokenSource stop)
     {
-        using IClipboardSyncClient client = doubao ? new DoubaoSyncClient(Accounts.Doubao!) { Trace = Log } : new WeTypeSyncClient(Accounts.WeType, Save) { Trace = Log };
+        using IClipboardSyncClient client = doubao ? new DoubaoSyncClient(Accounts.Doubao!) { Trace = Log } :
+            new WeTypeSyncClient(Accounts.WeType, Save) { Trace = Log, FileInviteChanged = ObserveFileOffer };
         string source = doubao ? Loc.T("豆包输入法", "Doubao IME") : Loc.T("微信输入法", "WeType");
         bool initialized = false, sending = false; string? lastId = null, lastSignature = null; int failures = 0;
         static string Signature(RemoteClip clip) => clip.Image is { } bytes ? HashImage(bytes) : Hash(clip.Text);
@@ -474,8 +478,10 @@ internal sealed partial class ClipboardSyncService : IDisposable
     public void Dispose()
     {
         _disposed = true;
+        CloseRelay();
         System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged -= NetworkChanged;
         StopLan();
+        _fileOffersStop?.Cancel();
         foreach (var source in _workers.Values) source.Cancel();
         _workers.Clear(); _pending.Clear(); _watch?.Dispose(); _watch = null;
     }

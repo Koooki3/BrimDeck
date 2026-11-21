@@ -77,7 +77,7 @@ internal sealed class NoDesktop : IDesktopSources
 
 internal sealed record Frame(BitmapSource Image, double Time);
 
-internal sealed class Renderer(App app, string output, string language, string[] scenes)
+internal sealed partial class Renderer(App app, string output, string language, string[] scenes)
 {
     private bool Wants(string scene) => scenes.Length == 0 || scenes.Contains(scene);
     private MainWindow _deck = null!;
@@ -177,6 +177,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (scenes.Contains("shelf-measures")) await ShelfMeasures();
             // The clipboard sync page and its connecting windows in each state; for checking, not for the README.
             if (scenes.Contains("clipboard-sync")) await ClipboardSyncScene(folder);
+            // The windows that send and receive files with WeType in each state; for checking, not for the README.
+            if (scenes.Contains("wetype-files")) await WeTypeFileScene(app, output, folder);
             // The line at the foot of the clipboard page that says why a click only copied, at the smallest panel and a usual one.
             if (scenes.Contains("shelf-notice")) await ShelfNotice();
             // The file transfer's settings, and the word beside the pointer while files are dragged out; for checking.

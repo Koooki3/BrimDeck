@@ -96,6 +96,25 @@ public partial class MainWindow
         }
         ShelfSearchButton.Visibility = Visibility.Visible;
         ClockLabel.Visibility = Visibility.Visible;
+        if (_app.ClipboardSync.Connected(false))
+        {
+            // Drawn as the search button beside it is: a 24-unit drawing with a 2-unit pen shown at 15, in the same glyph style
+            // (dimmed at rest, brighter under the pointer), so the two weigh the same.
+            var arrow = new Path { Data = Geometry.Parse("M 4.5,15 V 19.5 H 19.5 V 15 M 12,4 V 14.5 M 7.5,10 L 12,14.5 L 16.5,10"), StrokeThickness = 2,
+                StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round };
+            arrow.SetBinding(Shape.StrokeProperty, new System.Windows.Data.Binding(nameof(Button.Foreground)) { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(Button), 1) });
+            var canvas = new Canvas { Width = 24, Height = 24 };
+            canvas.Children.Add(arrow);
+            string receiveName = Loc.T("接收微信输入法文件", "Receive files from WeType");
+            var receive = new Button { Style = (Style)FindResource("PanelGlyphButton"), Content = new Viewbox { Width = 15, Height = 15, Child = canvas }, ToolTip = receiveName };
+            AutomationProperties.SetName(receive, receiveName);
+            receive.Click += (_, e) => { e.Handled = true; _app.ClipboardSync.OpenFileInbox(); };
+            receive.MouseRightButtonUp += (_, e) => e.Handled = true;
+            receive.HorizontalAlignment = HorizontalAlignment.Right;
+            receive.VerticalAlignment = VerticalAlignment.Center;
+            receive.Margin = new Thickness(0, 0, right + ShelfSearchButton.Width, 0);
+            ShelfToolbar.Children.Add(receive);
+        }
     }
     private Button ToolbarGlyph(string data, string name, Action click)
     {
@@ -479,9 +498,10 @@ public partial class MainWindow
         panel.Children.Add(PillButton(Loc.T("打开", "Open"), true, () => OpenFile(file.Path)));
         var show = PillButton(Loc.T("在文件夹中显示", "Show in folder"), false, () => ShowInFolder(file.Path)); show.Margin = new Thickness(6, 0, 0, 0);
         panel.Children.Add(show);
-        if (Shareable([file]).Count > 0)
+        if (FileShareTargets([file]).Count > 0)
         {
-            var share = PillButton(Loc.T("分享", "Share"), false, () => ShareFiles([file])); share.Margin = new Thickness(6, 0, 0, 0);
+            Button share = null!;
+            share = PillButton(Loc.T("分享", "Share"), false, () => ShowShareChoices(file, share)); share.Margin = new Thickness(6, 0, 0, 0);
             panel.Children.Add(share);
         }
         Button more = null!;
@@ -706,11 +726,7 @@ public partial class MainWindow
         bool many = files.Count > 1;
         menu.Items.Add(Item(many ? Loc.T($"粘贴所选 {files.Count} 项", $"Paste {files.Count} files") : Loc.T("粘贴", "Paste"),
             () => PasteFiles(files), MenuIcons.Paste));
-        // Folders and files that are gone are left out of a share; the count says what goes.
-        var shared = Shareable(files);
-        if (shared.Count > 0)
-            menu.Items.Add(Item(many ? Loc.T($"分享所选 {shared.Count} 项…", $"Share {shared.Count} files…") : Loc.T("分享…", "Share…"),
-                () => ShareFiles(shared), MenuIcons.Share));
+        AddShareMenu(menu, files);
         if (!many)
         {
             menu.Items.Add(Item(Loc.T("打开", "Open"), () => OpenFile(file.Path), MenuIcons.Open));
