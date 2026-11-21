@@ -551,7 +551,11 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
             Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value),
                 help: Loc.T("面板展开时，在面板内任意位置单击右键即可打开设置。", "When the panel is expanded, right-click anywhere inside it to open settings.")),
             MouseWheelRow(),
-            ExpandPlaceRow());
+            ExpandPlaceRow(),
+            // The collapsed panel opens on the part under the pointer; one switch for the whole mapping, as the wheel has.
+            Toggle(Loc.T("按悬停区段展开", "Open on the part under the pointer"), S.HoverPage, value => Change(s => s.HoverPage = value),
+                help: Loc.T("根据鼠标悬停位置，自动展开对应页面；停在标题上打开音乐，停在读数上打开系统监控，停在电量上打开设备电量。",
+                    "Opens the page that matches the part of the collapsed panel the pointer rests on: the title for music, the readings for the system monitor, the batteries for the devices.")));
     }
     private const double PageRowHeight = 44;
     private readonly List<(Border Row, StackPanel Sizes, Button Arrow)> _pageRows = [];
@@ -675,7 +679,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.QuotaRingStyle=defaults.QuotaRingStyle;s.QuotaRingRemaining=defaults.QuotaRingRemaining;s.QuotaRingLetters=defaults.QuotaRingLetters;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
                 case 5:s.EqualizerAlways=defaults.EqualizerAlways;s.EqualizerBars=defaults.EqualizerBars;s.EqualizerMode=defaults.EqualizerMode;s.EqualizerColor=defaults.EqualizerColor;s.EqualizerCustomColor=defaults.EqualizerCustomColor;
-                    s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicPausedHide=defaults.MusicPausedHide;s.MusicInstrumentalTitle=defaults.MusicInstrumentalTitle;s.MusicLyricAutoWidth=defaults.MusicLyricAutoWidth;s.MusicTitleAutoWidth=defaults.MusicTitleAutoWidth;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;s.MusicLyricsLayout=defaults.MusicLyricsLayout;s.MusicLyricsAlign=defaults.MusicLyricsAlign;
+                    s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicPausedHide=defaults.MusicPausedHide;s.MusicInstrumentalTitle=defaults.MusicInstrumentalTitle;s.MusicLyricAutoWidth=defaults.MusicLyricAutoWidth;s.MusicTitleAutoWidth=defaults.MusicTitleAutoWidth;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;s.MusicSimulatedKaraoke=defaults.MusicSimulatedKaraoke;s.MusicLyricsLayout=defaults.MusicLyricsLayout;s.MusicLyricsAlign=defaults.MusicLyricsAlign;
                     s.MusicLyricColor=defaults.MusicLyricColor;s.MusicLyricCustomColor=defaults.MusicLyricCustomColor;break;
                 case MusicGesturesPage:s.MusicDragLeft=defaults.MusicDragLeft;s.MusicDragRight=defaults.MusicDragRight;s.MusicDragUp=defaults.MusicDragUp;s.MusicDragDown=defaults.MusicDragDown;
                     s.MusicSwipeLeft=defaults.MusicSwipeLeft;s.MusicSwipeRight=defaults.MusicSwipeRight;break;

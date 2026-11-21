@@ -528,6 +528,7 @@ public sealed class DeckSettings
     public bool MusicPageCover { get; set; } = true;
     public bool MusicIndicatorProgress { get; set; } = true;
     public bool LyricsEnabled { get; set; } = true;
+    public bool MusicSimulatedKaraoke { get; set; }
     // Where the lyrics sit on the page, chosen apart from the cover: under the artist in the titles' column, or in a column of
     // their own right of the titles (the cover then stands above the titles). Without the cover the titles' column may sit at the
     // page's left edge or be centred.
@@ -589,6 +590,9 @@ public sealed class DeckSettings
     public int OpenDelay { get; set; } = 0;
     // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
     public bool ClickToExpand { get; set; }
+    // The collapsed panel opens on the page of the part under the pointer (the title, the readings, the devices, the rings),
+    // instead of on the page it would have opened on. A pointer over no part leaves that choice as it was.
+    public bool HoverPage { get; set; } = true;
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;

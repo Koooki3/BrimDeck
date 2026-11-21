@@ -92,7 +92,7 @@ internal static class AppleMusicLyricsTests
                 "c.y.qq.com" => qqWorks ? QqSearch : "{}",
                 "u.y.qq.com" => QqRpc,
                 "music.163.com" when u.AbsolutePath.Contains("search") => JsonSerializer.Serialize(new { result = new { songs = new[] { new { id = 1, name = Track.Title, artists = new[] { new { name = "李耀阳" } }, duration = 277500 } } } }),
-                "music.163.com" => JsonSerializer.Serialize(new { lrc = new { lyric = "[00:01]网易同步" } }),
+                "interface.music.163.com" => JsonSerializer.Serialize(new { lrc = new { lyric = "[00:01]网易同步" } }),
                 _ => "{}" } };
             using var service = new LyricsService(web.Http, () => []);
             var result = await service.FindAsync(Track, true, default);
