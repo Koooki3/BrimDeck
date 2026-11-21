@@ -70,7 +70,7 @@ public partial class MainWindow
     private readonly GlassOpeningSession _glassOpening = new();
     private readonly object _glassCoverKey = new();
     private CancellationTokenSource? _glassCoverCancel;
-    private long _glassIntentAt, _glassIntentFrameAt;
+    private long _glassIntentAt, _glassIntentStamp, _glassIntentFrameAt; // _glassIntentStamp, _glassIntentFrameAt: Stopwatch timestamps
     // Diagnostics for the isolated harness (one line per cover read's outcome); null in normal use.
     internal static Action<string>? GlassCoverTrace { get; set; }
     private (double Bright, double Dark) _glassTails = (1, 0);
@@ -556,6 +556,7 @@ public partial class MainWindow
         _glassOpening.Intent();
         _glassCoverDark = _glassCoverLight = double.NaN;
         _glassIntentAt = Environment.TickCount64;
+        _glassIntentStamp = System.Diagnostics.Stopwatch.GetTimestamp();
         _glassIntentFrameAt = long.MaxValue;
         CompositionTarget.Rendering -= GlassIntentFrame;
         CompositionTarget.Rendering += GlassIntentFrame;
@@ -565,7 +566,7 @@ public partial class MainWindow
     private void GlassIntentFrame(object? sender, EventArgs e)
     {
         CompositionTarget.Rendering -= GlassIntentFrame;
-        if (_glassIntentFrameAt == long.MaxValue) _glassIntentFrameAt = Environment.TickCount64;
+        if (_glassIntentFrameAt == long.MaxValue) _glassIntentFrameAt = System.Diagnostics.Stopwatch.GetTimestamp();
     }
 
     // One read of the area for the opening under way (at most one runs; one asked for meanwhile follows it, the latest). A read
@@ -575,6 +576,8 @@ public partial class MainWindow
     // is trusted less (GlassSceneSnapshot.Occluded).
     private async void ReadGlassCover()
     {
+        // Always on the window's thread: a pending read restarts from a continuation, which must not run elsewhere.
+        if (!Dispatcher.CheckAccess()) { _ = Dispatcher.BeginInvoke(ReadGlassCover); return; }
         if (!_glassActive || CurrentGlassSampleArea() is not { } area || GlassCoveredArea() is not { } covered) return;
         if (_glassOpening.Begin(area.Monitor, covered.X, covered.Y, covered.Width, covered.Height, area.Scale, Environment.TickCount64) is not { } ticket) return;
         var monitor = area.Screen;
@@ -593,13 +596,15 @@ public partial class MainWindow
         long now = Environment.TickCount64;
         var current = CurrentGlassSampleArea();
         var outcome = _glassOpening.Finish(ticket, current?.Monitor ?? 0, current?.Scale ?? double.NaN, reading is not null, refused);
-        bool occluded = reading is { } read && read.Started >= _glassIntentFrameAt;
+        bool occluded = reading is { } read && read.Started > _glassIntentFrameAt;
         var scene = reading?.Scene is { } grid ? occluded ? grid.Occluded() : grid : null;
         GlassCoverTrace?.Invoke(FormattableString.Invariant(
-            $"cover epoch={ticket.OpenEpoch} outcome={outcome} frame={(_glassIntentFrameAt == long.MaxValue ? -1 : _glassIntentFrameAt - _glassIntentAt)} gdi={(reading is { } g ? g.Started - _glassIntentAt : -1)} done={now - _glassIntentAt} area={covered.X},{covered.Y},{covered.Width}x{covered.Height} middle={reading?.MiddleMean ?? double.NaN:0.000} bright={reading?.Bright ?? double.NaN:0.000} dark={reading?.Dark ?? double.NaN:0.000} {scene}"));
+            $"cover epoch={ticket.OpenEpoch} outcome={outcome} frame={(_glassIntentFrameAt == long.MaxValue ? -1 : StampMs(_glassIntentFrameAt - _glassIntentStamp))} gdi={(reading is { } g ? StampMs(g.Started - _glassIntentStamp) : -1)} done={now - _glassIntentAt} area={covered.X},{covered.Y},{covered.Width}x{covered.Height} middle={reading?.MiddleMean ?? double.NaN:0.000} bright={reading?.Bright ?? double.NaN:0.000} dark={reading?.Dark ?? double.NaN:0.000} {scene}"));
         if (outcome == GlassOpeningSession.Outcome.Applied && reading is { } sample && _glassActive) ApplyGlassCover(sample, scene, now);
         if (_glassOpening.TakePending()) ReadGlassCover();
     }
+
+    private static long StampMs(long ticks) => ticks * 1000 / System.Diagnostics.Stopwatch.Frequency;
 
     private void ApplyGlassCover(AcrylicProbe.Reading sample, GlassSceneSnapshot? scene, long now)
     {

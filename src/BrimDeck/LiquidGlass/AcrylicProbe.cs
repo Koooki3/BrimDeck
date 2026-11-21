@@ -86,7 +86,7 @@ internal sealed class AcrylicProbe : IDisposable
 
     // The area itself (the part of the desktop an opening panel is about to cover, read before it does), shrunk to at most Cells a
     // side; its Changed is 0 and its Sides NaN but the first; its Scene the area's grid (GlassSceneSnapshot), Started when the
-    // screen was read (Environment.TickCount64). Nothing is read once cancelled (an opening that has ended).
+    // screen was read (Stopwatch.GetTimestamp, finer than the 15.6 ms tick so a read and a frame are ordered). Nothing is read once cancelled (an opening that has ended).
     public Reading? ReadArea(Int32Rect area, Int32Rect display, CancellationToken cancel = default)
     {
         if (cancel.IsCancellationRequested || Interlocked.CompareExchange(ref _state, 1, 0) != 0) return null;
@@ -129,7 +129,7 @@ internal sealed class AcrylicProbe : IDisposable
         if (screen == IntPtr.Zero) { _lastCount = 0; return null; }
         try
         {
-            started = Environment.TickCount64;
+            started = System.Diagnostics.Stopwatch.GetTimestamp();
             if (!Prepare(screen)) { _lastCount = 0; return null; }
             for (int i = 0; i < strips.Length; i++)
             {
