@@ -32,16 +32,15 @@ internal static class ExpandedMonitorTests
     private static void Cards(Action<string, bool> check)
     {
         var old = SettingsMigrations.Read("""{"AppVersion":"9.0.0","MonitorStorage":false,"CoreDisplay":1}""");
-        check("Expanded customization: old files keep automatic layout and visible CPU cores",
-            old.ExpandedCpuCores && !old.ExpandedCustomCards && old.ExpandedCardOrder.Count == 0 && old.CoreDisplay == CoreDisplay.Columns &&
+        check("Expanded customization: old files keep automatic layout",
+            !old.ExpandedCustomCards && old.ExpandedCardOrder.Count == 0 && old.CoreDisplay == CoreDisplay.Columns &&
             !old.ShowsExpanded(ExpandedItem.Storage));
-        old.ExpandedCpuCores = false;
         old.ExpandedCustomCards = true;
         old.ExpandedCardOrder = [new(ExpandedItem.Storage, " d: ", true), new(ExpandedItem.Upload), new(ExpandedItem.Storage, "D:"),
             new(ExpandedItem.Storage, "folder"), new(ExpandedItem.Processes), new(ExpandedItem.Memory, "D:")];
         var back = SettingsMigrations.Read(JsonSerializer.Serialize(old));
         check("Expanded customization: width and order round-trip, with invalid/duplicate entries removed and compact core mode preserved",
-            !back.ExpandedCpuCores && back.ExpandedCustomCards && back.CoreDisplay == CoreDisplay.Columns &&
+            back.ExpandedCustomCards && back.CoreDisplay == CoreDisplay.Columns &&
             back.ExpandedCardOrder.SequenceEqual([new(ExpandedItem.Storage, "D:", true), new(ExpandedItem.Upload), new(ExpandedItem.Memory)]));
         var copy = back.Copy();
         copy.ExpandedCardOrder.Clear();
@@ -51,8 +50,8 @@ internal static class ExpandedMonitorTests
         var switched = Profiles.With(back, legacyProfile);
         var restored = Profiles.With(switched, savedProfile);
         check("Expanded customization: older profiles use defaults and existing profiles restore their saved layout when switched back",
-            switched.ExpandedCpuCores && !switched.ExpandedCustomCards && switched.ExpandedCardOrder.Count == 0 && switched.CoreDisplay == CoreDisplay.Matrix &&
-            !restored.ExpandedCpuCores && restored.ExpandedCustomCards && restored.ExpandedCardOrder.SequenceEqual(back.ExpandedCardOrder));
+            !switched.ExpandedCustomCards && switched.ExpandedCardOrder.Count == 0 && switched.CoreDisplay == CoreDisplay.Matrix &&
+            restored.ExpandedCustomCards && restored.ExpandedCardOrder.SequenceEqual(back.ExpandedCardOrder));
 
         ExpandedItem[] items = [ExpandedItem.Cpu, ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Storage, ExpandedItem.Processes];
         var cards = ExpandedCards.Resolve(back.ExpandedCardOrder, items, ["C:", "E:"]);
@@ -69,10 +68,10 @@ internal static class ExpandedMonitorTests
             !ends[3].Wide);
 
         var content = new ExpandedCardContent(cards, AwaitingDrives: false, WatchDrives: true);
-        var wide = ExpandedLayout.For(items, 1200, 320, cpuCores: false, cardContent: content);
-        var narrow = ExpandedLayout.For(items, 300, 100, cpuCores: false, cardContent: content);
+        var wide = ExpandedLayout.For(items, 1200, 320, cardContent: content);
+        var narrow = ExpandedLayout.For(items, 300, 100, cardContent: content);
         check("Expanded customization: planner keeps aggregate CPU, all cards and adaptive process list placement",
-            !wide.CpuCores && wide.CardsTwoColumns && wide.Part(ExpandedItem.Cpu) is not null && wide.CardsHeight > narrow.CardsHeight &&
+            wide.CardsTwoColumns && wide.Part(ExpandedItem.Cpu) is not null && wide.CardsHeight > narrow.CardsHeight &&
             wide.List == ExpandedList.Side && !narrow.CardsTwoColumns &&
             wide.Demand(false) == (ExpandedDemand.Cpu | ExpandedDemand.Memory | ExpandedDemand.Network | ExpandedDemand.Storage | ExpandedDemand.Processes));
         var waiting = new ExpandedCardContent([], AwaitingDrives: true, WatchDrives: true);
@@ -81,12 +80,9 @@ internal static class ExpandedMonitorTests
         check("Expanded customization: drive-only pages request storage before the first reading and after disconnecting",
             drives.Kind == ExpandedKind.Readings && drives.CardsHeight > 0 && drives.Demand(false) == ExpandedDemand.Storage &&
             detached.Kind == ExpandedKind.Unavailable && detached.Demand(false) == ExpandedDemand.Storage);
-        check("Expanded customization: hiding cores changes the page while retaining CPU demand",
-            ExpandedLayout.For([ExpandedItem.Cpu], 560, 200, cpuCores: false) is { CpuCores: false } hidden &&
-            hidden.Demand(false) == ExpandedDemand.Cpu && hidden.Signature != ExpandedLayout.For([ExpandedItem.Cpu], 560, 200).Signature);
 
         ExpandedPlan Sized(double panelWidth, double height, ExpandedPlan? previous = null)
-            => ExpandedLayout.For(items, panelWidth - 40, height, null, null, MonitorMain.Cpu, previous, false, content);
+            => ExpandedLayout.For(items, panelWidth - 40, height, null, null, MonitorMain.Cpu, previous, content);
         var initial = Sized(766, 344);
         var above = Sized(767, 344, initial);
         var below = Sized(766, 344, above);
@@ -106,7 +102,7 @@ internal static class ExpandedMonitorTests
         check("Expanded customization: process list keeps its place during one-DIP jitter and still changes across the dead band",
             listBelow.List == ExpandedList.Below && nearListBoundary.Signature == listBelow.Signature
             && listSide.List == ExpandedList.Side && nearFromSide.Signature == listSide.Signature);
-        var listHidden = ExpandedLayout.For(items.Where(item => item != ExpandedItem.Processes), 510, 254, cpuCores: false, cardContent: content);
+        var listHidden = ExpandedLayout.For(items.Where(item => item != ExpandedItem.Processes), 510, 254, cardContent: content);
         var justEnabled = Sized(550, 254, listHidden);
         check("Expanded customization: explicitly enabling the process list is not held back by size hysteresis",
             listHidden.List == ExpandedList.None && justEnabled.List == ExpandedList.Below);

@@ -63,7 +63,8 @@ internal sealed class InkCentredLabel : FrameworkElement
     // Where the room the letters leave in the button is an odd number of pixels, no whole-pixel place centres them: at 100%,
     // "检查更新" left 8 pixels above and 9 below in a 28-pixel button. Then the label asks for one pixel more (_pad), so the
     // button grows to 29 and the letters get 9 and 9. A button whose height does not follow its text (a fixed Height, or
-    // stretched by a taller neighbour) does not grow; the label then stops asking until its text, font or scale changes.
+    // stretched by a taller neighbour) does not grow, and one whose rounding adds two pixels grows too much; the label then
+    // stops asking until its text, font or scale changes.
     private void Recentre(object? sender, EventArgs e)
     {
         if (!IsVisible || FindButton() is not { ActualHeight: > 0 } button) return;
@@ -71,10 +72,13 @@ internal sealed class InkCentredLabel : FrameworkElement
         if (pixels <= 0) return;
         var (inkTop, inkBottom) = Ink(pixels);
         int height = (int)Math.Round(button.ActualHeight * pixels), pad = (int)Math.Round(_pad * pixels);
+        // The pixel helps only when the button grows by exactly that pixel. Layout rounding can add two instead (at 125%, the
+        // 0.8 DIP more took a 34-pixel button to 36), and the natural height taken back from the grown one was then wrong: the
+        // label dropped the pixel, asked for it again, and the button and a window sized to it changed height on every frame.
         if (_padFrom is int from)
         {
             _padFrom = null;
-            if (height <= from) { _noPad = true; SetPad(0, pixels); return; }
+            if (height != from + 1) { _noPad = true; SetPad(0, pixels); return; }
         }
         double ink = (inkBottom - inkTop) * pixels;
         double Off(int box) { double side = (box - ink) / 2; return Math.Abs(side - Math.Round(side)); }

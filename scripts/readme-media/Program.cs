@@ -77,7 +77,7 @@ internal sealed class NoDesktop : IDesktopSources
 
 internal sealed record Frame(BitmapSource Image, double Time);
 
-internal sealed class Renderer(App app, string output, string language, string[] scenes)
+internal sealed partial class Renderer(App app, string output, string language, string[] scenes)
 {
     private bool Wants(string scene) => scenes.Length == 0 || scenes.Contains(scene);
     private MainWindow _deck = null!;
@@ -123,6 +123,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
         Program.SetField(devices, "_roster", roster);
         Program.SetField(devices, "_disposed", true);
         Program.SetProperty(devices, "Settled", true);
+        Program.SetProperty(devices, "Showing", roster.All);
+        _devices = devices; _roster = roster;
         Program.SetProperty(app, "Devices", devices);
 
         _deck = new MainWindow(app) { Opacity = 0, IsHitTestVisible = false };
@@ -175,14 +177,33 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (scenes.Contains("shelf-measures")) await ShelfMeasures();
             // The clipboard sync page and its connecting windows in each state; for checking, not for the README.
             if (scenes.Contains("clipboard-sync")) await ClipboardSyncScene(folder);
+            // The windows that send and receive files with WeType in each state; for checking, not for the README.
+            if (scenes.Contains("wetype-files")) await WeTypeFileScene(app, output, folder);
             // The line at the foot of the clipboard page that says why a click only copied, at the smallest panel and a usual one.
             if (scenes.Contains("shelf-notice")) await ShelfNotice();
             // The file transfer's settings, and the word beside the pointer while files are dragged out; for checking.
             if (scenes.Contains("transfer-settings")) { await DragHints(); await SettingsPage("transfer-settings", 14, tips: true); }
             // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
+            // The expanded monitor's grid editor on its settings page, the saved grid and the readings waiting above it; for checking.
+            if (scenes.Contains("monitor-grid"))
+            {
+                _settings.ExpandedCustomCards = true;
+                _settings.ExpandedGridTiles = [new(ExpandedItem.Cpu, null, 0, 0, 3, 2), new(ExpandedItem.Gpu, null, 3, 0, 1, 2), new(ExpandedItem.Memory, null, 0, 2, 1, 1),
+                    new(ExpandedItem.Download, null, 1, 2, 2, 1), new(ExpandedItem.Upload, null, 0, 3, 2, 2), new(ExpandedItem.Power, null, 0, 5, 4, 1), new(ExpandedItem.Processes, null, 2, 3, 2, 2)];
+                await SettingsPage("monitor-grid-settings", 9, 2600, tips: true);
+                await MonitorGrid();
+            }
             if (scenes.Contains("monitor-free")) { await MonitorFree(); await SettingsPage("monitor-free-settings", 9, 1100, tips: true); }
             // The backup section of the displays and profiles page, and the export and import windows in each state; for checking.
             if (scenes.Contains("config-backup")) { await ConfigBackupScene(); await SettingsPage("backup-settings", 16, 1500); }
+            // The indicator that opens into the capsule or the notch on each edge: the line, that style in its place, the panel opened from it, and
+            // the line after the panel closes; its option on the collapsed view page. For checking, not for the README.
+            // The last time's readings, faded, while the devices are read again: the page as tiles, as one device and as a list,
+            // and the collapsed row. For checking, not for the README.
+            if (scenes.Contains("devices-earlier")) await DevicesEarlier();
+            // The frame around the part under the pointer, on each form and edge; for checking.
+            if (scenes.Contains("hover-frame")) await HoverFrames();
+            if (scenes.Contains("line-capsule")) { await LineCapsule(); _settings.Style = CompactStyle.Line; await SettingsPage("line-capsule-settings", 1, 1300, tips: true); }
         }
         finally { Directory.Delete(folder, true); }
     }
@@ -739,6 +760,70 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Settle();
     }
 
+    // The expanded page as a grid of four columns: CPU and memory half a row each, a GPU a whole row, an upload two rows high, two drives a quarter each;
+    // at 820 and at 480 the arrangement is the same, the tiles scaled with the page.
+    private async Task MonitorGrid()
+    {
+        const double scale = 2;
+        Program.SetProperty(app, "Exiting", true);
+        _settings.Animations = false;
+        var snapshot = MonitorSample();
+        // With the day's traffic, which the README's sample leaves out: a network tile shows it where its width has room after the curve.
+        snapshot = snapshot with { Network = snapshot.Network.OrDefault! with { DownTotalBytes = 14.0e9, UpTotalBytes = 4.54e9 } };
+        void Feed() => Program.Call(_deck, "MonitorUpdated", [typeof(MonitorSnapshot)], snapshot);
+        _settings.ExpandedGridTiles = [new(ExpandedItem.Cpu, null, 0, 0, 2, 1), new(ExpandedItem.Power, null, 2, 0, 2, 1), new(ExpandedItem.Gpu, null, 0, 1, 4, 1),
+            new(ExpandedItem.Upload, null, 0, 2, 2, 1), new(ExpandedItem.Download, null, 2, 2, 2, 1), new(ExpandedItem.Memory, null, 0, 3, 2, 2), new(ExpandedItem.Storage, "C:", 2, 3, 1, 1), new(ExpandedItem.Storage, "D:", 3, 3, 1, 1)];
+        foreach (var (width, height) in new[] { (820.0, 330.0), (480.0, 200.0) })
+        {
+            _settings.MonitorWidth = width; _settings.MonitorHeight = height;
+            SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+            _deck.SetExpanded(true, true);
+            await Settle(); Feed(); await Settle(); Feed();
+            await Save($"monitor-grid-{width:0}", scale);
+        }
+        // The default grid (never edited) at the usual size and at the smallest.
+        _settings.ExpandedGridTiles = null;
+        foreach (var (width, height) in new[] { (620.0, 220.0), (440.0, 140.0) })
+        {
+            _settings.MonitorWidth = width; _settings.MonitorHeight = height;
+            SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+            _deck.SetExpanded(true, true);
+            await Settle(); Feed(); await Settle(); Feed();
+            await Save($"monitor-grid-default-{width:0}", scale);
+        }
+        // The default grid with the GPU chosen as the large gauge: the CPU one column wide and two rows high shows its cores.
+        _settings.MonitorMain = MonitorMain.Gpu;
+        _settings.MonitorWidth = 760; _settings.MonitorHeight = 340;
+        SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+        _deck.SetExpanded(true, true);
+        await Settle(); Feed(); await Settle(); Feed();
+        await Save("monitor-grid-default-gpu-760", scale);
+        _settings.MonitorMain = MonitorMain.Cpu;
+        // Fixed rows: a CPU two rows high is twice a line of readings however tall the page, and the rows sit in its middle;
+        // download and upload a quarter of the page wide keep their curves. The default grid at the spacious size likewise.
+        _settings.ExpandedGridTiles = [new(ExpandedItem.Cpu, null, 0, 0, 2, 2), new(ExpandedItem.Gpu, null, 2, 0, 1, 1), new(ExpandedItem.Processes, null, 3, 0, 1, 4),
+            new(ExpandedItem.Memory, null, 0, 2, 2, 1), new(ExpandedItem.Download, null, 2, 2, 1, 1), new(ExpandedItem.Upload, null, 0, 3, 1, 1),
+            new(ExpandedItem.Storage, "C:", 1, 3, 1, 1), new(ExpandedItem.Storage, "D:", 2, 3, 1, 1), new(ExpandedItem.Frames, null, 0, 4, 4, 1), new(ExpandedItem.Power, null, 0, 5, 4, 1)];
+        foreach (var (width, height) in new[] { (700.0, 380.0), (440.0, 300.0) })
+        {
+            _settings.MonitorWidth = width; _settings.MonitorHeight = height;
+            SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+            _deck.SetExpanded(true, true);
+            await Settle(); Feed(); await Settle(); Feed();
+            await Save($"monitor-grid-rows-{width:0}", scale);
+        }
+        _settings.ExpandedGridTiles = null;
+        _settings.MonitorWidth = 860; _settings.MonitorHeight = 320;
+        SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+        _deck.SetExpanded(true, true);
+        await Settle(); Feed(); await Settle(); Feed();
+        await Save("monitor-grid-default-860", scale);
+        SelectPage(DeckPage.Usage);
+        Program.SetProperty(app, "Exiting", false);
+        _settings.Animations = true;
+        await Settle();
+    }
+
     // As Monitor(), once with memory and the drives showing what is in use and once what is free: the page with room for the drives,
     // the page so low that memory and the network share a line, and the notch with every reading.
     private async Task MonitorFree()
@@ -804,6 +889,64 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Save("compact-devices", scale);
         _settings.NotchOrder = order;
         _settings.NotchDevices = false; _settings.NotchTransfer = false; _settings.NotchMusic = true; Refresh();
+        Program.SetProperty(app, "Exiting", false);
+        _settings.Animations = true;
+        await Settle();
+    }
+
+    private object _devices = null!;
+    private DeviceRoster _roster = null!;
+    // What the panels show (DeviceBatteries.Showing), told to the open page and the collapsed row.
+    private void ShowDevices(IReadOnlyList<DeviceBattery> showing)
+    {
+        Program.SetProperty(_devices, "Showing", showing);
+        Program.Call(_deck, "DevicesChanged", []);
+    }
+
+    // The mouse and the controller read again, the others still the last time's; then one device alone and a list, all the last
+    // time's; then the collapsed row with the earlier ones among the read.
+    private async Task DevicesEarlier()
+    {
+        const double scale = 2;
+        Program.SetProperty(app, "Exiting", true);
+        _settings.Animations = false;
+        var all = _roster.All;
+        var some = DeviceRoster.WithEarlier([.. all.Where(device => device.Key is "demo:mouse" or "demo:controller")], all);
+        _settings.DevicesWidth = 760; _settings.DevicesHeight = 240;
+        SelectPage(DeckPage.Devices);
+        _deck.SetExpanded(true, true);
+        ShowDevices(some);
+        await Settle();
+        await Save("devices-earlier-tiles", scale);
+        ShowDevices(DeviceRoster.WithEarlier([], [all[0]]));
+        await Settle();
+        await Save("devices-earlier-single", scale);
+        foreach (var (width, height) in new[] { (440, 150), (380, 140) })
+        {
+            _settings.DevicesWidth = width; _settings.DevicesHeight = height;
+            SelectPage(DeckPage.Usage); SelectPage(DeckPage.Devices);
+            ShowDevices(some);
+            await Settle();
+            await Save($"devices-earlier-{width}x{height}", scale);
+        }
+        SelectPage(DeckPage.Usage);
+        _deck.SetExpanded(false, true);
+        // The collapsed row's devices drawn by themselves on the notch's black, with and without figures.
+        foreach (bool figures in new[] { true, false })
+        {
+            _settings.DeviceFigures = figures;
+            var devices = Program.Call(_deck, "CurrentStripDevices", [])!;
+            var strip = (FrameworkElement)Activator.CreateInstance(Type.GetType("BrimDeck.DeviceStrip, BrimDeck")!, Program.Any, null, [devices, 1.0], null)!;
+            strip.Width = (double)Program.GetProperty(strip, "PreferredWidth")!;
+            var row = new System.Windows.Controls.Border { Background = Brushes.Black, Padding = new Thickness(14, 4, 14, 4), Child = strip };
+            row.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            row.Arrange(new Rect(row.DesiredSize));
+            var picture = new RenderTargetBitmap((int)Math.Ceiling(row.ActualWidth * 4), (int)Math.Ceiling(row.ActualHeight * 4), 96 * 4, 96 * 4, PixelFormats.Pbgra32);
+            picture.Render(row);
+            Write(picture, Path.Combine(output, $"compact-devices-earlier-{(figures ? "figures" : "rings")}.png"));
+        }
+        _settings.DeviceFigures = true;
+        ShowDevices(all);
         Program.SetProperty(app, "Exiting", false);
         _settings.Animations = true;
         await Settle();
@@ -1777,7 +1920,103 @@ internal sealed class Renderer(App app, string output, string language, string[]
         _clock = start + seconds;
     }
 
+    // The frame around the part under the pointer (DefaultDeckPage.Hover, MainWindow.Hover.cs): for each part of the collapsed row,
+    // found by walking along the surface as the pointer would, the frame the panel draws around it, on the notch at each edge and on
+    // the capsule, in the dark and the light look. For checking, not for the README.
+    private async Task HoverFrames()
+    {
+        const double scale = 3;
+        Program.SetProperty(app, "Exiting", true);
+        bool animations = _settings.Animations;
+        _settings.Animations = false;
+        var snapshot = MonitorSample();
+        var use = Type.GetType("BrimDeck.PanelTheme, BrimDeck")!.GetMethod("Use", Program.Any)!;
+        // A window beside the panel on this computer must not turn it into the line (DeckSettings.Occupied).
+        var occupied = _settings.Occupied; _settings.Occupied = WindowBehavior.Normal;
+        _settings.DefaultPage = DefaultDeckPage.Hover; _settings.MusicText = CompactMusicText.Title;
+        _settings.NotchMonitor = true; _settings.CapsuleMonitor = true; _settings.NotchTransfer = true; _settings.CapsuleTransfer = true;
+        _settings.NotchClock = true; _settings.CapsuleClock = true; _settings.NotchDevices = true;
+        _settings.CompactReadings = CompactMonitor.Readings(CompactMonitorMode.Custom, CompactMonitorItems.Cpu | CompactMonitorItems.Memory);
+        _deck.SetExpanded(false, true);
+        foreach (var look in new[] { PanelThemes.Dark, PanelThemes.Light, PanelThemes.PixelBlocks, PanelThemes.IslandHoliday2, PanelThemes.Demo })
+        foreach (var (style, edge) in new[] { (CompactStyle.Notch, ScreenEdge.Top), (CompactStyle.Capsule, ScreenEdge.Top), (CompactStyle.Notch, ScreenEdge.Left), (CompactStyle.Notch, ScreenEdge.Bottom), (CompactStyle.Notch, ScreenEdge.Right) })
+        {
+            if (look != PanelThemes.Dark && edge is ScreenEdge.Bottom or ScreenEdge.Right) continue;
+            if (look != PanelThemes.Dark && look != PanelThemes.Light && edge == ScreenEdge.Left) continue;
+            _settings.PanelTheme = look; use.Invoke(null, [_settings, false, false]);
+            _settings.Style = style; _settings.NotchEdge = edge; Refresh();
+            await Settle(); Program.Call(_deck, "MonitorUpdated", [typeof(MonitorSnapshot)], snapshot); await Settle();
+            var surface = (Rect)Program.Call(_deck, "SurfaceOnStage", [])!;
+            string name = $"hover-{look}-{style.ToString().ToLowerInvariant()}-{edge.ToString().ToLowerInvariant()}";
+            Program.Call(_deck, "HideHoverFrame", []);
+            await Save(name + "-0-none", scale);
+            object? last = null; int shot = 0;
+            for (double along = surface.Left - 10; along <= surface.Right + 10; along += 1)
+            {
+                var found = Program.Call(_deck, "HoverPartAt", [typeof(double)], along);
+                if (found is null) continue;
+                var elements = found.GetType().GetField("Item1")!.GetValue(found)!;
+                var part = found.GetType().GetField("Item2")!.GetValue(found)!;
+                if (Equals(part, last)) continue;
+                last = part;
+                Console.WriteLine($"{name}: from {along - surface.Left:0} DIP along, {part}");
+                Program.Call(_deck, "HideHoverFrame", []);
+                if (part.GetType().GetProperty("Page")!.GetValue(part) is null) continue;
+                Program.Call(_deck, "ShowHoverFrame", [elements.GetType()], elements);
+                await Save($"{name}-{++shot}", scale);
+            }
+            Program.Call(_deck, "HideHoverFrame", []);
+        }
+        _settings.PanelTheme = PanelThemes.Dark; use.Invoke(null, [_settings, false, false]);
+        _settings.Style = CompactStyle.Notch; _settings.NotchEdge = ScreenEdge.Top; _settings.DefaultPage = DefaultDeckPage.Last;
+        _settings.Occupied = occupied; _settings.Animations = animations; Refresh();
+        Program.SetProperty(app, "Exiting", false);
+        await Settle();
+    }
+
     private void Refresh() { _deck.ApplySettings(); Program.Call(_deck, "RenderCompact", []); }
+
+    // The places are written out too, in DIPs from the monitor's corner: the line's, and the capsule's on the screen.
+    private async Task LineCapsule()
+    {
+        const double scale = 1;
+        bool animations = _settings.Animations;
+        var style = _settings.Style;
+        _settings.Animations = false; _settings.Style = CompactStyle.Line;
+        string Place()
+        {
+            var shape = (CollapsedShape)Program.GetProperty(_deck, "Collapsed")!;
+            var frame = (EdgeFrame)Program.Field(_deck, "_frame")!;
+            var r = frame.ToScreen(shape.Surface);
+            return $"{shape.Style} on {frame.Edge}: {r.X:0.#},{r.Y:0.#} {r.Width:0.#}x{r.Height:0.#}";
+        }
+        foreach (var opens in new[] { IndicatorOpens.Capsule, IndicatorOpens.Notch })
+        foreach (var edge in new[] { ScreenEdge.Top, ScreenEdge.Bottom, ScreenEdge.Left, ScreenEdge.Right })
+        {
+            _settings.LineOpens = opens;
+            string name = $"line-{opens.ToString().ToLowerInvariant()}-{edge.ToString().ToLowerInvariant()}";
+            _settings.LineEdge = edge; Refresh();
+            await Settle(); await Settle();
+            Console.WriteLine($"{opens} {edge} line: {Place()}");
+            await Save(name + "-1-line", scale);
+            // Without pointer tracking here, the line that turned back on the last edge would rest until the pointer left it.
+            Program.Call(Program.Field(_deck, "_peek")!, "Reset", []);
+            Program.Call(_deck, "BeginPeek", []);
+            await Settle(); await Settle();
+            Console.WriteLine($"{opens} {edge} capsule: {Place()}, active {Program.GetProperty(_deck, "IslandFromLine")}");
+            await Save(name + "-2-capsule", scale);
+            _deck.SetExpanded(true, true);
+            await Settle(); await Settle();
+            Console.WriteLine($"{opens} {edge} panel: {Place()}");
+            await Save(name + "-3-panel", scale);
+            _deck.SetExpanded(false, true);
+            await Settle(); await Settle(); await Settle();
+            Console.WriteLine($"{opens} {edge} closed: {Place()}, active {Program.GetProperty(_deck, "IslandFromLine")}");
+            await Save(name + "-4-closed", scale);
+        }
+        _settings.LineEdge = ScreenEdge.Top; _settings.LineOpens = IndicatorOpens.Panel; _settings.Style = style; _settings.Animations = animations;
+        Refresh(); await Settle();
+    }
     private void SelectPage(DeckPage page) => Program.Call(_deck, "SelectPage", [typeof(DeckPage), typeof(bool)], page, false);
 
     private void SetSyncRing(double fraction)

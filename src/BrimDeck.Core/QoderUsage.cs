@@ -7,31 +7,39 @@ using System.Text.Json.Nodes;
 namespace BrimDeck.Core;
 
 // Qoder (qoder.com) and Qoder CN (qoder.com.cn) have separate accounts. Within an edition the CLI, the desktop app and the IDE
-// sign in to the same account and spend the same credits. The service encrypts its answers, which only Qoder's own programs
-// can read, so BrimDeck asks one of them, in this order:
+// sign in to the same account and spend the same credits. BrimDeck reads them from the first of these that answers:
 //
-// 1. Qoder CLI (%USERPROFILE%\.qoder\bin\qodercli\qodercli.exe; Qoder CN: .qoder-cn\bin\qoderclicn\qoderclicn.exe), started as the
-//    daemon of the Qoder Agent SDK (`--sdk`, with QODER_AGENT_SDK_DAEMON=1). It is asked to use the CLI's own sign-in
-//    (.auth\user), which it only reads: the daemon never renews it, so an expired sign-in waits for the CLI's next use.
-// 2. The desktop app's copy of the same daemon (resources\app.asar.unpacked\node_modules\@qoder-ai\<sdk>\dist\_worker\
-//    qoder-worker-runtime.obf.mjs, run by the app's own executable as Node). The desktop app keeps its sign-in apart, in
-//    auth.v1.dat in its data folder (%APPDATA%\com.qoder.app.stable; Qoder CN: com.qodercn.app.stable), and hands its token to the
-//    daemon when asked (daemon.auth.fetch_job_token); BrimDeck does the same with the token it decrypts. It is never renewed.
+// 1. The desktop app's sign-in. The app keeps it in auth.v1.dat in its data folder (%APPDATA%\com.qoder.app.stable; Qoder CN:
+//    com.qodercn.app.stable), encrypted with Chromium's os_crypt: {schemaVersion, authenticationContext, token, refreshToken,
+//    expiresAt (ISO 8601, 30 days after sign-in), refreshTokenExpiresAt, user}. authenticationContext is a JSON array kept as a
+//    string: [site, API origin, machine id, environment], such as ["https://qoder.com", "https://openapi.qoder.sh", …, "prod"]. The
+//    API takes the token as a bearer token and answers in plain JSON, as the desktop app asks it:
+//      GET /sash/api/v2/me/usage: {displayMode: "qoder", qoderUsage: <credits>}; the app shows another layout for displayMode
+//        "enterprise", of which no answer has been seen, so it is not read.
+//      GET /api/v2/user/plan: {plan_tier_name ("Pro Trial", "Teams"), is_personal_version, organization {role_name}, …}.
+//    The token is only read: the app renews it while in use, and an expired one waits for that.
+// 2. Qoder CLI (%USERPROFILE%\.qoder\bin\qodercli\qodercli.exe; Qoder CN: .qoder-cn\bin\qoderclicn\qoderclicn.exe), whose sign-in
+//    (.auth\user) only the CLI can read. It is started as the daemon of the Qoder Agent SDK (`--sdk`, with QODER_AGENT_SDK_DAEMON=1)
+//    and asked to use that sign-in, which it never renews, so an expired one waits for the CLI's next use.
 // 3. The IDE's language server, while the IDE runs: SharedClientCache\.info.json in %APPDATA%\Qoder (Qoder CN: QoderCN) names its
 //    local WebSocket port, which answers JSON-RPC requests framed like LSP messages: credit/usage and user/plan.
 //
-// The daemon and the language server answer credit/usage alike: {userQuota, addOnQuota, orgResourcePackage (cap in place of total),
-// dedicatedResourcePackages [{id, total, used, expiresAt, available, displayLabels [{dimension: "title", valueI18n}]}], expiresAt,
-// isQuotaExceeded}. The percentages differ (the daemon's are whole, the server's are shares), so they are worked out here.
+// All three give the credits alike: {userType, userQuota, addOnQuota, orgResourcePackage, dedicatedResourcePackages [{id, total,
+// used, expiresAt, available, displayLabels [{dimension: "title", valueI18n}]}], expiresAt, isQuotaExceeded}. A team member's
+// orgResourcePackage, the organization's shared credits, has no total and a cap of -1 when the member has no limit
+// ({used: 0, remaining: 8054, cap: -1, available: true}, from a Teams account on 2026-11-19). The percentages differ (the daemon's
+// are whole, the others' are shares), so they are worked out here.
 public static class QoderUsage
 {
     // An edition's folders and programs: Home under %USERPROFILE%, Cli under Home\bin, DesktopData and IdeData under %APPDATA%.
-    public sealed record Edition(ProviderId Id, string Name, string Cli, string DesktopData, string IdeData, string DesktopExe)
+    // Host is the domain of its API, the only one the desktop app's token is sent to.
+    public sealed record Edition(ProviderId Id, string Name, string Cli, string DesktopData, string IdeData, string DesktopExe, string Host)
     {
         public bool China => Id == ProviderId.QoderCn;
+        public string DefaultApi => "https://openapi." + Host;
     }
-    public static readonly Edition Global = new(ProviderId.Qoder, "Qoder", "qodercli", "com.qoder.app.stable", "Qoder", "Qoder.exe");
-    public static readonly Edition China = new(ProviderId.QoderCn, "Qoder CN", "qoderclicn", "com.qodercn.app.stable", "QoderCN", "Qoder CN.exe");
+    public static readonly Edition Global = new(ProviderId.Qoder, "Qoder", "qodercli", "com.qoder.app.stable", "Qoder", "Qoder.exe", "qoder.sh");
+    public static readonly Edition China = new(ProviderId.QoderCn, "Qoder CN", "qoderclicn", "com.qodercn.app.stable", "QoderCN", "Qoder CN.exe", "qoder.com.cn");
     public static Edition For(ProviderId id) => id == ProviderId.QoderCn ? China : Global;
 
     public enum Route { Cli, Desktop, Ide }
@@ -57,36 +65,58 @@ public static class QoderUsage
     public static string DesktopData(string roaming, Edition edition) => Path.Combine(roaming, edition.DesktopData);
     public static string IdeInfo(string roaming, Edition edition) => Path.Combine(roaming, edition.IdeData, "SharedClientCache", ".info.json");
 
-    // The daemon the desktop app installed in folder carries: the package name differs by edition (qoder-agent-sdk,
-    // qoder-cn-agent-sdk), so every @qoder-ai package is looked in.
-    public static string? FindRuntime(string folder)
-    {
-        var packages = Path.Combine(folder, "resources", "app.asar.unpacked", "node_modules", "@qoder-ai");
-        if (!Directory.Exists(packages)) return null;
-        foreach (var package in Directory.EnumerateDirectories(packages).Order(StringComparer.OrdinalIgnoreCase))
-        {
-            var runtime = Path.Combine(package, "dist", "_worker", "qoder-worker-runtime.obf.mjs");
-            if (File.Exists(runtime)) return runtime;
-        }
-        return null;
-    }
+    public const string UsagePath = "/sash/api/v2/me/usage";
+    public const string PlanPath = "/api/v2/user/plan";
 
-    // The desktop app's sign-in: {token, refreshToken, expiresAt (ISO 8601), refreshTokenExpiresAt, user}. Its token lasts 30 days.
-    public sealed record DesktopSignIn(string Token, DateTimeOffset? ExpiresAt)
+    // The desktop app's sign-in, with the API origin it signed in at; never shown or logged.
+    public sealed record DesktopSignIn(string Token, DateTimeOffset? ExpiresAt, string Api)
     {
         public bool Expired(DateTimeOffset now) => ExpiresAt is { } at && at <= now.AddMinutes(1);
+        public override string ToString() => nameof(DesktopSignIn);
     }
-    public static DesktopSignIn? ParseDesktopSignIn(string? json)
+    public static DesktopSignIn? ParseDesktopSignIn(string? json, Edition edition)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
         try
         {
             using var doc = JsonDocument.Parse(json);
-            var token = doc.RootElement.Get("token").Text();
-            return token.Length == 0 ? null : new(token, doc.RootElement.Get("expiresAt").Date());
+            var root = doc.RootElement;
+            var token = root.Get("token").Text();
+            if (token.Length == 0) return null;
+            // The context is kept as a string holding the array; an array kept as it is is read the same way.
+            var context = root.Get("authenticationContext");
+            JsonDocument? parsed = null;
+            if (context.ValueKind == JsonValueKind.String)
+            {
+                try { parsed = JsonDocument.Parse(context.GetString()!); context = parsed.RootElement; }
+                catch (JsonException) { context = default; }
+            }
+            using (parsed)
+            {
+                var api = context.Items().Select(item => item.Text()).FirstOrDefault(origin => Api(origin, edition) is not null);
+                return new(token, root.Get("expiresAt").Date(), api is null ? edition.DefaultApi : Api(api, edition)!);
+            }
         }
         catch (JsonException) { return null; }
     }
+
+    // The token is sent only over HTTPS to the edition's API domain or one under it; the site (qoder.com) is not one.
+    public static string? Api(string origin, Edition edition) =>
+        Uri.TryCreate(origin, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && uri.UserInfo.Length == 0 && uri.AbsolutePath == "/"
+        && (uri.Host.Equals(edition.Host, StringComparison.OrdinalIgnoreCase) || uri.Host.EndsWith("." + edition.Host, StringComparison.OrdinalIgnoreCase))
+            ? uri.GetLeftPart(UriPartial.Authority) : null;
+
+    // The answer of UsagePath; null for a layout other than Qoder's credits (displayMode "enterprise").
+    public static Reading? ParsePresentation(JsonElement root, string plan)
+    {
+        if (root.ValueKind != JsonValueKind.Object) throw new InvalidDataException();
+        if (root.Get("displayMode").Text() != "qoder") return null;
+        var usage = root.Get("qoderUsage");
+        if (usage.ValueKind != JsonValueKind.Object) throw new InvalidDataException();
+        return Parse(usage, plan);
+    }
+
+    public static string PlanName(JsonElement plan) => plan.Get("plan_tier_name").Text().Trim();
 
     // The language server's port from .info.json ({"websocketPort": 56510, "pid": …}); null when the IDE never ran.
     public static int? ReadIdePort(string info)
@@ -101,7 +131,8 @@ public static class QoderUsage
 
     // One row for each kind of credits the account holds: the plan's, add-on credits, the organization's package, and each
     // package kept for a model (named by the service in the display language). The plan's credits end when the plan's period
-    // does (expiresAt), as Qoder does not carry them over.
+    // does (expiresAt), as Qoder does not carry them over. A bucket without a total or cap (the shared package of a team member
+    // without a limit) counts what was used against that and what is left.
     public static Reading Parse(JsonElement usage, string plan)
     {
         var metrics = new List<UsageMetric>();
@@ -109,7 +140,9 @@ public static class QoderUsage
         {
             if (bucket.ValueKind != JsonValueKind.Object) return;
             decimal total = (decimal)Math.Max(0, bucket.Get(totalField).Number() ?? 0), used = (decimal)Math.Max(0, bucket.Get("used").Number() ?? 0);
-            if (bucket.Get("used").Number() is null && bucket.Get("remaining").Number() is { } left) used = Math.Max(0, total - (decimal)left);
+            var remaining = bucket.Get("remaining").Number();
+            if (bucket.Get("used").Number() is null && remaining is { } left) used = Math.Max(0, total - (decimal)left);
+            else if (total <= 0 && remaining is { } rest) total = used + (decimal)Math.Max(0, rest);
             if (total <= 0 && used <= 0) return;
             metrics.Add(new UsageMetric(MetricKind.Count, label) { Id = id, Unit = "积分", Total = Math.Max(total, used), Used = used, ExpiresAt = expires });
         }
@@ -137,9 +170,8 @@ public static class QoderUsage
         return package.Get("name").Text() is { Length: > 0 } own ? own : Loc.T("专属积分", "Dedicated credits");
     }
 
-    // Starts the daemon at command (with arguments), asks it for the credits and the plan, and ends it. signIn is the desktop
-    // app's token to hand over; without it the daemon reads the CLI's sign-in. electron runs the desktop app's executable as Node.
-    public static async Task<Reading> ReadDaemonAsync(string command, IReadOnlyList<string> arguments, bool electron, DesktopSignIn? signIn, TimeSpan timeout, CancellationToken ct)
+    // Starts the CLI's daemon at command (with arguments), asks it for the credits and the plan with the CLI's sign-in, and ends it.
+    public static async Task<Reading> ReadDaemonAsync(string command, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken ct)
     {
         var start = new ProcessStartInfo(command)
         {
@@ -149,12 +181,11 @@ public static class QoderUsage
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         start.Environment["QODER_AGENT_SDK_DAEMON"] = "1";
-        if (electron) start.Environment["ELECTRON_RUN_AS_NODE"] = "1";
         using var process = Process.Start(start) ?? throw new IOException("The Qoder daemon did not start");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(timeout);
         _ = DrainAsync(process.StandardError);
-        try { return await ConverseAsync(process.StandardInput, process.StandardOutput, signIn, deadline.Token); }
+        try { return await ConverseAsync(process.StandardInput, process.StandardOutput, deadline.Token); }
         finally
         {
             try { process.StandardInput.Close(); } catch (IOException) { }
@@ -172,9 +203,9 @@ public static class QoderUsage
 
     // The daemon protocol (version 2): one JSON object per line each way. BrimDeck sends control_request frames
     // {type: "control_request", request_id, request: {type: "daemon.<method>", …}} and reads the control_response frame with the
-    // same request_id, {response: {subtype: "success", response} | {subtype: "error", error, code}}. The daemon asks back the same
-    // way for the desktop app's token.
-    public static async Task<Reading> ConverseAsync(TextWriter input, TextReader output, DesktopSignIn? signIn, CancellationToken ct)
+    // same request_id, {response: {subtype: "success", response} | {subtype: "error", error, code}}. A request the daemon sends
+    // back the same way is answered as one BrimDeck has no handler for.
+    public static async Task<Reading> ConverseAsync(TextWriter input, TextReader output, CancellationToken ct)
     {
         async Task Send(JsonObject frame) { await input.WriteLineAsync(frame.ToJsonString().AsMemory(), ct); await input.FlushAsync(ct); }
         Task Request(string id, string method, JsonObject? parameters = null)
@@ -186,7 +217,7 @@ public static class QoderUsage
         await Request("brimdeck-1", "initialize", new JsonObject
         {
             ["daemon_protocol_version"] = 2, ["sdk_version"] = "1.0.59", ["capabilities"] = new JsonArray("multi_session_v2"),
-            ["auth"] = signIn is null ? new JsonObject { ["type"] = "qodercli" } : new JsonObject { ["type"] = "jobToken", ["jobTokenProvider"] = "host" }
+            ["auth"] = new JsonObject { ["type"] = "qodercli" }
         });
         JsonElement usage = default;
         while (true)
@@ -200,11 +231,11 @@ public static class QoderUsage
             var root = frame.RootElement;
             if (root.Get("type").Text() == "control_request")
             {
-                var id = root.Get("request_id").Text();
-                JsonObject answer = root.Get("request").Get("type").Text() == "daemon.auth.fetch_job_token" && signIn is not null
-                    ? new() { ["subtype"] = "success", ["request_id"] = id, ["response"] = JobToken(signIn) }
-                    : new() { ["subtype"] = "error", ["request_id"] = id, ["error"] = "BrimDeck has no handler for this request", ["code"] = "METHOD_NOT_FOUND" };
-                await Send(new JsonObject { ["type"] = "control_response", ["response"] = answer });
+                await Send(new JsonObject
+                {
+                    ["type"] = "control_response",
+                    ["response"] = new JsonObject { ["subtype"] = "error", ["request_id"] = root.Get("request_id").Text(), ["error"] = "BrimDeck has no handler for this request", ["code"] = "METHOD_NOT_FOUND" }
+                });
                 continue;
             }
             if (root.Get("type").Text() != "control_response") continue;
@@ -233,13 +264,6 @@ public static class QoderUsage
                     return Parse(usage, result.Get("account").Get("subscriptionType").Text());
             }
         }
-    }
-
-    private static JsonObject JobToken(DesktopSignIn signIn)
-    {
-        var token = new JsonObject { ["token"] = signIn.Token };
-        if (signIn.ExpiresAt is { } at) token["expires_at"] = at.ToUnixTimeMilliseconds();
-        return token;
     }
 
     // Asks the IDE's language server on port for the credits and the plan.

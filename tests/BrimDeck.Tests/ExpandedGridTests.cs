@@ -19,8 +19,9 @@ internal static class ExpandedGridTests
         var process = ExpandedGrid.Constrain(new(ExpandedItem.Processes, null, 1, ExpandedGrid.MaxRows, 1, 9));
         var shortProcess = ExpandedGrid.Constrain(new(ExpandedItem.Processes, null, 0, 0, 2, 1));
         check("Expanded grid: constrain clears unrelated letters, clamps widths and graph heights, and bounds row extents",
-            clamped == new ExpandedGridTile(ExpandedItem.Cpu, null, 1, 0, 1, 4)
-            && full == new ExpandedGridTile(ExpandedItem.Memory, null, 0, ExpandedGrid.MaxRows - 1, 2, 1)
+            clamped == new ExpandedGridTile(ExpandedItem.Cpu, null, ExpandedGrid.ColumnCount - 1, 0, 1, 4)
+            && full == new ExpandedGridTile(ExpandedItem.Memory, null, 1, ExpandedGrid.MaxRows - 2, 2, 2)
+            && ExpandedGrid.Constrain(new(ExpandedItem.Storage, "c:", 0, 0, 1, 3)).Rows == 1 && ExpandedGrid.Constrain(new(ExpandedItem.Upload, null, 0, 0, 1, 2)).Rows == 1
             && process == new ExpandedGridTile(ExpandedItem.Processes, null, 1, ExpandedGrid.MaxRows - 4, 1, 4)
             && shortProcess.Rows == 2);
 
@@ -39,10 +40,10 @@ internal static class ExpandedGridTests
         var memory = normalized.Single(tile => tile.Item == ExpandedItem.Memory);
         var drive = normalized.Single(tile => tile.Item == ExpandedItem.Storage);
         check("Expanded grid: normalization filters invalid identities, deduplicates drives and relocates colliding tiles",
-            cpu is { Column: 0, Row: 0, Columns: 2, Rows: 4 }
-            && gpu is { Column: 0, Row: 4, Columns: 1, Rows: 2 }
-            && memory is { Column: 1, Row: 4, Columns: 1, Rows: 1, Letter: null }
-            && drive is { Letter: "D:", Columns: 2, Column: 0, Rows: 1 }
+            cpu is { Column: 2, Row: 0, Columns: 2, Rows: 4 }
+            && gpu is { Column: 0, Row: 0, Columns: 1, Rows: 2 }
+            && memory is { Column: 1, Row: 0, Columns: 1, Rows: 2, Letter: null }
+            && drive is { Letter: "D:", Columns: 2, Column: 0, Row: 2, Rows: 1 }
             && normalized.Count == 4);
 
         check("Expanded grid: same-reading identity uses the drive letter only for storage",
@@ -58,27 +59,32 @@ internal static class ExpandedGridTests
             new(ExpandedItem.Gpu, null, 1, 0, 1, 1),
             new(ExpandedItem.Memory, null, 0, 1, 1, 1)
         ]);
-        var moved = ExpandedGrid.Place(initial, new(ExpandedItem.Cpu, null, 1, 1, 2, 2));
+        var moved = ExpandedGrid.Place(initial, new(ExpandedItem.Cpu, null, 0, 1, 2, 2));
         var cpu = moved.Single(tile => tile.Item == ExpandedItem.Cpu);
         var gpu = moved.Single(tile => tile.Item == ExpandedItem.Gpu);
         var memory = moved.Single(tile => tile.Item == ExpandedItem.Memory);
         check("Expanded grid: move and resize gives the target priority while preserving unaffected tiles",
             cpu is { Column: 0, Row: 1, Columns: 2, Rows: 2 }
             && gpu is { Column: 1, Row: 0 }
-            && memory.Row >= 3
+            && memory is { Column: 2, Row: 1 }
             && moved.All(a => moved.Where(b => b != a).All(b => !Overlaps(a, b))));
 
         var added = ExpandedGrid.Place(moved, new(ExpandedItem.Storage, "e:", 1, 0, 1, 1));
         check("Expanded grid: adding a tile normalizes its drive identity and relocates the existing occupant",
             added.Single(tile => tile.Item == ExpandedItem.Storage) is { Letter: "E:", Column: 1, Row: 0 }
             && added.Single(tile => tile.Item == ExpandedItem.Gpu) is { Column: 0, Row: 0 });
+
+        // The page shows only the columns and rows in use: a layout in the middle two columns, from the third row, fills it.
+        var (trimmed, columns) = ExpandedGrid.Trim([new(ExpandedItem.Memory, null, 1, 2, 1, 1), new(ExpandedItem.Cpu, null, 2, 2, 1, 2), new(ExpandedItem.Upload, null, 1, 4, 1, 1)]);
+        check("Expanded grid: the page shows only the columns and rows the tiles use, keeping gaps between them",
+            columns == 2 && trimmed[0] is { Column: 0, Row: 0 } && trimmed[1] is { Column: 1, Row: 0, Rows: 2 } && trimmed[2] is { Column: 0, Row: 2 }
+            && ExpandedGrid.Trim([]).Columns == ExpandedGrid.ColumnCount);
     }
 
     private static void Seeding(Action<string, bool> check)
     {
         var settings = new DeckSettings
         {
-            ExpandedCpuCores = false,
             ExpandedCustomCards = true,
             MonitorMain = MonitorMain.Gpu,
             ExpandedReadings =
@@ -100,28 +106,31 @@ internal static class ExpandedGridTests
         var download = seed.Single(tile => tile.Item == ExpandedItem.Download);
         var wideDrive = seed.Single(tile => tile.Item == ExpandedItem.Storage && tile.Letter == "D:");
         var memory = seed.Single(tile => tile.Item == ExpandedItem.Memory);
-        check("Expanded grid: legacy custom order and drive width seed the grid while new drives append",
+        check("Expanded grid: legacy custom order and drive width seed the grid beside the process list while new drives append",
             ordered.SequenceEqual([
                 (ExpandedItem.Cpu, (string?)null), (ExpandedItem.Gpu, null), (ExpandedItem.Download, null), (ExpandedItem.Storage, "D:"),
                 (ExpandedItem.Memory, null), (ExpandedItem.Power, null), (ExpandedItem.Frames, null), (ExpandedItem.Upload, null),
                 (ExpandedItem.Storage, "C:"), (ExpandedItem.Processes, null)
             ])
-            && wideDrive.Columns == 2 && wideDrive.Row > download.Row && memory.Row > wideDrive.Row
+            && wideDrive.Columns == ExpandedGrid.ColumnCount - 1 && download.Columns == 1 && wideDrive.Row > download.Row && memory is { Column: 1, Row: 2 }
             && gpu is { Column: 1, Row: 0 }
-            && seed.Where(tile => tile.Item is ExpandedItem.Power or ExpandedItem.Frames or ExpandedItem.Processes).All(tile => tile.Columns == 2)
-            && cpu.Rows == 1 && gpu.Rows == 2 && seed.Single(tile => tile.Item == ExpandedItem.Processes).Rows == 2);
+            && seed.Where(tile => tile.Item is ExpandedItem.Power or ExpandedItem.Frames).All(tile => tile.Columns == ExpandedGrid.ColumnCount)
+            && seed.Single(tile => tile.Item == ExpandedItem.Processes) is { Column: 3, Row: 0, Columns: 1, Rows: 4 }
+            && cpu.Rows == 2 && gpu.Rows == 2 && seed.All(a => seed.Where(b => b != a).All(b => !Overlaps(a, b))));
 
         settings.ExpandedCustomCards = false;
-        settings.ExpandedCpuCores = true;
         settings.MonitorMain = MonitorMain.Cpu;
         var defaults = ExpandedGrid.Seed(settings, ["D:"]);
         check("Expanded grid: regular reading order seeds visible chart sizes and ignores stale card layout",
             defaults.Select(tile => tile.Item).SequenceEqual([ExpandedItem.Cpu, ExpandedItem.Gpu, ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload,
                 ExpandedItem.Frames, ExpandedItem.Storage, ExpandedItem.Power, ExpandedItem.Processes])
             && defaults.Single(tile => tile.Item == ExpandedItem.Cpu).Rows == 2
-            && defaults.Single(tile => tile.Item == ExpandedItem.Gpu).Rows == 1
-            && defaults.Single(tile => tile.Item == ExpandedItem.Power).Columns == 2
-            && defaults.Single(tile => tile.Item == ExpandedItem.Processes).Rows == 2);
+            && defaults.Single(tile => tile.Item == ExpandedItem.Cpu) is { Column: 0, Row: 0, Columns: 2 }
+            && defaults.Single(tile => tile.Item == ExpandedItem.Gpu) is { Columns: 1, Column: 2, Row: 0, Rows: 2 }
+            && defaults.Single(tile => tile.Item == ExpandedItem.Memory) is { Column: 0, Row: 2, Columns: 2 }
+            && defaults.Single(tile => tile.Item == ExpandedItem.Download) is { Column: 2, Row: 2, Columns: 1 }
+            && defaults.Single(tile => tile.Item == ExpandedItem.Power).Columns == ExpandedGrid.ColumnCount
+            && defaults.Single(tile => tile.Item == ExpandedItem.Processes) is { Column: 3, Row: 0, Rows: 4 });
 
         var hidden = new DeckSettings { ExpandedReadings = [.. ExpandedMonitor.Order.Select(item => new ExpandedReading { Item = item, Visible = false })] };
         check("Expanded grid: hidden readings do not produce seeded tiles", ExpandedGrid.Seed(hidden, ["C:"]).Count == 0);
@@ -163,7 +172,7 @@ internal static class ExpandedGridTests
         damaged.Normalize();
         check("Expanded grid: settings normalization preserves the collection and removes malformed duplicate entries",
             damaged.ExpandedGridTiles is { Count: 2 }
-            && damaged.ExpandedGridTiles[0] is { Item: ExpandedItem.Memory, Letter: null, Columns: 1, Rows: 1, Row: 0, Column: 1 }
+            && damaged.ExpandedGridTiles[0] is { Item: ExpandedItem.Memory, Letter: null, Columns: 1, Rows: 2, Row: 0, Column: ExpandedGrid.ColumnCount - 1 }
             && damaged.ExpandedGridTiles[1] is { Item: ExpandedItem.Storage, Letter: "X:" });
     }
 

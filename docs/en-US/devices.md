@@ -26,7 +26,7 @@ HID devices that carry the standard battery report are shown too.
 | --- | --- |
 | Logitech, MCHOSE, ATK, Endgame Gear, VAXEE, Rapoo, Keychron, Finalmouse | Whole brand |
 | Razer, ASUS ROG, SteelSeries, Corsair, HyperX | Known wireless models |
-| VXE, VGN, Pulsar, LAMZU, G-Wolves, WLmouse, Ninjutso, LINGBAO, NZXT, HECATE, Dareu, Inphic, AJAZZ, Attack Shark, DELUX, Glorious, Darmoshark, EWEADN, AULA, Thunderobot ML903, Metaphyuni Metapanda P1, Scyrox, Cougar, Redragon, Hitscan, iRocks, Vancer, Incott, Ryunix, JD Jingzao JZM5, RIDLAG, Motospeed X6, GravaStar (Mercury series, S1 Pro and R1 included) | Known models |
+| VXE, VGN, Pulsar, LAMZU, G-Wolves, WLmouse, Ninjutso, LINGBAO, NZXT, HECATE, Dareu, Inphic, AJAZZ, Attack Shark, DELUX, Glorious, Darmoshark, EWEADN, AULA, Thunderobot ML903, Metaphyuni Metapanda P1, Scyrox, Cougar, Redragon, Hitscan, iRocks, Vancer, Incott, Ryunix, JD Jingzao JZM5, RIDLAG, Motospeed X6, GravaStar (Mercury series, S1 Pro and R1 included), IQUNIX Q101 | Known models |
 
 **Keyboards**
 
@@ -41,7 +41,7 @@ HID devices that carry the standard battery report are shown too.
 | Brand | Coverage |
 | --- | --- |
 | Jabra, FIFINE, XIBERIA | Whole brand |
-| Logitech (G PRO X 2 included), SteelSeries (GameBuds X included), HyperX, Corsair (Virtuoso, HS80 and Void series included), Razer, Sony INZONE and PULSE Explore, ASUS ROG, ASTRO A50, Audeze Maxwell, Skullcandy PLYR, AKG N9, MCHOSE (V9 PRO and G9 PRO included), AULA (G9, A9), JBL Quantum 910, PULSE 3D, ATK (N9 Pro, N9 Ultra, N9 V2 series), Lenovo, DARKRIM, Edifier Halo Space, ZhuAudio (ZG4, ZG3) | Known models |
+| Logitech (G PRO X 2 included), SteelSeries (GameBuds X included), HyperX, Corsair (Virtuoso, HS80 and Void series included), Razer, Sony INZONE and PULSE Explore, ASUS ROG, ASTRO A50, Audeze Maxwell, Skullcandy PLYR, AKG N9, MCHOSE (V9 PRO and G9 PRO included), AULA (G9, A9), JBL Quantum 910, PULSE 3D, ATK (N9 Pro, N9 Ultra, N9 V2 series), Lenovo, DARKRIM, Edifier Halo Space, ZhuAudio (ZG4, ZG3), EPOS (H3PRO Hybrid, GSP 670, GSP 370, GTW 270 Hybrid), IQUNIX ITX Pro | Known models |
 
 **Controllers**
 

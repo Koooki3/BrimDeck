@@ -41,12 +41,16 @@ public static class KeychronMice
     // - VGN's Dragonfly mice on their 8K receivers, 391D:1A20 to 1A23, 1A35, 1A36, 1A3B, 1A3C and 1A3E, on 0xFFC1 / 1: VGN HUB's
     //   table (hub.vgnlab.com) gives them this collection and the B3 06 status command. Not measured by us; their cables are
     //   not asked (the Motospeed cable's random levels).
+    // - Machenike L7 Mix 8K, its receiver 0BDA:FFE6 (interface 1) on 0xFFC1 / 1: its driver (machenike.com, L7 Mix 8K 1.0.1.8)
+    //   checks that page and sends B3 06, the percent in the low 7 bits of [20] and bit 7 charging. Not measured by us; its
+    //   cable FFD4 is not asked (the Motospeed cable's random levels), nor the B5 02 01 the driver sends before.
     public static readonly int[] VgnReceivers = [0x1A20, 0x1A21, 0x1A22, 0x1A23, 0x1A35, 0x1A36, 0x1A3B, 0x1A3C, 0x1A3E];
     public static readonly (string Brand, string Prefix, string Name, int Vendor, int Product, int Page)[] Partners =
     [
         ("JD Jingzao mouse", "jingzao", "京东京造 JZM5", 0x362D, 0xD107, 0x008C),
         ("RIDLAG mouse", "ridlag", "RIDLAG Owl X 8K", 0x362D, 0xFF09, 0xFFC1),
         ("Motospeed mouse", "motospeed", "Motospeed X6", 0x0BDA, 0xFFE0, 0xFFC1),
+        ("Machenike 8K mouse", "machenike", "Machenike L7 Mix 8K", 0x0BDA, 0xFFE6, 0xFFC1),
     ];
 
     public static IEnumerable<BrandFamily> Families =>

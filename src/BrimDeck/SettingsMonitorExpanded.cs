@@ -82,12 +82,7 @@ public sealed partial class SettingsWindow
         switches.Children.Add(cells);
         switches.Children.Add(gridOptions);
 
-        var order = new StackPanel();
-        order.Children.Add(MusicChoice(Loc.T("各 CPU 核心", "Individual CPU cores"), S.ExpandedCpuCores,
-            [(true, Loc.T("显示", "Show")), (false, Loc.T("隐藏", "Hide"))],
-            value => Resize(s => s.ExpandedCpuCores = value, DeckPage.Monitor), keepPreview: true,
-            help: Loc.T("隐藏各核心占用图，保留 CPU 总占用。仅影响展开页。", "Hides the per-core graph and keeps total CPU usage on the expanded page.")));
-        order.Children.Add(ExpandedSketch(refresh));
+        var order = ExpandedSketch(refresh);
         var editor = ExpandedGridEditor(refresh);
         var layout = new StackPanel();
         switches.Children.Insert(0, MusicChoice(Loc.T("排版方式", "Layout mode"), S.ExpandedCustomCards,

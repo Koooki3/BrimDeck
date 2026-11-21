@@ -92,11 +92,11 @@ public static partial class PanelThemes
         new("bubbleBorder", "进度时间气泡描边", "Seek time bubble border"),
     ];
     // Applications keyed by the names the "apps" object uses. Sources entered by hand share "manual".
-    public static readonly IReadOnlyList<string> AppKeys = ["claude", "codex", "antigravity", "cursor", "zcode", "dsh", "grokBot", "kimi", "opencode", "codeagent", "commandcode", "workbuddy", "mimo", "qoder", "qwenwork", "manual", "other", "warning", "critical"];
+    public static readonly IReadOnlyList<string> AppKeys = ["claude", "codex", "antigravity", "cursor", "zcode", "dsh", "grokBot", "kimi", "opencode", "codeagent", "commandcode", "workbuddy", "mimo", "qoder", "qwenwork", "trae", "doubao", "volcengine", "manual", "other", "warning", "critical"];
     public static string AppKey(ProviderId id) => id switch
     {
         ProviderId.Claude => "claude", ProviderId.Codex => "codex", ProviderId.Antigravity => "antigravity", ProviderId.Cursor => "cursor",
-        ProviderId.ZCode => "zcode", ProviderId.Dsh => "dsh", ProviderId.GrokBot => "grokBot", ProviderId.Kimi => "kimi", ProviderId.OpenCode => "opencode", ProviderId.CodeAgent => "codeagent", ProviderId.CommandCode => "commandcode", ProviderId.WorkBuddy or ProviderId.WorkBuddyAi => "workbuddy", ProviderId.MiMo or ProviderId.MiMoLinked => "mimo", ProviderId.Qoder or ProviderId.QoderCn => "qoder", ProviderId.QwenWorkCn or ProviderId.QwenWork => "qwenwork",
+        ProviderId.ZCode => "zcode", ProviderId.Dsh => "dsh", ProviderId.GrokBot => "grokBot", ProviderId.Kimi => "kimi", ProviderId.OpenCode => "opencode", ProviderId.CodeAgent => "codeagent", ProviderId.CommandCode => "commandcode", ProviderId.WorkBuddy or ProviderId.WorkBuddyAi => "workbuddy", ProviderId.MiMo or ProviderId.MiMoLinked => "mimo", ProviderId.Qoder or ProviderId.QoderCn => "qoder", ProviderId.QwenWorkCn or ProviderId.QwenWork => "qwenwork", ProviderId.Trae or ProviderId.TraeCn => "trae", ProviderId.Doubao or ProviderId.Dola => "doubao", ProviderId.VolcengineArk or ProviderId.BytePlusArk => "volcengine",
         ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.MiMoApi or ProviderId.MiMoTokenPlan or ProviderId.Qianwen or ProviderId.QwenCloud or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.KimiPlatform or ProviderId.OpenCodeGo or ProviderId.CommandCodeApi or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => "manual",
         _ => "other"
     };

@@ -26,6 +26,7 @@ public partial class App : Application
     internal IReadOnlyList<ProviderSnapshot> RestoredUsage { get; set; } = [];
     public ProviderSecrets Secrets { get; private set; } = null!;
     public MiMoAccount MiMo { get; private set; } = null!;
+    public DoubaoQuotaAccount DoubaoQuota { get; private set; } = null!;
     public Pricing Prices { get; private set; } = null!;
     public AppUpdates Updates { get; internal set; } = null!;
     // The main panel. It owns the tray icon, reads the usage data and takes the settings preview; every other chosen
@@ -125,8 +126,9 @@ public partial class App : Application
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
         MiMo = new MiMoAccount(folder);
-        Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
-        Usage = new UsageService(new DesktopSources(MiMo), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
+        DoubaoQuota = new DoubaoQuotaAccount(folder);
+        Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"), kugouLyricFolder: LyricsService.KugouLyricFolder);
+        Usage = new UsageService(new DesktopSources(MiMo, DoubaoQuota), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         // A source read in the background (Qoder) that ended after its round asks for another round to show it; the first reading
         // of a source always does, a later one only while the panel syncs by itself.

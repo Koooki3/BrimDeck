@@ -33,6 +33,7 @@ internal sealed class DeviceBatteries : IDisposable
     private readonly List<IDeviceSource> _sources = [];
     private readonly DispatcherTimer _linger;
     private readonly AppleBatteries _apple;
+    private readonly EncoDeckBatteries _encoDeck;
     private DeviceDemand _demand = DeviceDemand.None, _running = DeviceDemand.None;
     private bool _disposed;
 
@@ -45,27 +46,34 @@ internal sealed class DeviceBatteries : IDisposable
         _linger = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = MemoryPlan.For(MemoryMode.Balanced).ReadingsLinger };
         _linger.Tick += (_, _) => { _linger.Stop(); Run(_demand); };
         _apple = new AppleBatteries(dispatcher, Report);
+        _encoDeck = new EncoDeckBatteries(dispatcher, Report);
         // Phone Link first: it is the primary reading for a phone, and the Bluetooth source stands in only without it.
         _sources.Add(new PhoneLinkBatteries(dispatcher, Report));
         _sources.Add(new BluetoothBatteries(dispatcher, Report));
         _sources.Add(new HidBatteries(dispatcher, Report));
         _sources.Add(new GamingBatteries(dispatcher, Report));
         _sources.Add(_apple);
+        _sources.Add(_encoDeck);
     }
 
     // A source's whole list, on the UI thread. The AirPods scan follows what is connected (AppleBatteries.Consider), on every
     // Bluetooth list whether or not the merged one changed: AirPods that disconnect leave it unchanged while the Apple source
-    // still holds their entry.
+    // still holds their entry. A device that connects is also when EncoDeck is looked for (EncoDeckBatteries.Consider).
     private void Report(DeviceSource source, IReadOnlyList<DeviceBattery> devices)
     {
         if (_disposed || _running == DeviceDemand.None) return;
         bool changed = _roster.Set(source, devices);
-        if (source == DeviceSource.Bluetooth) _apple.Consider(_roster.Of(DeviceSource.Bluetooth));
-        if (changed) Changed?.Invoke();
+        if (source == DeviceSource.Bluetooth) { _apple.Consider(_roster.Of(DeviceSource.Bluetooth)); _encoDeck.Consider(_roster.Of(DeviceSource.Bluetooth)); }
+        if (changed) { Show(); Changed?.Invoke(); }
     }
 
     // Every device read now, hidden ones included; empty while nothing runs.
     public IReadOnlyList<DeviceBattery> All => _roster.All;
+    // What the panels show: All, and until the sources have listed what is connected (Settled), the readings of the last run for
+    // the devices without one yet, faded (DeviceRoster.WithEarlier). Kept in memory only, from the last time the sources stopped.
+    public IReadOnlyList<DeviceBattery> Showing { get; private set; } = [];
+    private IReadOnlyList<DeviceBattery> _earlier = [];
+    private void Show() => Showing = Settled || _running == DeviceDemand.None ? _roster.All : DeviceRoster.WithEarlier(_roster.All, _earlier);
     // Whether the sources have run long enough to have listed what is connected (the page says "no devices" only then).
     public bool Settled { get; private set; }
     public DeviceDemand Demand => _running;
@@ -92,16 +100,19 @@ internal sealed class DeviceBatteries : IDisposable
     // What the open-source battery tools on Windows do (quiet-battery, HaloBattery, ChargeDock, Solaar on resume): the devices are
     // read again when the computer wakes, a couple of seconds on (they reconnect first), and when input comes after 20 seconds
     // without any (a mouse picked up again wakes from its sleep), at most once in five seconds. Only the time of the last input
-    // is looked at (GetLastInputInfo), never what it was.
+    // is looked at (GetLastInputInfo), never what it was. A device whose search for its read ran out is tried once more then
+    // (DeviceReadBook.Again): each waking, and on input within the book's own limits.
     private static readonly TimeSpan Away = TimeSpan.FromSeconds(20), Again = TimeSpan.FromSeconds(5);
     private readonly DispatcherTimer _idle;
     private bool _away;
     private long _readNowAt;
 
-    private void ReadNow()
+    // input: the user came back (Idle), which gives a search that ran out another try within the book's limits.
+    private void ReadNow(bool input = false)
     {
         if (_running != DeviceDemand.Watch || Environment.TickCount64 - _readNowAt < (long)Again.TotalMilliseconds) return;
         _readNowAt = Environment.TickCount64;
+        if (input) DeviceReadStore.Book.Again(_readNowAt, woke: false);
         foreach (var source in _sources) source.ReadNow();
     }
 
@@ -111,7 +122,7 @@ internal sealed class DeviceBatteries : IDisposable
         if (!GetLastInputInfo(ref info)) return;
         uint idle = unchecked((uint)Environment.TickCount - info.dwTime);
         if (idle >= Away.TotalMilliseconds) { _away = true; return; }
-        if (_away) { _away = false; ReadNow(); }
+        if (_away) { _away = false; ReadNow(input: true); }
     }
 
     private void PowerModeChanged(object? sender, PowerModeChangedEventArgs e)
@@ -120,7 +131,7 @@ internal sealed class DeviceBatteries : IDisposable
         _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
             var later = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = TimeSpan.FromSeconds(2) };
-            later.Tick += (_, _) => { later.Stop(); _readNowAt = 0; ReadNow(); };
+            later.Tick += (_, _) => { later.Stop(); DeviceReadStore.Book.Again(Environment.TickCount64, woke: true); _readNowAt = 0; ReadNow(); };
             later.Start();
         });
     }
@@ -138,9 +149,18 @@ internal sealed class DeviceBatteries : IDisposable
         if (demand == DeviceDemand.None)
         {
             foreach (var source in _sources) source.Stop();
+            _earlier = [.. Showing.Where(device => device.Lowest is not null)];
             _roster.Clear(); Settled = false; _settle?.Stop();
+            Show();
             Changed?.Invoke();
             return;
+        }
+        // The last run's readings show at once (Showing); the change is told after this call, as the demand is set while a panel
+        // builds its collapsed row.
+        if (was == DeviceDemand.None)
+        {
+            Show();
+            if (Showing.Count > 0) _dispatcher.BeginInvoke(() => { if (!_disposed) Changed?.Invoke(); });
         }
         foreach (var source in _sources) source.Start(demand);
         if (was == DeviceDemand.None)
@@ -158,7 +178,7 @@ internal sealed class DeviceBatteries : IDisposable
         if (_running == DeviceDemand.None || Settled) { _settle?.Stop(); return; }
         if (!_sources.All(source => source.Listed) && DateTime.UtcNow - _settleStarted < TimeSpan.FromSeconds(10)) return;
         _settle?.Stop();
-        Settled = true; Changed?.Invoke();
+        Settled = true; _earlier = []; Show(); Changed?.Invoke();
     }
 
     public void Dispose()

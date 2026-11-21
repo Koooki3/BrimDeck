@@ -216,7 +216,8 @@ static class QwenWorkUsageTests
         desktop.SignIns[QwenWorkUsage.DataFolder(roaming, China)] = SignIn;
         rejected = true;
         var refused = (await service.RefreshAsync(settings)).Single(s => s.Id == ProviderId.QwenWorkCn);
-        check("A refused sign-in is reported as expired", refused.StatusLabel == Loc.T("登录已失效", "Sign-in expired") && !refused.LiveQuota);
+        check("A refused sign-in is reported as expired, with the last reading kept and marked as old", refused.StatusLabel == Loc.T("登录已失效", "Sign-in expired")
+            && refused.IsStale && refused.Metrics.Select(m => m.Id).SequenceEqual(["credits", "monthly", "longterm"]) && refused.Status.Contains(Loc.T("读取的额度", "showing the quota read at")));
     }
 
     private sealed class Site(Func<HttpRequestMessage, (HttpStatusCode Status, string Body)> answer) : HttpMessageHandler

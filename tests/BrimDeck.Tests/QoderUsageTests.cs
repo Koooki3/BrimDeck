@@ -1,13 +1,24 @@
 using System.IO.Pipes;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using BrimDeck.Core;
 
-// Qoder and Qoder CN are read from the first of their programs that answers: the CLI's daemon, the desktop app's copy of it, the
-// IDE's language server. The fixtures follow what Qoder CLI 1.1.91, the Qoder 0.5.14 desktop app (daemon 1.1.86-hotfix.5.3) and
-// Qoder IDE 1.106.3 answered on 2026-11-18, with the account details replaced.
+// Qoder and Qoder CN are read from the first source that answers: Qoder's API with the desktop app's sign-in, the CLI's daemon,
+// the IDE's language server. The fixtures follow what Qoder CLI 1.1.91, Qoder IDE 1.106.3 and the API (asked as the Qoder 0.5.14
+// desktop app asks it) answered on 2026-11-18 and 2026-11-19, a personal and a Teams account, with the account details replaced.
 static class QoderUsageTests
 {
+    private const string TeamsUsage = """
+        {"displayMode":"qoder","qoderUsage":{"userId":"user-2","userType":"teams","usageType":"credits","totalUsagePercentage":0.8,"isQuotaExceeded":false,
+         "expiresAt":1795332718000,"refreshAt":1795332718000,"upgradeUrl":"https://qoder.com/pricing?client=qoder",
+         "userQuota":{"total":3000,"used":2409,"remaining":591,"percentage":0.8,"unit":"credits"},
+         "orgResourcePackage":{"used":0,"remaining":8054,"percentage":0,"unit":"credits","cap":-1,"available":true},"isPlanQuotaProrated":false}}
+        """;
+    private const string TeamsPlan = """
+        {"user_type":"teams","plan_tier_name":"Teams","is_personal_version":false,"is_paid_plan":true,"is_highest_tier":false,
+         "organization":{"org_id":"org-1","org_name":"Team","role_name":"Member","is_suspended":false},"start_date":1792654318000,"end_date":1795332718000}
+        """;
     private const string DaemonUsage = """
         {"userId":"user-1","userType":"personal_professional_trial","totalUsagePercentage":3,"isHighestTier":false,"expiresAt":1796180759888,
          "isQuotaExceeded":false,"usageType":"credits","userQuota":{"total":300,"used":30,"remaining":270,"percentage":10,"unit":"credits"},
@@ -58,23 +69,42 @@ static class QoderUsageTests
         check("The organization's package is read from its cap, and used-up credits are marked",
             ide.Metrics.Select(m => (m.Id, m.UsedPercent)).SequenceEqual([("plan", 100.0), ("organization", 25.0)]) && ide.Exceeded);
         check("An empty bucket is left out", QoderUsage.Parse(Json("""{"addOnQuota":{"total":0,"used":0,"remaining":0}}"""), "").Metrics.Count == 0);
+
+        var teams = QoderUsage.ParsePresentation(Json(TeamsUsage), QoderUsage.PlanName(Json(TeamsPlan)));
+        check("A Teams member's credits come from the API's qoderUsage, named by the plan's tier",
+            teams is { Plan: "Teams", Exceeded: false } && teams.Metrics.Select(m => m.Id).SequenceEqual(["plan", "organization"]) &&
+            teams.Metrics[0] is { Total: 3000m, Used: 2409m } && teams.Metrics[0].ExpiresAt == DateTimeOffset.FromUnixTimeMilliseconds(1795332718000));
+        check("The shared package of a member without a limit counts what was used against that and what is left",
+            teams!.Metrics[1] is { Label: "组织资源包", Total: 8054m, Used: 0m } &&
+            QoderUsage.Parse(Json("""{"orgResourcePackage":{"used":100,"remaining":7954,"cap":-1,"available":true}}"""), "").Metrics.Single() is { Total: 8054m, Used: 100m });
+        check("A personal account reads alike through the API",
+            QoderUsage.ParsePresentation(Json("""{"displayMode":"qoder","qoderUsage":""" + DaemonUsage + "}"), "Pro Trial") is { Plan: "Pro Trial", Metrics.Count: 4 });
+        bool Rejected(string json) { try { QoderUsage.ParsePresentation(Json(json), ""); return false; } catch (InvalidDataException) { return true; } }
+        check("An enterprise layout is not read, and an answer without credits is a changed format",
+            QoderUsage.ParsePresentation(Json("""{"displayMode":"enterprise","enterpriseUsage":{}}"""), "") is null &&
+            Rejected("""{"displayMode":"qoder"}""") && Rejected("[]"));
         check("LSP framing is written and read", QoderUsage.Frame("{\"id\":1}") == "Content-Length: 8\r\n\r\n{\"id\":1}" &&
             QoderUsage.Unframe("Content-Length: 8\r\n\r\n{\"id\":1}") == "{\"id\":1}" && QoderUsage.Unframe("Content-Length: 0\r\n\r\n") is null);
     }
 
     private static void Files(string root, Action<string, bool> check)
     {
-        var signIn = QoderUsage.ParseDesktopSignIn("""{"schemaVersion":1,"token":"dt-fixture","refreshToken":"rt","expiresAt":"2026-12-18T03:06:40Z","user":{"id":"u"}}""");
-        check("The desktop app's sign-in gives its token and when it expires",
-            signIn is { Token: "dt-fixture" } && signIn.ExpiresAt == new DateTimeOffset(2026, 12, 18, 3, 6, 40, TimeSpan.Zero) &&
-            !signIn.Expired(new DateTimeOffset(2026, 12, 18, 3, 0, 0, TimeSpan.Zero)) && signIn.Expired(new DateTimeOffset(2026, 12, 18, 3, 6, 0, TimeSpan.Zero)));
-        check("A sign-in without a token is none", QoderUsage.ParseDesktopSignIn("""{"token":""}""") is null && QoderUsage.ParseDesktopSignIn("not json") is null);
-        var install = Path.Combine(root, "qoder-install");
-        var worker = Path.Combine(install, "resources", "app.asar.unpacked", "node_modules", "@qoder-ai", "qoder-cn-agent-sdk", "dist", "_worker");
-        Directory.CreateDirectory(worker);
-        check("No daemon is found before the desktop app carries one", QoderUsage.FindRuntime(install) is null && QoderUsage.FindRuntime(Path.Combine(root, "missing")) is null);
-        File.WriteAllText(Path.Combine(worker, "qoder-worker-runtime.obf.mjs"), "");
-        check("The desktop app's daemon is found whatever its SDK package is named", QoderUsage.FindRuntime(install) == Path.Combine(worker, "qoder-worker-runtime.obf.mjs"));
+        var signIn = QoderUsage.ParseDesktopSignIn("""
+            {"schemaVersion":1,"authenticationContext":"[\"https://qoder.com\",\"https://openapi.qoder.sh\",\"machine-1\",\"prod\"]",
+             "token":"dt-fixture","refreshToken":"rt","expiresAt":"2026-12-18T03:06:40Z","user":{"id":"u"}}
+            """, QoderUsage.Global);
+        check("The desktop app's sign-in gives its token, when it expires and the API it signed in at, not the site",
+            signIn is { Token: "dt-fixture", Api: "https://openapi.qoder.sh" } && signIn.ExpiresAt == new DateTimeOffset(2026, 12, 18, 3, 6, 40, TimeSpan.Zero) &&
+            !signIn.Expired(new DateTimeOffset(2026, 12, 18, 3, 0, 0, TimeSpan.Zero)) && signIn.Expired(new DateTimeOffset(2026, 12, 18, 3, 6, 0, TimeSpan.Zero)) &&
+            !signIn.ToString().Contains("dt-fixture"));
+        check("Qoder CN's sign-in uses its own API, and a context kept as an array reads the same",
+            QoderUsage.ParseDesktopSignIn("""{"authenticationContext":["https://qoder.cn","https://openapi.qoder.com.cn","m","prod"],"token":"t"}""", QoderUsage.China)?.Api == "https://openapi.qoder.com.cn");
+        check("The token goes only to the edition's API over HTTPS; otherwise the edition's own API is used",
+            QoderUsage.ParseDesktopSignIn("""{"authenticationContext":"[\"https://openapi.example.com\",\"http://openapi.qoder.sh\"]","token":"t"}""", QoderUsage.Global)?.Api == "https://openapi.qoder.sh" &&
+            QoderUsage.ParseDesktopSignIn("""{"authenticationContext":"not json","token":"t"}""", QoderUsage.China)?.Api == "https://openapi.qoder.com.cn" &&
+            QoderUsage.Api("https://openapi.qoder.com.cn", QoderUsage.Global) is null && QoderUsage.Api("https://evilqoder.sh", QoderUsage.Global) is null &&
+            QoderUsage.Api("https://center.qoder.sh/", QoderUsage.Global) == "https://center.qoder.sh");
+        check("A sign-in without a token is none", QoderUsage.ParseDesktopSignIn("""{"token":""}""", QoderUsage.Global) is null && QoderUsage.ParseDesktopSignIn("not json", QoderUsage.Global) is null);
         var info = Path.Combine(root, "qoder-info.json");
         File.WriteAllText(info, """{"websocketPort":56510,"pid":54440,"ipcServerPath":"\\\\.\\pipe\\qoder-854e04","isDev":false}""");
         check("The IDE's port is read from .info.json", QoderUsage.ReadIdePort(info) == 56510 && QoderUsage.ReadIdePort(Path.Combine(root, "none.json")) is null);
@@ -158,7 +188,7 @@ static class QoderUsageTests
     // A daemon on the far side of a pipe pair, answering as Qoder's does.
     private static async Task Daemon(Action<string, bool> check)
     {
-        async Task<(QoderUsage.Reading? Reading, Exception? Error, List<JsonElement> Sent)> Talk(QoderUsage.DesktopSignIn? signIn, Func<JsonElement, string?, IEnumerable<string>> answer)
+        async Task<(QoderUsage.Reading? Reading, Exception? Error, List<JsonElement> Sent)> Talk(Func<JsonElement, string?, IEnumerable<string>> answer)
         {
             using var toDaemon = new AnonymousPipeServerStream(PipeDirection.Out);
             using var fromBrimDeck = new AnonymousPipeClientStream(PipeDirection.In, toDaemon.ClientSafePipeHandle);
@@ -180,7 +210,7 @@ static class QoderUsageTests
                     if (frame.Get("request").Get("type").Text() == "daemon.shutdown") return;
                 }
             });
-            try { return (await QoderUsage.ConverseAsync(input, output, signIn, new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token), null, sent); }
+            try { return (await QoderUsage.ConverseAsync(input, output, new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token), null, sent); }
             catch (Exception ex) when (ex is QoderUsage.DaemonException or IOException) { return (null, ex, sent); }
             finally { input.Dispose(); await daemon.WaitAsync(TimeSpan.FromSeconds(5)); }
         }
@@ -194,29 +224,27 @@ static class QoderUsageTests
             "daemon.shutdown" => [Ok(frame, "{}")],
             _ => []
         };
-        var (reading, error, sent) = await Talk(null, Cli);
+        var (reading, error, sent) = await Talk(Cli);
         check("The CLI's daemon is asked to use the CLI's own sign-in, then for the credits and the plan, then to end",
             error is null && reading is { Plan: "Pro Trial", Metrics.Count: 4 } &&
             sent.Select(f => f.Get("request").Get("type").Text()).SequenceEqual(["daemon.initialize", "daemon.get_usage_info", "daemon.account_info", "daemon.shutdown"]) &&
             sent[0].Get("request").Get("auth").Get("type").Text() == "qodercli" && sent[0].Get("request").Get("daemon_protocol_version").Number() == 2);
 
-        var desktopSignIn = new QoderUsage.DesktopSignIn("dt-fixture", DateTimeOffset.FromUnixTimeMilliseconds(1797562000000));
-        (reading, error, sent) = await Talk(desktopSignIn, (frame, method) => method == "daemon.initialize"
+        (reading, error, sent) = await Talk((frame, method) => method == "daemon.initialize"
             ? [Ok(frame, """{"daemon_protocol_version":2,"daemon_version":"1.1.86","capabilities":[]}"""),
                """{"type":"control_request","request_id":"cb-1","request":{"type":"daemon.auth.fetch_job_token","reason":"initial"}}"""]
             : method == "daemon.account_info" ? ["""{"type":"control_response","response":{"subtype":"error","request_id":"brimdeck-3","error":"no account","code":"DAEMON_COMMAND_FAILED"}}"""]
             : Cli(frame, method));
-        var tokenAnswer = sent.FirstOrDefault(f => f.Get("type").Text() == "control_response").Get("response");
-        check("The desktop app's token is handed over when the daemon asks for it, and a missing plan leaves the credits",
-            error is null && reading is { Plan: "", Metrics.Count: 4 } && sent[0].Get("request").Get("auth").Get("type").Text() == "jobToken" &&
-            tokenAnswer.Get("request_id").Text() == "cb-1" && tokenAnswer.Get("response").Get("token").Text() == "dt-fixture" &&
-            tokenAnswer.Get("response").Get("expires_at").Number() == 1797562000000);
+        var refusal = sent.FirstOrDefault(f => f.Get("type").Text() == "control_response").Get("response");
+        check("A request from the daemon is refused, and a missing plan leaves the credits",
+            error is null && reading is { Plan: "", Metrics.Count: 4 } && refusal.Get("request_id").Text() == "cb-1" &&
+            refusal.Get("subtype").Text() == "error" && refusal.Get("response").ValueKind == JsonValueKind.Undefined);
 
-        (reading, error, _) = await Talk(null, (frame, method) => method == "daemon.get_usage_info"
+        (reading, error, _) = await Talk((frame, method) => method == "daemon.get_usage_info"
             ? ["""{"type":"control_response","response":{"subtype":"error","request_id":"brimdeck-2","error":"Local login has expired. Run \"qodercli login\" to refresh.","code":"DAEMON_COMMAND_FAILED"}}"""]
             : Cli(frame, method));
         check("An expired sign-in is told apart from other failures", error is QoderUsage.DaemonException { SignIn: true });
-        (reading, error, _) = await Talk(null, (frame, method) => method == "daemon.get_usage_info"
+        (reading, error, _) = await Talk((frame, method) => method == "daemon.get_usage_info"
             ? [Ok(frame, """{"usage":null,"session":{"total_credits":0,"model_usage":{}},"usage_error":"quota endpoint unavailable"}""")]
             : Cli(frame, method));
         check("A daemon that has no credits to give fails the reading", error is QoderUsage.DaemonException { SignIn: false, Code: "USAGE_UNAVAILABLE" });
@@ -233,77 +261,109 @@ static class QoderUsageTests
         var calls = new List<string>();
         Exception? cliFailure = null;
         var desktop = new Desktop();
+        var api = new Api(asked => { lock (calls) calls.Add(asked); });
         Func<Task>? gate = null;
-        UsageService Service(TimeSpan? wait = null) => new(desktop, new DataLocations("", "", "", roaming, "") { QoderHome = home }, new HttpClient(), () => now)
+        UsageService Service(TimeSpan? wait = null) => new(desktop, new DataLocations("", "", "", roaming, "") { QoderHome = home }, new HttpClient(api), () => now)
         {
             QoderWait = wait ?? TimeSpan.FromSeconds(3),
-            QoderDaemon = async (command, arguments, electron, signIn, _) =>
+            QoderDaemon = async (command, arguments, _) =>
             {
-                lock (calls) calls.Add(electron ? "desktop:" + signIn?.Token : "cli");
+                lock (calls) calls.Add("cli");
                 if (gate is not null) await gate();
-                if (!electron && cliFailure is not null) throw cliFailure;
-                return QoderUsage.Parse(Json(DaemonUsage), electron ? "" : "Pro Trial");
+                if (cliFailure is not null) throw cliFailure;
+                return QoderUsage.Parse(Json(DaemonUsage), "Pro Trial");
             },
             QoderIde = (port, _) => { lock (calls) calls.Add("ide:" + port); return Task.FromResult(QoderUsage.Parse(Json("""{"userQuota":{"total":300,"used":45}}"""), "Pro Trial")); }
         };
         async Task<ProviderSnapshot> Refresh(UsageService service) => (await service.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Qoder);
+        const string Usage = "https://openapi.qoder.sh/sash/api/v2/me/usage", Plan = "https://openapi.qoder.sh/api/v2/user/plan";
+        var desktopName = Loc.T("Qoder 桌面版", "Qoder desktop app");
 
         using (var service = Service())
         {
             var snapshot = await Refresh(service);
-            check("Without any Qoder program signed in nothing is started", calls.Count == 0 && !snapshot.LiveQuota && snapshot.StatusLabel == Loc.T("未连接", "Not connected"));
+            check("Without any Qoder program signed in nothing is asked", calls.Count == 0 && !snapshot.LiveQuota && snapshot.StatusLabel == Loc.T("未连接", "Not connected"));
         }
 
-        // The CLI comes first once both its binary and its sign-in are there.
+        // The desktop app's sign-in comes first, ahead of a signed-in CLI and a running IDE.
         Directory.CreateDirectory(Path.Combine(home, "bin", "qodercli")); File.WriteAllText(Path.Combine(home, "bin", "qodercli", "qodercli.exe"), "");
         Directory.CreateDirectory(Path.Combine(home, ".auth")); File.WriteAllText(Path.Combine(home, ".auth", "user"), "encrypted");
-        var install = Path.Combine(root, "qoder-desktop");
-        var worker = Path.Combine(install, "resources", "app.asar.unpacked", "node_modules", "@qoder-ai", "qoder-agent-sdk", "dist", "_worker");
-        Directory.CreateDirectory(worker); File.WriteAllText(Path.Combine(worker, "qoder-worker-runtime.obf.mjs"), "");
-        desktop.Install = install;
-        desktop.SignIn = """{"token":"dt-fixture","expiresAt":"2026-12-18T03:06:40Z"}""";
+        desktop.SignIn = """{"authenticationContext":"[\"https://qoder.com\",\"https://openapi.qoder.sh\",\"m\",\"prod\"]","token":"dt-fixture","expiresAt":"2026-12-18T03:06:40Z"}""";
         Directory.CreateDirectory(Path.Combine(roaming, "Qoder", "SharedClientCache"));
         File.WriteAllText(Path.Combine(roaming, "Qoder", "SharedClientCache", ".info.json"), """{"websocketPort":56510,"pid":1}""");
         using (var service = Service())
         {
             calls.Clear();
             var snapshot = await Refresh(service);
-            check("With the CLI signed in, Qoder reads the CLI first and names it", calls.SequenceEqual(["cli"]) &&
-                snapshot is { LiveQuota: true, Plan: "Pro Trial", Scope: "account", Source: "Qoder CLI" } && snapshot.Metrics.Count == 4);
+            check("With the desktop app signed in, Qoder's API is asked for the credits and the plan with its token, and named the desktop app",
+                calls.SequenceEqual([Usage, Plan]) && api.Tokens.All(token => token == "dt-fixture") &&
+                snapshot is { LiveQuota: true, Plan: "Teams", Scope: "account", Source: var source } && source == desktopName &&
+                snapshot.Metrics.Select(m => m.Id).SequenceEqual(["plan", "organization"]));
             now = now.AddMinutes(1);
             calls.Clear();
             snapshot = await Refresh(service);
-            check("Every refresh reads again", calls.SequenceEqual(["cli"]) && snapshot.QuotaTime == now);
+            check("Every refresh reads again", calls.SequenceEqual([Usage, Plan]) && snapshot.QuotaTime == now);
             now = now.AddSeconds(10);
             calls.Clear();
             snapshot = await Refresh(service);
-            check("A refresh right after a read shows it without starting another", calls.Count == 0 && snapshot.LiveQuota && snapshot.QuotaTime == now.AddSeconds(-10));
+            check("A refresh right after a read shows it without asking again", calls.Count == 0 && snapshot.LiveQuota && snapshot.QuotaTime == now.AddSeconds(-10));
+
+            now = now.AddMinutes(1);
+            api.PlanStatus = HttpStatusCode.InternalServerError;
+            calls.Clear();
+            snapshot = await Refresh(service);
+            check("Without the plan the credits still show", calls.SequenceEqual([Usage, Plan]) && snapshot is { LiveQuota: true, Plan: "" } && snapshot.Metrics.Count == 2);
+            api.PlanStatus = HttpStatusCode.OK;
+
+            now = now.AddMinutes(1);
+            api.Status = HttpStatusCode.Unauthorized;
+            calls.Clear();
+            snapshot = await Refresh(service);
+            check("When the API refuses the desktop app's token the CLI is read", calls.SequenceEqual([Usage, "cli"]) && snapshot is { LiveQuota: true, Source: "Qoder CLI" });
             now = now.AddMinutes(1);
             cliFailure = new QoderUsage.DaemonException("DAEMON_COMMAND_FAILED", "Local login has expired. Run \"qodercli login\" to refresh.");
             calls.Clear();
             snapshot = await Refresh(service);
-            check("When the CLI's sign-in has expired the desktop app's sign-in is used", calls.SequenceEqual(["cli", "desktop:dt-fixture"]) &&
-                snapshot is { LiveQuota: true, Source: var source } && source == Loc.T("Qoder 桌面版", "Qoder desktop app"));
+            check("With both sign-ins refused the running IDE is asked", calls.SequenceEqual([Usage, "cli", "ide:56510"]) && snapshot is { LiveQuota: true, Source: "Qoder IDE" } &&
+                snapshot.Metrics.Single().Used == 45m);
             now = now.AddMinutes(1);
             calls.Clear();
             await Refresh(service);
-            check("A CLI that failed is not started again for a while", calls.SequenceEqual(["desktop:dt-fixture"]));
+            check("The API is asked again on every read, while a CLI that failed is not started again for a while", calls.SequenceEqual([Usage, "ide:56510"]));
+
+            api.Status = HttpStatusCode.OK;
             now = now.AddMinutes(1);
-            desktop.SignIn = """{"token":"dt-old","expiresAt":"2026-11-01T00:00:00Z"}""";
             calls.Clear();
             snapshot = await Refresh(service);
-            check("With both sign-ins out of use the running IDE is asked", calls.SequenceEqual(["ide:56510"]) && snapshot is { LiveQuota: true, Source: "Qoder IDE" } &&
-                snapshot.Metrics.Single().Used == 45m);
+            check("A token the desktop app renewed is read at once", calls.SequenceEqual([Usage, Plan]) && snapshot.Source == desktopName);
+
+            desktop.SignIn = """{"token":"dt-old","expiresAt":"2026-11-01T00:00:00Z"}""";
             File.Delete(Path.Combine(roaming, "Qoder", "SharedClientCache", ".info.json"));
             now = now.AddMinutes(1);
             calls.Clear();
             snapshot = await Refresh(service);
-            check("Without any program that answers, the last reading stays, marked as old, naming the expired sign-ins",
-                calls.Count == 0 && snapshot.IsStale && snapshot.Metrics.Count == 1 && snapshot.Status.Contains("Qoder CLI") && snapshot.StatusLabel == Loc.T("稍后重试", "Retrying later"));
+            check("An expired desktop sign-in is not sent; without any source that answers the last reading stays, marked as old, naming the expired sign-ins",
+                calls.Count == 0 && snapshot.IsStale && snapshot.Metrics.Count == 2 && snapshot.Status.Contains(desktopName) && snapshot.Status.Contains("Qoder CLI") &&
+                snapshot.StatusLabel == Loc.T("稍后重试", "Retrying later"));
+        }
+
+        // An enterprise account's layout is not read: the status says so.
+        cliFailure = null;
+        File.Delete(Path.Combine(home, ".auth", "user"));
+        desktop.SignIn = """{"token":"dt-fixture","expiresAt":"2026-12-18T03:06:40Z"}""";
+        api.Usage = """{"displayMode":"enterprise","enterpriseUsage":{}}""";
+        using (var service = Service())
+        {
+            calls.Clear();
+            var snapshot = await Refresh(service);
+            check("An enterprise account is said to be not supported yet", calls.SequenceEqual([Usage, Plan]) && !snapshot.LiveQuota &&
+                snapshot.StatusLabel == Loc.T("暂不支持", "Not supported") && snapshot.Status.Contains(Loc.T("企业版", "enterprise")));
         }
 
         // A slow daemon is waited for only briefly: the round ends with the other sources, and the reading follows in a round of its own.
-        cliFailure = null;
+        api.Usage = TeamsUsage;
+        desktop.SignIn = null;
+        File.WriteAllText(Path.Combine(home, ".auth", "user"), "encrypted");
         var release = new TaskCompletionSource();
         gate = () => release.Task;
         using (var service = Service(TimeSpan.FromMilliseconds(200)))
@@ -323,15 +383,64 @@ static class QoderUsageTests
             check("That round shows the reading without starting another read", calls.Count == 0 && snapshot is { LiveQuota: true, Source: "Qoder CLI" });
         }
         gate = null;
+
+        // After a restart the previous run's reading stands in until a read of this run ends: while the read is under way, and when it fails.
+        var earlier = now.AddHours(-1);
+        var restored = new ProviderSnapshot(ProviderId.Qoder)
+        {
+            Metrics = [new UsageMetric(MetricKind.Count, "积分") { Id = "plan", Unit = "积分", Total = 300, Used = 30 }], Plan = "Pro", QuotaTime = earlier, LastSeenAt = earlier, IsStale = true
+        };
+        release = new TaskCompletionSource();
+        gate = () => release.Task;
+        using (var service = Service(TimeSpan.FromMilliseconds(200)))
+        {
+            service.RestoreLastReadings([restored]);
+            var finished = new TaskCompletionSource<bool>();
+            service.BackgroundReadFinished += first => finished.TrySetResult(first);
+            var snapshot = await Refresh(service);
+            check("While the first Qoder read of a run is under way, the previous run's reading shows, marked as old",
+                snapshot is { LiveQuota: true, IsStale: true, Plan: "Pro" } && snapshot.QuotaTime == earlier && snapshot.Metrics.Single().Used == 30m
+                && snapshot.Status.Contains(Loc.T("正在读取", "Reading")));
+            release.SetResult();
+            check("The first reading of the run still asks for a round of its own", await finished.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            now = now.AddSeconds(5);
+            snapshot = await Refresh(service);
+            check("It then replaces the previous run's reading", snapshot is { LiveQuota: true, IsStale: false, Source: "Qoder CLI" } && snapshot.QuotaTime != earlier);
+        }
+        gate = null;
+        cliFailure = new QoderUsage.DaemonException("DAEMON_COMMAND_FAILED", "Local login has expired. Run \"qodercli login\" to refresh.");
+        using (var service = Service())
+        {
+            service.RestoreLastReadings([restored]);
+            var snapshot = await Refresh(service);
+            check("A first Qoder read that fails shows the previous run's reading, marked as old",
+                snapshot is { LiveQuota: true, IsStale: true } && snapshot.QuotaTime == earlier && snapshot.StatusLabel == Loc.T("稍后重试", "Retrying later"));
+        }
+        cliFailure = null;
+    }
+
+    // Qoder's API: the credits and the plan, refusing every request with Status.
+    private sealed class Api(Action<string> asked) : HttpMessageHandler
+    {
+        public HttpStatusCode Status = HttpStatusCode.OK, PlanStatus = HttpStatusCode.OK;
+        public string Usage = TeamsUsage;
+        public readonly List<string?> Tokens = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var uri = request.RequestUri!;
+            asked(uri.GetLeftPart(UriPartial.Path));
+            lock (Tokens) Tokens.Add(request.Headers.Authorization is { Scheme: "Bearer" } bearer ? bearer.Parameter : null);
+            bool plan = uri.AbsolutePath == QoderUsage.PlanPath;
+            var status = Status != HttpStatusCode.OK ? Status : plan ? PlanStatus : HttpStatusCode.OK;
+            return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(plan ? TeamsPlan : Usage, Encoding.UTF8, "application/json") });
+        }
     }
 
     private sealed class Desktop : IDesktopSources
     {
-        public string? Install;
         public string? SignIn;
         public string? ReadCursorToken(string database) => throw new InvalidOperationException("Unexpected credential read");
         public Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation) => throw new InvalidOperationException("Unexpected service discovery");
-        public string? FindQoderDesktop(bool china) => china ? null : Install;
         public string? ReadQoderDesktopSignIn(string folder) => folder.EndsWith("com.qoder.app.stable", StringComparison.Ordinal) ? SignIn : null;
         public string?[][]? Rows = [];
         public string? Models;
@@ -343,3 +452,4 @@ static class QoderUsageTests
         }
     }
 }
+

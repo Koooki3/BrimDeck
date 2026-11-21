@@ -44,6 +44,90 @@ static class BrandsHeadsetTests
         Darkrim(check);
         Edifier(check);
         SteelSeries(check);
+        Iqunix(check);
+        Epos(check);
+    }
+
+    // EPOS: the H3PRO Hybrid's frames HeadsetControl captured from EPOS Gaming Suite; the GSP 370's answers built in the format its
+    // parseReply reads.
+    private static void Epos(Action<string, bool> check)
+    {
+        HidShape Vendor(int product, int page = 0xFFFF, int output = 107) => Shape(0x1395, product, page, 1, 3, 107, output, outputIds: [0x01]);
+        check("EPOS: the Gaming Suite's HID products on their vendor collection (107-byte report 1); dongles ask the headset, cables the device, the GTW 270 and H3 Hybrid both; the GSP 370, firmware-update products, other lengths and other vendors are not taken",
+            Names(Vendor(0x0303), "EPOS").SequenceEqual(["epos.headset"]) && Names(Vendor(0x0300, 0xFFCD), "EPOS").SequenceEqual(["epos.headset"])
+            && Names(Vendor(0x0101), "EPOS").SequenceEqual(["epos.device"]) && Names(Vendor(0x008A, 0xFF00), "EPOS").SequenceEqual(["epos.device"])
+            && Names(Vendor(0x009E), "EPOS").SequenceEqual(["epos.headset", "epos.device"]) && Names(Vendor(0x0102), "EPOS").SequenceEqual(["epos.headset", "epos.device"])
+            && BrandFamilies.Find(Vendor(0x009E))!.Value.Ways[0].ProbeOnAsleep && !BrandFamilies.Find(Vendor(0x0303))!.Value.Ways[0].ProbeOnAsleep
+            && Untaken(Shape(0x1395, 0x0303, 0xFFFF, 1, 3, 18, 107, outputIds: [0x01]), "EPOS")
+            && Untaken(Vendor(0x009A), "EPOS") && Untaken(Vendor(0x8089), "EPOS") && Untaken(Vendor(0x0303, output: 64), "EPOS")
+            && Untaken(Vendor(0x0303, 0x000C), "EPOS") && Untaken(Shape(0x1396, 0x0303, 0xFFFF, 1, 3, 107, 107, outputIds: [0x01]), "EPOS")
+            && BrandFamilies.Find(Shape(0x1395, 0x0303, 0xFFFF, 1, 3, 107, 107, outputIds: [0x02])) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Vendor(0x0303))!.Value.Family.DisplayName(Vendor(0x0303)) == "EPOS H3PRO Hybrid"
+            && BrandFamilies.Find(Vendor(0x0301))!.Value.Family.DisplayName(Vendor(0x0301)) is null);
+        var battery = BrimDeck.Core.Epos.Battery(BrimDeck.Core.Epos.Device, steps: true);
+        var headset = BrimDeck.Core.Epos.Battery(BrimDeck.Core.Epos.Headset);
+        var headsetAnswer = Hex("01 EB FE 01 00 04 00 04 00 06 00 00 00 12 00 03 00 3C 00", 107);
+        headsetAnswer[11] = BrimDeck.Core.Epos.Crc8(headsetAnswer.AsSpan(13, 6));
+        var corrupted = Hex("01 EB FE 01 00 04 00 00 00 06 00 5F 00 12 00 03 00 29 00", 107);
+        check("EPOS: the captured battery query and its 40 % answer over the cable (CRC 5F); the headset's answer behind the dongle; the request handed back from 0x0001 is the headset off; a bad CRC, another command, another target and the request read back are none",
+            BrimDeck.Core.Epos.Request(BrimDeck.Core.Epos.Device).SequenceEqual(Hex("01 EB FE 01 00 04 00 01 00 04 00 A5 00 12 00 03 00", 107))
+            && BrimDeck.Core.Epos.Request(BrimDeck.Core.Epos.Headset).SequenceEqual(Hex("01 EB FE 01 00 04 00 05 00 04 00 A5 00 12 00 03 00", 107))
+            && battery(Hex("01 EB FE 01 00 04 00 00 00 06 00 5F 00 12 00 03 00 28 00", 107)) == new BatteryRead(40, Accuracy: BatteryAccuracy.Steps)
+            && headset(headsetAnswer) == new BatteryRead(60)
+            && headset(Hex("01 EB FE 01 00 04 00 01 00 04 00 A5 00 12 00 03 00", 107)) == new BatteryRead(null, Asleep: true)
+            && battery(corrupted) is null && headset(Hex("01 EB FE 01 00 04 00 00 00 06 00 5F 00 12 00 03 00 28 00", 107)) is null
+            && battery(Hex("01 EB FE 01 00 04 00 00 00 06 00 AB 00 0A 00 0C 00 AD 00", 107)) is null
+            && battery(BrimDeck.Core.Epos.Request(BrimDeck.Core.Epos.Device)) is null && headset(BrimDeck.Core.Epos.Request(BrimDeck.Core.Epos.Headset)) is null
+            && battery(Hex("05 01")) is null);
+        BatteryRead? Serial(string hex, out bool whole) => BrimDeck.Core.Epos.SerialBattery(Hex(hex), out whole);
+        check("EPOS GSP 370: its dongle's consumer collection only finds it (the serial read); 01 9C FC 00; 80 %, the headset off (0C) and an event before the answer; a failure status and a value over 100 are whole answers without a reading; an incomplete answer and another command's answer are not whole; it stands aside for EPOS Gaming Suite",
+            Dongles.Find(0x1395, 0x009A, 0x000C, "", 0, 3, 1) == Dongles.Protocol.EposSerial && Dongles.Find(0x1395, 0x00AB, 0x000C, "", 0, 3, 1) == Dongles.Protocol.EposSerial
+            && Dongles.Find(0x1395, 0x009A, 0xFF00, "", 0, 3, 1) is null && Dongles.Find(0x1395, 0x0303, 0x000C, "", 0, 3, 1) is null
+            && BrimDeck.Core.Epos.SerialRequest().SequenceEqual(Hex("01 9C FC 00"))
+            && Serial("04 0E 05 01 9C FC 00 50", out bool w1) == new BatteryRead(80) && w1
+            && Serial("04 0E 04 01 9C FC 0C", out bool w2) == new BatteryRead(null, Asleep: true) && w2
+            && Serial("04 E9 00 04 0E 05 01 9C FC 00 51", out bool w3) == new BatteryRead(81) && w3
+            && Serial("04 0E 04 01 9C FC 01", out bool w4) is null && w4 && Serial("04 0E 05 01 9C FC 00 65", out bool w5) is null && w5
+            && Serial("04 0E 05 01 9C FC 00", out bool w6) is null && !w6
+            && Serial("04 0E 04 01 A2 FC 00", out bool w7) is null && !w7 && Serial("04 E9 00", out bool w8) is null && !w8
+            && VendorSoftware.BrandOf(0x1395) == DeviceBrand.Epos
+            && VendorSoftware.Running(["EPOSGamingSuiteService.exe"]).Contains(DeviceBrand.Epos));
+    }
+
+    // IQUNIX's ITX Pro headset and Q101 mouse, as its web driver reads them (answers constructed from its parse).
+    private static void Iqunix(Action<string, bool> check)
+    {
+        var headset = Shape(0x3869, 0x771A, 0xFF90, 1, 3, outputIds: [0x55]);
+        var mouse = Shape(0x3869, 0x7D68, 0xFF10, 1, 1, 65, 65, 65, featureIds: [0x00]);
+        check("IQUNIX: its 0xFF90 usage 1 collections with report 0x55 and its 0xFF10 usage 1 collections with feature report 0 are asked; keyboards (0xFF60), other usages and other vendors are not",
+            Names(headset, "IQUNIX Headset").SequenceEqual(["iqunix.headset"]) && Names(Shape(0x3869, 0x60EA, 0x90FF, 1, 3, outputIds: [0x55]), "IQUNIX Headset").Length == 1
+            && Names(mouse, "IQUNIX Mouse").SequenceEqual(["iqunix.mouse"]) && Names(Shape(0x3869, 0xC793, 0xFF10, 1, 1, 65, 65, 65, featureIds: [0x00]), "IQUNIX Mouse").Length == 1
+            && BrandFamilies.Find(Shape(0x3869, 0x771A, 0xFF90, 1, 3, outputIds: [0x56])) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Shape(0x3869, 0x7D68, 0xFF10, 1, 1, 65, 65, 65, featureIds: [0x01])) is { Ways.Count: 0 }
+            && BrandFamilies.Find(Shape(0x3869, 0x7530, 0xFF60, 0x61, 1, 33, 33, outputIds: [0x00])) is null
+            && Untaken(Shape(0x3869, 0x771A, 0xFF90, 2, 3, outputIds: [0x55]), "IQUNIX Headset") && Untaken(Shape(0x3868, 0x771A, 0xFF90, 1, 3, outputIds: [0x55]), "IQUNIX Headset")
+            && Untaken(Shape(0x3869, 0x7D68, 0xFF10, 1, 1, 9, 65, 65, featureIds: [0x00]), "IQUNIX Mouse")
+            && Names(Shape(0x3869, 0x6CBE, 0x10FF, 1, 1, 65, 65, 65, featureIds: [0x00]), "IQUNIX Mouse").Length == 1
+            && Untaken(Shape(0x3869, 0x7D68, 0xFF10, 2, 1, 65, 65, 65, featureIds: [0x00]), "IQUNIX Mouse")
+            && Untaken(Shape(0x3868, 0x7D68, 0xFF10, 1, 1, 65, 65, 65, featureIds: [0x00]), "IQUNIX Mouse")
+            && Untaken(Shape(0x3869, 0x771A, 0xFF90, 1, 3, 7, 64, outputIds: [0x55]), "IQUNIX Headset")
+            && BrandFamilies.Find(headset)!.Value.Ways[0] is { Transport: WayTransport.Output, StripZero: false }
+            && BrandFamilies.Find(mouse)!.Value.Ways[0] is { Transport: WayTransport.FeatureListen, StripZero: true }
+            && BrandFamilies.Find(headset)!.Value.Family.DisplayName(headset) == "IQUNIX ITX Pro"
+            && BrandFamilies.Find(mouse)!.Value.Family.Kind(mouse) == DeviceKind.Mouse);
+        check("IQUNIX: the headset's 55 65 01 and the mouse's feature 82; the level, charging (state 03, bit 7), the headset away (FE, state 1A); the dongle's timeout (FF), a zero level and the request read back are none",
+            BrimDeck.Core.Iqunix.HeadsetRequest().SequenceEqual(Hex("55 65 01")) && BrimDeck.Core.Iqunix.MouseRequest().SequenceEqual(Hex("00 82 00 00 00 00 00 00 00"))
+            && BrimDeck.Core.Iqunix.HeadsetBattery(Hex("55 65 4B 02 00 00 01 1E", 64)) == new BatteryRead(75)
+            && BrimDeck.Core.Iqunix.HeadsetBattery(Hex("55 65 32 03 00 00 01 1E", 64)) == new BatteryRead(50, true)
+            && BrimDeck.Core.Iqunix.HeadsetBattery(Hex("55 65 64 04 00 00 01 1E", 64)) == new BatteryRead(100)
+            && BrimDeck.Core.Iqunix.HeadsetBattery(Hex("55 65 FE", 64)) == new BatteryRead(null, Asleep: true)
+            && BrimDeck.Core.Iqunix.HeadsetBattery(Hex("55 65 32 1A 00 00 01 1E", 64)) == new BatteryRead(null, Asleep: true)
+            && BrimDeck.Core.Iqunix.HeadsetBattery(Hex("55 65 FF", 64)) is null && BrimDeck.Core.Iqunix.HeadsetBattery(Hex("55 65 01", 64)) is null
+            && BrimDeck.Core.Iqunix.HeadsetBattery(Hex("55 65 00 02", 64)) is null && BrimDeck.Core.Iqunix.HeadsetBattery(Hex("55 21 32 02", 64)) is null
+            && BrimDeck.Core.Iqunix.MouseBattery(Hex("82 00 00 00 00 00 00 00 50 01", 64)) == new BatteryRead(80)
+            && BrimDeck.Core.Iqunix.MouseBattery(Hex("82 00 00 00 00 00 00 00 C1 01", 64)) == new BatteryRead(65, true)
+            && BrimDeck.Core.Iqunix.MouseBattery(Hex("82 00 00 00 00 00 00 00 7F 01", 64)) == new BatteryRead(100)
+            && BrimDeck.Core.Iqunix.MouseBattery(Hex("82", 64)) is null && BrimDeck.Core.Iqunix.MouseBattery(Hex("81 00 00 00 00 00 00 00 50 01", 64)) is null);
     }
 
     // No product here is one an existing reader already takes.

@@ -84,7 +84,7 @@ public partial class MainWindow
     // Which form the grips take now: the open monitor page, the collapsed surface, or none (another page, a preview, hidden,
     // a quota alert widening the surface, powering off).
     private bool PanelResizable => _expanded && !_preview && IsVisible && !IsSuppressed && !_poweringOff;
-    private bool CompactResizable => !_expanded && !_preview && IsVisible && !IsSuppressed && _alert is null && !_poweringOff;
+    private bool CompactResizable => !_expanded && !_preview && IsVisible && !IsSuppressed && _alert is null && !_poweringOff && !IslandFromLine;
 
     // The island's box in the window's coordinates, where the grip layer draws.
     private DipRect IslandBox()
@@ -133,6 +133,11 @@ public partial class MainWindow
         if (!_grips.IsMouseOver) SetHoverEdge(edge);
         return edge;
     }
+
+    // Whether the pointer, a place on screen in physical pixels, is on a grip the layer offers now.
+    private bool OnGrip(Point screen)
+        => _grips is { Shape: not ResizeGripLayer.Form.None } grips && PresentationSource.FromVisual(Stage) is not null
+            && grips.EdgeAt(Stage.PointFromScreen(screen)) != ResizeEdges.None;
 
     private bool NearGrips(Point screen)
     {
@@ -205,7 +210,8 @@ public partial class MainWindow
         bool compact = _grips.Shape == ResizeGripLayer.Form.Compact;
         var style = EffectiveStyle;
         // A double click on an end does what the settings choose (MainWindow.Move.cs).
-        if (compact && e.ClickCount >= 2 && !_resizeSettling) { GripDoubleClicked(style); return; }
+        bool second = SecondGripPress(e);
+        if (compact && second && !_resizeSettling) { GripDoubleClicked(style); return; }
         BeginResize(compact);
         _resizeSettling = false; _resizeByKey = false;
         _resizeEdge = edge; _resizeStart = WindowsHost.Cursor();
@@ -213,6 +219,23 @@ public partial class MainWindow
         _grips.Light(edge, true, SizeLabel(_resizeFrom.Width, _resizeFrom.Height));
         _grips.CaptureMouse();
     }
+
+    // Whether a press on a grip is the second of a double click. Presses handed on by the taskbar mirror (TaskbarMirror) carry no
+    // click count, so a press within the system's double-click time and distance of the previous one counts as well.
+    private long _gripPressAt = long.MinValue;
+    private Point _gripPressPoint;
+    private bool SecondGripPress(MouseButtonEventArgs e)
+    {
+        long now = Environment.TickCount64;
+        var point = WindowsHost.Cursor();
+        bool second = e.ClickCount >= 2 || now - _gripPressAt <= GetDoubleClickTime()
+            && Math.Abs(point.X - _gripPressPoint.X) <= GetSystemMetrics(36) / 2.0 && Math.Abs(point.Y - _gripPressPoint.Y) <= GetSystemMetrics(37) / 2.0; // SM_CXDOUBLECLK, SM_CYDOUBLECLK
+        // A third press starts afresh rather than counting as another double click.
+        _gripPressAt = second ? long.MinValue : now; _gripPressPoint = point;
+        return second;
+    }
+    [System.Runtime.InteropServices.DllImport("user32")] private static extern uint GetDoubleClickTime();
+    [System.Runtime.InteropServices.DllImport("user32")] private static extern int GetSystemMetrics(int index);
 
     // Starts resizing the open page or the collapsed surface, for a drag's press or the resize shortcut. A start while the same
     // form still settles picks it up where it is heading; the other form still settling is saved first. A page starts from the
@@ -316,9 +339,10 @@ public partial class MainWindow
         DeckPages.SetSize(Settings, _resizePage, width, height);
         _pageWidth = width;
         SetExpanded(true, instant: true);
-        // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
-        // layout step and stretch in between, so they follow too; the model details and the media page are built again whole,
-        // about 25 times a second during the drag, and once more when it ends (FinishResize saves the size).
+        // The surface follows every frame. The monitor page, the usage page's columns and the model details are built again only
+        // where they cross a layout step (ModelDetailsFit) and stretch in between, so they follow too; the media page is built
+        // again whole, about 25 times a second during the drag. Each is built once more when the drag ends (FinishResize saves
+        // the size).
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
         else if (_resizePage == DeckPage.Devices) RenderDevices();
         // The clipboard page is built again only where its sizes step; in between its columns stretch (StretchShelf). It is built
@@ -328,7 +352,7 @@ public partial class MainWindow
         {
             _resizeRendered = Environment.TickCount64;
             // Columns that stay within their size step stretch; nothing else in the panel changes meanwhile.
-            if (_resizePage != DeckPage.Usage || _details || ColumnsBuild() != _usageBuilt) RenderUsage();
+            if (_resizePage != DeckPage.Usage || (_details ? !ModelDetailsFit() : ColumnsBuild() != _usageBuilt)) RenderUsage();
         }
         _grips.Light(LitEdges, true, SizeLabel(width, height));
     }

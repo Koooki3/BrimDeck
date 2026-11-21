@@ -7,19 +7,24 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The explicit two-column monitor grid. Readings use the same drawing blocks and Update path as the order-only view; only their
-// containers and placement differ. A logical row matches the settings editor, and the whole surface scrolls vertically.
+// The monitor grid as the settings arrange it. A column is always a quarter of the page (ExpandedGrid.ColumnCount): a layout using
+// fewer columns (ExpandedGrid.Trim) keeps that width and sits in the middle, rather than being stretched across. Readings use the
+// same drawing blocks and Update path as the order-only view; only their containers and placement differ. Neither the arrangement
+// nor a tile's share of it changes with the page's size: every row has one height, so a tile two rows high is twice a line of
+// readings as the settings draw it, and a graph grows by giving its tile more rows there. Rows that do not fill the page sit in
+// its middle; on a page too short for them the rows first close up to the least a line needs, and then the page scrolls.
 internal sealed partial class MonitorView
 {
-    private const double GridRowHeight = 48;
     private readonly bool _gridMode;
     private ScrollViewer? _gridScroll;
     private Grid? _gridSurface;
     private readonly Dictionary<string, TextBlock> _gridMissingDrives = new(StringComparer.OrdinalIgnoreCase);
+    // A CPU or GPU tile one row high has no room for its graph: the room after its figure carries the last minute's usage instead.
+    private bool _cpuTrend, _gpuTrend;
 
-    public MonitorView(IReadOnlyList<ExpandedGridTile> tiles, bool twoColumns, MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort,
+    public MonitorView(IReadOnlyList<ExpandedGridTile> tiles, int columns, MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort,
         MonitorProcessView processView, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures,
-        bool compactMemoryBar, PowerOptions power, CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false, int matrixColumns = 0,
+        PowerOptions power, CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false, int matrixColumns = 0,
         FrameworkElement? emptyMessage = null)
     {
         _gridMode = true;
@@ -36,17 +41,23 @@ internal sealed partial class MonitorView
         }
 
         int rowCount = Math.Max(1, tiles.Max(tile => tile.Row + tile.Rows));
-        var surface = _gridSurface = new Grid { ClipToBounds = true };
-        int columns = twoColumns ? ExpandedGrid.ColumnCount : 1;
+        var surface = _gridSurface = new Grid { ClipToBounds = true, HorizontalAlignment = HorizontalAlignment.Center };
         for (int column = 0; column < columns; column++)
             surface.ColumnDefinitions.Add(new ColumnDefinition());
+        // A row's height: room for a gauge's figure, the tallest single line, with air around it; and the least, the figure's alone.
+        double rowHeight = Math.Max(34, Math.Ceiling(layout.Figure * 1.4) + 6), leastHeight = Math.Max(26, Math.Ceiling(layout.Figure * 1.4) + 4);
         for (int row = 0; row < rowCount; row++)
-            surface.RowDefinitions.Add(new RowDefinition { Height = new GridLength(GridRowHeight) });
+            surface.RowDefinitions.Add(new RowDefinition { Height = new GridLength(rowHeight) });
+        surface.Height = rowCount * rowHeight;
+        surface.VerticalAlignment = VerticalAlignment.Center;
 
         foreach (var tile in tiles)
         {
             var reading = GridReading(tile, layout, colors, sort, processView, sortChanged, hold, gpuChanged, temperatures,
-                compactMemoryBar, power, coreDisplay, free, matrixColumns);
+                power, coreDisplay, free, matrixColumns);
+            // A reading sits in the middle of its tile's height, so readings side by side in a row line up however many lines each has.
+            if (tile.Item is not (ExpandedItem.Cpu or ExpandedItem.Gpu or ExpandedItem.Processes))
+                reading.VerticalAlignment = VerticalAlignment.Center;
             var frame = new Border
             {
                 Child = reading,
@@ -79,6 +90,13 @@ internal sealed partial class MonitorView
         {
             if (e.VerticalChange != 0) CloseCard();
         };
+        scroll.SizeChanged += (_, _) =>
+        {
+            double height = Math.Clamp(Math.Floor(scroll.ActualHeight / rowCount), leastHeight, rowHeight);
+            foreach (var row in surface.RowDefinitions) row.Height = new GridLength(height);
+            surface.Height = rowCount * height;
+            surface.Width = Math.Max(0, scroll.ActualWidth * columns / ExpandedGrid.ColumnCount);
+        };
         AutomationProperties.SetName(scroll, Loc.T("展开监控网格", "Expanded monitor grid"));
         Children.Add(scroll);
         SetColumnSpan(_overlay, columns);
@@ -87,25 +105,26 @@ internal sealed partial class MonitorView
 
     private FrameworkElement GridReading(ExpandedGridTile tile, MonitorLayout layout, MonitorColors colors, ProcessSort sort,
         MonitorProcessView processView, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures,
-        bool compactMemoryBar, PowerOptions power, CoreDisplay coreDisplay, bool free, int matrixColumns)
+        PowerOptions power, CoreDisplay coreDisplay, bool free, int matrixColumns)
     {
         switch (tile.Item)
         {
             case ExpandedItem.Cpu:
             {
-                var content = GaugeTile(cpu: true, tile.Rows, layout, colors, coreDisplay, matrixColumns, gpuChanged);
+                var content = GaugeTile(cpu: true, tile.Columns, tile.Rows, layout, colors, coreDisplay, matrixColumns, gpuChanged);
                 return content;
             }
             case ExpandedItem.Gpu:
-                return GaugeTile(cpu: false, tile.Rows, layout, colors, coreDisplay, matrixColumns, gpuChanged);
+                return GaugeTile(cpu: false, tile.Columns, tile.Rows, layout, colors, coreDisplay, matrixColumns, gpuChanged);
             case ExpandedItem.Memory:
-                return _memory = new MemoryBlock(colors, compact: false, layout.Body, layout.Caption, free, compactMemoryBar)
+                // One row high: the figure and the bar on one line, level with the readings beside it; taller: the bar under the figure.
+                return _memory = new MemoryBlock(colors, compact: tile.Rows < 2, layout.Body, layout.Caption, free)
                 { VerticalAlignment = VerticalAlignment.Top };
             case ExpandedItem.Download:
-                return _downloadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, download: true, upload: false)
+                return _downloadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, download: true, upload: false, steady: true)
                 { VerticalAlignment = VerticalAlignment.Top };
             case ExpandedItem.Upload:
-                return _uploadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, download: false, upload: true)
+                return _uploadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, download: false, upload: true, steady: true)
                 { VerticalAlignment = VerticalAlignment.Top };
             case ExpandedItem.Frames:
                 return _frames = new FramesBlock(colors[MonitorRole.Frames], layout.Body, layout.Caption, layout.StorageRow)
@@ -143,12 +162,20 @@ internal sealed partial class MonitorView
         }
     }
 
-    private FrameworkElement GaugeTile(bool cpu, int rows, MonitorLayout layout, MonitorColors colors, CoreDisplay coreDisplay,
+    // The height decides what a gauge shows. One row: the figure, with the last minute's usage after it where the tile is two columns
+    // or wider (a single cell shows the figure alone). Two rows or more: the graph under the figure, at any width: the cores'
+    // columns, and for the GPU its engines' columns, or one wide column in a tile one column wide (as the small GPU of the page
+    // before the grid), where the engines' names would not fit.
+    private FrameworkElement GaugeTile(bool cpu, int columns, int rows, MonitorLayout layout, MonitorColors colors, CoreDisplay coreDisplay,
         int matrixColumns, Action<GpuSample> gpuChanged)
     {
+        bool graph = rows >= 2;
         var content = new Grid();
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        if (rows >= 2)
+        if (columns >= 2 && !graph) { if (cpu) _cpuTrend = true; else _gpuTrend = true; }
+        // Without the graph the figure sits in the middle of the tile, level with the readings beside it.
+        if (!graph) content.VerticalAlignment = VerticalAlignment.Center;
+        if (graph)
             content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
 
         if (cpu)
@@ -156,13 +183,13 @@ internal sealed partial class MonitorView
             var gauge = _cpuGauge = new FigureGauge("C", colors.Performance, layout.Figure, layout.Caption);
             gauge.VerticalAlignment = VerticalAlignment.Top;
             content.Children.Add(gauge);
-            if (rows >= 2)
+            if (graph)
             {
-                var graph = _cpuGraph = new ColumnGraph(double.PositiveInfinity, layout.Caption, labels: false,
+                var cores = _cpuGraph = new ColumnGraph(double.PositiveInfinity, layout.Caption, labels: false,
                     name: Loc.T("CPU 各核心占用", "CPU usage by core"), display: coreDisplay, matrixColumns: matrixColumns)
                 { Margin = new Thickness(0, 4, 0, 2) };
-                Grid.SetRow(graph, 1);
-                content.Children.Add(graph);
+                Grid.SetRow(cores, 1);
+                content.Children.Add(cores);
             }
         }
         else
@@ -171,13 +198,20 @@ internal sealed partial class MonitorView
             gauge.VerticalAlignment = VerticalAlignment.Top;
             gauge.Clicked += () => { if (_nextGpu is { } next) gpuChanged(next); };
             content.Children.Add(gauge);
-            if (rows >= 2)
+            if (graph && columns < 2)
             {
-                var graph = _gpuGraph = new ColumnGraph(EngineColumn, layout.Caption, labels: !layout.CompactMetrics, gap: 6,
+                // The block is the page before the grid's button for making the GPU large; here it only shows the reading.
+                var block = _gpuBlock = new BlockGauge(colors.Gpu, "", layout.Caption) { Margin = new Thickness(0, 4, 0, 2), Cursor = null, IsHitTestVisible = false };
+                Grid.SetRow(block, 1);
+                content.Children.Add(block);
+            }
+            else if (graph)
+            {
+                var engines = _gpuGraph = new ColumnGraph(EngineColumn, layout.Caption, labels: !layout.CompactMetrics, gap: 6,
                     name: Loc.T("GPU 各引擎占用", "GPU usage by engine"))
                 { Margin = new Thickness(0, 4, 0, 2) };
-                Grid.SetRow(graph, 1);
-                content.Children.Add(graph);
+                Grid.SetRow(engines, 1);
+                content.Children.Add(engines);
             }
         }
         return content;

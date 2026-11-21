@@ -495,9 +495,16 @@ static class DeviceProtocolTests
         check("Nordic receivers: only the Ninjutso Sora V2's, on its vendor collection", Dongles.Find(0x1915, 0xAE1C, 0xFFA0, "", 33) == Dongles.Protocol.Nordic
             && Dongles.Find(0x1915, 0xAE1C, 0x0001, "", 0) is null && Dongles.Find(0x1915, 0x7777, 0xFFA0, "", 33) is null);
         var inphic = new byte[33]; inphic[0] = 0x0C; inphic[2] = 0x20; inphic[6] = 1; inphic[0x12] = 66; inphic[0x13] = 2;
-        check("Inphic IN9: the handshake with its payload, the query, a reply", Dongles.InphicRequest(0xF0, 3, Dongles.InphicHandshake)[..9].SequenceEqual(new byte[] { 0x0C, 0x01, 0xF0, 0x00, 0x03, 0x01, 0x01, 0xFF, 0 })
-            && Dongles.InphicRequest(0x20, 3)[..6].SequenceEqual(new byte[] { 0x0C, 0x01, 0x20, 0x00, 0x03, 0 }) && Dongles.InphicRequest(0x20, 3).Length == 33
-            && Dongles.InphicBattery(inphic) == new BatteryRead(66, true));
+        static byte[] With(byte[] frame, int at, byte value) { var copy = (byte[])frame.Clone(); copy[at] = value; return copy; }
+        check("Inphic IN9 and Machenike's M7 Pro, M720, M840: the query, a reply charging (2, InphicBatteryTray-IN9) or charging and full (1 and 2, Machenike), on battery, and an empty one",
+            Dongles.InphicRequest(0x20, 3)[..6].SequenceEqual(new byte[] { 0x0C, 0x01, 0x20, 0x00, 0x03, 0 }) && Dongles.InphicRequest(0x20, 3).Length == 33
+            && Dongles.InphicRequest(0x20, 3)[5..].All(b => b == 0)
+            && Dongles.InphicBattery(inphic) == new BatteryRead(66, true) && Dongles.InphicBattery(With(inphic, 0x13, 1)) == new BatteryRead(66, true)
+            && Dongles.InphicBattery(With(inphic, 0x13, 0)) == new BatteryRead(66) && Dongles.InphicBattery(With(inphic, 0x13, 3)) == new BatteryRead(66)
+            && Dongles.InphicBattery(With(inphic, 6, 0)) is null && Dongles.InphicBattery(With(inphic, 0x12, 101)) is null);
+        check("Inphic: Machenike's mice on 248A:5B2E and 5B2F, read only on the 33-byte feature collection",
+            Dongles.Find(0x248A, 0x5B2E, 0xFF00, "", 33) == Dongles.Protocol.Inphic && Dongles.Find(0x248A, 0x5B2F, 0xFF00, "", 33) == Dongles.Protocol.Inphic
+            && Dongles.Find(0x248A, 0x5B2F, 0x0001, "", 0) is null);
         check("MCHOSE: the device info request with its checksum", Dongles.MchoseRequest()[..9].SequenceEqual(new byte[] { 0x4D, 0x01, 0x01, 0x00, 0x00, 0x09, 0x00, 0x00, 0x08 }));
         // mitsimi/mchose-tray's capture from a K7 V2 Ultra+ (3837:1014): 83 %, not charging, and that frame changed (its XOR
         // recomputed) for the other states.
@@ -647,6 +654,33 @@ static class DeviceProtocolTests
         byte[] max = [0x07, 0x19, 0x01, 0x0A, 0x20, 0x2B, 0x07, 0x1F, 0, 0];
         check("AirPods Max and the one-piece Beats: one level, no left and right", AppleAdvert.Model(max) == "AirPods Max" && AppleAdvert.Parts(max) is { Count: 0 }
             && AppleAdvert.Single(max) == new BatteryRead(70, true, BatteryAccuracy.Steps) && AppleAdvert.Single([0x07, 0x19, 0x01, 0x10, 0x20, 0x2B, 0x0F, 0x0F]) is null);
+        // AirPods 4 (0x1920) and its noise-cancelling model (0x1B20) are earbuds with a case; AirPods Max with USB-C (0x1F20)
+        // is one piece; Beats Fit Pro (0x1220) are earbuds of the Beats family.
+        byte[] four = [0x07, 0x19, 0x01, 0x19, 0x20, 0x2B, 0x86, 0x43, 0, 0], fourAnc = [0x07, 0x19, 0x01, 0x1B, 0x20, 0x2B, 0x86, 0x43, 0, 0];
+        check("AirPods 4: read as earbuds with a case", AppleAdvert.Model(four) == "AirPods 4" && AppleAdvert.Parts(four) is { Count: 3 } && AppleAdvert.Single(four) is null
+            && AppleAdvert.Model(fourAnc) == "AirPods 4" && AppleAdvert.Parts(fourAnc) is { Count: 3 });
+        byte[] maxUsbC = [0x07, 0x19, 0x01, 0x1F, 0x20, 0x2B, 0x07, 0x1F, 0, 0], fitPro = [0x07, 0x19, 0x01, 0x12, 0x20, 0x2B, 0x86, 0x43, 0, 0];
+        check("AirPods Max with USB-C: one level; Beats Fit Pro: earbuds", AppleAdvert.Model(maxUsbC) == "AirPods Max" && AppleAdvert.Single(maxUsbC) == new BatteryRead(70, true, BatteryAccuracy.Steps)
+            && AppleAdvert.Model(fitPro) == "Beats Fit Pro" && AppleAdvert.Parts(fitPro) is { Count: 3 });
+        // A model not in the table (a newer one): no name, its parts read as earbuds all the same.
+        byte[] unknown = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0x86, 0x43, 0, 0];
+        var unknownParts = AppleAdvert.Parts(unknown)!;
+        check("AirPods: a model not in the table is read as earbuds", AppleAdvert.Model(unknown) is null && AppleAdvert.Single(unknown) is null
+            && unknownParts.Count == 3 && unknownParts[0] == new PartBattery(BatteryPart.Left, 60, false) && unknownParts[2] == new PartBattery(BatteryPart.Case, 30, true));
+        // A model not in the table with one level and no case is taken for a one-piece model, whichever nibble holds the level;
+        // two levels without a case are still earbuds.
+        byte[] loneLow = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0xF7, 0x1F, 0, 0], loneHigh = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0x7F, 0x2F, 0, 0];
+        byte[] budsNoCase = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0x86, 0x0F, 0, 0];
+        check("AirPods: an unknown model with one level and no case shows one level", AppleAdvert.Parts(loneLow) is { Count: 0 }
+            && AppleAdvert.Single(loneLow) == new BatteryRead(70, true, BatteryAccuracy.Steps)
+            && AppleAdvert.Parts(loneHigh) is { Count: 0 } && AppleAdvert.Single(loneHigh) == new BatteryRead(70, true, BatteryAccuracy.Steps)
+            && AppleAdvert.Single(budsNoCase) is null && AppleAdvert.Parts(budsNoCase) is { Count: 2 });
+        // The exact model takes the place of a plain Apple name of its line; a name the user gave, another line or no model keeps it.
+        check("AirPods: the exact model", AppleAdvert.Product(four) == "AirPods 4" && AppleAdvert.Product(advert) == "AirPods Pro 1"
+            && AppleAdvert.Product(maxUsbC) == "AirPods Max USB-C" && AppleAdvert.Product(fitPro) is null && AppleAdvert.Product(unknown) is null);
+        check("AirPods: a plain name shows the exact model, a given name stays", AppleAdvert.Shown("AirPods", "AirPods 4") == "AirPods 4"
+            && AppleAdvert.Shown(" airpods pro ", "AirPods Pro 2 USB-C") == "AirPods Pro 2 USB-C" && AppleAdvert.Shown("AirPods Pro", "AirPods 4") == "AirPods Pro"
+            && AppleAdvert.Shown("Koooki's AirPods", "AirPods 4") == "Koooki's AirPods" && AppleAdvert.Shown("AirPods", null) == "AirPods");
         check("AirPods: another advertisement is none", AppleAdvert.Parts([0x10, 0x05, 0, 0, 0, 0, 0, 0]) is null && AppleAdvert.Model([0x07, 0x19, 0x01, 0x99, 0x99]) is null);
     }
 }

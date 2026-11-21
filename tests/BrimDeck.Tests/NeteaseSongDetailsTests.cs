@@ -55,6 +55,14 @@ internal static class NeteaseSongDetailsTests
             && MediaRouting.FillDetails(playing with { SongId = "netease:999" }, details).Artist == "");
         check("Non-Netease tracks are never filled",
             MediaRouting.FillDetails(playing with { SongId = "qq:1", Artist = "" }, details).Artist == "");
+        check("A track whose blank artist and album were filled is still the same song, so its lyrics are kept",
+            MediaRouting.OnlyDetailsFilled(playing, filled) && MediaRouting.OnlyDetailsFilled(playing, playing));
+        check("A changed title, song id, length, or an artist replaced rather than filled is another lookup",
+            !MediaRouting.OnlyDetailsFilled(playing, filled with { Title = "别的歌" })
+            && !MediaRouting.OnlyDetailsFilled(playing, filled with { SongId = "netease:1" })
+            && !MediaRouting.OnlyDetailsFilled(playing, filled with { End = TimeSpan.FromSeconds(200) })
+            && !MediaRouting.OnlyDetailsFilled(kept, kept with { Artist = "别人" })
+            && !MediaRouting.OnlyDetailsFilled(playing with { SongId = "qq:1" }, filled with { SongId = "qq:1" }));
     }
 
     private sealed class Web(string body, HttpStatusCode status = HttpStatusCode.OK, bool fail = false) : HttpMessageHandler

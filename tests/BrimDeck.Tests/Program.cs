@@ -23,7 +23,11 @@ try
     await MiMoApiTests.Run(root, Check);
     await QianwenUsageTests.Run(root, Check);
     await QwenWorkUsageTests.Run(root, Check);
+    await TraeUsageTests.Run(root, Check);
+    await DoubaoQuotaUsageTests.Run(root, Check);
+    await VolcengineArkUsageTests.Run(root, Check);
     MaasPricingTests.Run(root, Check);
+    SeedPricingTests.Run(root, Check);
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
@@ -70,6 +74,7 @@ try
     DevicesTests.Run(Check);
     PhoneLinkCardTests.Run(Check);
     PhoneLinkMergeTests.Run(Check);
+    EncoDeckBatteryTests.Run(Check);
     DeviceProtocolTests.Run(Check);
     DeviceSafetyTests.Run(Check);
     DeviceReadTests.Run(Check);
@@ -116,6 +121,7 @@ try
     MemoryModeTests.Run(Check);
     OffPeakTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);
+    IndicatorCapsuleTests.Run(Check);
     LanguageTests.Run(root, Check);
     await ConfiguredProviderTests.Run(Check);
     await ZCodeUsageTests.Run(root, Check);
@@ -146,7 +152,7 @@ try
     var priceDirectory = Path.Combine(root, "prices");
     using var pricing = new Pricing(priceDirectory, priceClient, () => priceTime);
     await pricing.RefreshAsync();
-    // DeepSeek's own prices are built in beside the catalog's.
+    // DeepSeek's own prices and Seed 2.1 Pro's are built in beside the catalog's.
     int builtIn = Pricing.BuiltInModels.Count;
     Check("Live catalog loaded without credentials", pricing.ModelCount == 4 + builtIn && handler.Calls == 1 && !handler.SawAuthorization);
     await pricing.RefreshAsync();
@@ -821,7 +827,7 @@ try
     using (var missing = new Pricing(Path.Combine(root, "no-cache"), priceClient, () => priceTime))
     {
         await missing.RefreshAsync();
-        Check("Offline first start has only DeepSeek's built-in prices", missing.ModelCount == builtIn && missing.Estimate(entry) is null &&
+        Check("Offline first start has only the built-in prices", missing.ModelCount == builtIn && missing.Estimate(entry) is null &&
             missing.Estimate(peakEntry) == 1.506m && missing.LastError is not null);
         Check("Reported costs do not depend on catalog availability", missing.Estimate(eventItem!) == .0345131m);
     }

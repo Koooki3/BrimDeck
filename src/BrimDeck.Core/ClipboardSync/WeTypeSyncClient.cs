@@ -34,7 +34,7 @@ public sealed class WeTypeUnpairedException() : IOException("WeType is not paire
 
 // Independently implemented control client. Wire fields and protocol constants were checked
 // against mkdir700/wx-ime-sdk; no external executable or SDK is loaded.
-public sealed class WeTypeSyncClient(WeTypeIdentity identity, Action save) : IClipboardSyncClient
+public sealed partial class WeTypeSyncClient(WeTypeIdentity identity, Action save) : IClipboardSyncClient
 {
     private const string Version = "3.5.4.57423";
     private string Name => identity.DeviceName;
@@ -171,11 +171,20 @@ public sealed class WeTypeSyncClient(WeTypeIdentity identity, Action save) : ICl
             throw new InvalidDataException("Pairing peer mismatch.");
         identity.Paired = true; save();
     }
+    // Takes this device out of its group, so the other devices stop listing it. Command 35 with UnbindReq{1 uin, 2 platform,
+    // 3 unbind_uin} was read from WeType for Windows 3.0.2.44, which sends it when a device is removed from My devices.
+    public async Task LeaveGroupAsync(CancellationToken ct)
+    {
+        if (identity.Uin == 0) throw new WeTypeUnpairedException();
+        await InitializeAsync(ct);
+        Success(await ApiAsync(35, new WeTypeWire().Number(1, identity.Uin).Number(2, 1).Number(3, identity.Uin), ct));
+    }
     public async Task ReleasePairingCodeAsync(string code, CancellationToken ct) =>
         _ = await ApiAsync(33, new WeTypeWire().Number(1, identity.Uin).Number(2, 1).Text(3, code), ct);
-    private async Task<WeTypeWire> GroupAsync(CancellationToken ct, bool clipboard = false)
+    private async Task<WeTypeWire> GroupAsync(CancellationToken ct, bool clipboard = false, bool fileInvites = false)
     {
-        var request = new WeTypeWire().Number(1, identity.Uin).Number(2, 1).Number(3, clipboard ? 3UL : 1UL);
+        ulong filter = 1UL | (clipboard ? 2UL : 0UL) | (fileInvites ? 64UL : 0UL);
+        var request = new WeTypeWire().Number(1, identity.Uin).Number(2, 1).Number(3, filter);
         if (clipboard) request.Number(4, 0);
         var response = await ApiAsync(34, request, ct);
         // 10020 with no group: this device is in no group any more (checked against wx-ime-sdk's session.rs).
@@ -240,7 +249,9 @@ public sealed class WeTypeSyncClient(WeTypeIdentity identity, Action save) : ICl
     }
     private async Task<(string Id, WeTypeWire Clip)?> LatestAsync(CancellationToken ct)
     {
-        var group = await GroupAsync(ct, true); var clip = group.GetMessage(3);
+        var group = await GroupAsync(ct, true, FileInviteChanged != null);
+        FileInviteChanged?.Invoke(ReadIncomingFile(group));
+        var clip = group.GetMessage(3);
         ulong sender = clip.GetNumber(7), version = clip.GetNumber(1), expiry = clip.GetNumber(4);
         if (version == 0 || sender == identity.Uin || expiry != 0 && expiry <= (ulong)(Stamp / 1000)) return null;
         if (!_members.Contains(sender)) throw new InvalidDataException("Unknown clipboard sender.");

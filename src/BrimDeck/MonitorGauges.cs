@@ -708,14 +708,16 @@ internal sealed class NetworkBlock : FrameworkElement
     private readonly bool _download, _upload;
     // With both shown: the upload at the left, as the table orders them.
     private readonly bool _uploadFirst;
+    // A grid tile, which may be a quarter of the page wide: what it shows follows its width, not the rate of the moment (Half).
+    private readonly bool _steady;
     private NetworkSample? _rates;
     private IReadOnlyList<double> _down = [], _up = [];
     private string _reason = "";
 
-    public NetworkBlock(MonitorColors colors, MetricsMode mode, double body, double caption, bool download = true, bool upload = true, bool uploadFirst = false)
+    public NetworkBlock(MonitorColors colors, MetricsMode mode, double body, double caption, bool download = true, bool upload = true, bool uploadFirst = false, bool steady = false)
     {
         _colors = colors; _mode = mode == MetricsMode.Blocks ? MetricsMode.Lines : mode; _body = body; _caption = caption;
-        _download = download || !upload; _upload = upload || !download; _uploadFirst = uploadFirst;
+        _download = download || !upload; _upload = upload || !download; _uploadFirst = uploadFirst; _steady = steady;
         Height = ExpandedCards.LineHeight(body);
     }
 
@@ -751,7 +753,9 @@ internal sealed class NetworkBlock : FrameworkElement
     }
 
     // total: the traffic over the period chosen (TrafficPeriods), at the end of the half in the caption's type where there is room for it (with
-    // its label if that fits, else the figure alone), and the curve ends before it.
+    // its label if that fits, else the figure alone), and the curve ends before it. Steady (a grid tile): the rate keeps the room of
+    // its widest text and the curve comes before the total, which shows only where a curve still fits beside it, so a narrow tile
+    // keeps its curve and nothing appears or goes as the rate changes.
     private void Half(DrawingContext drawing, double left, double width, double line, MonitorGlyph glyph, double? rate, double? total, IReadOnlyList<double> history, string color, double ppd)
     {
         double badge = Math.Round(_body + 5), baseline = Math.Round(line / 2 + _body * .38);
@@ -764,7 +768,15 @@ internal sealed class NetworkBlock : FrameworkElement
         MonitorDraw.Baseline(drawing, number, x, baseline);
         x += number.WidthIncludingTrailingWhitespace;
         if (q.Unit.Length > 0) { var unit = MonitorDraw.Text(q.Unit, _caption, Look.Tertiary, ppd); MonitorDraw.Baseline(drawing, unit, x + 3, baseline); x += 3 + unit.WidthIncludingTrailingWhitespace; }
-        double reserved = 0;
+        bool curve = _mode != MetricsMode.Line;
+        if (_steady)
+        {
+            double widest = new[] { "888", "88.8" }.Max(sample => MonitorDraw.Text(sample, _body + 1, Look.Primary, ppd, strong: true).WidthIncludingTrailingWhitespace)
+                + 3 + MonitorDraw.Text("MB/s", _caption, Look.Tertiary, ppd).WidthIncludingTrailingWhitespace;
+            x = Math.Max(x, left + badge + Math.Round(_body * .5) + Math.Ceiling(widest));
+        }
+        // Where the curve starts: after the rate, and no earlier than a set share of the half, so curves one above another line up.
+        double start = Math.Max(x + 10, left + width * .45), reserved = 0;
         if (total is { } moved)
         {
             var figure = MonitorFormat.Total(moved).Text;
@@ -772,17 +784,18 @@ internal sealed class NetworkBlock : FrameworkElement
             {
                 var drawn = MonitorDraw.Text(label, _caption, Look.Tertiary, ppd);
                 double drawnWidth = Math.Ceiling(drawn.WidthIncludingTrailingWhitespace);
-                if (x + 8 + drawnWidth > left + width) continue;
+                // Steady: the room is the widest figure's, so tiles of one width show the same parts and their curves end together.
+                double room = _steady ? Math.Max(drawnWidth, Math.Ceiling(MonitorDraw.Text(label.Replace(figure, "8.88 MB"), _caption, Look.Tertiary, ppd).WidthIncludingTrailingWhitespace)) : drawnWidth;
+                if ((_steady && curve ? start + 24 : x) + 8 + room > left + width) continue;
                 MonitorDraw.Baseline(drawing, drawn, left + width - drawnWidth, baseline);
-                reserved = drawnWidth + 8;
+                reserved = room + 8;
                 break;
             }
         }
-        if (_mode == MetricsMode.Line || history.Count < 3) return;
+        if (!curve || history.Count < 3) return;
         // The sparkline takes the rest of the half after the rate, centred on the line and as tall as the power line's curve (a drive
         // line less 4), so the page's small curves are one size. Measured before a Rect is made: a Rect does not take a negative size,
         // and a narrow half leaves none.
-        double start = Math.Max(x + 10, left + width * .45);
         double areaWidth = left + width - reserved - start, areaHeight = Math.Min(line - 4, Math.Ceiling(_body * 1.5) - 4), areaTop = Math.Round((line - areaHeight) / 2);
         if (areaWidth >= 24 && areaHeight >= 6) Sparkline(drawing, new Rect(start, areaTop, areaWidth, areaHeight), history, color);
     }
@@ -908,7 +921,11 @@ internal sealed class StorageBlock : FrameworkElement
             * Math.Clamp(_heat.At(now), 0, 1);
         double glyph = Math.Round(badge * 9 / 16), labelX = badge + Math.Round(_body * .5), figureX = labelX + labels + space, barX = figureX + figures + space;
         double cell = Math.Floor((w - ColumnGap * (_columns - 1)) / _columns);
-        double barEnd = Math.Max(barX, cell - heatWidth);
+        // A narrow cell (a grid tile a quarter of the page wide) leaves out the temperature first, then the total and the bar, so
+        // nothing is drawn over anything else.
+        if (cell < barX + 16 + heatWidth) heatWidth = 0;
+        bool sizes = cell >= barX - space;
+        double barEnd = sizes ? Math.Max(barX, cell - heatWidth) : barX;
         for (int i = 0; i < _rows.Count; i++)
         {
             var row = _rows[i]; var t = texts[i];
@@ -916,7 +933,7 @@ internal sealed class StorageBlock : FrameworkElement
             MonitorDraw.Arrow(drawing, new Point(left + (badge - glyph) / 2, middle - glyph / 2), glyph, Math.Max(1, glyph * .13), MonitorGlyph.Drive, Look.Secondary);
             MonitorDraw.Baseline(drawing, t.Label, left + labelX, baseline);
             MonitorDraw.Baseline(drawing, t.Used, left + figureX, baseline);
-            MonitorDraw.Baseline(drawing, t.Size, left + figureX + t.Used.WidthIncludingTrailingWhitespace, baseline);
+            if (sizes) MonitorDraw.Baseline(drawing, t.Size, left + figureX + t.Used.WidthIncludingTrailingWhitespace, baseline);
             if (barEnd - barX >= 16) Bar(drawing, new Rect(left + barX, Math.Round(middle - 2), barEnd - barX, 4), row, i, now);
             if (row.Celsius is { } celsius && heatWidth > 1)
             {
