@@ -315,8 +315,13 @@ public partial class MainWindow
     {
         string key = LyricsKey(_mediaTrack);
         if (_lyricsKey == key) return;
-        _lyricsKey = key; _lyricsRequest?.Cancel(); _lyricsRequest?.Dispose(); _lyricsRequest = null;
         var requested = _mediaTrack;
+        // NetEase's song/detail can fill a blank artist or album after the song's lyrics are shown (MediaRouting.FillDetails):
+        // the lyrics found stay, and are not looked up again.
+        if (key.Length > 0 && requested is not null && _lyricsTrack is { } found && (_lyrics.Lines.Count > 0 || _lyrics.Instrumental)
+            && MediaRouting.OnlyDetailsFilled(found, requested))
+        { _lyricsKey = key; _lyricsTrack = requested; return; }
+        _lyricsKey = key; _lyricsRequest?.Cancel(); _lyricsRequest?.Dispose(); _lyricsRequest = null;
         // A player announces a song in a few updates (its title, then its length or its song ID), each of which looks the lyrics
         // up again. Lyrics found for the same song stay shown until the next ones are found: cleared, the lyrics of KuGou's own
         // file, found at once, went and came back.
@@ -333,12 +338,7 @@ public partial class MainWindow
             // writes a lyric file, keeping any lyrics already shown.
             for (int attempt = 0; ; attempt++)
             {
-                var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token, available =>
-                {
-                    if (request.IsCancellationRequested || _lyricsKey != key) return;
-                    _lyrics = available; _musicRenderKey = "";
-                    if (IsMusicPage) RenderMusic(); RenderCompact();
-                });
+                var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
                 if (request.IsCancellationRequested || _lyricsKey != key) return;
                 if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0) ShowLyrics(lyrics, requested);
                 if (requested.IsAppleMusic ? lyrics.Source == LyricsService.AppleSource : !requested.IsKugou || lyrics.Source == LyricsService.KugouLocalSource) break;
