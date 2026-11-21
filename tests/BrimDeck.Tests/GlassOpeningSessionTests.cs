@@ -157,5 +157,18 @@ internal static class GlassOpeningSessionTests
         // A capture that may already show the panel's own glass is trusted half: it turns nothing.
         check("A covered-area capture taken after the opening's first frame is trusted less and turns no look",
             pure.Occluded().OcclusionPossible && pure.Occluded().Confidence <= GlassSceneSnapshot.OccludedTrust && !Turns(pure.Occluded(), dark: true));
+
+        // v3b: the first opening over a white page turned the look light about 20 ms after the intent, the panel still almost
+        // shut, and the palette's spring then took 250-365 ms from dark: the panel's body showed dark glass (.50 of its settled
+        // .94) for 100-200 ms. A turn the opening itself decides while the panel is still mostly shut takes the new look at once
+        // (the opening is the panel's new scene); one decided later, over a panel mostly open, still turns on the spring.
+        var opening = new GlassAppearance(dark: true, appDark: true);
+        bool turnedLight = opening.Open(pure, 0) && !opening.Dark;
+        check("An opening's own look turn decided while the panel is mostly shut takes the new look at once (no dark-first turn)",
+            turnedLight && GlassOpening.TurnsAtOnce(0, animates: true) && GlassOpening.TurnsAtOnce(.05, animates: true)
+            && GlassOpening.TurnsAtOnce(double.NaN, animates: true));
+        check("An opening's look turn decided over a panel mostly open turns on the spring; reduced motion turns at once anyway",
+            !GlassOpening.TurnsAtOnce(GlassOpening.TurnAtOnceBelow, animates: true) && !GlassOpening.TurnsAtOnce(.9, animates: true)
+            && GlassOpening.TurnsAtOnce(.9, animates: false));
     }
 }

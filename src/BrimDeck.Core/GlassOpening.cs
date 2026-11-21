@@ -19,4 +19,14 @@ public static class GlassOpening
         double open = covered >= capsule ? covered : covered + CapsuleShare * (capsule - covered);
         return capsule + (open - capsule) * o;
     }
+
+    // Review v3b (the first opening over a white page): the covered area's read turned the look about 20 ms after the intent, the
+    // panel still almost shut, and the palette's turn from the old look (about 365 ms) then ran over the panel's first 100-200 ms,
+    // its body shown dark before it turned light. A look the opening itself decides (GlassAppearance.Open) while the panel shown
+    // is less than TurnAtOnceBelow open is taken at once: the opening is the panel's new scene, and the glass it grows into is
+    // already the new look's. A turn decided over a panel mostly open (a late read) still goes on the palette's spring.
+    public const double TurnAtOnceBelow = .5;
+
+    public static bool TurnsAtOnce(double openness, bool animates)
+        => !animates || !(Math.Clamp(double.IsFinite(openness) ? openness : 0, 0, 1) >= TurnAtOnceBelow);
 }
