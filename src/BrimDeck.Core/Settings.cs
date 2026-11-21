@@ -590,6 +590,9 @@ public sealed class DeckSettings
     public int OpenDelay { get; set; } = 0;
     // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
     public bool ClickToExpand { get; set; }
+    // The collapsed panel opens on the page of the part under the pointer (the title, the readings, the devices, the rings),
+    // instead of on the page it would have opened on. A pointer over no part leaves that choice as it was.
+    public bool HoverPage { get; set; } = true;
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;
