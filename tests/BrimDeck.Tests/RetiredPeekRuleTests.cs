@@ -49,5 +49,26 @@ internal static class RetiredPeekRuleTests
         check("The other window behaviors are left as they were saved", untouched.ToJsonString() == before);
         check("Every window behavior that remains keeps its saved number",
             (int)WindowBehavior.Normal == 0 && (int)WindowBehavior.Line == 1 && (int)WindowBehavior.Hide == 2 && Enum.GetValues<WindowBehavior>().Length == 3);
+
+        // The migration holds only while WindowBehavior has no 3 and no Peek of its own. Should upstream add one (an indicator
+        // that opens into a capsule, say, numbered 3), a saved 3 is that member's and must be read as saved, not made the indicator.
+        check("Today WindowBehavior defines neither the number 3 nor the name Peek, so both are migrated",
+            !RetiredWindowBehaviors.NumberDefined(3) && !RetiredWindowBehaviors.NameDefined("Peek")
+            && RetiredWindowBehaviors.NumberDefined(1) && RetiredWindowBehaviors.NameDefined("line"));
+        static JsonObject Saved3() => JsonNode.Parse("""{"Maximized":3,"Borderless":"Peek","Occupied":3,"FullscreenRules":[{"Name":"x","Maximized":3,"Exclusive":"peek"}]}""")!.AsObject();
+        var newer3 = Saved3();
+        RetiredWindowBehaviors.PeekToLine(newer3, number => number is >= 0 and <= 3, _ => false);
+        check("With a newer WindowBehavior that defines 3, a saved 3 is left as it was, globally and in an app rule",
+            (int?)newer3["Maximized"] == 3 && (int?)newer3["Occupied"] == 3 && (int?)newer3["FullscreenRules"]![0]!["Maximized"] == 3);
+        check("With a newer WindowBehavior that defines 3 but no Peek, the name Peek still reads as the plain indicator",
+            (int?)newer3["Borderless"] == (int)WindowBehavior.Line && (int?)newer3["FullscreenRules"]![0]!["Exclusive"] == (int)WindowBehavior.Line);
+        var newerPeek = Saved3();
+        RetiredWindowBehaviors.PeekToLine(newerPeek, number => number is >= 0 and <= 2, name => string.Equals(name, "Peek", StringComparison.OrdinalIgnoreCase));
+        check("With a newer WindowBehavior that has a member named Peek, the name is left as written and only the number 3 is migrated",
+            (string?)newerPeek["Borderless"] == "Peek" && (string?)newerPeek["FullscreenRules"]![0]!["Exclusive"] == "peek"
+            && (int?)newerPeek["Maximized"] == (int)WindowBehavior.Line && (int?)newerPeek["FullscreenRules"]![0]!["Maximized"] == (int)WindowBehavior.Line);
+        var both = Saved3(); var bothBefore = both.ToJsonString();
+        RetiredWindowBehaviors.PeekToLine(both, number => number is >= 0 and <= 3, name => string.Equals(name, "Peek", StringComparison.OrdinalIgnoreCase));
+        check("With both defined, nothing is migrated", both.ToJsonString() == bothBefore);
     }
 }
