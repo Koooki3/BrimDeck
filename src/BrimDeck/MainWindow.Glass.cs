@@ -139,14 +139,14 @@ public partial class MainWindow
         QueueGlass();
     }
 
-    // A layout pass asks for the glass again only when it changed what the glass is placed or shaped by: the island's size, its
-    // place and scale in the window, what is shown of it. Other layout passes (the content's own) leave the glass as it is.
-    private readonly record struct GlassLayoutKey(Size Size, Point Origin, Point Far, double Dpi, bool Shown, double Opacity, bool Expanded, WindowState State);
+    // A layout pass asks for the glass again only when it changed what the glass is placed or shaped by: the island's size and
+    // corners, its place and scale in the window, what is shown of it. Other layout passes (the content's own) leave the glass as it is.
+    private readonly record struct GlassLayoutKey(Size Size, Point Origin, Point Far, double Dpi, bool Shown, double Opacity, bool Expanded, WindowState State, CornerRadius Corners);
     private GlassLayoutKey? _glassLayoutKey;
     private void GlassLayout(object? sender, EventArgs e)
     {
         var key = new GlassLayoutKey(Island.RenderSize, default, default, VisualTreeHelper.GetDpi(Island).PixelsPerDip,
-            IsVisible && Island.IsVisible && HoverZone.IsVisible, HoverZone.Opacity * Island.MaterialOpacity, _expanded, WindowState);
+            IsVisible && Island.IsVisible && HoverZone.IsVisible, HoverZone.Opacity * Island.MaterialOpacity, _expanded, WindowState, Island.CornerRadius);
         if (Island.IsVisible && Island.RenderSize is { Width: > 0, Height: > 0 } size && Island.TransformToAncestor(this) is { } toWindow)
             key = key with { Origin = toWindow.Transform(new Point()), Far = toWindow.Transform(new Point(size.Width, size.Height)) };
         if (_glassActive && key == _glassLayoutKey) return;
