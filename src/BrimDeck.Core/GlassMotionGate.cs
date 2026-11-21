@@ -9,9 +9,10 @@ namespace BrimDeck.Core;
 // Times are milliseconds on any steady clock.
 public sealed class GlassMotionGate
 {
-    // Quiet: no change of the island's size or shape for this long and the motion has settled (a frame or two missed is not a
-    // stop). MaxPause: the longest motion the reads wait for.
-    public const long Quiet = 120, MaxPause = 1000;
+    // Quiet: no change of the island's size or shape for this long and the motion has settled (three frames at 60 Hz; a longer
+    // stall mid-motion costs one early read, then the gate holds again). It adds straight to how late the veils answer a backdrop
+    // that changed during the motion. MaxPause: the longest motion the reads wait for.
+    public const long Quiet = 50, MaxPause = 1000;
 
     private long _last, _since;
     private bool _moved, _owed;
