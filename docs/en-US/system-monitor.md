@@ -30,6 +30,12 @@ Under "When expanded", "What the page shows" has a chip for each reading, clicke
 - Until you change these switches or the order, the expanded page is exactly as before the upgrade; the old switches for the process list, drives, power and battery, and frame rate are now part of "What the page shows".
 - With both the CPU and the GPU shown, click the smaller one on the expanded page to choose which one is shown large.
 
+Under **When expanded › Layout mode**, choose **Reorder only** or **Grid layout**. In reorder mode, drag reading groups to change their order. **Individual CPU cores › Hide** keeps total CPU usage visible.
+
+In grid mode, drag available readings into the two-column grid, then drag a tile to move it or drag its lower corner handle to resize it. A one-row CPU or GPU tile shows total usage. At two rows or more, it also shows its own graph. Memory, download, upload, and each drive letter can be placed independently. Select memory to choose the bar length. Power and battery, frame rate, and the process list can also be placed in the grid. Use arrow keys to move a tile, Shift+arrows to resize it, or Delete to remove it.
+
+Each mode keeps its own settings, and the grid is saved in the profile. A disconnected drive keeps its position and resumes showing readings when it returns. Narrow panels use a single column in reading order. Scroll to see tiles that do not fit vertically.
+
 ## CPU and GPU
 
 - CPU usage is worked out from the time the processor is busy (including WSL2 and virtual machines when Hyper-V is on), as Task Manager does from Windows 11 24H2.

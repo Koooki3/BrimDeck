@@ -88,7 +88,10 @@ public sealed partial class SettingsWindow
         // stay under the chips. Which of the CPU and the GPU is large is chosen on the page, by clicking the small one. The choices
         // that show themselves on the monitor page keep its preview open, so switching between them does not collapse it first.
         var (chips, sketch) = ExpandedOptions();
-        Group(WithSensorStops(WithFrameAccess(chips, () => ExpandedOf(S, ExpandedItem.Frames).Visible && !Reading(S, CompactMonitorItems.Frames).Visible)), sketch,
+        Group(WithSensorStops(WithFrameAccess(chips, () =>
+            (S.ExpandedCustomCards && S.ExpandedGridTiles is { } tiles
+                ? tiles.Any(tile => tile.Item == ExpandedItem.Frames) : ExpandedOf(S, ExpandedItem.Frames).Visible)
+            && !Reading(S, CompactMonitorItems.Frames).Visible)), sketch,
             MusicChoice(Loc.T("进程行", "Process rows"), S.MonitorProcessView,
                 [(MonitorProcessView.Auto, Loc.T("自动", "Auto")), (MonitorProcessView.Compact, Loc.T("简略", "Compact")), (MonitorProcessView.Detailed, Loc.T("详细", "Detailed"))],
                 v => Resize(s => s.MonitorProcessView = v, DeckPage.Monitor), keepPreview: true),

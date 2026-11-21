@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -47,7 +48,7 @@ internal static class MonitorThemeColors
 // adapter's engines), the other gauge small beside it (a click on either swaps them), memory and network below, and the
 // busiest apps beside or under the readings. Every part draws itself; Update hands each its new reading. With more than one
 // graphics adapter the large GPU gauge names the shown adapter's kind and a click on it shows the next adapter.
-internal sealed class MonitorView : Grid
+internal sealed partial class MonitorView : Grid
 {
     // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
     private PanelLook Look => PanelLook.Of(this);
@@ -55,19 +56,24 @@ internal sealed class MonitorView : Grid
     private readonly MonitorColors _colors;
     private readonly MonitorMain _main;
     // Only what the plan has a place for is built.
-    private readonly FigureGauge? _cpuGauge, _gpuGauge;
-    private readonly ColumnGraph? _cpuGraph, _gpuGraph;
+    private FigureGauge? _cpuGauge, _gpuGauge;
+    private ColumnGraph? _cpuGraph, _gpuGraph;
     private readonly BlockGauge? _gpuBlock;
-    private readonly MemoryBlock? _memory;
+    private MemoryBlock? _memory;
     private readonly NetworkBlock? _network;
     private readonly StorageBlock? _storage;
-    private readonly PowerBlock? _power;
-    private readonly FramesBlock? _frames;
+    private readonly List<(string Letter, StorageBlock Block)> _driveCards = [];
+    private NetworkBlock? _downloadCard, _uploadCard;
+    private readonly ScrollViewer? _cardScroll;
+    private readonly IReadOnlyList<ExpandedCard> _cards = [];
+    private (ExpandedCard Card, double WithinRow)? _pendingCardScroll;
+    private PowerBlock? _power;
+    private FramesBlock? _frames;
     private readonly bool _temperatures;
     private readonly Grid _readings = new();
     // How far the readings stop above the page's foot, so their last line ends level with the list's last row (AlignFoot).
     private readonly FootAlignment _foot = new();
-    private readonly ProcessListView? _list;
+    private ProcessListView? _list;
     private readonly Canvas _overlay = new() { IsHitTestVisible = false };
     private ProcessCard? _card;
     private ProcessList? _processes;
@@ -82,8 +88,8 @@ internal sealed class MonitorView : Grid
     // the drives' entries theirs (the layout's StorageLines and StorageColumns are the places kept for the volumes under memory and
     // network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
     public MonitorView(ExpandedPlan plan, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
-        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures = false, bool smallTemperature = false,
-        PowerOptions? power = null, FrameworkElement? message = null, CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false, int matrixColumns = 0)
+        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures, bool smallTemperature,
+        PowerOptions power, FrameworkElement? message = null, CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false, int matrixColumns = 0)
     {
         var layout = plan.Steps;
         _layout = layout; _colors = colors; _temperatures = temperatures;
@@ -100,6 +106,7 @@ internal sealed class MonitorView : Grid
         _main = cpuMain ? MonitorMain.Cpu : MonitorMain.Gpu;
         string swapToGpu = Loc.T("切换为以 GPU 为主", "Show the GPU large"), swapToCpu = Loc.T("切换为以 CPU 为主", "Show the CPU large");
         string cores = Loc.T("CPU 各核心占用", "CPU usage by core");
+        bool hasGraphs = hasGpu || hasCpu && plan.CpuCores;
         var readings = _readings;
         // The bands, each with the kind that decides its place and its height: the gauges' band takes what the others leave.
         var bands = new List<(ExpandedItem Kind, FrameworkElement Element)>();
@@ -108,7 +115,8 @@ internal sealed class MonitorView : Grid
         {
             var band = new Grid();
             band.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            band.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
+            if (hasGraphs) band.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
+            else band.Margin = new Thickness(0, 0, 0, layout.CompactMetrics ? 10 : 16);
             // The gauge shown small takes a fixed width at the right, the same for either: a block for the GPU, thin columns for the
             // processor. Its line is wider than the column under it, and wider still with a temperature after the figure.
             double mini = Math.Round(Math.Clamp(layout.Figure * 3.4, 54, 84));
@@ -134,7 +142,7 @@ internal sealed class MonitorView : Grid
 
             var graphs = new Grid { Margin = new Thickness(0, layout.CompactMetrics ? 4 : 6, 0, layout.CompactMetrics ? 6 : 10) };
             graphs.ColumnDefinitions.Add(new ColumnDefinition());
-            if (pair)
+            if (pair && plan.CpuCores)
             {
                 graphs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
                 graphs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(mini) });
@@ -143,13 +151,18 @@ internal sealed class MonitorView : Grid
             {
                 // Fill the main graph's width even on CPUs with few cores. The fill is the
                 // load, the tick the clock, and pointing at a core gives both.
-                _cpuGraph = new ColumnGraph(double.PositiveInfinity, layout.Caption, labels: false, name: cores, display: coreDisplay, matrixColumns: matrixColumns);
-                graphs.Children.Add(_cpuGraph);
+                if (plan.CpuCores)
+                {
+                    _cpuGraph = new ColumnGraph(double.PositiveInfinity, layout.Caption, labels: false, name: cores, display: coreDisplay, matrixColumns: matrixColumns);
+                    graphs.Children.Add(_cpuGraph);
+                }
                 if (pair)
                 {
                     _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu, layout.Caption);
                     _gpuBlock.Clicked += () => mainChanged(MonitorMain.Gpu);
-                    SetColumn(_gpuBlock, 2); graphs.Children.Add(_gpuBlock);
+                    if (plan.CpuCores) SetColumn(_gpuBlock, 2);
+                    else { _gpuBlock.Width = mini; _gpuBlock.HorizontalAlignment = HorizontalAlignment.Right; }
+                    graphs.Children.Add(_gpuBlock);
                 }
             }
             else
@@ -157,18 +170,73 @@ internal sealed class MonitorView : Grid
                 // The engines spread over the room the graph has, so a wide page leaves no gap between them and the processor's columns.
                 _gpuGraph = new ColumnGraph(EngineColumn, layout.Caption, !layout.CompactMetrics, gap: 6, name: Loc.T("GPU 各引擎占用", "GPU usage by engine"));
                 graphs.Children.Add(_gpuGraph);
-                if (pair)
+                if (pair && plan.CpuCores)
                 {
                     _cpuGraph = new ColumnGraph(6, layout.Caption, false, gap: 1.5, button: swapToCpu, name: cores, display: coreDisplay, matrixColumns: matrixColumns);
                     _cpuGraph.Clicked += () => mainChanged(MonitorMain.Cpu);
                     SetColumn(_cpuGraph, 2); graphs.Children.Add(_cpuGraph);
                 }
             }
-            SetRow(graphs, 1); band.Children.Add(graphs);
+            if (hasGraphs) { SetRow(graphs, 1); band.Children.Add(graphs); }
             bands.Add((ExpandedItem.Cpu, band));
         }
 
-        bool hasMemory = plan.Part(ExpandedItem.Memory) is not null, hasNetwork = plan.Downloads || plan.Uploads;
+        if (plan.CardContent is { } custom && (custom.Cards.Count > 0 || custom.AwaitingDrives))
+        {
+            _cards = custom.Cards;
+            var cards = new Grid();
+            cards.ColumnDefinitions.Add(new ColumnDefinition());
+            cards.ColumnDefinitions.Add(new ColumnDefinition());
+            var slots = ExpandedCards.Place(custom.Cards, plan.CardsTwoColumns);
+            double line = ExpandedCards.LineHeight(layout.Body);
+            for (int i = 0; i < custom.Cards.Count; i++)
+            {
+                var card = custom.Cards[i];
+                var (row, column, span) = slots[i];
+                while (cards.RowDefinitions.Count <= row) cards.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                FrameworkElement reading;
+                if (card.Item == ExpandedItem.Memory)
+                    reading = _memory = new MemoryBlock(colors, false, layout.Body, layout.Caption, free, compactBar: card.CompactMemoryBar);
+                else if (card.Item == ExpandedItem.Power)
+                    reading = _power = new PowerBlock(colors, power, layout.Body, layout.Caption, line);
+                else if (card.Item == ExpandedItem.Frames)
+                    reading = _frames = new FramesBlock(colors[MonitorRole.Frames], layout.Body, layout.Caption, line);
+                else if (card.Letter is { } letter)
+                {
+                    var drive = new StorageBlock(colors, layout.Body, layout.Caption, line, 1, 1, temperatures, free, alignCardBaseline: true);
+                    _driveCards.Add((letter, drive));
+                    reading = drive;
+                }
+                else if (card.Item == ExpandedItem.Download)
+                    reading = _downloadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, upload: false);
+                else if (card.Item == ExpandedItem.Upload)
+                    reading = _uploadCard = new NetworkBlock(colors, MetricsMode.Lines, layout.Body, layout.Caption, download: false);
+                else continue;
+                // A two-line memory card adds room below the shared text baseline.
+                reading.VerticalAlignment = VerticalAlignment.Top;
+                var frame = new Border { Child = reading, ClipToBounds = true,
+                    Padding = new Thickness(6, ExpandedCards.VerticalPadding, 6, ExpandedCards.VerticalPadding),
+                    Margin = new Thickness(column == 1 ? 3 : 0, 0, span == 1 && column == 0 ? 3 : 0, ExpandedCards.RowGap) };
+                SetRow(frame, row); SetColumn(frame, column); SetColumnSpan(frame, span);
+                cards.Children.Add(frame);
+            }
+            if (custom.AwaitingDrives)
+            {
+                var waiting = new TextBlock { Text = Loc.T("正在读取硬盘", "Reading drives"), FontSize = layout.Caption, Margin = new Thickness(5, 2, 0, 2) };
+                waiting.SetResourceReference(TextBlock.ForegroundProperty, "PanelSecondary");
+                SetRow(waiting, cards.RowDefinitions.Count); SetColumnSpan(waiting, 2);
+                cards.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                cards.Children.Add(waiting);
+            }
+            _cardScroll = new ScrollViewer { Content = cards, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto, PanningMode = PanningMode.VerticalOnly,
+                Focusable = true, MaxHeight = plan.CardsHeight };
+            var scroll = _cardScroll;
+            scroll.AddHandler(MouseWheelEvent, new MouseWheelEventHandler((_, e) => { if (scroll.ScrollableHeight < 1) e.Handled = false; }), true);
+            AutomationProperties.SetName(_cardScroll, Loc.T("监控卡片", "Monitor cards"));
+            bands.Add((ExpandedItem.Memory, _cardScroll));
+        }
+        bool hasMemory = plan.CardContent is null && plan.Part(ExpandedItem.Memory) is not null, hasNetwork = plan.Downloads || plan.Uploads;
         if (hasMemory || hasNetwork)
         {
             if (hasMemory) _memory = new MemoryBlock(colors, layout.Metrics != MetricsMode.Blocks, layout.Body, layout.Caption, free);
@@ -214,7 +282,7 @@ internal sealed class MonitorView : Grid
             _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, layout.StorageLines, layout.StorageColumns, temperatures, free);
             bands.Add((ExpandedItem.Storage, _storage));
         }
-        if (plan.Part(ExpandedItem.Power) is not null && layout.PowerLines > 0 && power is not null)
+        if (plan.Part(ExpandedItem.Power) is not null && layout.PowerLines > 0)
         {
             // One line of a list row's height.
             _power = new PowerBlock(colors, power, layout.Body, layout.Caption, layout.StorageRow);
@@ -233,13 +301,17 @@ internal sealed class MonitorView : Grid
         double lineGap = layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 };
         for (int i = 0; i < bands.Count; i++)
         {
-            bool flex = bands[i].Kind == ExpandedItem.Cpu;
+            bool flex = bands[i].Kind == ExpandedItem.Cpu && hasGraphs;
             readings.RowDefinitions.Add(new RowDefinition { Height = flex ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
             // At the lines' distance from a band that is not the gauges' (whose own margin keeps the distance).
-            if (i > 0 && bands[i - 1].Kind != ExpandedItem.Cpu) bands[i].Element.Margin = new Thickness(0, lineGap, 0, 0);
+            if (i > 0 && bands[i - 1].Kind != ExpandedItem.Cpu)
+            {
+                var margin = bands[i].Element.Margin;
+                bands[i].Element.Margin = new Thickness(margin.Left, lineGap, margin.Right, margin.Bottom);
+            }
             SetRow(bands[i].Element, i); readings.Children.Add(bands[i].Element);
         }
-        if (!bands.Any(band => band.Kind == ExpandedItem.Cpu)) readings.VerticalAlignment = VerticalAlignment.Center;
+        if (!hasGraphs) readings.VerticalAlignment = _cardScroll is null ? VerticalAlignment.Center : VerticalAlignment.Top;
 
         if (plan.List == ExpandedList.Full)
         {
@@ -260,7 +332,7 @@ internal sealed class MonitorView : Grid
                     MinWidth = MonitorLayout.ListMinimum, MaxWidth = MonitorLayout.ListMaximum });
                 SetColumn(_list, 2);
                 // The readings end where the list's last row ends, so both columns share their foot.
-                SizeChanged += (_, _) => AlignFoot();
+                if (_cardScroll is null) SizeChanged += (_, _) => AlignFoot();
             }
             else
             {
@@ -273,6 +345,45 @@ internal sealed class MonitorView : Grid
         }
         SetColumnSpan(_overlay, 3); SetRowSpan(_overlay, 3);
         Children.Add(_overlay);
+    }
+
+    public void ResizeCards(ExpandedPlan plan)
+    {
+        if (_cardScroll is not null && _cardScroll.MaxHeight != plan.CardsHeight) _cardScroll.MaxHeight = plan.CardsHeight;
+    }
+
+    public void KeepCardScrollFrom(MonitorView previous)
+    {
+        var scroll = _cardScroll;
+        if (scroll?.Content is not Grid grid || previous.CardScrollAnchor() is not { } anchor) return;
+        int index = 0;
+        while (index < _cards.Count && (_cards[index].Item != anchor.Card.Item || _cards[index].Letter != anchor.Card.Letter)) index++;
+        if (index == _cards.Count || grid.Children[index] is not FrameworkElement card) return;
+        _pendingCardScroll = anchor;
+        scroll.Loaded += Restore;
+
+        void Restore(object sender, RoutedEventArgs e)
+        {
+            scroll.Loaded -= Restore;
+            double rowTop = card.TranslatePoint(new Point(), grid).Y;
+            double withinRow = Math.Min(anchor.WithinRow, Math.Max(0, card.ActualHeight - 1));
+            scroll.ScrollToVerticalOffset(rowTop + withinRow);
+            Dispatcher.InvokeAsync(() => { _pendingCardScroll = null; }, System.Windows.Threading.DispatcherPriority.Background);
+        }
+    }
+
+    private (ExpandedCard Card, double WithinRow)? CardScrollAnchor()
+    {
+        if (_pendingCardScroll is { } pending) return pending;
+        if (_cardScroll?.Content is not Grid grid || _cardScroll.VerticalOffset <= 0) return null;
+        double offset = _cardScroll.VerticalOffset;
+        for (int i = 0; i < _cards.Count; i++)
+        {
+            if (grid.Children[i] is not FrameworkElement card) continue;
+            double top = card.TranslatePoint(new Point(), grid).Y;
+            if (top + card.ActualHeight > offset) return (_cards[i], Math.Max(0, offset - top));
+        }
+        return null;
     }
 
     // A press anywhere in the window outside the card and the list's rows closes the card: the page's blank room, the list's own
@@ -336,7 +447,7 @@ internal sealed class MonitorView : Grid
                 + (temperature.Length > 0 ? "\n" + TemperatureLine(cpu, temperature) : ""),
                 motion, heat is { } c ? Hot(Temperatures.OfCpu(c)) : null);
             int groups = Math.Max(1, cpu.GroupCount);
-            _cpuGraph?.Set(cpu.Cores.Select(core => new GraphColumn(core.Usage, cpuMain ? core.FrequencyFraction : null, _colors.Core(core.Group, groups), core.Group, core.Describe(), Hot: _colors.Level(ReadingLevels.OfShare(core.Usage), _colors.Core(core.Group, groups)))).ToList(), motion);
+            _cpuGraph?.Set(cpu.Cores.Select(core => new GraphColumn(core.Usage, cpuMain || _gridMode ? core.FrequencyFraction : null, _colors.Core(core.Group, groups), core.Group, core.Describe(), Hot: _colors.Level(ReadingLevels.OfShare(core.Usage), _colors.Core(core.Group, groups)))).ToList(), motion);
         }
         else { _cpuGauge.Set(null, "—", "", "", Loc.T("暂无读数：", "No reading: ") + snapshot.Cpu.Reason, motion); _cpuGraph?.Set([], motion); }
 
@@ -347,7 +458,7 @@ internal sealed class MonitorView : Grid
                 ? Loc.T("显存 ", "VRAM ") + MonitorFormat.Gigabytes(used) + (gpu.DedicatedTotal is { } total ? " / " + MonitorFormat.GigabytesCompact(total) : "") + " GB" : "";
             // With more than one adapter each is named with its kind, and the large gauge says which kind it shows.
             bool several = snapshot.Gpus.Count > 1;
-            _nextGpu = several && !cpuMain ? GpuChoice.Next(snapshot.Gpus, gpu) : null;
+            _nextGpu = several && (!cpuMain || _gridMode) ? GpuChoice.Next(snapshot.Gpus, gpu) : null;
             double? heat = _temperatures ? gpu.Temperature : null;
             string temperature = heat is { } celsius ? Temperatures.Format(celsius) + " °C" : "";
             // An adapter without engine readings at the moment (NoReadings) shows a dash and says so; it can still be switched from.
@@ -358,16 +469,16 @@ internal sealed class MonitorView : Grid
                 + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "")
                 + (temperature.Length > 0 ? " · " + temperature + (gpu.TemperatureFrom is { } from ? Loc.T($"（{from} 的温度）", $" ({from}'s temperature)") : "") : "");
             string switchTo = _nextGpu is { } next ? Loc.T("点击切换到 ", "Click to show ") + GpuChoice.Describe(next.Name, next.Kind) : "";
-            if (!cpuMain) _gpuGauge.Button = switchTo.Length > 0 ? Loc.T("切换显卡", "Switch GPU") : null;
+            if (!cpuMain || _gridMode) _gpuGauge.Button = switchTo.Length > 0 ? Loc.T("切换显卡", "Switch GPU") : null;
             // The adapter's name and its memory are in the tooltip and in the block's line, not spelled out beside the figure. After the
             // figure: the adapter's kind where there is more than one ("独显"), and its temperature, "独显 · 48 °C"; a temperature read
             // from another adapter (this one has no sensor) carries that adapter's kind instead.
-            string kind = several && !cpuMain ? GpuChoice.KindName(gpu.Kind) : "";
+            string kind = several && (!cpuMain || _gridMode) ? GpuChoice.KindName(gpu.Kind) : "";
             string heatText = temperature.Length > 0 && gpu.TemperatureKind is { } from2 ? from2 + " " + temperature : temperature;
             string detail = kind.Length > 0 && heatText.Length > 0 ? kind + " · " + heatText : kind + heatText;
             // The memory in use, in the large gauge's line after the temperature (the small one's room is kept for the temperature; its
             // block carries the memory), in its own level's color as in the collapsed row, not the temperature's.
-            var memoryShare = !cpuMain && !idle ? gpu.DedicatedFraction : null;
+            var memoryShare = (_gridMode || !cpuMain) && !idle ? gpu.DedicatedFraction : null;
             string memoryText = memoryShare is { } m ? Loc.T("显存 ", "VRAM ") + MonitorFormat.Percent(m) + "%" : "";
             _gpuGauge.Set(idle ? null : gpu.Usage, idle ? "—" : MonitorFormat.Percent(gpu.Usage), idle ? "" : "%", detail, switchTo.Length > 0 ? tip + "\n" + switchTo : tip, motion,
                 heat is { } c ? Hot(Temperatures.OfGpu(c)) : null, memoryText, memoryShare is { } level ? Hot(ReadingLevels.OfShare(level)) : null);
@@ -386,10 +497,18 @@ internal sealed class MonitorView : Grid
         }
 
         // The main gauge carries the last minute's usage in the room after its figure.
-        if ((cpuMain ? _cpuGauge : _gpuGauge) is { } large) large.Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
+        if (!_gridMode && (cpuMain ? _cpuGauge : _gpuGauge) is { } large) large.Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
         _memory?.Set(snapshot.Memory, motion);
         _network?.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
+        _downloadCard?.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
+        _uploadCard?.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
         _storage?.Set(snapshot.Storage, motion);
+        foreach (var (letter, block) in _driveCards)
+        {
+            var found = Storage.Find(snapshot.Storage, letter);
+            block.Set(found is { } volume ? [volume.Drive with { Volumes = [volume.Volume] }] : [], motion);
+            SetGridDrivePresence(letter, found is not null);
+        }
         _power?.Set(snapshot, motion);
         _frames?.Set(snapshot);
         _list?.Set(snapshot.Processes, _cores, motion);
