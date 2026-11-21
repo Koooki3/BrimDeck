@@ -1114,13 +1114,20 @@ public partial class MainWindow
             }
         }
         // The collapsed row's lyric lights each character up as it is sung (Karaoke), like the page's line; a row
-        // showing anything else (its title, an instrumental's caption) stays whole and fades nothing.
-        bool compactKaraoke = CompactLyrics && !PausedHides(PausedMusicHide.Text) && CompactLyricText(track, line.Current) == line.Current;
+        // showing anything else (its title, an instrumental's caption) stays whole and fades nothing. During a new
+        // track notice the row shows the caption, not the lyric, so sweeping the lyric's words over the title would
+        // light characters that are not the song's; wait until the notice ends and the marquee holds the line.
+        bool notice = _trackNoticeUntil > DateTimeOffset.UtcNow;
+        bool compactKaraoke = CompactLyrics && !PausedHides(PausedMusicHide.Text) && !notice
+            && CompactLyricText(track, line.Current) == line.Current
+            && _compactMarquee is not null && _compactMarquee.Text == line.Current;
         _karaokeCompact = compactKaraoke && words is not null;
         if (_compactMarquee is not null) _compactMarquee.Karaoke(compactKaraoke ? words : null, compactKaraoke ? Animated(sweep) : default);
         // The player reports four times a second; the highlight must cross a character in between. Drive the sweep on
         // display frames from the position the player gave (extrapolated continuously by MediaTrack.Position), easing to it.
-        if (Animates && track.State == MediaState.Playing && (words is not null || _karaokeCompact)) Motion.Start(this, KaraokeFrame);
+        // Only start when something on screen will take the frames, so a hidden or caption row is not re-started every tick.
+        bool lyricTarget = page ? _lyricCurrent is not null : _karaokeCompact;
+        if (Animates && track.State == MediaState.Playing && lyricTarget && words is not null) Motion.Start(this, KaraokeFrame);
         MusicIndicator.Visibility = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && track.State != MediaState.Stopped && track.HasTimeline ? Visibility.Visible : Visibility.Collapsed;
         // Hidden, the bar keeps its last length: setting it four times a second laid the island out again for nothing.
         if (MusicIndicator.Visibility != Visibility.Visible) return;
@@ -1139,11 +1146,14 @@ public partial class MainWindow
     private bool KaraokeFrame(double now)
     {
         if (_mediaTrack is not { } track || track.State != MediaState.Playing || !Animates) return false;
+        bool page = _expanded && IsMusicPage;
+        // Nothing on screen would take this sample: stop the frame loop instead of burning frames on a hidden
+        // or non-lyric row. The 250 ms position tick starts it again when a target becomes visible.
+        if (page ? _lyricCurrent is null : !_karaokeCompact || _compactMarquee is null) return false;
         var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold, Settings.MusicSimulatedKaraoke);
         if (words is null) return false;
-        bool page = _expanded && IsMusicPage;
-        if (page && _lyricCurrent is not null) _lyricCurrent.Karaoke(words, sweep);
-        if (!page && _karaokeCompact && _compactMarquee is not null) _compactMarquee.Karaoke(words, sweep);
+        if (page) _lyricCurrent!.Karaoke(words, sweep);
+        else _compactMarquee!.Karaoke(words, sweep);
         return true;
     }
     private (string Previous, string Current, string Next) CurrentLyrics(MediaTrack track)

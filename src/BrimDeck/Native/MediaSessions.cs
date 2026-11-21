@@ -547,14 +547,16 @@ internal sealed class MediaSessions : IDisposable
 
     private async Task ReadCoverAsync(CoverCache cache, string key, IReadOnlyList<string> urls)
     {
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+        // The outer token means "this read is obsolete" — a different song or disposal. A separate per-candidate
+        // timeout lets a slow or stalled first URL give up without cancelling the fallback candidates; a single
+        // shared token would leave every later URL already cancelled once the first one ran past six seconds.
+        using var cancellation = new CancellationTokenSource();
         cache.CoverCancellation = cancellation;
-        var token = cancellation.Token;
         try
         {
             foreach (var url in urls)
             {
-                if (_disposed || cache.CoverKey != key) return;
+                if (_disposed || cache.CoverKey != key || cancellation.IsCancellationRequested) return;
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http")) continue;
                 // Netease originals reach 3000 px and more than the size limit below. Its image CDN returns
                 // the size DecodeCover keeps anyway when asked with its own resize parameter.
@@ -562,6 +564,9 @@ internal sealed class MediaSessions : IDisposable
                     uri = new Uri(uri.AbsoluteUri + $"?param={CoverPixels}y{CoverPixels}");
                 try
                 {
+                    using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
+                    attempt.CancelAfter(TimeSpan.FromSeconds(6));
+                    var token = attempt.Token;
                     using var response = await _coverHttp.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token);
                     response.EnsureSuccessStatusCode();
                     if (response.Content.Headers.ContentLength > 8_388_608) continue;
@@ -576,15 +581,16 @@ internal sealed class MediaSessions : IDisposable
                     }
                     if (buffer.Length == 0 || buffer.Length > 8_388_608) continue;
                     var downloaded = buffer.ToArray();
-                    if (_disposed || cache.CoverKey != key) return;
-                    RememberCover(url, downloaded);
                     var decoded = await Task.Run(() => DecodeCover(downloaded));
-                    if (_disposed || cache.CoverKey != key) return;
+                    if (_disposed || cache.CoverKey != key || cancellation.IsCancellationRequested) return;
                     if (decoded is null) continue;
+                    // Cache only bytes that actually decode: a bad first URL would otherwise be remembered and,
+                    // on the next play of this song, win over a fallback that had decoded successfully.
+                    RememberCover(url, downloaded);
                     cache.Cover = decoded; cache.Previous = null; Schedule();
                     return;
                 }
-                catch { /* This candidate failed; try the next one. */ }
+                catch { /* This candidate timed out or failed; try the next one. */ }
             }
         }
         catch { /* A cover request cannot block playback state or controls. */ }

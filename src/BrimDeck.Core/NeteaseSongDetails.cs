@@ -22,7 +22,7 @@ public sealed record NeteaseSongDetails(string Id, string Name, string Artist, s
         string album = "", cover = "";
         if (song.TryGetProperty("album", out var record) && record.ValueKind == JsonValueKind.Object)
         { album = Str(record, "name"); cover = Str(record, "picUrl"); }
-        double duration = song.TryGetProperty("duration", out var ms) && ms.TryGetDouble(out var value) && value > 0 ? value / 1000 : 0;
+        double duration = song.TryGetProperty("duration", out var ms) && ms.ValueKind == JsonValueKind.Number && ms.TryGetDouble(out var value) && value > 0 ? value / 1000 : 0;
         return new(requestedId, name, artist, album, duration, cover.Length == 0 ? null : cover);
     }
 }
@@ -31,9 +31,13 @@ public sealed record NeteaseSongDetails(string Id, string Name, string Artist, s
 // the song without them, so a failed or slow request must never hold up metadata, artwork or controls.
 public sealed class NeteaseSongDetailService : IDisposable
 {
+    // A song whose detail is missing or whose request failed is asked again only after this long, so a refresh
+    // tick or a position report cannot turn a persistently empty id into a request on every frame.
+    internal static readonly TimeSpan RetryDelay = TimeSpan.FromMinutes(2);
     private readonly HttpClient _http;
     private readonly Dictionary<string, NeteaseSongDetails> _cache = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Task<NeteaseSongDetails?>> _pending = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTimeOffset> _retryAfter = new(StringComparer.Ordinal);
     private readonly object _gate = new();
     private bool _disposed;
 
@@ -53,7 +57,10 @@ public sealed class NeteaseSongDetailService : IDisposable
         lock (_gate)
         {
             if (_cache.TryGetValue(id, out var known)) return Task.FromResult<NeteaseSongDetails?>(known);
-            // Several sources can ask for the same song in one refresh; one request serves them all.
+            // A recent miss or failure is left alone until its cooldown passes; a pending request still serves
+            // callers that arrive while it is in flight.
+            if (_retryAfter.TryGetValue(id, out var until) && until > DateTimeOffset.UtcNow)
+                return Task.FromResult<NeteaseSongDetails?>(null);
             if (!_pending.TryGetValue(id, out task!)) _pending[id] = task = FetchAsync(id);
         }
         return task;
@@ -61,24 +68,34 @@ public sealed class NeteaseSongDetailService : IDisposable
 
     private async Task<NeteaseSongDetails?> FetchAsync(string id)
     {
+        NeteaseSongDetails? found = null;
         try
         {
             using var response = await _http.GetAsync($"https://music.163.com/api/song/detail?ids=[{Uri.EscapeDataString(id)}]");
-            if (!response.IsSuccessStatusCode) return null;
-            await using var stream = await response.Content.ReadAsStreamAsync();
-            using var document = await JsonDocument.ParseAsync(stream);
-            if (!document.RootElement.TryGetProperty("songs", out var songs) || songs.ValueKind != JsonValueKind.Array) return null;
-            NeteaseSongDetails? found = null;
-            foreach (var song in songs.EnumerateArray())
-                if ((found = NeteaseSongDetails.Parse(song, id)) is not null) break;
-            if (found is not null) lock (_gate) { _cache[id] = found; }
-            return found;
+            if (response.IsSuccessStatusCode)
+            {
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                using var document = await JsonDocument.ParseAsync(stream);
+                if (document.RootElement.TryGetProperty("songs", out var songs) && songs.ValueKind == JsonValueKind.Array)
+                    foreach (var song in songs.EnumerateArray())
+                        if ((found = NeteaseSongDetails.Parse(song, id)) is not null) break;
+            }
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or OperationCanceledException or InvalidOperationException)
         {
-            return null;
+            found = null;
         }
-        finally { lock (_gate) _pending.Remove(id); }
+        finally
+        {
+            lock (_gate)
+            {
+                _pending.Remove(id);
+                // Both an error and an empty reply are cooling down; a hit is cached and clears any earlier miss.
+                if (found is not null) { _cache[id] = found; _retryAfter.Remove(id); }
+                else _retryAfter[id] = DateTimeOffset.UtcNow.Add(RetryDelay);
+            }
+        }
+        return found;
     }
 
     public void Dispose()

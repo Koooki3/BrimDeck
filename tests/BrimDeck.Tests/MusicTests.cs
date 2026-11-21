@@ -33,6 +33,8 @@ internal static class MusicTests
         check("New lyric JSON credits retain text and timing in LRC", Lyrics.Parse(credit + "\n[00:03]正文", null, 10, "test").At(1).Current == "作曲: 测试作者");
         var creditYrc = Lyrics.ParseYrc(credit + "\n{invalid}\n[3000,1000](3000,1000,0)正文", 10, "test");
         check("YRC credits have no invented word times and malformed metadata is ignored", creditYrc.Lines.Count == 2 && creditYrc.Lines[0].Text == "作曲: 测试作者" && creditYrc.Lines[0].Words is null && creditYrc.Lines[1].Words is { Count: 1 });
+        var badCreditTime = Lyrics.ParseYrc("{\"t\":\"bad\",\"c\":[{\"tx\":\"甲\"}]}\n{\"t\":null,\"c\":[{\"tx\":\"乙\"}]}\n[3000,1000](3000,1000,0)正文", 10, "test");
+        check("A non-numeric credit time is skipped without aborting the rest of the lyric", badCreditTime.Lines.Count == 1 && badCreditTime.Lines[0].Text == "正文");
         var simulated = Lyrics.Parse("[00:00]一二三四\n[00:04]下一行", null, 10, "test");
         var simulationTrack = new MediaTrack { End = TimeSpan.FromSeconds(10), ReportedPosition = TimeSpan.FromSeconds(2), PositionAt = now, State = MediaState.Playing };
         check("Simulated karaoke defaults off", !new DeckSettings().MusicSimulatedKaraoke && simulated.Karaoke(simulationTrack, now).Words is null);
@@ -53,11 +55,24 @@ internal static class MusicTests
         check("Long lyric lines stay visible until the next timestamp", lrc.At(10.75).Current == "同一行" && lrc.At(12).Current == "同一行" && lrc.At(19.499).Current == "同一行" && lrc.At(19.5).Current == "后一行");
         var timed = Lyrics.Parse("[03:17.552]<03:17.552>我<03:17.855>也<03:18.143>可<03:18.479>以 <03:19.000>", null, 252, "test");
         check("Word timing tags are removed from LRC lines", timed.Lines.Count == 1 && timed.Lines[0].Text == "我也可以" && Math.Abs(timed.Lines[0].Seconds - 197.552) < 0.001);
+        // <03:19.000> has no text after it; it is the boundary that ends 以, so the sweep crosses 以 until 199.0
+        // instead of finishing the instant 以 starts at 198.479.
+        check("A textless end tag bounds the last word's duration",
+            timed.Lines[0].Words is { Count: 4 } four && Math.Abs(four[3].Duration - (199 - 198.479)) < 0.001
+            && Math.Abs(timed.Karaoke(198.7).Sweep.Sung - 4) > 0.1 && timed.Karaoke(199).Sweep.Sung == 4);
+        var prefixedLine = Lyrics.Parse("[00:01]前<00:02>后", null, 10, "test").Lines.Single();
+        check("Text before the first word tag stays shown and rides on the first word without an invented time",
+            prefixedLine.Text == "前后" && prefixedLine.Words is { Count: 1 } p && p[0].Count == 2 && Math.Abs(p[0].Time - 2) < 0.001);
+        var offsetLyrics = Lyrics.Parse("[offset:-1000]\n[00:02]<00:02>甲<00:03>乙", null, 20, "test");
+        var offsetLine = offsetLyrics.Lines.Single();
+        check("LRC word times take the same offset as their line",
+            offsetLine.Words is { Count: 2 } offsetWords && Math.Abs(offsetWords[0].Time - 1) < 0.001 && Math.Abs(offsetWords[1].Time - 2) < 0.001
+            && offsetLyrics.Karaoke(1.2).Sweep.Sung is > 0 and < 1);
         check("Word timing tags are kept as the line's words (Karaoke)",
             timed.Lines[0].Words is { Count: 4 } words && words.Select(w => w.Count).SequenceEqual([1, 1, 1, 1])
             && Math.Abs(words[3].Time - 198.479) < 0.001 && words[3].Count == 1
             && Math.Abs(timed.Karaoke(197.6).Sweep.Sung - .16) < .01 && Math.Abs(timed.Karaoke(198.2).Sweep.Sung - 2.17) < .01
-            && timed.Karaoke(198.5).Sweep.Sung == 4 && timed.Karaoke(200).Sweep.Sung == 4);
+            && timed.Karaoke(200).Sweep.Sung == 4);
         check("A word is crossed a character at a time, and the sweep rests where the word ends (Karaoke)",
             timed.Karaoke(197.6).Sweep is { Rest: 1 } start && Math.Abs(start.Rate - 3.3) < .01
             && timed.Karaoke(198.2).Sweep.Rest == 3);

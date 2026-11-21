@@ -85,9 +85,13 @@ internal static class NeteaseSongDetailsTests
         using var offline = new NeteaseSongDetailService(new HttpClient(failing));
         check("A failed request degrades silently to no details and is not cached as known",
             await offline.GetAsync("1") is null && offline.Known("1") is null);
+        check("A failure cools down so repeated refresh ticks do not reissue the request",
+            await offline.GetAsync("1") is null && await offline.GetAsync("1") is null && failing.Calls == 1);
 
         var empty = new Web("{\"songs\":[],\"code\":200}");
         using var missing = new NeteaseSongDetailService(new HttpClient(empty));
         check("A reply without the requested song yields no details", await missing.GetAsync("1") is null);
+        check("An empty reply cools down too, without caching a miss as known",
+            await missing.GetAsync("1") is null && missing.Known("1") is null && empty.Calls == 1);
     }
 }

@@ -141,13 +141,9 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
             if (stamps.Count == 0) continue;
             // Word-timed LRC puts a <mm:ss.xx> tag before each word; the tags are dropped, and the words are
             // kept so the line can light up as it is sung (Karaoke). The same words are kept with every line a row stamps.
-            var words = WordTimedRows(row[(stamps[^1].Index + stamps[^1].Length)..], out string text);
+            var words = WordTimedRows(row[(stamps[^1].Index + stamps[^1].Length)..], offset, out string text);
             foreach (Match stamp in stamps)
-            {
-                double time = int.Parse(stamp.Groups[1].Value) * 60 + int.Parse(stamp.Groups[2].Value);
-                if (stamp.Groups[3].Success) time += double.Parse("0." + stamp.Groups[3].Value, CultureInfo.InvariantCulture);
-                result.Add(new(Math.Max(0, time + offset), text, words));
-            }
+                result.Add(new(Math.Max(0, StampSeconds(stamp) + offset), text, words));
         }
         if (result.Count > 0)
             return InstrumentalNotice(result.Select(l => l.Text)) ? new([], true, source, true) : new(WithoutShortGaps([.. result.OrderBy(l => l.Seconds).Distinct()]), true, source, instrumental);
@@ -157,6 +153,13 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         // Plain lyrics have no timing information; retain their order for manual scrolling.
         return new(lines.Select(line => new LyricLine(0, line)).ToArray(), false, source, instrumental);
     }
+    // A timestamp match carries minutes, seconds and an optional fraction; shared by the line and word tags.
+    private static double StampSeconds(Match stamp)
+    {
+        double time = int.Parse(stamp.Groups[1].Value) * 60 + int.Parse(stamp.Groups[2].Value);
+        if (stamp.Groups[3].Success) time += double.Parse("0." + stamp.Groups[3].Value, CultureInfo.InvariantCulture);
+        return time;
+    }
     private static LyricLine? ParseCredit(string row, double offset)
     {
         if (!row.TrimStart().StartsWith('{')) return null;
@@ -164,7 +167,9 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         {
             using var json = JsonDocument.Parse(row);
             var root = json.RootElement;
-            if (!root.TryGetProperty("t", out var time) || !time.TryGetDouble(out double milliseconds) || !double.IsFinite(milliseconds)
+            // TryGetDouble throws InvalidOperationException on a string or null, which JsonException does not cover:
+            // check the kind first so a malformed "t" is skipped and the rest of the lyric still parses.
+            if (!root.TryGetProperty("t", out var time) || time.ValueKind != JsonValueKind.Number || !time.TryGetDouble(out double milliseconds) || !double.IsFinite(milliseconds)
                 || !root.TryGetProperty("c", out var parts) || parts.ValueKind != JsonValueKind.Array) return null;
             var text = string.Concat(parts.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.Object)
                 .Select(p => p.TryGetProperty("tx", out var tx) && tx.ValueKind == JsonValueKind.String ? tx.GetString() : "")).Trim();
@@ -188,24 +193,36 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         kept.Reverse();
         return kept;
     }
-    // Word-timed LRC puts a <mm:ss.xx> tag before each word, its time on the song's clock and the characters it
-    // covers of the line (the next tag's, or the line's end). Tags of empty words are dropped. The line's text is
-    // the words it carries with its leading and trailing whitespace trimmed, and a word that held the trimmed text
-    // covers as many characters as remain. Without tags the whole line is returned as its text and no words.
-    private static IReadOnlyList<LyricWord>? WordTimedRows(string seed, out string text)
+    // Word-timed LRC puts a <mm:ss.xx> tag before each word, its time on the song's clock. The characters a word
+    // covers run from its tag up to the next tag (or the line's end); a tag with no characters before the next one
+    // is a time boundary that closes the word before it. The text before the first tag has no word time of its own;
+    // it is kept in the line and carried by the first word so no character is lost from the shown line. Without tags
+    // the whole line is returned as its text and no words.
+    private static IReadOnlyList<LyricWord>? WordTimedRows(string seed, double offset, out string text)
     {
         var matches = Regex.Matches(seed, @"<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>");
         if (matches.Count == 0) { text = seed.Trim(); return null; }
         var words = new List<LyricWord>();
         var builder = new StringBuilder();
+        // Everything before the first tag precedes any word time. Keep it in the text, and let the first word
+        // carry those characters: it gets no invented time of its own, but its characters still sweep in order.
+        int lead = matches[0].Index;
+        builder.Append(seed, 0, lead);
         for (int i = 0; i < matches.Count; i++)
         {
             var match = matches[i];
             string fragment = seed[(match.Index + match.Length)..(i + 1 < matches.Count ? matches[i + 1].Index : seed.Length)];
-            if (fragment.Length == 0) continue;
-            double time = int.Parse(match.Groups[1].Value) * 60 + int.Parse(match.Groups[2].Value);
-            if (match.Groups[3].Success) time += double.Parse("0." + match.Groups[3].Value, CultureInfo.InvariantCulture);
-            words.Add(new LyricWord(time, fragment.Length));
+            double time = Math.Max(0, StampSeconds(match) + offset);
+            if (fragment.Length == 0)
+            {
+                // A tag with no text is the end of the word before it: give that word a duration so the sweep
+                // crosses it until this boundary instead of finishing the moment the word starts.
+                if (words.Count > 0 && words[^1].Duration <= 0 && time > words[^1].Time)
+                    words[^1] = words[^1] with { Duration = time - words[^1].Time };
+                continue;
+            }
+            words.Add(new LyricWord(time, fragment.Length + lead));
+            lead = 0;
             builder.Append(fragment);
         }
         text = builder.ToString().Trim();
@@ -476,8 +493,11 @@ public sealed partial class LyricsService : IDisposable
                 if (result.Lines.Count == 0 && !result.Instrumental) continue;
                 if (result.Lines.Any(line => line.Words is { Count: > 0 }))
                 {
-                    if (!first.Lines.Any(line => line.Words is { Count: > 0 })) { first = result; onAvailable?.Invoke(first); }
-                    continue;
+                    // Word timing is the best outcome: return at once so the slower endpoint cannot hold the
+                    // service gate while it retries or times out. The finally cancels and observes the loser.
+                    // A plain LRC already offered stays with its caller; only a word-timed reply upgrades it.
+                    onAvailable?.Invoke(result);
+                    return result;
                 }
                 if (first.Lines.Count == 0 && !first.Instrumental)
                 {
