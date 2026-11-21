@@ -691,6 +691,13 @@ public sealed class DeckSettings
     // How the processor's cores are drawn, collapsed and expanded: columns, a dot matrix, or by the count and the room (Auto).
     public CoreDisplay CoreDisplay { get; set; } = CoreDisplay.Auto;
     public int CoreMatrixColumns { get; set; }
+    // Hides the individual CPU cores in the expanded page; the aggregate gauge and the collapsed readings are independent.
+    public bool ExpandedCpuCores { get; set; } = true;
+    // Null means this profile has never edited the two-column grid and should seed it from the older reading/card settings;
+    // an empty list is an explicit choice to show no grid tiles.
+    public List<ExpandedGridTile>? ExpandedGridTiles { get; set; }
+    public bool ExpandedCustomCards { get; set; }
+    public List<ExpandedCard> ExpandedCardOrder { get; set; } = [];
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     // The span the traffic shown beside the network's rates is summed over, from Windows' own record (TrafficPeriods).
@@ -893,6 +900,8 @@ public sealed class DeckSettings
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
         copy._expanded = _expanded?.Select(reading => reading?.Copy()!).ToList();
+        copy.ExpandedGridTiles = ExpandedGridTiles is null ? null : [.. ExpandedGridTiles];
+        copy.ExpandedCardOrder = [.. ExpandedCardOrder ?? []];
         copy.MonitorCustomColors = (MonitorCustomColors ?? new()).Copy();
         copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder]; copy._pageOrder = [.. _pageOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
@@ -979,6 +988,8 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(CompactSmoothing)) CompactSmoothing = CompactSmoothing.Ten;
         if (!Enum.IsDefined(CoreDisplay)) CoreDisplay = CoreDisplay.Auto;
         CoreMatrixColumns = CoreMatrix.NormalizeColumns(CoreMatrixColumns);
+        if (ExpandedGridTiles is not null) ExpandedGridTiles = ExpandedGrid.Normalize(ExpandedGridTiles);
+        ExpandedCardOrder = ExpandedCards.Normalize(ExpandedCardOrder);
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;

@@ -63,11 +63,18 @@ internal static class ConfigBackupTests
             using (var zip = new ZipArchive(empty, ZipArchiveMode.Create, true)) zip.CreateEntry("readme.txt");
             check("a ZIP without a manifest is not a backup", Problem(empty.ToArray()) == BackupProblem.NotBackup);
         }
-        var damaged = Pack(Content(settings, keys: new Dictionary<Guid, string> { [keyed.InstanceId] = "sk-test-123" }));
-        // A byte in the middle of the compressed settings.
-        int middle = Encoding.ASCII.GetString(damaged).IndexOf("settings.json", StringComparison.Ordinal) + 200;
-        damaged[middle] ^= 0x5A;
-        check("a damaged backup is refused", Problem(damaged) == BackupProblem.NotBackup);
+        using (var damaged = new MemoryStream())
+        {
+            ConfigBackup.Write(damaged, Content(settings));
+            damaged.Position = 0;
+            using (var zip = new ZipArchive(damaged, ZipArchiveMode.Update, leaveOpen: true))
+            {
+                zip.GetEntry("settings.json")!.Delete();
+                using var writer = new StreamWriter(zip.CreateEntry("settings.json").Open());
+                writer.Write("{\"Width\":");
+            }
+            check("a backup with truncated settings JSON is refused", Problem(damaged.ToArray()) == BackupProblem.NotBackup);
+        }
         check("a backup from a later version asks for an update first", Problem(Pack(Content(settings, "9.1.0"))) == BackupProblem.Newer);
         try { Unpack(Pack(Content(settings, "10.0.0"))); check("the later version is named", false); }
         catch (BackupException ex) { check("the later version is named", ex.Version == "10.0.0"); }
