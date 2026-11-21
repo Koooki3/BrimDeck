@@ -125,6 +125,8 @@ public partial class MainWindow
         // choice is spent here. A page hotkey still wins; the clock, a page the settings leave out and an opening without the
         // pointer (a hotkey) keep the last page. The file transfer's count opens its page with the file transfer in front.
         var part = _hoverPart; _hoverPart = null;
+        // Opened by files dragged in, the panel stays on the clipboard page it was turned to (ShelfDragEnter, OpenForDrag).
+        if (_dropping) return;
         DeckPage? hover = part is { Page: { } chosen } && DeckPages.Shown(Settings, chosen) ? chosen : null;
         if (hover is not null && part!.Files && _hotkeyPage is null) _shelfFront = ShelfSide.Files;
         // A page hotkey opens on its page and remembers it, as choosing it on the page switch does (MainWindow.Hotkeys.cs).

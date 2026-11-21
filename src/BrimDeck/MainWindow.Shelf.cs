@@ -1245,20 +1245,25 @@ public partial class MainWindow
     }
 
     // ---- Files dragged in ----
-    // Into the collapsed island the panel opens on this page; into the panel on another page it turns to this page. The file transfer
-    // column lights up; over a file category, that category does too. Taken away without dropping, the panel goes back.
-    private void ShelfDragEnter(object sender, DragEventArgs e)
+    // Files dragged onto the collapsed island arrive with a button held, and the hover may open the panel before the drag reaches
+    // the window: OLE looks for the window under the pointer only as the pointer moves. Opened so, the panel opens on this page
+    // with the file transfer in front, not on the page of the part under the pointer, so no other page shows first; the drag that
+    // follows finds the page ready and builds nothing again while the panel is still opening. A press that began on the island is no
+    // drag coming in; a drag that never reaches the window (not files) leaves the drop after a moment, as a drag taken away does.
+    private bool DragArriving => !_islandPressed && (PasteInput.KeyDown(0x01) || PasteInput.KeyDown(0x02))
+        && DeckPages.Shown(Settings, DeckPage.Clipboard) && Settings.ShelfShown != ShelfShown.Clipboard;
+    private void OpenForDrag()
     {
-        _dropLeave?.Stop();
-        // Showing the clipboard alone, files dragged over the panel have nowhere to go.
-        // A selection of desktop icons with "此电脑" or "回收站" among them comes without a list of paths: its files are read from
-        // the shell's own list (DroppedFiles).
-        if (_draggingOut || !Settings.ClipboardPage || Settings.ShelfShown == ShelfShown.Clipboard || DroppedFiles.Paths(e.Data).Length == 0) return;
-        e.Effects = DragDropEffects.Copy; e.Handled = true;
-        if (_dropping) return;
+        _hoverPart = null;
+        BeginDrop(opened: true);
+        StartDropLeave(400);
+    }
+    // The page turned into a place to drop files: the clipboard page with the file transfer in front, its column lit.
+    private void BeginDrop(bool opened)
+    {
         _dropping = true;
         _shelfDetail = null; _shelfEdit = null; _shelfSearching = false; _shelfQuery = "";
-        if (!_expanded)
+        if (opened)
         {
             _dropOpened = true; _dropReturn = null;
             _hover.Stop();
@@ -1273,6 +1278,26 @@ public partial class MainWindow
         }
         RenderShelf();
     }
+    private void StartDropLeave(double milliseconds)
+    {
+        _dropLeave ??= new DispatcherTimer(DispatcherPriority.Input, Dispatcher);
+        _dropLeave.Interval = TimeSpan.FromMilliseconds(milliseconds);
+        _dropLeave.Tick -= DropLeft; _dropLeave.Tick += DropLeft;
+        _dropLeave.Stop(); _dropLeave.Start();
+    }
+    // Into the collapsed island the panel opens on this page; into the panel on another page it turns to this page. The file transfer
+    // column lights up; over a file category, that category does too. Taken away without dropping, the panel goes back.
+    private void ShelfDragEnter(object sender, DragEventArgs e)
+    {
+        _dropLeave?.Stop();
+        // Showing the clipboard alone, files dragged over the panel have nowhere to go.
+        // A selection of desktop icons with "此电脑" or "回收站" among them comes without a list of paths: its files are read from
+        // the shell's own list (DroppedFiles).
+        if (_draggingOut || !Settings.ClipboardPage || Settings.ShelfShown == ShelfShown.Clipboard || DroppedFiles.Paths(e.Data).Length == 0) return;
+        e.Effects = DragDropEffects.Copy; e.Handled = true;
+        if (_dropping) return;
+        BeginDrop(opened: !_expanded);
+    }
     private void ShelfDragOver(object sender, DragEventArgs e)
     {
         _dropLeave?.Stop();
@@ -1286,9 +1311,7 @@ public partial class MainWindow
     {
         if (!_dropping) return;
         // Leave also fires when the pointer moves between parts of the panel; it counts only if no part takes the drag right after.
-        _dropLeave ??= new DispatcherTimer(DispatcherPriority.Input, Dispatcher) { Interval = TimeSpan.FromMilliseconds(120) };
-        _dropLeave.Tick -= DropLeft; _dropLeave.Tick += DropLeft;
-        _dropLeave.Stop(); _dropLeave.Start();
+        StartDropLeave(120);
     }
     private void DropLeft(object? sender, EventArgs e) => EndDrop(dropped: false);
     private void ShelfDrop(object sender, DragEventArgs e)

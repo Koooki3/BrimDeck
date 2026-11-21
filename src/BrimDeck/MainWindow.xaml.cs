@@ -1112,8 +1112,10 @@ public partial class MainWindow : Window
         // The line that opens into the capsule does that first; a click on the capsule opens the panel (MainWindow.Peek.cs).
         if (!_expanded && LineOpensIsland && !_peek.Active) { BeginPeek(); return; }
         if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
-        _hoverPart = HoverPartUnderPointer();
         HideHoverFrame();
+        // Files on their way onto the island open the file transfer (MainWindow.Shelf.cs).
+        if (!_expanded && DragArriving) { OpenForDrag(); return; }
+        _hoverPart = HoverPartUnderPointer();
         SetExpanded(true);
     }
     // With ClickToExpand on, a click on the collapsed surface opens the panel; the press must start on it, so a drag that ends
