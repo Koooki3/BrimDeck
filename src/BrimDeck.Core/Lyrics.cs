@@ -85,11 +85,28 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
     // word being sung, so the marquee can sweep the highlight through a character as it is sung. The words are the current
     // line's own; a line without per-word times, or none yet (an instrumental, the start of a gap), returns no words: the
     // line is drawn whole. A paused song reports no rate: the sweep stays where the song does.
-    public (IReadOnlyList<LyricWord>? Words, LyricSweep Sweep) Karaoke(MediaTrack track, DateTimeOffset now, LyricHold? hold = null)
+    public (IReadOnlyList<LyricWord>? Words, LyricSweep Sweep) Karaoke(MediaTrack track, DateTimeOffset now, LyricHold? hold = null, bool simulate = false)
     {
         if (!CanSynchronize(track) || QqPreview && track.IsQqMusic) return (null, default);
         var (words, sweep) = Karaoke(track.Position(now).TotalSeconds + (track.IsAppleMusic ? AppleLead : 0), hold);
+        if (words is null && simulate)
+            (words, sweep) = SimulatedKaraoke(track.Position(now).TotalSeconds + (track.IsAppleMusic ? AppleLead : 0), track.Duration.TotalSeconds, hold);
         return (words, track.State == MediaState.Playing ? sweep : sweep with { Rate = 0 });
+    }
+    private readonly Dictionary<int, IReadOnlyList<LyricWord>> _simulatedWords = new();
+    private (IReadOnlyList<LyricWord>? Words, LyricSweep Sweep) SimulatedKaraoke(double seconds, double duration, LyricHold? hold)
+    {
+        int index = FindIndex(seconds, hold);
+        if (index < 0 || Instrumental || string.IsNullOrWhiteSpace(Lines[index].Text)) return (null, default);
+        var line = Lines[index];
+        double end = index + 1 < Lines.Count ? Lines[index + 1].Seconds : duration > line.Seconds ? duration : line.Seconds + 4.8;
+        double span = Math.Max(0.75, end - line.Seconds);
+        double progress = Math.Clamp((seconds - line.Seconds) / span, 0, 1);
+        if (!_simulatedWords.TryGetValue(index, out var words))
+            _simulatedWords[index] = words = new[] { new LyricWord(line.Seconds, line.Text.Length) };
+        double sung = line.Text.Length * progress * progress * (3 - 2 * progress);
+        double rate = line.Text.Length * 6 * progress * (1 - progress) / span;
+        return (words, new(sung, rate, line.Text.Length));
     }
     public (IReadOnlyList<LyricWord>? Words, LyricSweep Sweep) Karaoke(double seconds, LyricHold? hold = null)
     {
@@ -119,6 +136,7 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         if (offsetMatch.Success && double.TryParse(offsetMatch.Groups[1].Value, CultureInfo.InvariantCulture, out var ms)) offset = ms / 1000;
         foreach (var row in (lrc ?? "").Split('\n'))
         {
+            if (ParseCredit(row, offset) is { } credit) { result.Add(credit); continue; }
             var stamps = Regex.Matches(row, @"\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]");
             if (stamps.Count == 0) continue;
             // Word-timed LRC puts a <mm:ss.xx> tag before each word; the tags are dropped, and the words are
@@ -138,6 +156,21 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         if (InstrumentalNotice(lines)) return new([], true, source, true);
         // Plain lyrics have no timing information; retain their order for manual scrolling.
         return new(lines.Select(line => new LyricLine(0, line)).ToArray(), false, source, instrumental);
+    }
+    private static LyricLine? ParseCredit(string row, double offset)
+    {
+        if (!row.TrimStart().StartsWith('{')) return null;
+        try
+        {
+            using var json = JsonDocument.Parse(row);
+            var root = json.RootElement;
+            if (!root.TryGetProperty("t", out var time) || !time.TryGetDouble(out double milliseconds) || !double.IsFinite(milliseconds)
+                || !root.TryGetProperty("c", out var parts) || parts.ValueKind != JsonValueKind.Array) return null;
+            var text = string.Concat(parts.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.Object)
+                .Select(p => p.TryGetProperty("tx", out var tx) && tx.ValueKind == JsonValueKind.String ? tx.GetString() : "")).Trim();
+            return text.Length == 0 ? null : new(Math.Max(0, milliseconds / 1000 + offset), text);
+        }
+        catch (JsonException) { return null; }
     }
     // Some LRC files put a blank line wherever a line ends before the next one starts, often less than a second ahead of it.
     // A blank line the next line follows within Gap seconds is dropped, so the line before it stays shown through the pause.
@@ -208,6 +241,7 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         var result = new List<LyricLine>();
         foreach (var row in yrc.Split('\n'))
         {
+            if (ParseCredit(row, offset) is { } credit) { result.Add(credit); continue; }
             string line = row.Trim();
             if (line.Length == 0 || line[0] != '[' || line.IndexOf(']') < 0) continue;
             int close = line.IndexOf(']');
@@ -310,7 +344,7 @@ public sealed partial class LyricsService : IDisposable
         // Redirects are followed by Get, only to HTTPS on the same host.
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(8) };
     }
-    public async Task<Lyrics> FindAsync(MediaTrack track, bool enabled, CancellationToken token)
+    public async Task<Lyrics> FindAsync(MediaTrack track, bool enabled, CancellationToken token, Action<Lyrics>? onAvailable = null)
     {
         if (!enabled || string.IsNullOrWhiteSpace(track.Title) || string.IsNullOrWhiteSpace(track.Artist)) return Lyrics.Empty;
         if (!track.IsQqMusic && !string.IsNullOrWhiteSpace(track.EmbeddedLyrics))
@@ -340,11 +374,11 @@ public sealed partial class LyricsService : IDisposable
             else
             {
                 if (track.SongId.StartsWith("netease:", StringComparison.Ordinal))
-                    lyrics = await FindNeteaseId(track.SongId[8..], track.Duration.TotalSeconds, token);
+                    lyrics = await FindNeteaseId(track.SongId[8..], track.Duration.TotalSeconds, token, onAvailable);
                 // KuGou's songs ask KuGou first; for the others it is the last provider asked.
                 if (track.IsKugou) lyrics = await FindKugou(track, token);
                 if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindLrclib(track, token);
-                if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindNetease(track, token);
+                if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindNetease(track, token, onAvailable);
                 if (lyrics.Lines.Count == 0 && !lyrics.Instrumental && !track.IsKugou) lyrics = await FindKugou(track, token);
             }
             token.ThrowIfCancellationRequested();
@@ -425,14 +459,48 @@ public sealed partial class LyricsService : IDisposable
     private static bool Matches(MediaTrack track, string title, string artist, double seconds)
         => MatchText(track, track.Title) == MatchText(track, title) && Regex.Split(track.Artist, @"\s*[/、,，&;；]\s*").Where(a => a.Length > 0).All(a => MatchText(track, artist).Contains(MatchText(track, a), StringComparison.Ordinal))
             && (track.Duration.TotalSeconds <= 0 || Math.Abs(seconds - track.Duration.TotalSeconds) <= 2);
-    private async Task<Lyrics> FindNeteaseId(string id, double duration, CancellationToken token)
+    private async Task<Lyrics> FindNeteaseId(string id, double duration, CancellationToken token, Action<Lyrics>? onAvailable = null)
     {
         if (!Regex.IsMatch(id, @"\A[0-9]{1,16}\z")) return Lyrics.Empty;
-        // The public GET endpoint answers every lyric version it has; each of lv, kv, tv, yv, ytv, rv and yrv
-        // asks it (yv for the word-timed yrc, lv for the plain lrc), and NeteaseLyric takes the newest it holds.
+        using var race = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var pending = new List<Task<Lyrics>> { FindNeteaseNew(id, duration, race.Token), FindNeteaseOld(id, duration, race.Token) };
+        var first = Lyrics.Empty;
+        try
+        {
+            while (pending.Count > 0)
+            {
+                var completed = await Task.WhenAny(pending);
+                var result = await completed;
+                pending.Remove(completed);
+                token.ThrowIfCancellationRequested();
+                if (result.Lines.Count == 0 && !result.Instrumental) continue;
+                if (result.Lines.Any(line => line.Words is { Count: > 0 }))
+                {
+                    if (!first.Lines.Any(line => line.Words is { Count: > 0 })) { first = result; onAvailable?.Invoke(first); }
+                    continue;
+                }
+                if (first.Lines.Count == 0 && !first.Instrumental)
+                {
+                    first = result;
+                    onAvailable?.Invoke(first);
+                }
+            }
+            return first;
+        }
+        finally
+        {
+            race.Cancel();
+            foreach (var task in pending) _ = ObserveNeteaseRequest(task);
+        }
+    }
+    private static async Task ObserveNeteaseRequest(Task<Lyrics> task)
+    {
+        try { await task; } catch (Exception) { /* Canceled or failed losing request. */ }
+    }
+    private async Task<Lyrics> FindNeteaseOld(string id, double duration, CancellationToken token)
+    {
         var data = await Get($"https://music.163.com/api/song/lyric?id={id}&lv=1&kv=1&tv=1&yv=1&ytv=1&rv=1&yrv=1", token);
-        if (data is not { ValueKind: JsonValueKind.Object } value) return Lyrics.Empty;
-        return NeteaseLyric(value, duration);
+        return data is { ValueKind: JsonValueKind.Object } value ? NeteaseLyric(value, duration) : Lyrics.Empty;
     }
     // A NetEase lyric reply: the word-timed lyric wins over the plain one when it has words, its times being the
     // line's own. It is labelled yrc (the version asked for with yv) or klyric; both hold the word-timed rows
@@ -466,7 +534,8 @@ public sealed partial class LyricsService : IDisposable
             { var lyrics = Parse(item); if (lyrics.Lines.Count > 0 || lyrics.Instrumental) return lyrics; }
         return Lyrics.Empty;
     }
-    private async Task<Lyrics> FindNetease(MediaTrack track, CancellationToken token)
+    private Task<Lyrics> FindNetease(MediaTrack track, CancellationToken token) => FindNetease(track, token, null);
+    private async Task<Lyrics> FindNetease(MediaTrack track, CancellationToken token, Action<Lyrics>? onAvailable)
     {
         var search = await Get("https://music.163.com/api/search/get/web?type=1&limit=8&s=" + Uri.EscapeDataString(track.Title + " " + track.Artist), token);
         if (search is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty("result", out var result) || !result.TryGetProperty("songs", out var songs) || songs.ValueKind != JsonValueKind.Array) return Lyrics.Empty;
@@ -474,7 +543,7 @@ public sealed partial class LyricsService : IDisposable
         {
             string artist = song.TryGetProperty("artists", out var artists) && artists.ValueKind == JsonValueKind.Array ? string.Join(" / ", artists.EnumerateArray().Select(a => Str(a, "name"))) : "";
             if (!Matches(track, Str(song, "name"), artist, Num(song, "duration") / 1000) || !song.TryGetProperty("id", out var id)) continue;
-            var lyrics = await FindNeteaseId(id.ToString(), track.Duration.TotalSeconds, token);
+            var lyrics = await FindNeteaseId(id.ToString(), track.Duration.TotalSeconds, token, onAvailable);
             if (lyrics.Lines.Count > 0 || lyrics.Instrumental) return lyrics;
         }
         return Lyrics.Empty;

@@ -24,6 +24,7 @@ try
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
+    await NeteaseSongDetailsTests.Run(Check);
     await AppleMusicLyricsTests.Run(root, Check);
     await QueMusicLyricsTests.Run(root, Check);
     await KugouTests.Run(Check);

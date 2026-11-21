@@ -328,7 +328,12 @@ public partial class MainWindow
             // lyrics already shown.
             for (int attempt = 0; ; attempt++)
             {
-                var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
+                var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token, available =>
+                {
+                    if (request.IsCancellationRequested || _lyricsKey != key) return;
+                    _lyrics = available; _musicRenderKey = "";
+                    if (IsMusicPage) RenderMusic(); RenderCompact();
+                });
                 if (request.IsCancellationRequested || _lyricsKey != key) return;
                 if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0)
                 {
@@ -1079,7 +1084,7 @@ public partial class MainWindow
         var line = CurrentLyrics(track);
         // How far the current line is sung (Karaoke): the lyric area lights each character up as it is sung, sweeping through
         // them, in the open page's line and in the collapsed row's middle text.
-        var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold);
+        var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold, Settings.MusicSimulatedKaraoke);
         if (page && _lyricCurrent is not null) { _lyricCurrent.Text = line.Current; _lyricCurrent.Karaoke(words, Animated(sweep)); }
         if (page && _lyricPrevious is not null) _lyricPrevious.Text = line.Previous;
         if (page && _lyricNext is not null) _lyricNext.Text = line.Next;
@@ -1134,7 +1139,7 @@ public partial class MainWindow
     private bool KaraokeFrame(double now)
     {
         if (_mediaTrack is not { } track || track.State != MediaState.Playing || !Animates) return false;
-        var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold);
+        var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold, Settings.MusicSimulatedKaraoke);
         if (words is null) return false;
         bool page = _expanded && IsMusicPage;
         if (page && _lyricCurrent is not null) _lyricCurrent.Karaoke(words, sweep);

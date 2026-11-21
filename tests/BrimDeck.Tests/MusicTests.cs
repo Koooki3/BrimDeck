@@ -29,6 +29,18 @@ internal static class MusicTests
             && CompactMusicLayout.Calculate(164, true, 4, true) is { VisibleRings: 1, ScrollRings: true, RingSize: 20, RingGap: 8 });
         CompactLayout(check);
         var now = DateTimeOffset.UtcNow;
+        const string credit = "{\"t\":1000,\"c\":[{\"tx\":\"作曲: \"},{\"tx\":\"测试作者\",\"li\":\"https://example.com/avatar\"}]}";
+        check("New lyric JSON credits retain text and timing in LRC", Lyrics.Parse(credit + "\n[00:03]正文", null, 10, "test").At(1).Current == "作曲: 测试作者");
+        var creditYrc = Lyrics.ParseYrc(credit + "\n{invalid}\n[3000,1000](3000,1000,0)正文", 10, "test");
+        check("YRC credits have no invented word times and malformed metadata is ignored", creditYrc.Lines.Count == 2 && creditYrc.Lines[0].Text == "作曲: 测试作者" && creditYrc.Lines[0].Words is null && creditYrc.Lines[1].Words is { Count: 1 });
+        var simulated = Lyrics.Parse("[00:00]一二三四\n[00:04]下一行", null, 10, "test");
+        var simulationTrack = new MediaTrack { End = TimeSpan.FromSeconds(10), ReportedPosition = TimeSpan.FromSeconds(2), PositionAt = now, State = MediaState.Playing };
+        check("Simulated karaoke defaults off", !new DeckSettings().MusicSimulatedKaraoke && simulated.Karaoke(simulationTrack, now).Words is null);
+        var simulation = simulated.Karaoke(simulationTrack, now, simulate: true);
+        check("Simulated karaoke sweeps half the line at its midpoint", simulation.Words is not null && Math.Abs(simulation.Sweep.Sung - 2) < 0.001);
+        check("Simulated karaoke pauses with playback", simulated.Karaoke(simulationTrack with { State = MediaState.Paused }, now, simulate: true).Sweep.Rate == 0);
+        var nativeTiming = Lyrics.ParseYrc("[0,4000](0,1000,0)一(1000,3000,0)二", 10, "test");
+        check("Native word timing wins over simulation", nativeTiming.Karaoke(simulationTrack, now, simulate: true) == nativeTiming.Karaoke(simulationTrack, now));
         var track = new MediaTrack { Title = "测试曲目", Artist = "测试歌手", Start = TimeSpan.FromSeconds(10), End = TimeSpan.FromSeconds(210), ReportedPosition = TimeSpan.FromSeconds(20), PositionAt = now, State = MediaState.Playing, Rate = 2 };
         check("Playback position applies rate and timeline origin", track.Position(now.AddSeconds(3)).TotalSeconds == 16);
         check("Paused position does not advance", (track with { State = MediaState.Paused }).Position(now.AddSeconds(30)).TotalSeconds == 10);
@@ -111,11 +123,11 @@ internal static class MusicTests
         check("Native full lyrics bypass online lookup", nativeLyrics.At(2).Current == "播放器提供的完整歌词" && handler.Calls == 1);
         using var versioned = new NeteaseLyricHandler(); using var versionedHttp = new HttpClient(versioned); using var versionedService = new LyricsService(versionedHttp);
         var firstVersion = await versionedService.FindAsync(track with { Source = "NetEase", SongId = "netease:2692035029" }, true, default);
-        check("A NetEase lyric is asked of the public endpoint for its newest versions (Karaoke)",
+        check("NetEase dual requests preserve new endpoint word timing",
             firstVersion.Lines.Select(l => l.Text).SequenceEqual(["逐字歌词"]) && firstVersion.Lines[0].Words is { Count: 3 }
             && firstVersion.At(0.8).Current == "逐字歌词" && Math.Abs(firstVersion.Karaoke(0.8).Sweep.Sung - 1.17) < .01
-            && versioned.Requested.Count == 1
-            && versioned.Requested[0] == "https://music.163.com/api/song/lyric?id=2692035029&lv=1&kv=1&tv=1&yv=1&ytv=1&rv=1&yrv=1");
+            && versioned.Requested.Count == 2
+            && versioned.Requested[0] == "https://interface.music.163.com/eapi/song/lyric/v1");
         async Task<(Lyrics Lyrics, List<Uri> Requested)> Served(Func<Uri, HttpResponseMessage> reply)
         {
             using var served = new ReplyHandler(reply); using var servedHttp = new HttpClient(served); using var servedService = new LyricsService(servedHttp);
@@ -276,11 +288,11 @@ internal static class MusicTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             string url = request.RequestUri!.ToString(); Requested.Add(url);
-            if (!url.StartsWith("https://music.163.com/api/song/lyric?", StringComparison.Ordinal)) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            if (url != "https://interface.music.163.com/eapi/song/lyric/v1" || request.Method != HttpMethod.Post) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             // The public endpoint is asked for each version in one request; yv holds the word-timed yrc for
             // Karaoke and lv the plain lrc a song without word timings falls back to.
-            string lyric = url.Contains("lv=1", StringComparison.Ordinal) ? "[00:01]first" : "";
-            string yrc = url.Contains("yv=1", StringComparison.Ordinal) ? "[0,0](0,0,0)逐(700,600,0)字(1300,600,0)歌词" : "";
+            string lyric = "[00:01]first";
+            string yrc = "[0,0](0,0,0)逐(700,600,0)字(1300,600,0)歌词";
             var body = $"{{\"lrc\":{{\"version\":1,\"lyric\":\"{lyric}\"}},\"yrc\":{{\"version\":1,\"lyric\":\"{yrc}\"}},\"code\":200}}";
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
         }
