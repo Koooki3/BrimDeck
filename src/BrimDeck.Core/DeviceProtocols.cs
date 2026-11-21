@@ -1329,7 +1329,7 @@ public static class Dongles
     public enum Protocol
     {
         BitMouse, Compx, Vgn, Endgame, Vaxee, Inphic, Mchose, Ajazz, CompxFramed, F83, Nordic, MchoseRealtek, Gmouse, Lingbao, Nzxt, Cherry, Hecate,
-        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial, RapooQuery
+        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial, RapooQuery, EposSerial
     }
 
     // The Compx receivers atkctl documents (the ATK A9 Ultra), by vendor, product and usage page.
@@ -1385,6 +1385,9 @@ public static class Dongles
         // sent to it, the battery being read on the device's serial port (AtkHeadsets.SerialRequest).
         if (vendor == AtkVendor && AtkHeadsets.SerialProducts.Any(p => p.Product == product))
             return usagePage == 0x000C && usage == 0x0001 ? Protocol.AtkSerial : null;
+        // EPOS's GSP 370 dongle: the same, its battery read on its serial port (Epos.SerialRequest).
+        if (vendor == Epos.Vendor && Epos.SerialProducts.Any(p => p.Product == product))
+            return usagePage == 0x000C && usage == 0x0001 ? Protocol.EposSerial : null;
         if (CompxVerified.Contains((vendor, product, usagePage))) return Protocol.Compx;
         if (vendor == VgnVendor && usagePage == 0xFF1C && product == 0x5088) return Protocol.Vgn;
         // ATK's keyboards on the same page, answered with VGN's frame (AtkKeyboards): the measured Z87 Pro and the receivers ATK

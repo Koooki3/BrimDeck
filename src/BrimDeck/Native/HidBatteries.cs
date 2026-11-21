@@ -802,6 +802,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             Dongles.Protocol.Aula => Aula,
             Dongles.Protocol.MchoseKeyboard => MchoseKeyboard,
             Dongles.Protocol.AtkSerial => AtkSerial,
+            Dongles.Protocol.EposSerial => EposSerial,
             Dongles.Protocol.CompxSplit => CompxSplit,
             _ => null
         };
@@ -1348,6 +1349,19 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         claimed.Add(info.Path);
         string name = AtkHeadsets.SerialProducts.First(p => p.Product == info.Product).Name;
         return [Mouse("atk-headset", info, name, found.Read, DeviceKind.Headphones, name)];
+    }
+
+    // EPOS's GSP 370: read on its dongle's serial port (Epos.Serial*), through Family; nothing is sent to the HID collection.
+    private static IEnumerable<DeviceBattery> EposSerial(HidInfo info, HashSet<string> claimed)
+    {
+        var ports = UsbSerial.Ports(info.Vendor, info.Product);
+        if (ports.Count == 0) return [];
+        if (Family(info, ["epos.gsp370-serial"], _ => ports.Select(port => UsbSerial.AskStream<BatteryRead>(port, Epos.SerialBaud, Epos.SerialRequest(),
+                Epos.SerialBattery, Epos.SerialSettleMs, 2000)).FirstOrDefault(read => read is not null) is { } read ? (read, null) : null) is not { } found)
+            return [];
+        claimed.Add(info.Path);
+        string name = Epos.SerialProducts.First(p => p.Product == info.Product).Name;
+        return [Mouse("epos", info, name, found.Read, DeviceKind.Headphones, name)];
     }
 
     // MCHOSE's 7 series on 0x5253 (the RealTek exchange alone; MCHOSE's other reads are for 0x3837).
