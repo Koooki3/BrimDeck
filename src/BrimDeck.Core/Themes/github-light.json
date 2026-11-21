@@ -64,7 +64,5 @@
       { "name": "霓虹", "nameEn": "Neon", "stops": ["#BF3989", "#8250DF", "#0969DA"] }
     ]
   },
-  "effects": { "shadowOpacity": 0.18 },
-  // Primer: flat and quick. A subtle fill and a neutral 2 px bar along the bottom under the control the pointer is on.
-  "motion": { "hover": "underline", "hoverStrength": 0.22, "pace": 0.75, "color": "accent", "secondary": "#6E7781" }
+  "effects": { "shadowOpacity": 0.18 }
 }

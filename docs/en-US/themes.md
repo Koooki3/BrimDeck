@@ -103,6 +103,17 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain. Its lightest and darkest squares are checked for contrast like gradient stops; without `pixel` it has no effect | 0–0.12 |
 | `decor` | Quiet pictures drawn into the surface under the content, each value inherited on its own (a night look that names only `sea` keeps the day's `at` and `line`): `horizon` a sea (`sea`) below `at` of the height (0.62 when not set) with a line of light (`line`, any opacity, checked like the rest) along it; `caustics` a net of soft light lines below the horizon (over the whole surface without one); `palm` a palm frond's shadow in the open panel's top-right corner, above the horizon. A fully transparent color turns a part off, e.g. in a night look; a transparent `sea` removes the whole horizon, so the caustics then cover the surface. Nothing is drawn on the small collapsed island, so the horizon never crosses the clock; the motifs fade in as the panel opens. Text is held to its minimums over the sea (at the horizon and at its deepest), the line and the motifs, each over what it is drawn on | `at` 0.3–0.9, caustics alpha ≤ 0.2, palm alpha ≤ 0.12 |
 
+### Hover mark (motion)
+
+Off unless a theme turns it on: no built-in theme has a `motion` section, and the panel's controls keep their own hover looks. A theme that writes one draws a mark on the control the pointer is over, only on controls that show no hover of their own; the panel's buttons and the music controls already do, so they never get one. Each value is inherited on its own; a value that cannot be used is shown as a warning in settings and the rest of the theme still loads. Nothing is drawn while BrimDeck's or Windows' animations are off, or in high contrast.
+
+| Key | Effect | Range |
+| --- | --- | --- |
+| `hover` | `none`, `reveal` (a faint fill and a lit edge), `lift` (a soft shadow, for light themes), `underline` (a fill and a 2 px bar) | |
+| `hoverStrength` | How strongly the mark draws | 0–0.3 |
+| `pace` | Scales how long the mark takes | 0.6–1.6 |
+| `color` `secondary` | The mark and its second tone: a color key or `#RRGGBB` | |
+
 ### Day, dusk and night looks (night, dusk, daylight)
 
 A theme can carry a night look: `night` holds the `colors`, `apps`, `effects` and `clock` that change at night, laid over the day look by the local clock, or while Windows apps use dark mode (`daylight.mode`); whatever it leaves out stays as by day. An optional `dusk` look, written the same way, is laid over the day look for the last `duskMinutes` before the night begins. `daylight`'s `day` and `night` are when the day and the night begin (`HH:mm`, 06:30 and 18:30 by default; the day may run past midnight, as 20:00 to 08:00 does). The user can move them in half hours in Settings › Current theme › Daytime; choosing the theme's own hours again saves no setting. Both looks are held to the readability rules below.

@@ -6,8 +6,8 @@ namespace BrimDeck.Core;
 // How a theme answers the pointer on BrimDeck's own panel: a mark on the control the pointer hovers, drawn on the control's
 // own visible shape (InteractionFx in the window project). The file's "motion" section is merged field by field along the
 // base chain, like the effects, and every value is held to MotionSafety's limits. Nothing here runs by itself: BrimDeck only
-// animates while the app-wide rule allows it (Soft.Enabled), and a theme without a motion section (the default dark and light
-// themes) draws nothing over the controls, which keep their own hover looks.
+// animates while the app-wide rule allows it (Soft.Enabled), and the mark is off unless a theme turns it on: no built-in theme
+// has a motion section, and one without draws nothing over the controls, which keep their own hover looks.
 
 // The mark on a hovered control. reveal: a faint fill and a 1 px edge lit from the top (Fluent); lift: a soft shadow outside
 // the shape and a light top edge (a light theme's raised card); underline: a subtle fill and a 2 px bar along the bottom (Primer).
