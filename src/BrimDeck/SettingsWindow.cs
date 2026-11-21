@@ -93,14 +93,17 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         if (S.SettingsWindowMaximized) WindowState = WindowState.Maximized;
         Closing += (_, _) => { if (!_app.Exiting) RememberSize(); };
+        // Text keeps WPF's default layout (Ideal), as the panel's does. Laid out on whole pixels (Display), the strokes of one
+        // character came out uneven and the gaps between characters unequal at 150% and above (issue #249).
         UseLayoutRounding = true; SnapsToDevicePixels = true;
-        TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
         Native.SettingsChrome.Apply(this);
         SourceInitialized += (_, _) => Native.SettingsChrome.SetTheme(this, _palette.Dark);
         SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         Deactivated += (_, _) => { EndAppDrag(false); QueuePreviewDismissal(); };
         // Back from PawnIO's installer or uninstaller: the enhanced sensors page shows what changed.
         Activated += (_, _) => _refreshSensors?.Invoke();
+        SensorOperationChanged += RefreshSensorSettings;
+        Closed += (_, _) => SensorOperationChanged -= RefreshSensorSettings;
         PreviewMouseDown += (_, e) => DismissPreviewOutsideControl(e.OriginalSource);
         DismissPreviewOnCaptionPress();
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape && _appDrag is not null) { EndAppDrag(false); e.Handled = true; } };
@@ -130,6 +133,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private Button? _maximize;
     private void UpdateCaption()
     {
+        // A maximized window has no outline, as in Windows' own windows; it would draw a line along the screen's edges.
+        if (RootVisual is Border frame) frame.BorderThickness = new Thickness(WindowState == WindowState.Maximized ? 0 : 1);
         if (_maximize is null) return;
         _maximize.Content = CaptionIcon(WindowState == WindowState.Maximized ? "restore" : "maximize");
         _maximize.ToolTip = WindowState == WindowState.Maximized ? Loc.T("还原", "Restore") : Loc.T("最大化", "Maximize");
@@ -500,8 +505,9 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private readonly HashSet<DeckPage> _openSizes = [];
     private void Expanded()
     {
-        // The last viewed page is always offered, followed by each page that is shown. A choice whose page is switched off
-        // reads as the last viewed page, which is what the panel does then, and returns when the page is shown again.
+        // The last viewed page and the part under the pointer are always offered, followed by each page that is shown. A choice
+        // whose page is switched off reads as the last viewed page, which is what the panel does then, and returns when the page
+        // is shown again.
         // Switching a page on or off refills the list in place, so the page is not rebuilt and the switch keeps its animation.
         var start = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo") };
         AutomationProperties.SetName(start, Loc.T("每次打开时显示", "Page shown on opening")); PopupMotion.Attach(start);
@@ -509,7 +515,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         bool filling = false;
         void FillStarts()
         {
-            starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page"))];
+            starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page")), (DefaultDeckPage.Hover, Loc.T("鼠标所在的区段", "Part under pointer"))];
             foreach (var page in DeckPages.Visible(S))
                 starts.Add(page switch
                 {
@@ -544,7 +550,9 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         Group(pages);
         // Settings that apply across the expanded pages rather than to one of them.
         SectionTitle(Loc.T("通用", "General"));
-        Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start),
+        Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start,
+                help: () => Loc.T("选“鼠标所在的区段”时，鼠标靠近收起的面板会框出所在区段，展开后显示对应页面，例如标题对应音乐、读数对应系统监控；停在时钟上显示上次停留的页面。",
+                    "With “Part under pointer”, a frame marks the part of the collapsed panel the pointer is near, and the panel opens on its page, such as music for the title or the system monitor for the readings; the clock opens the last viewed page.")),
             Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value),
                 help: Loc.T("面板展开时，在面板内任意位置单击右键即可打开设置。", "When the panel is expanded, right-click anywhere inside it to open settings.")),
             MouseWheelRow(),
@@ -652,7 +660,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                 case 0:s.LaunchAtStartup=false;s.ShowTrayIcon=defaults.ShowTrayIcon;s.MemoryMode=defaults.MemoryMode;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.ClickToExpand=defaults.ClickToExpand;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.AlwaysOnTop=defaults.AlwaysOnTop;s.ForceTopmost=defaults.ForceTopmost;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.Occupied=defaults.Occupied;s.FullscreenRules=[];s.PanelScale=defaults.PanelScale;s.SurfaceTransparency=defaults.SurfaceTransparency;s.UiFont=defaults.UiFont;s.SettingsFollowsFont=defaults.SettingsFollowsFont;
                     s.ClickThrough=defaults.ClickThrough;s.ClickThroughPanel=defaults.ClickThroughPanel;s.ClickThroughKeyboard=defaults.ClickThroughKeyboard;s.WindowCapture=defaults.WindowCapture;break;
                 case HotkeysPage:foreach(var kind in Enum.GetValues<HotkeyKind>())s.SetHotkey(kind,defaults.Hotkey(kind));break;
-                case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
+                case 1:s.Style=defaults.Style;s.LineOpens=defaults.LineOpens;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
                     s.NotchEqualizer=defaults.NotchEqualizer;s.CapsuleEqualizer=defaults.CapsuleEqualizer;s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;s.ClockSeconds=defaults.ClockSeconds;CopyCollapsedSize(s,defaults);s.GripDoubleClick=defaults.GripDoubleClick;
                     s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;s.NotchDevices=defaults.NotchDevices;s.CapsuleDevices=defaults.CapsuleDevices;s.NotchOrder=defaults.NotchOrder;s.CapsuleOrder=defaults.CapsuleOrder;s.NotchTransfer=defaults.NotchTransfer;s.CapsuleTransfer=defaults.CapsuleTransfer;
                     // The clock goes back to the one the panel theme suggests, as choosing the theme gives.
@@ -661,17 +669,18 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;s.PageOrder=defaults.PageOrder;
                     s.ClipboardPage=defaults.ClipboardPage;s.ClipboardWidth=defaults.ClipboardWidth;s.ClipboardHeight=defaults.ClipboardHeight;
                     s.DevicesPage=defaults.DevicesPage;s.DevicesWidth=defaults.DevicesWidth;s.DevicesHeight=defaults.DevicesHeight;break;
-                case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.CompactSmoothing=defaults.CompactSmoothing;s.CoreDisplay=defaults.CoreDisplay;s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
-                    s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;s.MonitorPower=defaults.MonitorPower;s.MonitorFrames=defaults.MonitorFrames;s.ExpandedTable=null;s.MonitorGpuUsage=defaults.MonitorGpuUsage;s.MonitorTrafficPeriod=defaults.MonitorTrafficPeriod;break;
+                case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorCustomColors=defaults.MonitorCustomColors;s.CompactWarningColor=null;s.CompactCriticalColor=null;s.CompactSmoothing=defaults.CompactSmoothing;s.CoreDisplay=defaults.CoreDisplay;s.CoreMatrixColumns=defaults.CoreMatrixColumns;s.ExpandedCustomCards=defaults.ExpandedCustomCards;s.ExpandedCardOrder=[];s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
+                    s.ExpandedGridTiles=null;
+                    s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;s.MonitorTemperatures=defaults.MonitorTemperatures;s.MonitorStorage=defaults.MonitorStorage;s.MonitorPower=defaults.MonitorPower;s.MonitorFrames=defaults.MonitorFrames;s.ExpandedTable=null;s.MonitorGpuUsage=defaults.MonitorGpuUsage;s.MonitorTrafficPeriod=defaults.MonitorTrafficPeriod;s.MonitorShowFree=defaults.MonitorShowFree;break;
                 // The devices' order, names and switches stay; the page and its size are Expanded view's (case 2).
                 case DevicesSettingsPage:s.DeviceLowPercent=defaults.DeviceLowPercent;s.DeviceWarningPercent=defaults.DeviceWarningPercent;s.DeviceFigures=defaults.DeviceFigures;break;
-                case ShelfLayoutSettingsPage:s.ShelfShown=defaults.ShelfShown;s.ShelfArrangement=defaults.ShelfArrangement;s.ShelfSameSideStack=defaults.ShelfSameSideStack;s.ShelfFileShare=defaults.ShelfFileShare;s.ShelfHoverSwitch=defaults.ShelfHoverSwitch;s.ShelfMiddleSwitch=defaults.ShelfMiddleSwitch;s.ShelfSwipeSwitch=defaults.ShelfSwipeSwitch;break;
+                case ShelfLayoutSettingsPage:s.ShelfShown=defaults.ShelfShown;s.ShelfArrangement=defaults.ShelfArrangement;s.ShelfSameSideStack=defaults.ShelfSameSideStack;s.ShelfFileShare=defaults.ShelfFileShare;s.ShelfStripWheelSwitch=defaults.ShelfStripWheelSwitch;s.ShelfMiddleSwitch=defaults.ShelfMiddleSwitch;s.ShelfSwipeSwitch=defaults.ShelfSwipeSwitch;break;
                 // The categories and phrases are the user's own data, not settings; the other page has nothing to restore.
-                case ClipboardSettingsPage:s.ClipboardRecord=defaults.ClipboardRecord;s.ClipboardExcluded=[];s.ClipboardKeepHistory=defaults.ClipboardKeepHistory;s.ClipboardKeepFor=defaults.ClipboardKeepFor;break;
+                case ClipboardSettingsPage:s.ClipboardRecord=defaults.ClipboardRecord;s.ClipboardClickCopyOnly=defaults.ClipboardClickCopyOnly;s.ClipboardExcluded=[];s.ClipboardKeepHistory=defaults.ClipboardKeepHistory;s.ClipboardKeepFor=defaults.ClipboardKeepFor;break;
                 // The current theme's application colors go back to its own; the other themes keep what was saved for them.
                 case 3:{var previous=s.Apps;s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.QuotaRingStyle=defaults.QuotaRingStyle;s.QuotaRingRemaining=defaults.QuotaRingRemaining;s.QuotaRingLetters=defaults.QuotaRingLetters;s.Apps=defaults.Apps;PanelThemes.CarryAppChoices(s,previous);break;}
                 case 5:s.EqualizerAlways=defaults.EqualizerAlways;s.EqualizerBars=defaults.EqualizerBars;s.EqualizerMode=defaults.EqualizerMode;s.EqualizerColor=defaults.EqualizerColor;s.EqualizerCustomColor=defaults.EqualizerCustomColor;
-                    s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicPausedHide=defaults.MusicPausedHide;s.MusicInstrumentalTitle=defaults.MusicInstrumentalTitle;s.MusicLyricAutoWidth=defaults.MusicLyricAutoWidth;s.MusicTitleAutoWidth=defaults.MusicTitleAutoWidth;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;s.MusicLyricsLayout=defaults.MusicLyricsLayout;s.MusicLyricsAlign=defaults.MusicLyricsAlign;
+                    s.MusicText=defaults.MusicText;s.MusicEqualizerBars=defaults.MusicEqualizerBars;s.MusicTrackNotice=defaults.MusicTrackNotice;s.MusicPausedHide=defaults.MusicPausedHide;s.MusicInstrumentalTitle=defaults.MusicInstrumentalTitle;s.MusicLyricAutoWidth=defaults.MusicLyricAutoWidth;s.MusicTitleAutoWidth=defaults.MusicTitleAutoWidth;s.MusicCompactCover=defaults.MusicCompactCover;s.MusicPageCover=defaults.MusicPageCover;s.LyricsEnabled=defaults.LyricsEnabled;s.MusicSimulatedKaraoke=defaults.MusicSimulatedKaraoke;s.MusicLyricsLayout=defaults.MusicLyricsLayout;s.MusicLyricsAlign=defaults.MusicLyricsAlign;
                     s.MusicLyricColor=defaults.MusicLyricColor;s.MusicLyricCustomColor=defaults.MusicLyricCustomColor;break;
                 case MusicGesturesPage:s.MusicDragLeft=defaults.MusicDragLeft;s.MusicDragRight=defaults.MusicDragRight;s.MusicDragUp=defaults.MusicDragUp;s.MusicDragDown=defaults.MusicDragDown;
                     s.MusicSwipeLeft=defaults.MusicSwipeLeft;s.MusicSwipeRight=defaults.MusicSwipeRight;break;
@@ -721,7 +730,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private void WindowRules()
     {
         SectionTitle(Loc.T("窗口行为", "Window behavior"));
-        // The window rules apply whether or not the panel is kept above other windows; Keep on top only concerns a panel above
+        // The window rules apply whether or not the panel is kept above other windows; Force on top only concerns a panel above
         // them, so it leaves with the switch.
         var rules = new StackPanel();
         foreach (var row in new[]
@@ -758,7 +767,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         });
         raise.BorderBrush = UI.Brush(_palette.Border);
         raise.Background = UI.Brush(_palette.Input);
-        keep.Children.Add(Toggle(Loc.T("持续置顶", "Keep on top"), S.ForceTopmost, value => Change(s => s.ForceTopmost = value), help:
+        keep.Children.Add(Toggle(Loc.T("强制置顶", "Force on top"), S.ForceTopmost, value => Change(s => s.ForceTopmost = value), help:
             Loc.T("开启后，面板被其他置顶窗口遮住时仍显示在最上方，可以正常操作。其他应用的菜单除外。",
                 "When on, the panel stays above other always-on-top windows and works as usual. Menus from other apps are excepted.")));
         keep.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
@@ -950,6 +959,8 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
                     else current.UsageSource = id;
                 });
                 if (quota && !ProviderCatalog.IsBuiltIn(id)) { CollapseSourceRows(); _expandedSource = entry.InstanceId; }
+                // Choosing Qoder for the statistics opens the row on its token switch while that is off.
+                if (!quota && id is ProviderId.Qoder or ProviderId.QoderCn && QoderUsage.UserSwitch(QoderUsage.For(id)) != true) { CollapseSourceRows(); _expandedSource = entry.InstanceId; }
                 RefreshAppRow(entry.InstanceId);
             }
             AutomationProperties.SetName(item, Loc.T("选择 ", "Select ") + Label(id)); items.Children.Add(item);

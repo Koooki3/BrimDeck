@@ -112,6 +112,7 @@ internal static class KugouTests
     private static async Task LyricsLookup(Action<string, bool> check)
     {
         const string Hash = "d62a437719aba2b0da0a5d2ad5e14e51";
+        const string Other = "0123456789abcdef0123456789abcdef";
         string lyric = Convert.ToBase64String(Encoding.UTF8.GetBytes("[id:$00000000]\n[00:01.47]我们之间的回忆\n[00:03.60]全部都小心地收集"));
         var requested = new List<Uri>();
         HttpResponseMessage Reply(Uri uri)
@@ -119,6 +120,8 @@ internal static class KugouTests
             lock (requested) requested.Add(uri);
             string body = uri.Host switch
             {
+                "mobiles.kugou.com" => "{\"status\":1,\"data\":{\"info\":[{\"hash\":\"" + Other + "\",\"songname\":\"同名歌\",\"singername\":\"别人\",\"duration\":181},"
+                    + "{\"hash\":\"" + Hash.ToUpperInvariant() + "\",\"songname\":\"把回忆拼好给你\",\"singername\":\"张妙格\",\"duration\":181}]}}",
                 "krcs.kugou.com" => "{\"status\":200,\"candidates\":[{\"id\":\"1\",\"accesskey\":\"0123456789ABCDEF0123456789ABCDEF\",\"song\":\"同名歌\",\"singer\":\"别人\",\"duration\":181000},"
                     + "{\"id\":\"511461352\",\"accesskey\":\"68AE8550EA30C9BDA452384B1C5B8E0C\",\"song\":\"把回忆拼好给你\",\"singer\":\"张妙格\",\"duration\":181000}]}",
                 "lyrics.kugou.com" => uri.Query.Contains("id=511461352") ? "{\"status\":200,\"content\":\"" + lyric + "\"}" : "{\"status\":200,\"content\":\"\"}",
@@ -138,11 +141,10 @@ internal static class KugouTests
         using (var http = new HttpClient(new Handler(Reply))) using (var service = new LyricsService(http))
         {
             var lyrics = await service.FindAsync(song with { Source = "Spotify", SongId = "" }, true, default);
-            int kugou = requested.FindIndex(u => u.Host == "krcs.kugou.com");
-            check("Another player's song asks KuGou last, by name, and takes only the candidate with the same title and artist",
-                lyrics.Source == "酷狗音乐" && kugou > 0 && requested.Take(kugou).All(u => u.Host != "lyrics.kugou.com")
-                && requested[kugou].Query.Contains("keyword=" + Uri.EscapeDataString("张妙格 - 把回忆拼好给你"))
-                && requested.Where(u => u.Host == "lyrics.kugou.com").All(u => u.Query.Contains("id=511461352")));
+            check("Another player's song asks KuGou first, through its song search, and takes only the recording with the same title and artist",
+                lyrics.Source == "酷狗音乐" && requested[0].Host == "mobiles.kugou.com" && requested[0].Query.Contains("keyword=" + Uri.EscapeDataString("把回忆拼好给你 张妙格"))
+                && requested.Where(u => u.Host == "krcs.kugou.com").All(u => u.Query.Contains("hash=" + Hash))
+                && lyrics.At(2).Current == "我们之间的回忆" && requested.All(u => u.Host.EndsWith(".kugou.com", StringComparison.Ordinal)));
         }
     }
 

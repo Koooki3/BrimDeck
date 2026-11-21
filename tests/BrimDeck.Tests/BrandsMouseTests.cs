@@ -154,8 +154,8 @@ static class BrandsMouseTests
         var hub = Shape(0x089D, 0x062F, 0xFF01, 0x10, input: 33, output: 33, outputIds: [0x00]);
         var aula = Shape(0x089D, 0x062F, 0xFF02, 0x00, input: 33, output: 33, outputIds: [0x00]);
         check("EWEADN: the 089D:062F receiver takes HaloBattery's info read on 0xFF01 / 0x10 and MouseDock's identify read on 0xFF02 / 0 (33 / 33), as does the 088D:062E cable",
-            Named(hub, "EWEADN mouse", "eweadn.info") && Named(aula, "EWEADN mouse", "eweadn.identify")
-            && Named(Shape(0x088D, 0x062E, 0xFF01, 0x10, input: 33, output: 33, outputIds: [0x00]), "EWEADN mouse", "eweadn.info"));
+            Named(hub, "EWEADN mouse", "eweadn.info", "eweadn.info10") && Named(aula, "EWEADN mouse", "eweadn.identify")
+            && Named(Shape(0x088D, 0x062E, 0xFF01, 0x10, input: 33, output: 33, outputIds: [0x00]), "EWEADN mouse", "eweadn.info", "eweadn.info10"));
         check("EWEADN: another collection of the receiver (65-byte 0xFF02, the mouse page) and another product are not asked",
             Untaken(Shape(0x089D, 0x062F, 0xFF02, 0x00, input: 65, output: 65, outputIds: [0x00])) && Untaken(Shape(0x089D, 0x062F, 0x0001, 0x02))
             && Untaken(Shape(0x089D, 0x0630, 0xFF01, 0x10, input: 33, output: 33, outputIds: [0x00])));
@@ -325,8 +325,8 @@ static class BrandsMouseTests
             FinalmouseMice.Percent(4400) == 100 && FinalmouseMice.Percent(4380) == 100 && FinalmouseMice.Percent(3880) == 50 && FinalmouseMice.Percent(3810) == 38
             && FinalmouseMice.Percent(2900) == 0 && FinalmouseMice.Percent(0) is null && FinalmouseMice.Percent(0xFFFF) is null);
         check("Finalmouse: HaloBattery's measured answers 0x1064 (78 %) and 0x10B4 (88 %) read coarse; status 80 % reads; FF, 0 V, another command and report 4 are none",
-            FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x64, 0x10)) == new BatteryRead(78, Coarse: true)
-            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x85, 0x02, 0xB4, 0x10)) == new BatteryRead(88, Coarse: true)
+            FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x64, 0x10)) == new BatteryRead(78, Accuracy: BatteryAccuracy.Voltage)
+            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x85, 0x02, 0xB4, 0x10)) == new BatteryRead(88, Accuracy: BatteryAccuracy.Voltage)
             && FinalmouseMice.Status(Pad(64, 0x05, 0x05, 0x26, 0x03, 0x50, 0x2C, 0x10)) == new BatteryRead(80)
             && FinalmouseMice.Status(Pad(64, 0x05, 0x05, 0x26, 0x03, 0xFF, 0x00, 0x00)) is null && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x00, 0x00)) is null
             && FinalmouseMice.Voltage(Pad(64, 0x05, 0x03, 0x12, 0x01, 0x01)) is null && FinalmouseMice.Voltage(Pad(64, 0x04, 0x02, 0x85, 0x00)) is null
@@ -334,7 +334,7 @@ static class BrandsMouseTests
         check("Finalmouse: a frame whose length does not match its payload, and millivolts outside 2500 to 4600 (4700, 2400), are none",
             FinalmouseMice.Voltage(Pad(64, 0x05, 0x05, 0x05, 0x02, 0x64, 0x10)) is null && FinalmouseMice.Status(Pad(64, 0x05, 0x04, 0x26, 0x03, 0x50, 0x2C, 0x10)) is null
             && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x5C, 0x12)) is null && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x60, 0x09)) is null
-            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0xF8, 0x11)) == new BatteryRead(100, Coarse: true));
+            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0xF8, 0x11)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Voltage));
     }
 
     private static void Incott(Action<string, bool> check)
@@ -386,6 +386,8 @@ static class BrandsMouseTests
             && RedragonMice.Battery(Hex("05 90 10 01 00 00 00 00")) == new BatteryRead(null, true) && RedragonMice.Battery(Hex("05 90 10 02 00 00 00 00")) == new BatteryRead(100)
             && RedragonMice.Battery(RedragonMice.Request()) is null && RedragonMice.Battery(Hex("05 80 01 01 00 00 00 00")) is null
             && RedragonMice.Battery(Hex("05 90 11 00 00 00 00 00")) is null);
+        check("Redragon: named the M690 PRO unless the product string names Machenike (its M7, M721 and M722 share both ids)",
+            RedragonMice.Name(receiver) == "Redragon M690 PRO" && RedragonMice.Name(receiver with { Name = "MACHENIKE M7 Gaming Mouse" }) is null);
     }
 
     private static void Scyrox(Action<string, bool> check)

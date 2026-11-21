@@ -43,5 +43,15 @@ internal static class CollapsedHoverTests
             CollapsedHover.Zone(CompactStyle.Notch, new DipRect(100, 0, 238, 32), 48) == new DipRect(100, 0, 238, 32)
             && CollapsedHover.Zone(CompactStyle.Line, new DipRect(500, 52, 56, 4), 48) == new DipRect(492, 0, 72, 58)
             && CollapsedHover.HasBridge(CompactStyle.Line, new DipRect(0, 200, 56, 4), 48));
+
+        // The parts along a surface: a cover 10-30, a title 38-140, rings 148-200.
+        (double, double)[] row = [(10, 30), (38, 140), (148, 200)];
+        check("Every place along the surface has one part: the gaps split halfway, the ends reach past the surface",
+            CollapsedHover.PartAt(row, -50) == 0 && CollapsedHover.PartAt(row, 33.9) == 0 && CollapsedHover.PartAt(row, 34) == 1
+            && CollapsedHover.PartAt(row, 143.9) == 1 && CollapsedHover.PartAt(row, 144) == 2 && CollapsedHover.PartAt(row, 900) == 2);
+        check("A single part answers everywhere, and no part answers nowhere",
+            CollapsedHover.PartAt([(50, 60)], -1) == 0 && CollapsedHover.PartAt([(50, 60)], 1000) == 0 && CollapsedHover.PartAt([], 10) == -1);
+        check("Overlapping neighbours (a carousel's fades) still meet halfway between them",
+            CollapsedHover.PartAt([(0, 40), (36, 80)], 37) == 0 && CollapsedHover.PartAt([(0, 40), (36, 80)], 39) == 1);
     }
 }

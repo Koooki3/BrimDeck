@@ -9,13 +9,22 @@ public enum CoreDisplay { Auto = 0, Columns = 1, Matrix = 2 }
 // kinds of core, fastest first, read as stripes from left to right just as the columns do. Every size is in DIPs on whole device
 // pixels. Origin is where the grid starts inside the rect it was fitted to (the grid is centred vertically, left-aligned).
 // Fits is false when even the smallest squares asked for would not fit the rect: the grid is then wider than the rect.
-public readonly record struct MatrixGrid(int Count, int Rows, int Columns, double Cell, double Gap, double Width, double Height, double X, double Y, bool Fits)
+public readonly record struct MatrixGrid(int Count, int Rows, int Columns, double Cell, double Gap, double Width, double Height, double X, double Y, bool Fits,
+    double TailOffset = 0, bool Spread = false)
 {
     public static readonly MatrixGrid Empty = new(0, 0, 0, 0, 0, 0, 0, 0, 0, true);
     public double Pitch => Cell + Gap;
 
     // The left and top edges of a core's square.
-    public (double X, double Y) Origin(int index) => (X + index / Rows * Pitch, Y + index % Rows * Pitch);
+    public (double X, double Y) Origin(int index)
+    {
+        int longColumns = Spread ? Count % Columns : 0;
+        int full = longColumns * Rows;
+        int stride = Spread && index >= full ? Rows - 1 : Rows;
+        int offset = stride == Rows ? index : index - full;
+        int column = offset / stride + (stride == Rows ? 0 : longColumns);
+        return (X + column * Pitch, Y + offset % stride * Pitch + (column == Columns - 1 ? TailOffset : 0));
+    }
 
     // The core under a point (in the rect's own coordinates), or -1. The gap belongs to the square before it, so no point of the
     // grid is dead; the empty places of the last column and anything outside the grid give -1.
@@ -23,14 +32,20 @@ public readonly record struct MatrixGrid(int Count, int Rows, int Columns, doubl
     {
         if (Count == 0 || Rows == 0 || Pitch <= 0 || !double.IsFinite(x) || !double.IsFinite(y)) return -1;
         double px = x - X, py = y - Y;
-        if (px < 0 || py < 0 || px >= Columns * Pitch || py >= Rows * Pitch) return -1;
-        int index = (int)(px / Pitch) * Rows + (int)(py / Pitch);
-        return index < Count ? index : -1;
+        if (px < 0 || py < 0 || px >= Width || py >= Height) return -1;
+        int column = Math.Min((int)(px / Pitch), Columns - 1);
+        int shortBefore = Spread ? Math.Max(0, column - Count % Columns) : 0;
+        int start = column * Rows - shortBefore;
+        int rows = Spread && column >= Count % Columns ? Rows - 1 : Math.Min(Rows, Count - start);
+        if (column == Columns - 1) py -= TailOffset;
+        return py >= 0 && py < rows * Pitch - Gap ? start + Math.Min((int)(py / Pitch), rows - 1) : -1;
     }
 }
 
 public static class CoreMatrix
 {
+    public const int MaxPreferredColumns = 64;
+    public static int NormalizeColumns(int columns) => columns is >= 0 and <= MaxPreferredColumns ? columns : 0;
     // Auto keeps the columns while each is at least this many device pixels wide.
     public const double ReadableColumn = 2;
     // The load is shown in this many brightness steps (0 .. Steps - 1) of the core's color over the empty cell: a cell steps
@@ -60,52 +75,74 @@ public static class CoreMatrix
     // a seventh of the pitch.
     public static int GapPixels(int pitch) => pitch < 3 ? 0 : pitch < 8 ? 1 : (int)Math.Round(pitch / 7d);
 
-    // The largest squares for count cores in a width by height rect at dpi device pixels per DIP: rows and columns follow from the
-    // count and the room (the biggest whole-pixel pitch for which the columns fit across and the rows down, then as few columns as
-    // that allows with the rows balanced between them). maxCell (DIPs) stops a few cores from growing into slabs; minPitch (device
-    // pixels) is the smallest the squares may shrink to before the grid is allowed to be wider than the rect.
-    public static MatrixGrid Fit(int count, double width, double height, double dpi, double maxCell = double.PositiveInfinity, int minPitch = 1)
+    // Fit a requested column count while cells stay individually readable. Auto favors the largest cells, allowing a nearby
+    // full rectangle; otherwise its partial last column is centered. All geometry and hit testing share this placement.
+    public static MatrixGrid Fit(int count, double width, double height, double dpi, double maxCell = double.PositiveInfinity, int minPitch = 1,
+        int preferredColumns = 0)
     {
         if (count <= 0) return MatrixGrid.Empty;
         if (!double.IsFinite(dpi) || dpi <= 0) dpi = 1;
         minPitch = Math.Max(1, minPitch);
         int wp = Pixels(width, dpi), hp = Pixels(height, dpi);
-        int capCell = double.IsFinite(maxCell) ? Math.Max(1, (int)Math.Floor(maxCell * dpi + 1e-6)) : int.MaxValue;
-        if (wp > 0 && hp > 0)
-            for (int pitch = (int)Math.Min(Math.Max(wp, hp), (long)capCell + 8); pitch >= minPitch; pitch--)
+        int capCell = double.IsFinite(maxCell) ? Math.Max(1, Pixels(maxCell, dpi)) : int.MaxValue;
+        int columnsWanted = Math.Min(count, NormalizeColumns(preferredColumns));
+        MatrixGrid? largest = null, balanced = null;
+        for (int pitch = Math.Min(Math.Min(wp, hp), capCell) * 2; pitch >= minPitch; pitch--)
+        {
+            int gap = GapPixels(pitch), cell = pitch - gap;
+            if (cell > capCell || cell > hp || cell > wp) continue;
+            int maxRows = Math.Min(count, (hp + gap) / pitch);
+            int maxCols = Math.Min(count, (wp + gap) / pitch);
+            if (maxRows == 0 || maxCols == 0 || maxRows * (long)maxCols < count) continue;
+            if (columnsWanted > 0 && cell >= 2 && columnsWanted <= maxCols)
             {
-                int gap = GapPixels(pitch);
-                if (pitch - gap > capCell || pitch - gap > hp) continue;
-                var (rows, columns) = Arrange(count, pitch, gap, hp);
-                if (columns * pitch - gap <= wp)
-                    return Make(count, rows, columns, pitch, gap, dpi, wp, hp, fits: true);
+                int rowsWanted = DivideUp(count, columnsWanted);
+                if (rowsWanted <= maxRows)
+                    return Make(count, rowsWanted, columnsWanted, pitch, gap, dpi, hp, fits: true, spread: count % columnsWanted != 0);
             }
+            if (largest is null)
+            {
+                int columns = DivideUp(count, maxRows);
+                largest = Make(count, DivideUp(count, columns), columns, pitch, gap, dpi, hp, fits: true);
+            }
+            // In a very shallow strip an extra row must not halve already-small cells.
+            int bestCell = (int)Math.Round(largest.Value.Cell * dpi);
+            if (balanced is null && (cell == bestCell || cell >= Math.Max(3, (bestCell * 3 + 4) / 5)))
+            {
+                for (int rows = maxRows; rows >= DivideUp(count, maxCols); rows--)
+                    if (count % rows == 0)
+                    {
+                        balanced = Make(count, rows, count / rows, pitch, gap, dpi, hp, fits: true);
+                        break;
+                    }
+            }
+            if ((columnsWanted == 0 || cell < 2) &&
+                (balanced is not null || cell < Math.Max(3, (bestCell * 3 + 4) / 5))) break;
+        }
+        if ((balanced ?? largest) is { } fit) return fit;
         int small = minPitch, smallGap = GapPixels(small);
-        var (r, c) = Arrange(count, small, smallGap, hp);
-        return Make(count, r, c, small, smallGap, dpi, wp, hp, fits: false);
+        int fallbackColumns = DivideUp(count, Math.Clamp((hp + smallGap) / small, 1, count));
+        return Make(count, DivideUp(count, fallbackColumns), fallbackColumns, small, smallGap, dpi, hp, fits: false);
     }
 
     // The strip's matrix: the room the columns have (56 wide and 14 high at the strip's scale), widening only when the squares
     // would otherwise be under 2 device pixels.
-    public static MatrixGrid Strip(int count, double scale, double dpi)
-        => Fit(count, Math.Round(CompactMonitor.ColumnsRoom * SafeScale(scale)), Math.Round(CompactMonitor.ColumnsHeight * SafeScale(scale)), dpi, minPitch: 2);
+    public static MatrixGrid Strip(int count, double scale, double dpi, int preferredColumns = 0)
+        => Fit(count, Math.Round(CompactMonitor.ColumnsRoom * SafeScale(scale)), Math.Round(CompactMonitor.ColumnsHeight * SafeScale(scale)), dpi,
+            minPitch: 2, preferredColumns: preferredColumns);
 
     private static double SafeScale(double scale) => double.IsFinite(scale) && scale > 0 ? scale : 1;
     private static int Pixels(double size, double dpi) => double.IsFinite(size) && size > 0 ? (int)Math.Min(Math.Floor(size * dpi + 1e-6), 1 << 20) : 0;
 
-    // Rows and columns for squares of this pitch down a rect hp device pixels high: the most rows that fit (at least one), the
-    // columns they need, then the fewest rows those columns need.
-    private static (int Rows, int Columns) Arrange(int count, int pitch, int gap, int hp)
-    {
-        int rows = Math.Clamp((hp + gap) / pitch, 1, count);
-        int columns = (count + rows - 1) / rows;
-        return ((count + columns - 1) / columns, columns);
-    }
+    private static int DivideUp(int count, int divisor) => 1 + (count - 1) / divisor;
 
-    private static MatrixGrid Make(int count, int rows, int columns, int pitch, int gap, double dpi, int wp, int hp, bool fits)
+    private static MatrixGrid Make(int count, int rows, int columns, int pitch, int gap, double dpi, int hp, bool fits, bool spread = false)
     {
-        int height = rows * pitch - gap, width = columns * pitch - gap;
+        int height = rows * pitch - gap;
+        long width = (long)columns * pitch - gap;
         int top = fits || height <= hp ? (hp - height) / 2 : 0;
-        return new(count, rows, columns, (pitch - gap) / dpi, gap / dpi, width / dpi, height / dpi, 0, top / dpi, fits);
+        int missing = spread ? 0 : (int)((long)rows * columns - count);
+        return new(count, rows, columns, (pitch - gap) / dpi, gap / dpi, width / dpi, height / dpi, 0, top / dpi, fits,
+            (missing * pitch / 2) / dpi, spread);
     }
 }

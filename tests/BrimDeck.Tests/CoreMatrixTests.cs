@@ -11,6 +11,7 @@ internal static class CoreMatrixTests
     internal static void Run(Action<string, bool> check)
     {
         Placement(check);
+        Balanced(check);
         Hits(check);
         Rule(check);
         Strip(check);
@@ -59,6 +60,46 @@ internal static class CoreMatrixTests
         check("Core matrix: cores fill a column from the top, then the next column", x1 == x0 && y1 > y0 && yr == y0 && xr > x0);
     }
 
+    private static void Balanced(Action<string, bool> check)
+    {
+        var compact = CoreMatrix.Strip(32, 1, 1);
+        check("Core matrix: 32 in a tight strip retain readable cells and center the short column",
+            compact is { Rows: 3, Columns: 11, TailOffset: > 0, Cell: >= 4, Fits: true });
+        var roomier = CoreMatrix.Strip(32, 1, 1.25);
+        check("Core matrix: 32 at 125% choose a complete 8 by 4 with a visible gap",
+            roomier is { Rows: 4, Columns: 8, TailOffset: 0, Gap: > 0, Fits: true } && roomier.Cell * 1.25 >= 3 - 1e-8);
+        check("Core matrix: an explicit 8 columns fit a tight strip",
+            CoreMatrix.Strip(32, 1, 1, 8) is { Rows: 4, Columns: 8, Fits: true });
+        check("Core matrix: an unreadable choice falls back to auto",
+            CoreMatrix.Strip(32, 1, 1, 32) == compact);
+        var custom = CoreMatrix.Fit(32, 250, 40, 1, 14, preferredColumns: 10);
+        check("Core matrix: uneven custom rows keep the requested columns without phantom cells",
+            custom is { Rows: 4, Columns: 10, Fits: true } && custom.CellAt(custom.Width - custom.Cell / 2, custom.Y + custom.Height - .01) == -1);
+        bool roundTrips = true;
+        foreach (int count in new[] { 1, 7, 31, 32, 65, 192, 257, 512 })
+            foreach (int columns in new[] { 0, 1, 7, 8, 10, 16, 32, 63, 64 })
+                foreach (double dpi in new[] { 1, 1.25, 1.5, 2 })
+                {
+                    var grid = CoreMatrix.Fit(count, 210, 42, dpi, 14, preferredColumns: columns);
+                    roundTrips &= grid.Fits;
+                    for (int index = 0; index < count; index++)
+                    {
+                        var (x, y) = grid.Origin(index);
+                        roundTrips &= grid.CellAt(x + grid.Cell / 2, y + grid.Cell / 2) == index
+                            && x + grid.Cell <= 210 + 1e-8 && y + grid.Cell <= 42 + 1e-8;
+                    }
+                }
+        check("Core matrix: automatic and uneven custom grids round-trip every cell at four DPIs", roundTrips);
+        check("Core matrix: custom width and drawing agree for strip admission",
+            CompactMonitor.CoreWidth(CoreDisplay.Matrix, 32, 1, 1, 8) == CoreMatrix.Strip(32, 1, 1, 8).Width);
+        var old = SettingsMigrations.Read("""{"AppVersion":"0.1.0"}""");
+        var loaded = SettingsMigrations.Read("""{"AppVersion":"0.1.0","CoreMatrixColumns":16}""");
+        var invalid = SettingsMigrations.Read("""{"AppVersion":"0.1.0","CoreMatrixColumns":65}""");
+        check("Core matrix preference migrates, persists with a profile and sanitizes invalid values",
+            old.CoreMatrixColumns == 0 && invalid.CoreMatrixColumns == 0 && loaded.CoreMatrixColumns == 16
+            && Profiles.With(old, Profiles.Values(loaded)).CoreMatrixColumns == 16);
+    }
+
     private static void Hits(Action<string, bool> check)
     {
         bool every = true;
@@ -75,7 +116,7 @@ internal static class CoreMatrixTests
         var grid = CoreMatrix.Fit(10, 100, 30, 1, 10);
         check("Core matrix: outside the grid and the empty places of the last column name no core",
             grid.CellAt(-1, 5) == -1 && grid.CellAt(5, -1) == -1 && grid.CellAt(1000, 5) == -1 && grid.CellAt(double.NaN, 5) == -1
-            && grid.CellAt(grid.Columns * grid.Pitch - .1, grid.Rows * grid.Pitch - .1) == (grid.Rows * grid.Columns > 10 ? -1 : 9));
+            && grid.CellAt(grid.Width, grid.Y + grid.Height - .1) == -1);
     }
 
     private static void Rule(Action<string, bool> check)

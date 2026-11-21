@@ -62,16 +62,25 @@ internal static class PanelHeaderTests
         check("The previous header (switch at (10, 4)) was 2.6 DIPs from the curve, which the check rejects",
             Math.Abs(PanelHeader.CornerGap(24, 10, 4, 8) - 2.58) < .01 && PanelHeader.CornerGap(24, 10, 0, 8) < 0);
 
-        // The usage page keeps its own header (78d0a03: settings 28x24 with a 6 DIP corner; ba20473: switch 28, or 24 in a row below
-        // 36). The music page takes the usage page's controls, so they keep their distance from the panel's top edge when the page
-        // changes; it keeps its own row (where its content starts), side inset and right margin.
+        // Both the vertical and horizontal anchors belong to the shared toolbar, while each body keeps its own space.
         var usageHeaders = usage.Select(e => PanelHeader.For(e.Row, e.Side)).ToList();
         var musicHeaders = Enumerable.Range(0, 301).Select(i => PanelHeader.Music(MusicMetrics.At(i / 100d))).ToList();
-        static (double, double, double, double, double) Controls(PanelHeader h) => (h.Height, h.SwitchHeight, h.ButtonHeight, h.SwitchTop, h.SettingsHeight);
+        static (double, double, double, double, double, double, double) Controls(PanelHeader h) =>
+            (h.Height, h.SwitchHeight, h.ButtonHeight, h.SwitchTop, h.SettingsHeight, h.Side, h.RightMargin);
         check("With the usage page's controls, every music header puts the switch, the clock and the right group where the usage page does",
             usageHeaders.All(u => musicHeaders.All(m => Controls(m.WithControlsOf(u)) == Controls(u))));
-        check("The music page keeps its row, side and right margin with the usage page's controls",
-            usageHeaders.All(u => musicHeaders.All(m => m.WithControlsOf(u) is var w && w.Row == m.Row && w.Side == m.Side && w.RightMargin == m.RightMargin)));
+        check("The music body keeps its row and side inset with the usage page's controls",
+            usageHeaders.All(u => musicHeaders.All(m => m.WithControlsOf(u) is var w && w.Row == m.Row && w.ContentSide == m.ContentSide)));
+        foreach (var (width, height) in new[] { (320, 140), (440, 200), (730, 289), (900, 290), (1200, 400) })
+        {
+            var panel = PanelHeader.ForPanel(height); // Monitor and devices use these body dimensions.
+            var shelf = PanelHeader.For(PanelHeader.ToolbarFor(height), ShelfLayout.For(width, height).Side);
+            var music = PanelHeader.Music(MusicMetrics.At(MusicLayout.DensityFor(width, height)));
+            foreach (var shared in usageHeaders.Append(panel))
+                check($"Equal {width}x{height} pages share the toolbar ({shared.Height}, {shared.Side}) and keep their body bounds",
+                    new[] { panel, shelf, music }.All(page => page.WithControlsOf(shared) is var applied
+                        && Controls(applied) == Controls(shared) && applied.Row == page.Row && applied.ContentSide == page.ContentSide));
+        }
         var user = PanelHeader.For(32, 16);
         var userMusic = PanelHeader.Music(MusicMetrics.At(1)).WithControlsOf(user);
         check("Floating, both pages' switches sit 10 DIPs below the edge (4 hanging)",

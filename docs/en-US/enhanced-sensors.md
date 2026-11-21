@@ -16,7 +16,7 @@ The CPU temperature's tooltip on the monitor page names its source, such as "(pr
 
 ## Turning it on
 
-1. **Install PawnIO**: click Install. BrimDeck opens a command window running `winget install --id namazso.PawnIO --exact`; the installer asks an administrator to confirm. Without winget, PawnIO's own download page opens. A PC that already has PawnIO (installed with FanControl or LibreHardwareMonitor, for example) shows it as installed and needs nothing more.
+1. **Install PawnIO**. Click Install. BrimDeck opens a command window and runs `winget install --id namazso.PawnIO --exact --source winget`. Approve the administrator prompt if Windows asks. Once installation finishes, Settings shows Installed and the version. If installation fails, Settings displays the error and a link to the official download. If WinGet is unavailable, the download page opens directly. If PawnIO is already installed, Settings shows Installed.
 2. **Turn on the sensor service**: click Turn on. BrimDeck downloads the sensor service and PawnIO's official modules, and Windows asks an administrator to confirm once; never again after that.
 
 ## Safety

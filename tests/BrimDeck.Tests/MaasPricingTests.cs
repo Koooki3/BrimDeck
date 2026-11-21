@@ -30,10 +30,13 @@ static class MaasPricingTests
         check("MaaS GLM names drop the gateway, provider and channel words",
             All(2, "maas-glm-5.1", "maas-glm-5.1-zhipu") && All(3, "maas-glm-5.2", "maas-glm-5.2-tencent-codeagent", "maas-glm-5.2-volcengine-codeagent")
             && All(4, "maas-glm-5.3-baidu-codeagent", "maas-glm-5.3-volcengine-codeagent", "maas-glm-5.3-zhipu-codeagent", "maas-glm-5.3-tencent-codeagent"));
-        check("MaaS release suffixes and dashed versions are read", All(3, "maas-glm-5-2-260617") && All(6, "maas-deepseek-v4-flash-ga-260731")
-            && All(8, "maas-deepseek-v4-1-flash-261017", "maas-deepseek-v4.1-flash-1017"));
+        // DeepSeek's models take DeepSeek's own Flash price (Pricing.BuiltIn) over the catalog's, at a peak hour: Wednesday 10:00 Beijing time.
+        var peak = entry with { Time = DateTimeOffset.Parse("2026-11-04T02:00:00Z") };
+        bool Flash(params string[] names) => names.All(name => pricing.Estimate(peak with { Model = name }) == 1000 * .0000003m + 100 * .0000012m + 2000 * .000000006m);
+        check("MaaS release suffixes and dashed versions are read", All(3, "maas-glm-5-2-260617") && Flash("maas-deepseek-v4-flash-ga-260731")
+            && Flash("maas-deepseek-v4-1-flash-261017", "maas-deepseek-v4.1-flash-1017"));
         check("MaaS DeepSeek, Qwen and MiniMax names match in any case",
-            All(6, "maas-DeepSeek-V4-Flash-volcengine-codeagent") && All(8, "maas-deepseek-v4.1-flash-baidu-codeagent", "maas-deepseek-v4.1-flash-volcengine-codeagent")
+            Flash("maas-DeepSeek-V4-Flash-volcengine-codeagent", "maas-deepseek-v4.1-flash-baidu-codeagent", "maas-deepseek-v4.1-flash-volcengine-codeagent")
             && All(10, "maas-qwen3.7-plus") && All(11, "maas-qwen3.7-flash") && All(12, "maas-qwen3.7-max") && All(13, "maas-qwen3.8-flash-aliyun-codeagent")
             && All(14, "maas-MiniMax-M3"));
         check("MaaS automatic routes take the price of the model they are named after",

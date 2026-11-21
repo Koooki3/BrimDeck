@@ -51,7 +51,9 @@ public static class AtkHeadsets
 
     public static IEnumerable<BrandFamily> Families =>
     [
-        new("ATK Headset", Takes, _ => [new BrandWay("atk-headset.state", WayTransport.Output, Request(), StateBattery) { TimeoutMs = 1000 }])
+        // Also where Windows lists report 0x55 as an input report alone, as on the MCHOSE V9 PRO's receiver, which also carries a
+        // 0xFF82 and a 0xFF90 collection (BrandWay.Undeclared; not measured on these dongles).
+        new("ATK Headset", Takes, _ => [new BrandWay("atk-headset.state", WayTransport.Output, Request(), StateBattery) { TimeoutMs = 1000, Undeclared = true }])
         { Kind = _ => DeviceKind.Headphones, Prefix = "atk-headset", DisplayName = s => Receivers.First(d => d.Product == s.Product).Name },
     ];
 }

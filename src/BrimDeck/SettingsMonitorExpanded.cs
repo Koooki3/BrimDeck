@@ -27,7 +27,7 @@ public sealed partial class SettingsWindow
 
     private static string ExpandedHelp(ExpandedItem item) => item switch
     {
-        ExpandedItem.Cpu => Loc.T("CPU 总占用和各核心的占用。", "The CPU's total usage and each core's."),
+        ExpandedItem.Cpu => Loc.T("CPU 总占用，可单独隐藏各核心占用。", "Total CPU usage, with an option to hide the individual cores."),
         ExpandedItem.Gpu => Loc.T("GPU 占用和各引擎的占用。", "The GPU's usage and each engine's."),
         ExpandedItem.Memory => Loc.T("内存占用与提交量。", "Memory in use and the commit charge."),
         ExpandedItem.Download => Loc.T("下载速率。", "The download rate."),
@@ -74,16 +74,36 @@ public sealed partial class SettingsWindow
         heat.Checked += (_, _) => { if (!syncing) Resize(s => s.MonitorTemperatures = true, DeckPage.Monitor); };
         heat.Unchecked += (_, _) => { if (!syncing) Resize(s => s.MonitorTemperatures = false, DeckPage.Monitor); };
         refresh.Add(() => heat.IsChecked = S.MonitorTemperatures);
-        cells.Children.Add(heat);
+        var gridOptions = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
         var title = SettingLabel(Loc.T("显示的内容", "What the page shows"), null);
         title.Margin = new Thickness(0, 12, 0, 0);
         var switches = new StackPanel();
         switches.Children.Add(title);
         switches.Children.Add(cells);
+        switches.Children.Add(gridOptions);
 
-        var sketch = ExpandedSketch(refresh);
+        var order = ExpandedSketch(refresh);
+        var editor = ExpandedGridEditor(refresh);
+        var layout = new StackPanel();
+        switches.Children.Insert(0, MusicChoice(Loc.T("排版方式", "Layout mode"), S.ExpandedCustomCards,
+            [(false, Loc.T("仅调顺序", "Reorder only")), (true, Loc.T("网格布局", "Grid layout"))],
+            value => { Resize(s => s.ExpandedCustomCards = value, DeckPage.Monitor); Refresh(); FrameAccessChanged?.Invoke(); }, keepPreview: true));
+        layout.Children.Add(order);
+        layout.Children.Add(editor);
+        refresh.Add(() =>
+        {
+            cells.Visibility = order.Visibility = S.ExpandedCustomCards ? Visibility.Collapsed : Visibility.Visible;
+            title.Visibility = cells.Visibility;
+            editor.Visibility = S.ExpandedCustomCards ? Visibility.Visible : Visibility.Collapsed;
+            var holder = S.ExpandedCustomCards ? (Panel)gridOptions : cells;
+            if (heat.Parent != holder)
+            {
+                (heat.Parent as Panel)?.Children.Remove(heat);
+                holder.Children.Add(heat);
+            }
+        });
         Refresh();
-        return (KeepPreview(switches), sketch);
+        return (KeepPreview(switches), layout);
     }
 
     // A chip that is on or off: a dot in each of its colors (one neutral dot without any), its name, its help on hover.
@@ -289,8 +309,11 @@ public sealed partial class SettingsWindow
         {
             var readings = ExpandedMonitor.Normalize(S.ExpandedReadings);
             var blocks = ExpandedMonitor.BlocksIn(readings).Where(block => block[0] != ExpandedItem.Processes && BlockName(block, readings).Length > 0).ToList();
+            string NameOf(IReadOnlyList<ExpandedItem> block) => BlockName(block, readings);
             bool processes = ExpandedOf(S, ExpandedItem.Processes).Visible;
-            string key = string.Join("|", blocks.Select(block => BlockName(block, readings))) + "|" + processes + "|" + Loc.Language;
+            string Key(IEnumerable<IReadOnlyList<ExpandedItem>> list) =>
+                string.Join("|", list.Select(NameOf)) + $"|{processes}|{Loc.Language}";
+            string key = Key(blocks);
             if (key == built) return;
             built = key;
             var grid = new Grid();
@@ -308,9 +331,13 @@ public sealed partial class SettingsWindow
             {
                 // Memory and the network show their parts when there is more than one, to be changed round by dragging.
                 var grip = new SketchGrip();
-                var inside = block[0] == ExpandedItem.Memory && BlockName(block, readings).Contains('+') ? MetricsInside(readings, Swap, grip) : null;
-                stack.Children.Add(SketchBlock(block, BlockName(block, readings), inside, grip, stack,
-                    order => { built = SketchKey(order, readings, processes); Change(s => s.ExpandedReadings = ExpandedMonitor.Arrange(s.ExpandedReadings, order)); Restorable(); }));
+                var inside = block[0] == ExpandedItem.Memory && NameOf(block).Contains('+') ? MetricsInside(readings, Swap, grip) : null;
+                stack.Children.Add(SketchBlock(block, NameOf(block), inside, grip, stack, order =>
+                {
+                    built = Key(order.Select(ExpandedMonitor.BlockOf));
+                    Change(s => s.ExpandedReadings = ExpandedMonitor.Arrange(s.ExpandedReadings, order));
+                    Restorable();
+                }));
             }
             if (blocks.Count > 0) { grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.Children.Add(stack); }
             if (processes)
@@ -337,9 +364,6 @@ public sealed partial class SettingsWindow
         panel.Children.Add(title); panel.Children.Add(host);
         return KeepPreview(panel);
     }
-
-    private static string SketchKey(IEnumerable<ExpandedItem> order, IReadOnlyList<ExpandedReading> readings, bool processes)
-        => string.Join("|", order.Select(item => BlockName(ExpandedMonitor.BlockOf(item), readings))) + "|" + processes + "|" + Loc.Language;
 
     // How a part inside a block hands its drag on to the block: the block sets Start once it is made.
     // pending: a change made inside the block on the way (memory and the network changed round), saved when the block is let go.

@@ -74,7 +74,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 
 ### 应用颜色（apps）
 
-配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`kimi`、`opencode`、`codeagent`、`commandcode`、`workbuddy`、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`（这两种同时也是文字，需 4.5:1）。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
+配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`kimi`、`opencode`、`codeagent`、`commandcode`、`workbuddy`、`mimo`、`qoder`、`qwenwork`（千问办公与 QwenWork）、`trae`（TRAE 与 TRAE CN）、`doubao`（豆包与 Dola）、`volcengine`（火山方舟与 BytePlus ModelArk）、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`（这两种同时也是文字，需 4.5:1）。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
 
 ### 时间（clock）
 
@@ -102,6 +102,17 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 | `pixel` | 像素风：轮廓的曲线变成这么多 DIP 的阶梯（按整设备像素取整），面板上的圆角变成直角，文字不做平滑；配合 `rimGradient` 时描线变成斜面，第一个颜色照亮朝上和朝左的边，最后一个颜色压暗朝下和朝右的边 | 0，或 1–4 |
 | `texture` | 配合 `pixel`：以像素大小为单位、略亮或略暗于底色的方块，像方块的颗粒。最亮和最暗的方块与渐变色标一样参与对比度检查；没有 `pixel` 时不生效 | 0–0.12 |
 | `decor` | 画在表面里、内容之下的安静图案，每个值分别继承（夜间外观只写 `sea` 时沿用白天的 `at` 与 `line`）：`horizon` 在高度 `at`（未设置时为 0.62）处以下铺一片海（`sea`），沿海平线有一道光（`line`，不透明度不限，同样检查对比度）；`caustics` 是海平线以下柔和的水波光纹（没有海平线时铺满整个表面）；`palm` 是展开面板右上角、海平线以上的棕榈叶影。完全透明的颜色会关掉该部分（例如在夜间外观里）；`sea` 透明时整条海平线都不画，水光随之铺满整个表面。收起的小岛上不画任何图案，海平线不会横穿时间；面板展开时图案渐显。文字对比度按海面（海平线处与最深处）、海平线光带和各图案在其所在区域叠加后的颜色检查 | `at` 0.3–0.9，水光不透明度 ≤ 0.2，叶影不透明度 ≤ 0.12 |
+
+### 悬停标记（motion）
+
+默认关闭，须由主题自行开启：内置主题都没有 `motion` 段，面板上的控件保持各自的悬停样式。写了此段的主题，会在指针所在的控件上画一个标记，但只画在本身没有悬停反馈的控件上；面板上的按钮和音乐控制按钮都已有自己的悬停反馈，所以不会出现标记。每个值分别继承；无法使用的值会在设置页显示为警告，主题其余部分照常加载。BrimDeck 或 Windows 的动画关闭时、以及高对比度下，什么都不画。
+
+| 键 | 作用 | 范围 |
+| --- | --- | --- |
+| `hover` | `none`；`reveal`（淡淡的填充与一道亮边）；`lift`（柔和的阴影，适合浅色主题）；`underline`（填充加一条 2 px 的底线） | |
+| `hoverStrength` | 标记的强度 | 0–0.3 |
+| `pace` | 按比例调整标记出现与消失的时长 | 0.6–1.6 |
+| `color` `secondary` | 标记的主色与第二色：颜色项名或 `#RRGGBB` | |
 
 ### 日夜外观（night、dusk、daylight）
 

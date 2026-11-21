@@ -50,17 +50,20 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly bool[] _letterUsage, _letterHeat;
     // Whether the frame rate shows its program's icon in place of the glyph (CompactFrames).
     private readonly bool _framesIcon;
+    // Memory and the drives show what is free in place of what is in use; their level still follows the share in use.
+    private readonly bool _free;
 
     // unavailable: readings left out (StripAdmission.Hidden): the drives until their first figures, and for good on a machine
     // without them, so the row never shows a dash for them. admission: which temperatures and letters have given their first
     // figures (StripAdmission.Shows); without it every chosen one shows.
     // parts: what the drive reading draws. The collapsed column (MainWindow.CompactColumn.cs) gives each drive a line without the
-    // glyph, its letter shown even when it is the only one.
+    // glyph, its letter shown even when it is the only one. free: memory and the drives show what is free (DeckSettings.MonitorShowFree).
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi,
         CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null, DriveParts parts = DriveParts.All,
-        CoreDisplay coreDisplay = CoreDisplay.Auto)
+        CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false, int matrixColumns = 0, int coreCount = 0)
     {
-        _driveParts = parts; _coreDisplay = coreDisplay;
+        _driveParts = parts; _coreDisplay = coreDisplay; _free = free; _matrixColumns = matrixColumns;
+        _reservedCores = coreCount > 0 ? coreCount : Environment.ProcessorCount;
         AddVisualChild(_moving);
         _easing = new PromptTimer(Dispatcher, EaseStep);
         _presence = presence; _dpi = dpi; _colors = colors; _centered = centered; _powerStyle = PowerStyle.For(colors.Palette);
@@ -108,7 +111,7 @@ internal sealed class MonitorStrip : FrameworkElement
         // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings. A rate has
         // three digits and a letter, with a point below 100 (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, Look.Primary, 1).WidthIncludingTrailingWhitespace;
-        var widths = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
+        var widths = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(_reservedCores),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
             FramesSlot + Math.Round(3 * _scale) + FigureWidth(WidestFrames) + Math.Round(2 * _scale) + SmallWidth(FramesUnit),
@@ -150,7 +153,8 @@ internal sealed class MonitorStrip : FrameworkElement
 
     // The cores' room: the columns', or, as chosen or once the columns no longer fit, the dot matrix's.
     private readonly CoreDisplay _coreDisplay;
-    private double ColumnsWidth(int cores) => CompactMonitor.CoreWidth(_coreDisplay, cores, _scale, _dpi);
+    private readonly int _matrixColumns, _reservedCores;
+    private double ColumnsWidth(int cores) => CompactMonitor.CoreWidth(_coreDisplay, cores, _scale, _dpi, _matrixColumns);
 
     private CompactMonitorItems Shown => _shown;
     // Rounded up to whole device pixels: the row rounds the region it gives down to them, which must not drop a reading.
@@ -238,7 +242,7 @@ internal sealed class MonitorStrip : FrameworkElement
             for (int i = 0; i < count; i++) moving |= _cores[i].Set(cpu!.Cores[i].Usage, motion, now);
         }
         if ((Shown & CompactMonitorItems.Cpu) != 0) moving |= _cpu.Set(cpu?.Usage, motion, now);
-        if ((Shown & CompactMonitorItems.Memory) != 0) moving |= _memory.Set(s?.Memory.OrDefault?.UsedFraction, motion, now);
+        if ((Shown & CompactMonitorItems.Memory) != 0) moving |= _memory.Set(s?.Memory.OrDefault?.Shown(_free), motion, now);
         if ((Shown & CompactMonitorItems.Gpu) != 0) moving |= _gpu.Set(s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, motion, now);
         if (moving && !_easing.IsEnabled) _easing.Start();
         InvalidateVisual();
@@ -338,7 +342,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Cpu: Gauge(drawing, dial, left, center, item, _cpu.At(now), s?.Cpu.OrDefault?.Usage, color, level, "C", s, ppd); break;
                 case CompactMonitorItems.Memory:
                     var memory = s?.Memory.OrDefault;
-                    Gauge(drawing, dial, left, center, item, _memory.At(now), memory?.UsedFraction, memory is null ? Look.Tertiary : color, level, "M", s, ppd); break;
+                    Gauge(drawing, dial, left, center, item, _memory.At(now), memory?.Shown(_free), memory is null ? Look.Tertiary : color, level, "M", s, ppd); break;
                 case CompactMonitorItems.Gpu: Gauge(drawing, dial, left, center, item, _gpu.At(now), s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, color, level, "G", s, ppd); break;
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, RateFigure(s?.Network.OrDefault?.DownBytesPerSecond), color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, RateFigure(s?.Network.OrDefault?.UpBytesPerSecond), color, level, ppd); break;
@@ -361,7 +365,7 @@ internal sealed class MonitorStrip : FrameworkElement
         double height = Math.Round(14 * _scale), top = Math.Round(center - height / 2);
         if (cpu is null || cpu.Cores.Count == 0) { drawing.DrawRoundedRectangle(UI.Brush(Look.Fill), null, new Rect(x, top, width, height), 2, 2); return; }
         int count = cpu.Cores.Count, groups = Math.Max(1, cpu.GroupCount);
-        if (CompactMonitor.UsesMatrix(_coreDisplay, count, _scale)) { Matrix(drawing, x, top, height, cpu, groups, now); return; }
+        if (CompactMonitor.UsesMatrix(_coreDisplay, count, _scale)) { Matrix(drawing, x, top, width, height, cpu, groups, now); return; }
         var (column, gap, _) = CompactMonitor.CoreColumns(count, _scale);
         for (int i = 0; i < count; i++)
         {
@@ -376,10 +380,18 @@ internal sealed class MonitorStrip : FrameworkElement
     // of its eased load over an empty cell. The placement and the brushes are kept: a frame allocates nothing.
     private MatrixGrid _matrix;
     private readonly Dictionary<(string Color, int Step), Brush> _cellBrushes = [];
-    private void Matrix(DrawingContext drawing, double x, double top, double height, CpuSample cpu, int groups, double now)
+    private void Matrix(DrawingContext drawing, double x, double top, double width, double height, CpuSample cpu, int groups, double now)
     {
         int count = cpu.Cores.Count;
-        if (_matrix.Count != count) _matrix = CoreMatrix.Strip(count, _scale, _dpi);
+        if (_matrix.Count != count)
+        {
+            _matrix = count == _reservedCores
+                ? CoreMatrix.Strip(count, _scale, _dpi, _matrixColumns)
+                : CoreMatrix.Fit(count, width, height, _dpi, minPitch: 2, preferredColumns: _matrixColumns);
+            if (!_matrix.Fits && _matrix.Width > width)
+                _matrix = CoreMatrix.Fit(count, width, height, _dpi, preferredColumns: _matrixColumns);
+        }
+        if (!_matrix.Fits && _matrix.Width > width) return;
         var grid = _matrix;
         double radius = grid.Cell >= 5 ? grid.Cell * .18 : 0;
         var track = UI.Brush(Look.Fill);
@@ -421,7 +433,7 @@ internal sealed class MonitorStrip : FrameworkElement
     private void Gauge(DrawingContext drawing, DialParts parts, double x, double center, CompactMonitorItems item, double? dial, double? share, string color, MemoryLevel level, string letter, MonitorSnapshot? s, double ppd)
     {
         // As thick as a quota ring and on the same track, so its whole outline shows even at a low share.
-        MonitorDraw.Dial(drawing, new Point(x + _dial / 2, center), _dial, Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), Math.Max(1, 7 * _scale), dial, color, letter, ppd, parts, look: Look);
+        MonitorDraw.Dial(drawing, new Point(x + _dial / 2, center), _dial, Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), Math.Max(1, 7 * _scale), dial, color, letter, ppd, parts, look: Look, centerVisibleBounds: true);
         if ((_values & item) == 0 || (parts & DialParts.Face) == 0) return;
         var heat = (_heat & item) != 0 ? CompactFigures.Heat(item, s) : null;
         bool vram = (_vram & item) != 0;
@@ -495,7 +507,7 @@ internal sealed class MonitorStrip : FrameworkElement
         bool any = false;
         for (int i = 0; i < _letters.Length; i++)
         {
-            if (_letterUsage[i] && CompactSources.Share(_letters[i], s) is { } share) { any = true; if (share.Level > level) level = share.Level; }
+            if (_letterUsage[i] && CompactSources.Share(_letters[i], s, _free) is { } share) { any = true; if (share.Level > level) level = share.Level; }
             if (_letterHeat[i] && CompactSources.Heat(_letters[i], s) is { } heat) { any = true; if (heat.Level > level) level = heat.Level; }
         }
         double size = Glyph, baseline = Math.Round(center + _font * .36);
@@ -510,7 +522,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 MonitorDraw.BaselineKept(drawing, MonitorDraw.Text(_tags[i], _font, Look.Tertiary, ppd), at, baseline);
                 at += FigureWidth(_tags[i]) + TagGap;
             }
-            var share = _letterUsage[i] ? CompactSources.Share(_letters[i], s) : null;
+            var share = _letterUsage[i] ? CompactSources.Share(_letters[i], s, _free) : null;
             var heat = _letterHeat[i] ? CompactSources.Heat(_letters[i], s) : null;
             Figures(drawing, at, center, item, _letterUsage[i] ? (share?.Share, share?.Level ?? MemoryLevel.Normal) : null, _letterHeat[i], heat, ppd);
             // Each letter keeps the room of the widest figures it can show.
@@ -580,7 +592,8 @@ internal sealed class MonitorStrip : FrameworkElement
             switch (item)
             {
                 case CompactMonitorItems.Cpu when s?.Cpu.OrDefault is { } cpu: parts.Add("CPU " + MonitorFormat.Percent(cpu.Usage) + "%"); break;
-                case CompactMonitorItems.Memory when s?.Memory.OrDefault is { } memory: parts.Add(Loc.T("内存 ", "Memory ") + MonitorFormat.Percent(memory.UsedFraction) + "%"); break;
+                case CompactMonitorItems.Memory when s?.Memory.OrDefault is { } memory: parts.Add(_free ? Loc.T("内存剩余 ", "Memory free ") + MonitorFormat.Percent(memory.FreeFraction) + "%"
+                    : Loc.T("内存 ", "Memory ") + MonitorFormat.Percent(memory.UsedFraction) + "%"); break;
                 case CompactMonitorItems.Gpu when s?.Gpu.OrDefault is { NoReadings: false } gpu:
                     parts.Add(MonitorSpeech.StripGpu(gpu.Usage, (_values & item) != 0 && (_vram & item) != 0 ? CompactFigures.Memory(item, s)?.Share : null)); break;
                 case CompactMonitorItems.Download when s?.Network.OrDefault is { } down: parts.Add(Loc.T("下载 ", "Download ") + MonitorFormat.Rate(down.DownBytesPerSecond).Text); break;

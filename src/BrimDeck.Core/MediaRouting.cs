@@ -45,6 +45,28 @@ public static class MediaRouting
     }
     private static string Folded(string value) => string.Concat(value.Normalize(System.Text.NormalizationForm.FormKC).Where(c => !char.IsWhiteSpace(c)));
 
+    // NetEase's song/detail fills only what the live source left blank. It knows a song's full artist list and album from
+    // its id, but not what is playing now: a detail fetched a moment ago may belong to the previous song if the id is stale.
+    // So the id must match exactly, the title is never replaced, and an artist or album already reported is kept as is.
+    public static MediaTrack FillDetails(MediaTrack primary, NeteaseSongDetails? details)
+    {
+        if (details is null || primary.SongId != "netease:" + details.Id) return primary;
+        return primary with
+        {
+            Artist = string.IsNullOrWhiteSpace(primary.Artist) ? details.Artist : primary.Artist,
+            Album = string.IsNullOrWhiteSpace(primary.Album) ? details.Album : primary.Album
+        };
+    }
+    // Whether after is before with only a blank artist or album filled in (FillDetails): the same song of the same player,
+    // so lyrics found for before still belong to it.
+    public static bool OnlyDetailsFilled(MediaTrack before, MediaTrack after)
+    {
+        static bool Filled(string was, string now) => was == now || string.IsNullOrWhiteSpace(was);
+        return before.Id == after.Id && before.SongId.StartsWith("netease:", StringComparison.Ordinal) && before.SongId == after.SongId
+            && before.Title == after.Title && before.Duration == after.Duration && before.EmbeddedLyrics == after.EmbeddedLyrics
+            && Filled(before.Artist, after.Artist) && Filled(before.Album, after.Album);
+    }
+
     // A supplement owns only these three controls. It cannot replace metadata, time,
     // modes, or state, even while the primary is waiting for the next song to load.
     public static MediaTrack Merge(MediaTrack primary, MediaTrack? controls) => primary with

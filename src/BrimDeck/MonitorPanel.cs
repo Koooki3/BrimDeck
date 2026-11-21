@@ -47,6 +47,10 @@ public partial class MainWindow
         // devices (UpdateDevicesDemand), not the system.
         bool heldStrip = StripNeedsSystem && (_compactStrip is not null || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !DisplayPower.Off && EffectiveStyle != CompactStyle.Line;
         bool strip = heldStrip && !_expanded && _alert is null;
+        // The line that opens into the capsule or the notch keeps the readings that style shows current, as that style does, so they
+        // show as soon as it opens (MainWindow.Peek.cs); the line that opens the panel reads none.
+        bool ahead = StripNeedsSystem && LineIsland is { } island && Settings.ShowsMonitor(island) && EffectiveStyle == CompactStyle.Line
+            && !_expanded && _alert is null && IsVisible && !IsSuppressed && !DisplayPower.Off;
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -57,7 +61,7 @@ public partial class MainWindow
         // The power is read for a page that shows its line (a page too small for it, or with the setting off, reads none of it).
         bool power = page && _monitorView?.ShowsPower == true;
         _powerPage = power;
-        _app.PresentMonitor(this, page, strip, power, heldStrip, PageDemand());
+        _app.PresentMonitor(this, page, strip || ahead, power, heldStrip || ahead, PageDemand());
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
@@ -103,10 +107,21 @@ public partial class MainWindow
             // a letter that joins or leaves changes its reading's width, and the row is built again for it.
             if (admitted) return;
             // A row still waiting for its first figures stops asking for readings once its sensors turn out to be missing.
-            if (_compactStrip is null) { UpdateMonitorDemand(); return; }
+            if (_compactStrip is null) { if (EffectiveStyle != CompactStyle.Line) UpdateMonitorDemand(); return; }
             UpdateCompactStrips(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off); return;
         }
         if (!IsMonitorPage || _monitorView is null) return;
+        if (Settings.ExpandedCustomCards)
+        {
+            var (tiles, columns) = ExpandedGrid.Trim(CurrentMonitorGridTiles());
+            var gridLayout = CurrentMonitorGridLayout();
+            if (MonitorGridKey(gridLayout, tiles, columns) != _monitorKey)
+            {
+                // A seeded grid may gain volume tiles after storage discovery. Saved tiles stay put when a volume is absent.
+                RenderMonitor(); return;
+            }
+            _monitorView.Update(snapshot, MonitorMotion); return;
+        }
         // The sensors and the layout step are worked out once for each reading; the key and what the page was built for follow from them.
         var sensors = MonitorSensors();
         var layout = CurrentMonitorPlan(sensors);
@@ -142,11 +157,14 @@ public partial class MainWindow
     private ExpandedPlan CurrentMonitorPlan((int Drives, bool Small, int Power) sensors)
     {
         double height = ContentCanvas.Height;
-        return ExpandedLayout.For(ExpandedMonitor.Shown(Settings.ExpandedReadings), ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height),
+        var shown = ExpandedMonitor.Shown(Settings.ExpandedReadings);
+        return ExpandedLayout.For(shown, ContentCanvas.Width - 2 * _header.ContentSide, height - _header.Row - MonitorBottom(height),
             new ExpandedContent(sensors.Drives, sensors.Power), null, Settings.MonitorMain, _monitorView is not null ? _monitorPlan : null);
     }
     // What the open page reads: what its layout kept, before the first one is made what the table chooses.
-    private ExpandedDemand PageDemand() => (_monitorPlan is { } plan ? plan.Demand(Settings.MonitorTemperatures) : ExpandedMonitor.Demand(ExpandedMonitor.Shown(Settings.ExpandedReadings), Settings.MonitorTemperatures));
+    private ExpandedDemand PageDemand() => Settings.ExpandedCustomCards ? GridPageDemand()
+        : _monitorPlan is { } plan ? plan.Demand(Settings.MonitorTemperatures)
+        : ExpandedMonitor.Demand(ExpandedMonitor.Shown(Settings.ExpandedReadings), Settings.MonitorTemperatures);
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
     // The sort is not part of it: a new sort reorders the list in place. The page keeps places for the volumes (as many as were
@@ -155,7 +173,7 @@ public partial class MainWindow
     // that room change: when the volumes are first counted, a sensor turns out to have none or first shows, or a volume comes or
     // goes past the room.
     private string MonitorKey(ExpandedPlan plan, bool small) => string.Join("|", plan.Signature, Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "",
-        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, Look.Generation, Settings.MonitorTemperatures, small, Native.BatteryProvider.SystemHasBattery, Settings.CoreDisplay);
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, Look.Generation, Settings.MonitorTemperatures, small, Native.BatteryProvider.SystemHasBattery, Settings.CoreDisplay, Settings.MonitorShowFree, Settings.CoreMatrixColumns);
     // What the shown page was built for: its volumes' places, the small gauge's room and the lines for power and the battery.
     private (int Lines, int Columns, bool Small, int Power) _monitorSensors;
     private static (int Lines, int Columns, bool Small, int Power) BuiltSensors(ExpandedPlan plan, bool small)
@@ -205,18 +223,26 @@ public partial class MainWindow
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
-        // The header keeps the usage page's controls, as the music page does, so the switch does not move between pages. Fitting
-        // the usage page for them is kept until its size, data or settings change: a drag resizes this page many times a second.
-        var header = PanelHeader.For(ToolbarFor(height), height < 170 ? 14 : 20);
-        ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
-        MonitorContent.Margin = new Thickness(_header.Side, 0, _header.Side, MonitorBottom(height));
+        ApplyPageHeader(PanelHeader.ForPanel(height));
+        MonitorContent.Margin = new Thickness(_header.ContentSide, 0, _header.ContentSide, MonitorBottom(height));
         Motion.Enabled = MonitorMotion;
+        bool fade = _monitorFade; _monitorFade = false;
+        if (Settings.ExpandedCustomCards)
+        {
+            _monitorPlan = null;
+            RenderMonitorGrid(shown, fade);
+            return;
+        }
         // Worked out once for each render: a drag renders the page many times a second.
         var sensors = MonitorSensors();
         var layout = CurrentMonitorPlan(sensors);
         var key = MonitorKey(layout, sensors.Small);
-        bool fade = _monitorFade; _monitorFade = false;
-        if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView)) return;
+        if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView))
+        {
+            _monitorPlan = layout;
+            _monitorView.ResizeCards(layout);
+            return;
+        }
         _monitorKey = key; _monitorPlan = layout; _monitorSensors = BuiltSensors(layout, sensors.Small);
         // The list being replaced may have been under the pointer; its leave event never comes.
         if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
@@ -224,7 +250,8 @@ public partial class MainWindow
         old?.CloseCard();
         _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings, Look), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
-            Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor(old is null && MonitorMotion && !Resizing), MonitorMessage(layout), Settings.CoreDisplay);
+            Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor(old is null && MonitorMotion && !Resizing), MonitorMessage(layout), Settings.CoreDisplay, Settings.MonitorShowFree, Settings.CoreMatrixColumns);
+        if (old is not null) _monitorView.KeepCardScrollFrom(old);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         // The new page may show the power line where the old one did not, or the other way round: what is read follows
         // (UpdateMonitorDemand, which asks for the extras as well). And the frame rate's line: the frame rate is read only while a
@@ -237,17 +264,6 @@ public partial class MainWindow
             // A new main gauge, asked for on the page, arrives with a short fade instead of a cut.
             if (fade && MonitorMotion) _monitorView.BeginAnimation(OpacityProperty, Soft.Fade(.15, 1, Soft.Short));
         }
-    }
-
-    private (double Width, double Height, IReadOnlyList<ProviderSnapshot> Snapshots, DeckSettings Settings, PanelHeader Header)? _usageHeader;
-    private PanelHeader CachedUsageHeader()
-    {
-        double width = _usageWidth, height = UsagePageHeight;
-        if (_usageHeader is { } known && known.Width == width && known.Height == height && ReferenceEquals(known.Snapshots, Snapshots) && ReferenceEquals(known.Settings, Settings))
-            return known.Header;
-        var header = UsageHeader(width, height);
-        _usageHeader = (width, height, Snapshots, Settings, header);
-        return header;
     }
 
     // The sort and the main gauge are the same for every panel and are kept with the settings. A new main gauge rebuilds the page,

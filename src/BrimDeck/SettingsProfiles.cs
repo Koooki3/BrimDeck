@@ -66,6 +66,7 @@ public sealed partial class SettingsWindow
         Group([.. shared.Profiles.Select(profile => ProfileRow(shared, profile))]);
         DisplayProfiles(shared);
         ProfileRules(shared);
+        BackupSettings();
     }
 
     // A line above the profiles: a colored dot and what it is about.

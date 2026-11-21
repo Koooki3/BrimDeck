@@ -57,6 +57,9 @@ public sealed partial class SettingsWindow
         Refresh();
         // The options stay available while the page is off, so they can be set before it is shown.
         SectionTitle(Loc.T("通用", "General"));
+        string matrixTitle = Loc.T("点阵每行核心数", "Cores per matrix row");
+        var matrixCount = NumericControls(matrixTitle, S.CoreMatrixColumns, 0, CoreMatrix.MaxPreferredColumns, 1, "",
+            v => Resize(s => s.CoreMatrixColumns = (int)v, DeckPage.Monitor)).Number;
         Group(Row(Loc.T("各项颜色", "Reading colors"), roles),
             QuickRow(Loc.T("快捷预设", "Presets"), presets),
             GpuChoiceRow(),
@@ -65,12 +68,19 @@ public sealed partial class SettingsWindow
                 v => Change(s => s.CoreDisplay = v), keepPreview: true,
                 help: Loc.T("自动：核心较少时用柱状，柱子多到看不清时用点阵。",
                     "Auto: columns while there are few cores, the dot matrix when there are too many columns to read.")),
+            Row(matrixTitle, KeepPreview(matrixCount),
+                help: () => Loc.T("0 为自动。仅影响点阵。空间不足时自动排列，保留保存的设置。",
+                    "0 for automatic. Applies to the dot matrix. Tight spaces use automatic layout and keep the saved choice.")),
             MusicChoice(Loc.T("流量统计时长", "Traffic period"), S.MonitorTrafficPeriod,
                 [(TrafficPeriod.Today, TrafficPeriods.Name(TrafficPeriod.Today)), (TrafficPeriod.Day, TrafficPeriods.Name(TrafficPeriod.Day)),
                     (TrafficPeriod.Week, TrafficPeriods.Name(TrafficPeriod.Week)), (TrafficPeriod.Month, TrafficPeriods.Name(TrafficPeriod.Month))],
                 v => Change(s => s.MonitorTrafficPeriod = v),
                 help: Loc.T("与 Windows 流量统计一致，最近的流量稍后计入。当天从 0 点算起。",
-                    "Matches Windows' data usage; recent traffic is counted a little later. Today counts from midnight.")));
+                    "Matches Windows' data usage; recent traffic is counted a little later. Today counts from midnight.")),
+            MusicChoice(Loc.T("内存与硬盘", "Memory and drives"), S.MonitorShowFree,
+                [(false, Loc.T("已用", "Used")), (true, Loc.T("剩余", "Free"))],
+                v => Change(s => s.MonitorShowFree = v), keepPreview: true,
+                help: Loc.T("收起与展开时都适用。", "Applies collapsed and expanded.")));
         CompactMonitorOptions();
         SectionTitle(Loc.T("展开时", "When expanded"));
         // What the page shows (chips, the temperatures among them, and a sketch of the page whose blocks are dragged to order it), then
@@ -78,7 +88,10 @@ public sealed partial class SettingsWindow
         // stay under the chips. Which of the CPU and the GPU is large is chosen on the page, by clicking the small one. The choices
         // that show themselves on the monitor page keep its preview open, so switching between them does not collapse it first.
         var (chips, sketch) = ExpandedOptions();
-        Group(WithSensorStops(WithFrameAccess(chips, () => ExpandedOf(S, ExpandedItem.Frames).Visible && !Reading(S, CompactMonitorItems.Frames).Visible)), sketch,
+        Group(WithSensorStops(WithFrameAccess(chips, () =>
+            (S.ExpandedCustomCards && S.ExpandedGridTiles is { } tiles
+                ? tiles.Any(tile => tile.Item == ExpandedItem.Frames) : ExpandedOf(S, ExpandedItem.Frames).Visible)
+            && !Reading(S, CompactMonitorItems.Frames).Visible)), sketch,
             MusicChoice(Loc.T("进程行", "Process rows"), S.MonitorProcessView,
                 [(MonitorProcessView.Auto, Loc.T("自动", "Auto")), (MonitorProcessView.Compact, Loc.T("简略", "Compact")), (MonitorProcessView.Detailed, Loc.T("详细", "Detailed"))],
                 v => Resize(s => s.MonitorProcessView = v, DeckPage.Monitor), keepPreview: true),

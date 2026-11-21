@@ -13,6 +13,7 @@ public sealed record FontMetrics(double Scale = 1, double LineFactor = FontMetri
 // What the page can show of the system at the moment: the volumes it has entries for (as many as the page would show) and the lines
 // the power reading has (0 without a source of power, 1 with, 2 with the battery's own line besides).
 public sealed record ExpandedContent(int Drives = 0, int PowerLines = 0);
+public sealed record ExpandedCardContent(IReadOnlyList<ExpandedCard> Cards, bool AwaitingDrives, bool WatchDrives);
 
 // Empty: nothing is chosen, the page says so and reads nothing. Unavailable: something is chosen but nothing of it can be read on
 // this machine. Readings: the readings (and the list beside or under them). List: the process list alone.
@@ -20,7 +21,7 @@ public enum ExpandedKind { Empty, Unavailable, Readings, List }
 public enum ExpandedList { None, Side, Below, Full }
 // The shape an item takes: a gauge with its partner small beside it (Pair) or alone (Solo); memory and network on one line shared
 // (Line), a line each (Lines) or memory as a block (Blocks); a line of its own (Row) or several (Rows).
-public enum ExpandedForm { Pair, Solo, Line, Lines, Blocks, Row, Rows }
+public enum ExpandedForm { Pair, Solo, Line, Lines, Blocks, Row, Rows, Cards }
 
 public readonly record struct ExpandedBox(double X, double Y, double Width, double Height)
 {
@@ -53,16 +54,20 @@ public sealed class ExpandedPlan
     public double Hole { get; init; }
     public double Width { get; init; }
     public double Height { get; init; }
+    public ExpandedCardContent? CardContent { get; init; }
+    public double CardsHeight { get; init; }
+    public bool CardsTwoColumns { get; init; }
 
     // The rates the network block shows: it is one block of one line, with the download, the upload or both.
     public bool Downloads { get; init; }
     public bool Uploads { get; init; }
     // With both rates shown: the upload at the left (the table puts it before the download).
     public bool UploadFirst { get; init; }
-    public IEnumerable<ExpandedItem> Shown => Parts.Select(part => part.Item).Where(item => item is not (ExpandedItem.Download or ExpandedItem.Upload))
+    public IEnumerable<ExpandedItem> Shown => Parts.Where(part => part.Form != ExpandedForm.Cards).Select(part => part.Item).Where(item => item is not (ExpandedItem.Download or ExpandedItem.Upload))
         .Concat(Downloads ? [ExpandedItem.Download] : []).Concat(Uploads ? [ExpandedItem.Upload] : [])
+        .Concat(CardContent is { } custom ? custom.Cards.Select(card => card.Item).Distinct() : [])
         .Concat(List != ExpandedList.None ? [ExpandedItem.Processes] : []);
-    public ExpandedPart? Part(ExpandedItem item) => Parts.FirstOrDefault(part => part.Item == item);
+    public ExpandedPart? Part(ExpandedItem item) => Parts.FirstOrDefault(part => part.Item == item && part.Form != ExpandedForm.Cards);
     // Type sizes as drawn.
     public double Figure => Steps.Figure * Scale;
     public double Body => Steps.Body * Scale;
@@ -70,10 +75,12 @@ public sealed class ExpandedPlan
     public double RowHeight => Steps.RowHeight * Scale;
 
     // What the sampler reads for this page and nothing else: the items the layout kept, and the temperatures where one is shown.
-    public ExpandedDemand Demand(bool temperatures) => ExpandedMonitor.Demand(Shown, temperatures);
+    public ExpandedDemand Demand(bool temperatures) => ExpandedMonitor.Demand(CardContent?.WatchDrives == true ? Shown.Append(ExpandedItem.Storage) : Shown, temperatures);
 
     // What makes two plans the same page, as far as building it goes.
-    public string Signature => string.Join("|", Kind, Steps, List, Downloads, Uploads, UploadFirst, string.Join(",", Parts.Select(part => part.Item + ":" + part.Form)));
+    public string Signature => string.Join("|", Kind, Steps, List, Downloads, Uploads, UploadFirst, CardsTwoColumns,
+        CardContent?.AwaitingDrives, CardContent?.WatchDrives, CardContent is { } custom ? string.Join(",", custom.Cards.Select(card => $"{card.Item}/{card.Letter}/{card.Wide}/{card.CompactMemoryBar}")) : "",
+        string.Join(",", Parts.Select(part => part.Item + ":" + part.Form)));
 }
 
 // The expanded page's layout from the table of items: the page before the table (MonitorLayout) made general. The rules:
@@ -100,7 +107,7 @@ public static class ExpandedLayout
     public const double PairMinimum = 120;
     public const double Hysteresis = MonitorLayout.Hysteresis;
 
-    private enum BandKind { Gauge, Metrics, Frames, Storage, Power }
+    private enum BandKind { Gauge, Metrics, Frames, Storage, Power, Cards }
     private sealed class Band
     {
         public BandKind Kind;
@@ -109,9 +116,13 @@ public static class ExpandedLayout
     }
 
     // The plan for this size, keeping previous while the size is within Hysteresis of the step it shows.
-    public static ExpandedPlan For(IEnumerable<ExpandedItem>? shown, double width, double height, ExpandedContent? content, FontMetrics? font, MonitorMain main, ExpandedPlan? previous)
+    public static ExpandedPlan For(IEnumerable<ExpandedItem>? shown, double width, double height, ExpandedContent? content, FontMetrics? font, MonitorMain main, ExpandedPlan? previous,
+        ExpandedCardContent? cardContent = null)
     {
         var items = (shown ?? []).ToList();
+        // The scrolling card section uses the actual viewport height, including while the panel is being resized.
+        if (cardContent is not null)
+            return BuildPlan(items, width, height, content, font, main, cardContent, previous);
         var next = For(items, width, height, content, font, main);
         if (previous is null || next.Signature == previous.Signature) return next;
         foreach (double dw in new[] { 0, -Hysteresis, Hysteresis })
@@ -120,7 +131,12 @@ public static class ExpandedLayout
         return next;
     }
 
-    public static ExpandedPlan For(IEnumerable<ExpandedItem>? shown, double width, double height, ExpandedContent? content = null, FontMetrics? font = null, MonitorMain main = MonitorMain.Cpu)
+    public static ExpandedPlan For(IEnumerable<ExpandedItem>? shown, double width, double height, ExpandedContent? content = null, FontMetrics? font = null, MonitorMain main = MonitorMain.Cpu,
+        ExpandedCardContent? cardContent = null)
+        => BuildPlan(shown, width, height, content, font, main, cardContent, null);
+
+    private static ExpandedPlan BuildPlan(IEnumerable<ExpandedItem>? shown, double width, double height, ExpandedContent? content, FontMetrics? font, MonitorMain main,
+        ExpandedCardContent? cardContent, ExpandedPlan? previous)
     {
         var order = (shown ?? []).Where(item => Enum.IsDefined(item)).Distinct().ToList();
         font = (font ?? FontMetrics.Default).Fit(); content ??= new();
@@ -130,11 +146,25 @@ public static class ExpandedLayout
         double w = width / scale, h = height / scale;
 
         bool cpu = order.Contains(ExpandedItem.Cpu), gpu = order.Contains(ExpandedItem.Gpu), gauge = cpu || gpu;
-        bool mem = order.Contains(ExpandedItem.Memory), down = order.Contains(ExpandedItem.Download), up = order.Contains(ExpandedItem.Upload), net = down || up, metrics = mem || net;
-        bool frames = order.Contains(ExpandedItem.Frames), processes = order.Contains(ExpandedItem.Processes);
-        int drives = order.Contains(ExpandedItem.Storage) ? Math.Max(0, content.Drives) : 0;
-        int powerWant = order.Contains(ExpandedItem.Power) ? Math.Clamp(content.PowerLines, 0, 2) : 0;
-        bool readings = gauge || metrics || frames || drives > 0 || powerWant > 0;
+        bool framesSelected = order.Contains(ExpandedItem.Frames), processes = order.Contains(ExpandedItem.Processes);
+        int powerLinesAvailable = order.Contains(ExpandedItem.Power) ? Math.Clamp(content.PowerLines, 0, 2) : 0;
+        bool InlineAvailable(ExpandedCard card) => card.Item switch
+        {
+            ExpandedItem.Power => powerLinesAvailable > 0,
+            ExpandedItem.Frames => framesSelected,
+            _ => true
+        };
+        if (cardContent is not null && !cardContent.Cards.All(InlineAvailable))
+            cardContent = cardContent with { Cards = cardContent.Cards.Where(InlineAvailable).ToArray() };
+        bool inlinePower = cardContent?.Cards.Any(card => card.Item == ExpandedItem.Power) == true;
+        bool inlineFrames = cardContent?.Cards.Any(card => card.Item == ExpandedItem.Frames) == true;
+        int powerWant = inlinePower ? 0 : powerLinesAvailable;
+        bool frames = framesSelected && !inlineFrames;
+        bool cards = cardContent is { Cards.Count: > 0 } or { AwaitingDrives: true };
+        bool mem = cardContent is null && order.Contains(ExpandedItem.Memory), down = cardContent is null && order.Contains(ExpandedItem.Download),
+            up = cardContent is null && order.Contains(ExpandedItem.Upload), net = down || up, metrics = mem || net;
+        int drives = cardContent is null && order.Contains(ExpandedItem.Storage) ? Math.Max(0, content.Drives) : 0;
+        bool readings = gauge || metrics || cards || frames || drives > 0 || powerWant > 0;
 
         // Type sizes and the list's step as before the table.
         var basis = MonitorLayout.For(w, h, processes && readings);
@@ -145,11 +175,24 @@ public static class ExpandedLayout
             return new ExpandedPlan
             {
                 Kind = order.Count == 0 ? ExpandedKind.Empty : ExpandedKind.Unavailable, Steps = basis, Scale = scale, Parts = [], Readings = default, List = ExpandedList.None,
-                ListBox = default, Dropped = order, Width = width, Height = height, Hole = height
+                ListBox = default, Dropped = order, Width = width, Height = height, Hole = height, CardContent = cardContent
             };
         }
 
         var list = !processes ? ExpandedList.None : !readings ? ExpandedList.Full : (ExpandedList)(int)basis.List;
+        const double stackedListGap = 10;
+        bool belowFits = h - MonitorLayout.StackedReadings - stackedListGap >= MonitorLayout.ListHead + MonitorLayout.MinimumRows * row;
+        if (cards && list == ExpandedList.Below && !belowFits) list = ExpandedList.None;
+        if (cards && list is ExpandedList.Side or ExpandedList.Below
+            && previous is { CardContent.Cards.Count: > 0, List: ExpandedList.Side or ExpandedList.Below } && previous.Scale == scale
+            && previous.List != list && (previous.List != ExpandedList.Below || belowFits))
+        {
+            // The process list can change the width available to the cards by much more than the pointer moved.
+            // Keep its previous position near a boundary, but use the actual width and height for the boxes below.
+            double margin = Hysteresis / scale;
+            double nearbyWidth = w + (previous.List == ExpandedList.Side ? margin : -margin);
+            if ((ExpandedList)(int)MonitorLayout.For(nearbyWidth, h, true).List == previous.List) list = previous.List;
+        }
         double readingsH = list == ExpandedList.Below ? MonitorLayout.StackedReadings : h;
         double readingsW = list == ExpandedList.Side ? w - ListGap - MonitorLayout.SideListWidth(w) : w;
         if (!readings)
@@ -158,7 +201,7 @@ public static class ExpandedLayout
             return new ExpandedPlan
             {
                 Kind = ExpandedKind.List, Steps = basis, Scale = scale, Parts = [], Readings = default, List = ExpandedList.Full, ListBox = Scaled(only, scale),
-                Dropped = [.. order.Where(item => item != ExpandedItem.Processes)], Width = width, Height = height
+                Dropped = [.. order.Where(item => item != ExpandedItem.Processes)], Width = width, Height = height, CardContent = cardContent
             };
         }
 
@@ -166,7 +209,7 @@ public static class ExpandedLayout
         double headH = gauge ? Math.Ceiling(figure * 1.4 * k) : 0;
         double minGraph = gauge ? MonitorLayout.MinimumGraph : 0;
         double Margins(MetricsMode mode) => gauge ? (mode == MetricsMode.Line ? 10 : 16) : 0;
-        double Rest(MetricsMode mode) => Rest2(mode, mem, net);
+        double Rest(MetricsMode mode) => Rest2(mode, mem, net) + (cards ? ln : 0);
         double Gap(MetricsMode mode) => mode switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 };
 
         // Memory and network take a line each only where a line of the lines under them still fits, and blocks from BlocksFrom.
@@ -199,7 +242,7 @@ public static class ExpandedLayout
         // A page too short for any line still shows the first of what was asked, squeezed, rather than nothing.
         bool squeezed = false;
         bool memShown = mem, netShown = net, gaugeShown = gauge;
-        if (!gauge && !metrics && !frameLine && storageLines == 0 && powerLines == 0)
+        if (!gauge && !metrics && !cards && !frameLine && storageLines == 0 && powerLines == 0)
         {
             squeezed = true;
             if (powerWant > 0) powerLines = 1; else if (frames) frameLine = true; else storageLines = 1;
@@ -207,13 +250,21 @@ public static class ExpandedLayout
 
         // Bands in the table's order.
         int Index(params ExpandedItem[] of) => of.Where(item => order.Contains(item)).Select(item => order.IndexOf(item)).DefaultIfEmpty(int.MaxValue).Min();
+        int cardIndex = cards ? order.FindIndex(item => ExpandedCards.PageSection(item, inlinePower, inlineFrames) == ExpandedItem.Memory) : -1;
         double graphMin = minGraph;
+        // Keep the column count within the dead band while measuring the viewport at its real dimensions.
+        double columnMargin = previous is { CardContent.Cards.Count: > 0 } && previous.List == list && previous.Scale == scale
+            ? (previous.CardsTwoColumns ? Hysteresis : -Hysteresis) : 0;
+        bool twoColumns = cards && ExpandedCards.TwoColumns(readingsW * scale + columnMargin, scale);
+        var (cardHeight, tallestCardRow) = cards ? ExpandedCards.MeasureRows(cardContent!, twoColumns, body) : (0d, 0d);
         List<Band> Build()
         {
             double restNow = Rest2(mode, memShown, netShown);
             var bands = new List<Band>();
             if (gaugeShown) bands.Add(new Band { Kind = BandKind.Gauge, Index = Index(ExpandedItem.Cpu, ExpandedItem.Gpu), Height = head + margins + graphMin });
             if (restNow > 0) bands.Add(new Band { Kind = BandKind.Metrics, Index = Index(ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload), Height = restNow, Stretch = StretchBlocks });
+            if (cards) bands.Add(new Band { Kind = BandKind.Cards, Index = cardIndex < 0 ? int.MaxValue : cardIndex, Height = ln,
+                Stretch = cardHeight / ln });
             if (frameLine) bands.Add(new Band { Kind = BandKind.Frames, Index = Index(ExpandedItem.Frames), Height = rowS, Stretch = StretchRows });
             if (storageLines > 0) bands.Add(new Band { Kind = BandKind.Storage, Index = Index(ExpandedItem.Storage), Height = storageLines * rowS, Stretch = StretchDrives });
             if (powerLines > 0) bands.Add(new Band { Kind = BandKind.Power, Index = Index(ExpandedItem.Power), Height = powerLines * rowS, Stretch = StretchRows });
@@ -233,9 +284,20 @@ public static class ExpandedLayout
             return total;
         }
         var all = Build();
+        if (cards && gaugeShown && graphMin > GraphFloor)
+        {
+            // Give the scroll viewport room to show a complete reading before using the extra height for graphs.
+            double shortage = tallestCardRow - ln - (readingsH - Total(all));
+            if (shortage > 0)
+            {
+                squeezed = true;
+                graphMin = Math.Max(GraphFloor, graphMin - shortage);
+                all = Build();
+            }
+        }
         if (Total(all) > readingsH + .001 && gaugeShown)
         {
-            squeezed = true; graphMin = GraphFloor; all = Build();
+            squeezed = true; graphMin = Math.Min(graphMin, GraphFloor); all = Build();
         }
         // Still too much: the lines leave, then network, then memory (the battery's own line before the power line).
         while (Total(all) > readingsH + .001 && all.Count > 1)
@@ -246,7 +308,13 @@ public static class ExpandedLayout
             else if (powerLines > 0) powerLines = 0;
             else if (netShown && memShown) netShown = false;
             else if (memShown && gaugeShown) memShown = false;
-            else break;
+            else
+            {
+                // Scrolling keeps the cards reachable even below the natural row height.
+                var smallCards = all.FirstOrDefault(band => band.Kind == BandKind.Cards);
+                if (smallCards is not null) smallCards.Height = Math.Max(0, smallCards.Height - (Total(all) - readingsH));
+                break;
+            }
             squeezed = true;
             all = Build();
         }
@@ -257,10 +325,19 @@ public static class ExpandedLayout
         double hole = 0, offset = 0;
         double fixedTotal = Total(all) - (all.FirstOrDefault(b => b.Kind == BandKind.Gauge)?.Height ?? 0);
         var gaugeBand = all.FirstOrDefault(b => b.Kind == BandKind.Gauge);
+        var cardBand = all.FirstOrDefault(b => b.Kind == BandKind.Cards);
         if (gaugeBand is not null)
         {
+            if (cardBand is not null)
+            {
+                double spare = Math.Max(0, readingsH - Total(all));
+                double grow = Math.Min(spare, Math.Max(0, cardHeight - cardBand.Height));
+                cardBand.Height += grow;
+                fixedTotal += grow;
+            }
             // The band's gaps: counted in the total with the gauge's own height removed, so add them back as they stand.
             gaugeBand.Height = Math.Max(0, readingsH - fixedTotal);
+            if (minGraph == 0) gaugeBand.Height = Math.Min(gaugeBand.Height, head + margins);
             if (all.Count == 1) gaugeBand.Height = readingsH;
         }
         else
@@ -281,7 +358,7 @@ public static class ExpandedLayout
                 }
             }
             hole = Math.Max(0, readingsH - Total(all));
-            offset = Math.Floor(hole / 2);
+            offset = cards ? 0 : Math.Floor(hole / 2);
         }
 
         // Places.
@@ -297,7 +374,7 @@ public static class ExpandedLayout
             {
                 case BandKind.Gauge:
                 {
-                    double minHeight = head + margins + (squeezed ? Math.Min(graphMin, GraphFloor) : MonitorLayout.MinimumGraph);
+                    double minHeight = head + margins + (squeezed ? Math.Min(graphMin, GraphFloor) : minGraph);
                     double mini = Math.Round(Math.Clamp(figure * 3.4, 54, 84));
                     bool pair = cpu && gpu && readingsW >= mini + PairGap + PairMinimum;
                     var first = cpu && gpu ? (main == MonitorMain.Gpu ? ExpandedItem.Gpu : ExpandedItem.Cpu) : cpu ? ExpandedItem.Cpu : ExpandedItem.Gpu;
@@ -319,6 +396,9 @@ public static class ExpandedLayout
                 case BandKind.Storage:
                     parts.Add(new(ExpandedItem.Storage, Scaled(new(0, y, readingsW, bh), scale), ExpandedForm.Rows, storageLines * rowS));
                     break;
+                case BandKind.Cards:
+                    parts.Add(new(ExpandedItem.Memory, Scaled(new(0, y, readingsW, bh), scale), ExpandedForm.Cards, ln));
+                    break;
                 default:
                     parts.Add(new(ExpandedItem.Power, Scaled(new(0, y, readingsW, bh), scale), powerLines > 1 ? ExpandedForm.Rows : ExpandedForm.Row, powerLines * rowS));
                     break;
@@ -326,20 +406,21 @@ public static class ExpandedLayout
             y += bh;
         }
 
-        var steps = new MonitorLayout(figure, body, caption, mode, (ListPlacement)(int)(list == ExpandedList.Full ? ExpandedList.None : list), row)
+        var steps = new MonitorLayout(figure, body, caption, mode, (ListPlacement)(int)list, row)
         {
-            StorageLines = storageLines, StorageColumns = storageLines > 0 ? columns : 0, PowerLines = powerLines, FrameLine = frameLine
+            StorageLines = storageLines, StorageColumns = storageLines > 0 ? columns : 0, PowerLines = inlinePower ? 1 : powerLines, FrameLine = frameLine || inlineFrames
         };
         var listBox = list switch
         {
             ExpandedList.Side => new ExpandedBox(readingsW + ListGap, 0, MonitorLayout.SideListWidth(w), h),
-            ExpandedList.Below => new ExpandedBox(0, MonitorLayout.StackedReadings + 10, w, Math.Max(0, h - MonitorLayout.StackedReadings - 10)),
+            ExpandedList.Below => new ExpandedBox(0, MonitorLayout.StackedReadings + stackedListGap, w, Math.Max(0, h - MonitorLayout.StackedReadings - stackedListGap)),
             _ => default
         };
         var plan = new ExpandedPlan
         {
             Kind = ExpandedKind.Readings, Steps = steps, Scale = scale, Parts = parts, Readings = Scaled(new(0, 0, readingsW, readingsH), scale), List = list,
             ListBox = Scaled(listBox, scale), Dropped = dropped, Squeezed = squeezed, Hole = hole * scale, Width = width, Height = height,
+            CardContent = cardContent, CardsHeight = (cardBand?.Height ?? 0) * scale, CardsTwoColumns = twoColumns,
             Downloads = down && netShown, Uploads = up && netShown,
             UploadFirst = down && up && netShown && order.IndexOf(ExpandedItem.Upload) < order.IndexOf(ExpandedItem.Download)
         };

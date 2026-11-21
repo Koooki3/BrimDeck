@@ -20,11 +20,13 @@ public sealed class PanelThemeFile
     public PanelThemeEffects? Effects { get; set; }
     // The clock style and color that suit the theme; choosing the theme in settings switches the clock to them.
     public PanelThemeClock? Clock { get; set; }
+    // How the theme answers the pointer (see ThemeMotion), merged field by field like the effects.
+    public PanelThemeMotion? Motion { get; set; }
     // The twelve preset colors of the color picker in settings. Unlike everything else these are not inherited: a theme without
     // its own list offers its own app, warning, critical and clock colors (see PanelPalette.Swatches).
     public List<string>? Swatches { get; set; }
     // A theme with a day and a night look: Night is laid over the theme from Daylight's evening to its morning. Only its colors,
-    // apps, effects and clock are read; it has no base or name of its own.
+    // apps, effects, motion and clock are read; it has no base or name of its own.
     public PanelThemeFile? Night { get; set; }
     // A dusk look, read like Night and laid over the day look for Daylight.DuskMinutes before the night begins. By the clock
     // only, and only beside a night look.

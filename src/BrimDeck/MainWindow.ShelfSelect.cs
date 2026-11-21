@@ -12,7 +12,8 @@ namespace BrimDeck;
 // with a click takes all from the last one chosen to this one, and a drag that starts on an empty part of the list draws a
 // frame that chooses what it touches. The right button on one of the chosen then acts on all of them (ClipMenu, FileMenu): into
 // or out of a category, deleted or removed. What is chosen is in one column at a time (_picked): choosing in the other lets go
-// of it. A click on an entry by itself still pastes it and lets go of the choice; a click on an empty part only lets go.
+// of it. A click on an entry by itself still pastes it (or only copies it: DeckSettings.ClipboardClickCopyOnly) and lets go of the
+// choice; a click on an empty part only lets go.
 public partial class MainWindow
 {
     private Guid? _clipAnchor;
@@ -69,7 +70,8 @@ public partial class MainWindow
         }
         if (_picked.Count > 0) { _picked.Clear(); RenderShelf(); }
         _clipAnchor = clip.Id;
-        PasteClip(clip);
+        if (Settings.ClipboardClickCopyOnly) CopyClip(clip);
+        else PasteClip(clip);
     }
     // The menu of several chosen clipboard entries: into or out of "常用" and the user's categories, and deleted, all at once.
     private ContextMenu ClipsMenu(IReadOnlyList<ClipEntry> clips)

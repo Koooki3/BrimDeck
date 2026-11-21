@@ -6,9 +6,19 @@ namespace BrimDeck.Core;
 public readonly record struct HidShape(int Vendor, int Product, int UsagePage, int Usage, int Interface, int InputLength, int OutputLength,
     int FeatureLength, IReadOnlySet<byte> OutputIds, IReadOnlySet<byte> FeatureIds, string Name)
 {
+    private static readonly IReadOnlySet<byte> NoIds = new HashSet<byte>();
+    // The ids of the input reports the collection declares.
+    public IReadOnlySet<byte> InputIds { get; init; } = NoIds;
+
+    // A report id the collection lists as an input report while it lists no output report at all: a collection that may still
+    // take that report as output (BrandWay.Undeclared).
+    public bool Unlisted(byte id) => OutputIds.Count == 0 && InputIds is { } ids && ids.Contains(id);
+
     public bool Declares(BrandWay way) => way.Transport switch
     {
-        WayTransport.Output or WayTransport.OutputListen or WayTransport.OutputGetInput => OutputIds.Contains(way.Request.Length > 0 ? way.Request[0] : (byte)0),
+        WayTransport.Output or WayTransport.OutputListen or WayTransport.OutputGetInput or WayTransport.Converse
+            => OutputIds.Contains(way.Request.Length > 0 ? way.Request[0] : (byte)0)
+                || way.Undeclared && way.Request.Length > 0 && Unlisted(way.Request[0]) && OutputLength >= way.Request.Length,
         WayTransport.Feature or WayTransport.FeatureListen or WayTransport.FeatureGet => FeatureIds.Contains(way.Request.Length > 0 ? way.Request[0] : (byte)0),
         WayTransport.Listen => InputLength > 0,
         _ => false
@@ -24,7 +34,20 @@ public readonly record struct HidShape(int Vendor, int Product, int UsagePage, i
 // - OutputGetInput: an output report is written, then input report ReplyId is fetched (HidD_GetInputReport) every GapMs
 //   until it parses or TimeoutMs passes; the report as it was before the request (a stale answer) is never taken.
 // - FeatureGet: nothing is written; feature report Request[0] is fetched (FeatureLength bytes) and parsed.
-public enum WayTransport { Output, Feature, FeatureListen, OutputListen, Listen, OutputGetInput, FeatureGet }
+// - Converse: the read talks to the collection itself (BrandWay.Converse), frame by frame, for a transport that needs more than
+//   one question and its answer (a receiver that splits a request into acknowledged frames). Request is its first frame's
+//   report id and nothing more is sent from it; Parse is not used.
+public enum WayTransport { Output, Feature, FeatureListen, OutputListen, Listen, OutputGetInput, FeatureGet, Converse }
+
+// A collection as a Converse read sees it: output reports written (report id first, padded to the collection's length) and
+// input reports read (report id first, null when none came in the time). Key names the collection for the whole run (its
+// path), for a transport that keeps state from one read to the next.
+public interface IHidExchange
+{
+    string Key { get; }
+    void Write(byte[] report);
+    byte[]? Read(int timeoutMs);
+}
 
 // One of a brand's battery reads. Name: stable across versions (kept in device-reads.json), "brand.read". Before: frames sent
 // first the same way (a session or mode a read needs), After: frames that undo them, sent whatever the answer. Attempts: how
@@ -40,6 +63,11 @@ public sealed record BrandWay(string Name, WayTransport Transport, byte[] Reques
     public IReadOnlyList<byte[]> Before { get; init; } = [];
     public IReadOnlyList<byte[]> After { get; init; } = [];
     public bool StripZero { get; init; }
+    // An output read also sent to a collection that lists no output report id at all but lists the request's id as an input
+    // report (HidShape.Unlisted), long enough for the request. Measured on the MCHOSE V9 PRO's receiver: Windows lists report
+    // 0x55 there as input only, and the collection takes it as output and answers. Never where other output report ids are
+    // listed.
+    public bool Undeclared { get; init; }
     // OutputGetInput: the input report fetched for the answer.
     public byte ReplyId { get; init; }
     // A question asked first, the same way, whose answer says whether the device can answer the read at all (a headset
@@ -55,6 +83,11 @@ public sealed record BrandWay(string Name, WayTransport Transport, byte[] Reques
     // as read. Not for Listen (nothing is sent).
     public byte[]? Then { get; init; }
     public Func<byte[], bool?>? Charging { get; init; }
+    // A first try of this read that finds the device asleep does not settle the reads (a receiver that answers it for itself
+    // whatever is behind it): the ones after it are tried, and it is kept only if none of them gives a level.
+    public bool ProbeOnAsleep { get; init; }
+    // WayTransport.Converse: the whole exchange, its reading or null. It must keep to its own time limit.
+    public Func<IHidExchange, BatteryRead?>? Converse { get; init; }
 
     // The level with the charging question's answer.
     public static BatteryRead WithCharging(BatteryRead level, bool? charging) => charging is true ? level with { Charging = true } : level;
@@ -112,12 +145,15 @@ public static class GetInputExchange
 
 // A brand's devices and their reads. Takes: whether a collection is the brand's to read (its vendor, and for a vendor id
 // other brands share, its products), from its shape alone, never by sending anything. Ways: the reads that collection takes,
-// best first; a way is only sent to a collection that declares its report id (HidShape.Declares). Kind: what the device is
+// best first; a way is only sent to a collection that declares its report id, or for an Undeclared output read one that lists
+// it as an input report alone (HidShape.Declares). Kind: what the device is
 // when its name does not say. Prefix: the device key's prefix (stable: user choices are kept under the key). DisplayName: a
 // better name than the product string, if any.
 public sealed record BrandFamily(string Brand, Func<HidShape, bool> Takes, Func<HidShape, IReadOnlyList<BrandWay>> Ways)
 {
     public Func<HidShape, DeviceKind?> Kind { get; init; } = _ => null;
+    // What the device is, by the read that answered (a receiver shared by keyboards and mice), before Kind.
+    public Func<string, DeviceKind?> WayKind { get; init; } = _ => null;
     public string Prefix { get; init; } = "brand";
     public Func<HidShape, string?> DisplayName { get; init; } = _ => null;
     // Read only while none of these processes runs (the brand's own software would lose its answers to us).

@@ -65,22 +65,9 @@ public partial class MainWindow
         public double Required(int slots, bool inline) => Head + slots * QuotaHeight + Math.Max(0, slots - 1) * QuotaGap + FooterHeight(inline);
     }
 
-    private static double ToolbarFor(double panelHeight) => panelHeight < 150 ? 28 : panelHeight >= 290 ? 40 : 36;
-
     // Until a layout is fitted (or without one: no apps, model details) the header uses the inset the content will most likely get.
     private PanelHeader UnfittedHeader(double panelHeight) =>
-        PanelHeader.For(ToolbarFor(panelHeight), _details ? (panelHeight < 170 ? 14 : 20) : EdgeInset + Layout.For(panelHeight < 150 ? Tier.Tiny : Tier.Default).ColumnPad);
-
-    // The header the usage page gives a page of this size with the current apps and data, as RenderUsage applies it. The music
-    // page takes its controls from it (PanelHeader.WithControlsOf), so they stay in place when the page changes.
-    private PanelHeader UsageHeader(double width, double height)
-    {
-        if (_details || !Settings.UsagePage || Settings.EnabledApps.Count == 0) return UnfittedHeader(height);
-        var columns = DashboardUsage.Columns(Settings, Snapshots);
-        if (columns.Count == 0) return UnfittedHeader(height);
-        var fit = FitColumns(columns, width, height);
-        return PanelHeader.For(fit.Layout.Toolbar, EdgeInset + fit.Layout.ColumnPad);
-    }
+        _details ? PanelHeader.ForPanel(panelHeight) : PanelHeader.For(PanelHeader.ToolbarFor(panelHeight), EdgeInset + Layout.For(panelHeight < 150 ? Tier.Tiny : Tier.Default).ColumnPad);
 
     // The layout is fitted to everything the panel can show, not to the page on screen, so switching application pages or
     // quota pages never changes column widths, sizes or spacing. Each page contains at most two quotas, regardless of the
@@ -184,7 +171,7 @@ public partial class MainWindow
         if (build is not null && build == _usageBuilt && _usageHandover == Handover.None && UsageContent.Children.Count > 0)
         {
             // The page as it was built; another page may have taken the header meanwhile.
-            ApplyHeader(_usageHeaderBuilt);
+            ApplyPageHeader(_usageHeaderBuilt);
             ClockLabel.Visibility = Visibility.Visible; ModelToolbar.Visibility = Visibility.Collapsed;
             ApplicationPages.Visibility = ApplicationPages.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             return;
@@ -212,7 +199,7 @@ public partial class MainWindow
         ModelToolbar.Children.Clear(); UsageContent.Children.Clear();
         ApplicationPages.Children.Clear(); ApplicationPages.Visibility = Visibility.Collapsed;
         double panelHeight = ContentCanvas.Height;
-        ApplyHeader(UnfittedHeader(panelHeight));
+        ApplyPageHeader(UnfittedHeader(panelHeight));
         ClockLabel.Visibility = _details ? Visibility.Collapsed : Visibility.Visible;
         ModelToolbar.Visibility = _details ? Visibility.Visible : Visibility.Collapsed;
 
@@ -341,8 +328,7 @@ public partial class MainWindow
         _usageForm = $"{layout.Tier}|{layout.Footer}|{inline}|{wide}|{count}";
         int first = _applicationPage * pageSize;
         columns = columns.Skip(first).Take(pageSize).ToList(); views = views.Skip(first).Take(pageSize).ToList();
-        // The quotas start EdgeInset + ColumnPad from the panel edge; the header lines up with them.
-        ApplyHeader(PanelHeader.For(layout.Toolbar, EdgeInset + layout.ColumnPad));
+        ApplyPageHeader(PanelHeader.For(layout.Toolbar, EdgeInset + layout.ColumnPad));
         UsageContent.Margin = new Thickness(EdgeInset, 0, EdgeInset, layout.Bottom);
         // Spare height is always split evenly above and below the quotas, so resizing moves them smoothly
         // instead of pinning them under the title until a threshold is crossed.
@@ -622,10 +608,10 @@ public partial class MainWindow
         {
             MetricKind.Balance => Loc.T("可用 " + quota.ValueText, quota.ValueText + " available")
                 + (quota.Total is { } total ? quota.TotalIsTarget
-                    ? Loc.T(" · 目标余额 " + UsageMetric.Money(total, quota.Currency), " · target " + UsageMetric.Money(total, quota.Currency))
-                    : Loc.T(" · 总额 " + UsageMetric.Money(total, quota.Currency), " · " + UsageMetric.Money(total, quota.Currency) + " total") : ""),
+                    ? Loc.T(" · 目标余额 " + quota.AmountText(total), " · target " + quota.AmountText(total))
+                    : Loc.T(" · 总额 " + quota.AmountText(total), " · " + quota.AmountText(total) + " total") : ""),
             MetricKind.Spend => Loc.T("已用 " + quota.ValueText, quota.ValueText + " used") + (quota.Unlimited ? Loc.T(" · 无上限", " · no limit") : "")
-                + (quota.Total is { } goal && quota.TotalIsTarget ? Loc.T(" · 目标金额 " + UsageMetric.Money(goal, quota.Currency), " · target " + UsageMetric.Money(goal, quota.Currency)) : ""),
+                + (quota.Total is { } goal && quota.TotalIsTarget ? Loc.T(" · 目标金额 " + quota.AmountText(goal), " · target " + quota.AmountText(goal)) : ""),
             MetricKind.Count => CountTooltip(quota),
             _ => MetricPercentTooltip(quota)
         };

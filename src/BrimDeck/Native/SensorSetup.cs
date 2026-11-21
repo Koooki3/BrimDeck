@@ -19,8 +19,6 @@ namespace BrimDeck.Native;
 // the SHA-256 the release build wrote into BrimDeck (SensorsSha256); PawnIO's two modules come from PawnIO's own signed release,
 // pinned by its SHA-256 here. The service and its modules go to Program Files, which only administrators may change: BrimDeck
 // itself sits in the user's own folders, and a SYSTEM service run from there could be replaced by anything the user runs.
-internal enum SensorSetupState { NoPawnIo, NotEnabled, Enabled }
-
 internal static class SensorSetup
 {
     internal const string ElevatedSwitch = "--sensor-service";
@@ -73,20 +71,32 @@ internal static class SensorSetup
     private static int _generation;
     public static int Generation => Volatile.Read(ref _generation);
 
-    public static SensorSetupState State => PawnIoVersion is null ? SensorSetupState.NoPawnIo : ServiceInstalled ? SensorSetupState.Enabled : SensorSetupState.NotEnabled;
-
     // Installs or removes PawnIO with winget in a window of its own, so its agreements and progress are the user's to see; winget
     // asks for administrator rights itself. False without winget (the page then offers PawnIO's own download).
-    public static bool RunWinget(bool install)
+    public static async Task<bool> RunWingetAsync(bool install)
     {
-        try
+        var info = new ProcessStartInfo("winget.exe") { UseShellExecute = true };
+        foreach (var argument in new[] { install ? "install" : "uninstall", "--id", "namazso.PawnIO", "--exact" }) info.ArgumentList.Add(argument);
+        if (install)
         {
-            var info = new ProcessStartInfo("winget.exe") { UseShellExecute = true };
-            foreach (var argument in new[] { install ? "install" : "uninstall", "--id", "namazso.PawnIO", "--exact" }) info.ArgumentList.Add(argument);
-            Process.Start(info)?.Dispose();
+            info.ArgumentList.Add("--source");
+            info.ArgumentList.Add("winget");
+        }
+        Process? process;
+        try { process = Process.Start(info); }
+        catch (Win32Exception ex) when (ex.NativeErrorCode is 2 or 3) { return false; }
+        using (process)
+        {
+            if (process is null) return false;
+            await process.WaitForExitAsync();
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException(Loc.T("WinGet 退出代码", "WinGet exit code") + $" 0x{process.ExitCode:X8}");
+            if ((PawnIoVersion is not null) != install)
+                throw new InvalidOperationException(install
+                    ? Loc.T("安装结束后未检测到 PawnIO", "PawnIO was not found after installation")
+                    : Loc.T("卸载结束后仍检测到 PawnIO", "PawnIO is still installed after uninstallation"));
             return true;
         }
-        catch (Win32Exception) { return false; }
     }
     public const string PawnIoDownload = "https://github.com/namazso/PawnIO.Setup/releases/latest";
 

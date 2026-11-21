@@ -12,6 +12,8 @@ public enum ScreenEdge { Top, Bottom, Left, Right }
 // edge. Without a taskbar on that edge the two are the same line. See DeckSettings.Dock.
 public enum EdgeAnchor { Screen, Taskbar }
 public enum WindowBehavior { Normal, Line, Hide }
+// What hovering or clicking the indicator opens (DeckSettings.LineOpens): the panel, or first the capsule or the notch in its place.
+public enum IndicatorOpens { Panel, Capsule, Notch }
 // BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
 // Occupied: a window that neither is maximized nor fills the screen overlaps the place of the collapsed panel.
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen, Occupied }
@@ -52,13 +54,23 @@ public sealed record IgnoredMediaApp(string AppId = "", string Name = "", string
 // MiMo Code (CLI) and MiMo Desktop share. MiMoApi reads the Xiaomi MiMo Open Platform account of a pay-as-you-go key entered by
 // hand: its balances and the month's charges. MiMoTokenPlan reads the quota of a Token Plan key entered by hand. MiMoLinked reads
 // both with the keys Xiaomi MiMo Desktop and MiMo Code linked (MiMoUsage.ReadLinkedKeys); its statistics are MiMo's.
+// Qoder reads the credits of the account Qoder (CLI, desktop app or IDE) signed in with, and the token records of Qoder IDE; QoderCn
+// does the same for Qoder CN (QoderUsage).
+// Qianwen reads the Token Plans (personal and team), the balance and the month's charges of a Qianwen AI platform account signed in
+// to from settings; QwenCloud does the same for the international edition, QwenCloud (QianwenUsage).
+// QwenWorkCn reads the credits of the account the QwenWork CN (千问办公) desktop app signed in with, and its token records; QwenWork does
+// the same for the international edition (QwenWorkUsage).
+// Trae reads the USD usage quota and local token records of Trae / TRAE SOLO; TraeCn reads the credits and local token records of Trae CN / TRAE SOLO CN (TraeUsage).
+// Doubao reads the personal, team and enterprise quotas of a Doubao / DoubaoWork account signed in from settings; Dola does the same for the international edition (DoubaoQuotaUsage).
+// VolcengineArk and BytePlusArk read Coding Plan, Agent Plan (personal, team and enterprise seats) and account balance with an AccessKey ID and Secret Access Key entered by hand, or with an OAuth device sign-in from settings (VolcengineArkUsage).
 // Statistics sources are saved as numbers. 8 and 9 were a short-lived split of Claude and are retired:
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
-public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20, CodeAgent = 21, CommandCode = 22, CommandCodeApi = 23, WorkBuddy = 24, WorkBuddyAi = 25, MiMo = 26, MiMoApi = 27, MiMoTokenPlan = 28, MiMoLinked = 29, KimiPlatform = 30 }
+public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19, Pi = 20, CodeAgent = 21, CommandCode = 22, CommandCodeApi = 23, WorkBuddy = 24, WorkBuddyAi = 25, MiMo = 26, MiMoApi = 27, MiMoTokenPlan = 28, MiMoLinked = 29, KimiPlatform = 30, Qoder = 31, QoderCn = 32, Qianwen = 33, QwenCloud = 34, QwenWorkCn = 35, QwenWork = 36, Trae = 37, TraeCn = 38, Doubao = 39, Dola = 40, VolcengineArk = 41, BytePlusArk = 42 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
 public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices }
+// Hover: the page of the collapsed part under the pointer (MainWindow.Hover.cs); over a part that names none, the last page.
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, Hover }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
@@ -72,7 +84,7 @@ public enum PausedMusicHide { None, Text, Cover, Both }
 // drum beat or a voice is seen crossing them. Spectrum: the sound split by pitch, each bar one band, low on the left and high
 // on the right. Saved as numbers, so new members go at the end; a file without it, or with a number not listed, is Flow.
 public enum EqualizerMode { Flow = 0, Spectrum = 1 }
-// How the collapsed quota rings are drawn (QuotaRing). Nested: up to three rings about one centre, 20 DIP across, each quota in
+// How the collapsed quota rings are drawn (QuotaRing). Nested: up to three rings about one centre, at least 16 DIP across, each quota in
 // a ring of its own. Single: one 12 DIP ring per application with its highest share, as before there were nested rings. Saved
 // as numbers, so new members go at the end; a file without it, or with a number not listed, is Single.
 public enum QuotaRingStyle { Nested = 0, Single = 1 }
@@ -135,6 +147,10 @@ public sealed class AppEntry
     // Claude and Grok Bot rows only: read the quota from the account API. When off, the row sends no request and shows the
     // quota the desktop app (Claude or Grok Bot) recorded on this PC. Each row has its own choice.
     public bool QuotaOnline { get; set; } = true;
+    // Antigravity rows only: when neither the Antigravity app nor Antigravity IDE gives the quota, run "agy -p /usage" at most
+    // every five minutes and show what the signed-in Antigravity CLI reports. Antigravity is read once for all its rows, so
+    // the CLI is run while any enabled row has this on. Off by default.
+    public bool AntigravityCli { get; set; }
     // New API, Sub2API and custom rows: also send requests, and so the API key, over plain HTTP to any address, such as a
     // gateway on a NAS or reached through Tailscale. Off by default; HTTP to this PC is allowed either way.
     public bool AllowHttp { get; set; }
@@ -269,8 +285,8 @@ public static class AppPresets
     public static string Name(ProviderId id) => ProviderCatalog.Name(id);
     // The original preset colors: coral for Claude, mint for Codex, periwinkle for Antigravity, light gray for Cursor.
     public static string ThemeColor(ProviderId id) => id switch
-    { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#3A538D", ProviderId.Dsh => "#6081DA", ProviderId.Kimi => "#68CDEB", ProviderId.OpenCode => "#8E8E93", ProviderId.CodeAgent => "#22D3C5", ProviderId.CommandCode => "#7A60E3", ProviderId.WorkBuddy or ProviderId.WorkBuddyAi => "#98DBB0", ProviderId.MiMo or ProviderId.MiMoLinked => "#FF6900",
-      ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.MiMoApi or ProviderId.MiMoTokenPlan or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.KimiPlatform or ProviderId.OpenCodeGo or ProviderId.CommandCodeApi or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
+    { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#3A538D", ProviderId.Dsh => "#6081DA", ProviderId.Kimi => "#68CDEB", ProviderId.OpenCode => "#8E8E93", ProviderId.CodeAgent => "#22D3C5", ProviderId.CommandCode => "#7A60E3", ProviderId.WorkBuddy or ProviderId.WorkBuddyAi => "#98DBB0", ProviderId.MiMo or ProviderId.MiMoLinked => "#FF6900", ProviderId.Qoder or ProviderId.QoderCn => "#27BD51", ProviderId.QwenWorkCn or ProviderId.QwenWork => "#1DCA63", ProviderId.Trae or ProviderId.TraeCn => "#32F08C", ProviderId.Doubao or ProviderId.Dola => "#5BA4FF", ProviderId.VolcengineArk or ProviderId.BytePlusArk => "#4F8CFF",
+      ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.MiMoApi or ProviderId.MiMoTokenPlan or ProviderId.Qianwen or ProviderId.QwenCloud or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.KimiPlatform or ProviderId.OpenCodeGo or ProviderId.CommandCodeApi or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
     // Sources entered by hand share one purple by default.
     public const string ManualColor = "#CC9EED";
     public static int Level(double usedPercent) => usedPercent >= CriticalPercent ? 2 : usedPercent >= WarningPercent ? 1 : 0;
@@ -402,6 +418,10 @@ public sealed class DeckSettings
     public double LineThickness { get; set; } = CollapsedLimits.LineThicknessDefault;
     public double LineTop { get; set; } = CollapsedLimits.LineTopDefault;
     public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
+    // What hovering or clicking the indicator opens (ClickToExpand decides which): the panel, or first the capsule or the notch in the
+    // indicator's place, read-only, whose click opens the panel (IndicatorPeek). Either shows what its own style is set to show, at its
+    // size. It applies to every indicator, the chosen style and the one a window rule shows.
+    public IndicatorOpens LineOpens { get; set; }
     // The global shortcuts (HotkeyKind), all unset by default; Hotkey and SetHotkey reach them by kind.
     public string HideHotkey { get; set; } = "";
     public string ExpandHotkey { get; set; } = "";
@@ -522,6 +542,7 @@ public sealed class DeckSettings
     public bool MusicPageCover { get; set; } = true;
     public bool MusicIndicatorProgress { get; set; } = true;
     public bool LyricsEnabled { get; set; } = true;
+    public bool MusicSimulatedKaraoke { get; set; } = true;
     // Where the lyrics sit on the page, chosen apart from the cover: under the artist in the titles' column, or in a column of
     // their own right of the titles (the cover then stands above the titles). Without the cover the titles' column may sit at the
     // page's left edge or be centred.
@@ -602,7 +623,7 @@ public sealed class DeckSettings
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
     // A window that overlaps the place of the collapsed panel in its own style, such as one dragged under it. Maximized and
     // full-screen windows follow the rules above; the app rules do not choose for this one.
-    public WindowBehavior Occupied { get; set; } = WindowBehavior.Normal;
+    public WindowBehavior Occupied { get; set; } = WindowBehavior.Line;
     // Whether a window behind the foreground one counts too: maximized or borderless across the panel's monitor, it calls for
     // the same rule as if it were in front. Off, only the foreground window is read, as before the background was looked at.
     public bool BackgroundWindows { get; set; } = true;
@@ -625,6 +646,8 @@ public sealed class DeckSettings
     public double ClipboardWidth { get; set; } = ShelfSizes.Default.Width;
     public double ClipboardHeight { get; set; } = ShelfSizes.Default.Height;
     public bool ClipboardRecord { get; set; } = true;
+    // On, a click on a clipboard entry only puts it on the clipboard, as "只复制，不粘贴" in its menu does; off, it pastes it.
+    public bool ClipboardClickCopyOnly { get; set; }
     public bool WeTypeClipboardSync { get; set; }
     public bool DoubaoClipboardSync { get; set; }
     public bool LanClipboardSync { get; set; }
@@ -646,11 +669,11 @@ public sealed class DeckSettings
     public bool ShelfSameSideStack { get; set; } = true;
     public double ShelfFileShare { get; set; } = ShelfLayout.DefaultShare;
     // Stacked, further ways to bring the card behind forward, besides a click on its side strip, on the title of the card in
-    // front or on the page's own button: resting the pointer on the side strip, a middle click anywhere on the page, and a
-    // two-finger sideways swipe or Shift with the wheel.
-    public bool ShelfHoverSwitch { get; set; }
+    // front or on the page's own button: the wheel turned over the side strip, a middle click anywhere on the page, and a
+    // two-finger sideways swipe on a touchpad; the wheel and the swipe either way.
+    public bool ShelfStripWheelSwitch { get; set; }
     public bool ShelfMiddleSwitch { get; set; } = true;
-    public bool ShelfSwipeSwitch { get; set; }
+    public bool ShelfSwipeSwitch { get; set; } = true;
     // How each column shows its entries (ClipView, FileView), chosen for each by itself. At first the clipboard shows one line an
     // entry, and the file transfer two, under a larger icon.
     public ClipView ShelfClipView { get; set; } = ClipView.Single;
@@ -667,10 +690,21 @@ public sealed class DeckSettings
     public CompactSmoothing CompactSmoothing { get; set; } = CompactSmoothing.Ten;
     // How the processor's cores are drawn, collapsed and expanded: columns, a dot matrix, or by the count and the room (Auto).
     public CoreDisplay CoreDisplay { get; set; } = CoreDisplay.Auto;
+    public int CoreMatrixColumns { get; set; }
+    // Null means this profile has never edited the grid and should seed it from the older reading/card settings; an empty list is
+    // an explicit choice to show no grid tiles. Saved under its own name: the grid had two columns before it was ever released, and
+    // tiles saved then are not read as four-column ones.
+    [JsonPropertyName("ExpandedLayoutGrid")]
+    public List<ExpandedGridTile>? ExpandedGridTiles { get; set; }
+    public bool ExpandedCustomCards { get; set; }
+    public List<ExpandedCard> ExpandedCardOrder { get; set; } = [];
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     // The span the traffic shown beside the network's rates is summed over, from Windows' own record (TrafficPeriods).
     public TrafficPeriod MonitorTrafficPeriod { get; set; } = TrafficPeriod.Today;
+    // Memory and the drives show what is free in place of what is in use, collapsed and expanded alike: the figures, the dials and
+    // the bars. Their color still follows the share in use (ReadingLevels), so little room left shows as a warning.
+    public bool MonitorShowFree { get; set; }
     public bool MonitorProcesses { get; set; } = true;
     public ProcessSort MonitorSort { get; set; }
     public MonitorMain MonitorMain { get; set; }
@@ -799,13 +833,20 @@ public sealed class DeckSettings
     // Media is detected for the expanded music page, the chosen style's music or equalizer, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
     [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || ShowsEqualizer(Style) || MusicIndicatorProgress
-        && (Style == CompactStyle.Line || Maximized == WindowBehavior.Line || Borderless == WindowBehavior.Line || Exclusive == WindowBehavior.Line
-            || Occupied == WindowBehavior.Line);
+        && IndicatorMayShow
+        || IslandFromIndicator is { } island && (ShowsMusic(island) || ShowsEqualizer(island));
+    // Whether the indicator may show: the chosen style, or a window rule, global or an app's, that turns the panel into it.
+    [JsonIgnore] public bool IndicatorMayShow => Style == CompactStyle.Line || Maximized == WindowBehavior.Line || Borderless == WindowBehavior.Line
+        || Exclusive == WindowBehavior.Line || Occupied == WindowBehavior.Line
+        || FullscreenRules.Any(rule => rule.Maximized == WindowBehavior.Line || rule.Borderless == WindowBehavior.Line || rule.Exclusive == WindowBehavior.Line);
+    // The style an indicator may open into (LineOpens), whose content is then wanted too; null when it opens the panel or cannot show.
+    [JsonIgnore] public CompactStyle? IslandFromIndicator => !IndicatorMayShow ? null
+        : LineOpens switch { IndicatorOpens.Capsule => CompactStyle.Capsule, IndicatorOpens.Notch => CompactStyle.Notch, _ => null };
     // The switched-on applications. Their quotas are read for the AI usage page or for the rings of the chosen compact
     // style; the two are shown independently, so either one keeps the data current.
     [JsonIgnore] public IReadOnlyList<AppEntry> ConfiguredApps => Apps.Where(app => app.Enabled).Take(AppPresets.MaximumShownApps).ToList();
     [JsonIgnore] public bool ShownAppsFull => ConfiguredApps.Count >= AppPresets.MaximumShownApps;
-    [JsonIgnore] public bool QuotaWanted => UsagePage || ShowsSummary(Style);
+    [JsonIgnore] public bool QuotaWanted => UsagePage || ShowsSummary(Style) || IslandFromIndicator is { } island && ShowsSummary(island);
     [JsonIgnore] public IReadOnlyList<AppEntry> EnabledApps => QuotaWanted ? ConfiguredApps : [];
     [JsonIgnore] public IReadOnlySet<ProviderId> RequiredProviders => EnabledApps.SelectMany(app => new[] { app.QuotaSource, app.UsageSource }).ToHashSet();
     [JsonIgnore] public IReadOnlyList<ProviderId> StatisticsProviders => EnabledApps.Select(app => app.UsageSource).Distinct().ToList();
@@ -859,6 +900,8 @@ public sealed class DeckSettings
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
         copy._expanded = _expanded?.Select(reading => reading?.Copy()!).ToList();
+        copy.ExpandedGridTiles = ExpandedGridTiles is null ? null : [.. ExpandedGridTiles];
+        copy.ExpandedCardOrder = [.. ExpandedCardOrder ?? []];
         copy.MonitorCustomColors = (MonitorCustomColors ?? new()).Copy();
         copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder]; copy._pageOrder = [.. _pageOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
@@ -944,6 +987,9 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
         if (!Enum.IsDefined(CompactSmoothing)) CompactSmoothing = CompactSmoothing.Ten;
         if (!Enum.IsDefined(CoreDisplay)) CoreDisplay = CoreDisplay.Auto;
+        CoreMatrixColumns = CoreMatrix.NormalizeColumns(CoreMatrixColumns);
+        if (ExpandedGridTiles is not null) ExpandedGridTiles = ExpandedGrid.Normalize(ExpandedGridTiles);
+        ExpandedCardOrder = ExpandedCards.Normalize(ExpandedCardOrder);
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
@@ -985,6 +1031,7 @@ public sealed class DeckSettings
         NotchOffsetX = Offset(NotchOffsetX);
         if (!Enum.IsDefined(NotchEdge)) NotchEdge = ScreenEdge.Top;
         if (!Enum.IsDefined(LineEdge)) LineEdge = ScreenEdge.Top;
+        if (!Enum.IsDefined(LineOpens)) LineOpens = IndicatorOpens.Panel;
         if (NotchAnchor is { } notchAnchor && !Enum.IsDefined(notchAnchor)) NotchAnchor = null;
         if (LineAnchor is { } lineAnchor && !Enum.IsDefined(lineAnchor)) LineAnchor = null;
         if (!Enum.IsDefined(GripDoubleClick)) GripDoubleClick = GripDoubleClick.Move;
@@ -1001,7 +1048,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
-        if (!Enum.IsDefined(Occupied)) Occupied = WindowBehavior.Normal;
+        if (!Enum.IsDefined(Occupied)) Occupied = WindowBehavior.Line;
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
         // A file saved before MouseWheel had the page switch turned off as MouseWheelPages = false.
         if (MouseWheelPages is false) MouseWheel = MouseWheelAction.None;

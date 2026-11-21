@@ -63,6 +63,10 @@ public static class MetapandaMice
     public static bool Others(HidShape shape) => shape.Product is not (P1 or ThunderobotMice.Ml903) && Collection(shape)
         && shape.InputLength >= 25 && shape.OutputIds.Contains(0xA0);
 
+    // Machenike's NearLink mice (the L8 Max NearLink, L8 SE and L7 Air NearLink apps, machenike.com: their device tables on
+    // 0xFFA0 / 2 with reports A0 and A1), which these reads reach as other products: listed only to show them as mice.
+    public static readonly IReadOnlySet<int> MachenikeNearLink = new HashSet<int> { 0x0043, 0x0044, 0x0053, 0x0054, 0x0123, 0x0144, 0x0133, 0x0154, 0x01B3, 0x0204 };
+
     private static BrandWay Way(Func<byte[], BatteryRead?> parse) => new("metapanda.status", WayTransport.Output, Request(), parse) { TimeoutMs = 600 };
 
     public static IEnumerable<BrandFamily> Families =>
@@ -70,6 +74,6 @@ public static class MetapandaMice
         new("Metapanda", Takes, _ => [Way(StatusOrAsleep)])
         { Kind = _ => DeviceKind.Mouse, Prefix = "nearlink", DisplayName = _ => "Metapanda NearLink Mouse" },
         new("NearLink receiver", Others, _ => [Way(Status) with { Attempts = 1 }, ThunderobotMice.Info()])
-        { Prefix = "nearlink" },
+        { Prefix = "nearlink", Kind = shape => MachenikeNearLink.Contains(shape.Product) ? DeviceKind.Mouse : null },
     ];
 }

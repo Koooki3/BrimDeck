@@ -29,7 +29,7 @@ public partial class MainWindow
         EventManager.RegisterClassHandler(typeof(FrameworkContentElement), ToolTipService.ToolTipOpeningEvent, new ToolTipEventHandler(Suppress), true);
     }
     private DeckPage _page;
-    private double _pageWidth = 760, _usageWidth = 760, _widestPage = 760;
+    private double _pageWidth = 760, _widestPage = 760;
     private MediaSessions? _media => _app.Media;
     private MediaTrack? _mediaTrack;
     private IReadOnlyList<MediaTrack> _mediaTracks = [];
@@ -39,9 +39,11 @@ public partial class MainWindow
     // The color the cover gave, if it gave one; _musicAccent is the theme's equalizer color otherwise.
     private Color? _coverAccent;
     private Lyrics _lyrics = Lyrics.Empty;
+    // The track _lyrics were found for.
+    private MediaTrack? _lyricsTrack;
     private CancellationTokenSource? _lyricsRequest;
-    // Completed when Apple Music writes a lyric file while the current Apple Music song has no lyrics of Apple's.
-    private TaskCompletionSource? _appleLyricsWritten;
+    // Completed when Apple Music or KuGou writes a lyric file while the current song has none of its player's own.
+    private TaskCompletionSource? _localLyricsWritten;
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
     // Drives the equalizer, which must keep moving while the cursor moves; see PromptTimer.
     private PromptTimer _musicTick = null!;
@@ -52,6 +54,8 @@ public partial class MainWindow
     private readonly MediaSeekPreview _seekPreview = new();
     // The collapsed lyric and the page's lines share one hold, so they never show different lines (LyricHold).
     private readonly LyricHold _lyricHold = new();
+    // Whether the collapsed row is showing a word-timed lyric, so the frame loop knows whose sweep to drive.
+    private bool _karaokeCompact;
     // Keeps the progress bar's room while the player moves to its next song; the timer lays the page out again when it ends.
     private readonly MusicTimelineHold _timelineHold = new();
     private DispatcherTimer? _timelineHoldEnd;
@@ -96,7 +100,7 @@ public partial class MainWindow
         _musicTick = new(Dispatcher, TickMusic) { Interval = TimeSpan.FromMilliseconds(33) };
         IsVisibleChanged += (_, _) => UpdateMusicTimer();
         _app.MediaChanged += MediaChanged;
-        _app.Lyrics.AppleLyricsWritten += AppleLyricsWritten;
+        _app.Lyrics.AppleLyricsWritten += LocalLyricsWritten; _app.Lyrics.KugouLyricsWritten += LocalLyricsWritten;
         DisplayPower.Changed += DisplayPowerChanged;
     }
     private void StartMusic()
@@ -117,9 +121,17 @@ public partial class MainWindow
     }
     private void ApplyDefaultMusicPage()
     {
+        // Opening on the part under the pointer (DefaultDeckPage.Hover), the part taken by OpenAtPointer chose the page; that
+        // choice is spent here. A page hotkey still wins; the clock, a page the settings leave out and an opening without the
+        // pointer (a hotkey) keep the last page. The file transfer's count opens its page with the file transfer in front.
+        var part = _hoverPart; _hoverPart = null;
+        // Opened by files dragged in, the panel stays on the clipboard page it was turned to (ShelfDragEnter, OpenForDrag).
+        if (_dropping) return;
+        DeckPage? hover = part is { Page: { } chosen } && DeckPages.Shown(Settings, chosen) ? chosen : null;
+        if (hover is not null && part!.Files && _hotkeyPage is null) _shelfFront = ShelfSide.Files;
         // A page hotkey opens on its page and remembers it, as choosing it on the page switch does (MainWindow.Hotkeys.cs).
         // Opened from the file transfer's count on the island, the panel opens on the clipboard and file transfer page.
-        var wanted = _hotkeyPage ?? (DeckPages.Shown(Settings, DeckPage.Clipboard) && OpensOnTransfer() ? DeckPage.Clipboard : (DeckPage?)null) ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
+        var wanted = _hotkeyPage ?? hover ?? (DeckPages.Shown(Settings, DeckPage.Clipboard) && OpensOnTransfer() ? DeckPage.Clipboard : (DeckPage?)null) ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
         if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: _hotkeyPage is not null);
         // The clipboard page builds nothing while the panel is closed (RenderShelf), the page switch just above included: it is
         // built now, as the panel opens on it.
@@ -198,15 +210,15 @@ public partial class MainWindow
     private void DevicesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Devices);
     // Where the usage page's application tabs start: after the page switch, which holds one 28 DIP button per shown page.
     private double ApplicationPagesLeft(double side) { int pages = DeckPages.Visible(Settings).Count; return side + (pages <= 1 ? 36 : 72 + 29 * (pages - 2)); }
-    // The header shared by both pages (see PanelHeader). Its row holds the page's top margin, so the clock, the switch and the
-    // right group are centred on one line, and the switch and the gear line up with the page's content edges. Toolbar's own
-    // height replaces its binding to the row: the music page takes the usage page's controls (PanelHeader.WithControlsOf), so
-    // its band can be shorter than its row, with the rest below the controls; the row may also be one DIP taller, and the
-    // controls are centred in the even part. Toolbar lies outside ContentCanvas's rows, so a band taller than the row is not
-    // clipped. Only layout values change, and setting an unchanged value does nothing.
     private PanelHeader _header = PanelHeader.For(36, 20);
-    private void ApplyHeader(PanelHeader header)
+    private void ApplyPageHeader(PanelHeader page)
     {
+        // Size the toolbar from the first visible tab, even on a shorter or taller page.
+        var settings = Settings;
+        double wanted = DeckPages.Size(settings, DeckPages.FirstVisible(settings)).Height;
+        double height = PageHeight(wanted, PanelFor(wanted));
+        var header = page.WithControlsOf(PanelHeader.ForPanel(height));
+        bool gripBoundaryChanged = _header.Height != header.Height;
         _header = header;
         ToolbarRow.Height = new GridLength(header.Row);
         Toolbar.Height = header.Height;
@@ -220,8 +232,10 @@ public partial class MainWindow
         }
         PageCapsule.CornerRadius = new CornerRadius(Look.Corner(PanelHeader.ButtonRadius));
         SettingsButton.Height = header.SettingsHeight;
-        if (SettingsButton.Parent is FrameworkElement right) right.Margin = new Thickness(0, 0, header.RightMargin, 0);
+        ToolbarActions.Margin = new Thickness(0, 0, header.RightMargin, 0);
         ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(header.Side), 0, 0, 0);
+        // Refresh the grip boundary when the shared toolbar changes without resizing the island.
+        if (gripBoundaryChanged) UpdateGrips();
     }
     private void RenderPageSwitch()
     {
@@ -298,7 +312,7 @@ public partial class MainWindow
         _timelineHoldEnd.Interval = until - now + TimeSpan.FromMilliseconds(50); _timelineHoldEnd.Start();
     }
     // The expanded page and the compact text choose lyrics independently; either one is enough to look them up.
-    private bool CompactLyrics => Settings.ShowsMusic(Settings.Style) && Settings.MusicText == CompactMusicText.Lyrics;
+    private bool CompactLyrics => (Settings.ShowsMusic(Settings.Style) || Settings.IslandFromIndicator is { } island && Settings.ShowsMusic(island)) && Settings.MusicText == CompactMusicText.Lyrics;
     private bool NeedsLyrics => Settings.MusicPage && Settings.LyricsEnabled || CompactLyrics;
     // While the song is paused the collapsed title or lyric, the cover, or both give way (DeckSettings.MusicPausedHide); the state
     // change builds the row again.
@@ -309,32 +323,34 @@ public partial class MainWindow
     {
         string key = LyricsKey(_mediaTrack);
         if (_lyricsKey == key) return;
+        var requested = _mediaTrack;
+        // NetEase's song/detail can fill a blank artist or album after the song's lyrics are shown (MediaRouting.FillDetails):
+        // the lyrics found stay, and are not looked up again.
+        if (key.Length > 0 && requested is not null && _lyricsTrack is { } found && (_lyrics.Lines.Count > 0 || _lyrics.Instrumental)
+            && MediaRouting.OnlyDetailsFilled(found, requested))
+        { _lyricsKey = key; _lyricsTrack = requested; return; }
         _lyricsKey = key; _lyricsRequest?.Cancel(); _lyricsRequest?.Dispose(); _lyricsRequest = null;
-        _lyrics = Lyrics.Empty; _compactLyric = ""; _musicRenderKey = "";
-        if (key.Length == 0) return;
-        var requested = _mediaTrack!;
+        // A player announces a song in a few updates (its title, then its length or its song ID), each of which looks the lyrics
+        // up again. Lyrics found for the same song stay shown until the next ones are found: cleared, the lyrics of KuGou's own
+        // file, found at once, went and came back.
+        if (key.Length == 0 || requested is null || _lyricsTrack is not { } shown || shown.Id != requested.Id || !SameMediaSong(shown, requested))
+        { _lyrics = Lyrics.Empty; _lyricsTrack = null; _compactLyric = ""; _musicRenderKey = ""; }
+        if (key.Length == 0 || requested is null) return;
         if (!requested.IsQqMusic && !string.IsNullOrWhiteSpace(requested.EmbeddedLyrics))
-        {
-            _lyrics = Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source);
-            if (IsMusicPage) RenderMusic(); RenderCompact(); return;
-        }
+        { ShowLyrics(Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source), requested); return; }
         var request = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token); _lyricsRequest = request;
         try
         {
-            // Apple Music writes a song's lyrics to its cache as the song starts, which can be after the song changes here, or later
-            // still: they are looked for again 3 and 15 seconds later and whenever Apple Music writes a lyric file, keeping any
-            // lyrics already shown.
+            // Apple Music and KuGou write a song's lyrics as the song starts, which can be after the song changes here, or later
+            // still: until the player's own are found they are looked for again 3 and 15 seconds later and whenever the player
+            // writes a lyric file, keeping any lyrics already shown.
             for (int attempt = 0; ; attempt++)
             {
                 var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
                 if (request.IsCancellationRequested || _lyricsKey != key) return;
-                if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0)
-                {
-                    _lyrics = lyrics; _musicRenderKey = "";
-                    if (IsMusicPage) RenderMusic(); RenderCompact();
-                }
-                if (!requested.IsAppleMusic || lyrics.Source == LyricsService.AppleSource) break;
-                var written = (_appleLyricsWritten = new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+                if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0) ShowLyrics(lyrics, requested);
+                if (requested.IsAppleMusic ? lyrics.Source == LyricsService.AppleSource : !requested.IsKugou || lyrics.Source == LyricsService.KugouLocalSource) break;
+                var written = (_localLyricsWritten = new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
                 await (attempt < 2 ? Task.WhenAny(written, Task.Delay(TimeSpan.FromSeconds(attempt == 0 ? 3 : 15), request.Token)) : written.WaitAsync(request.Token));
                 request.Token.ThrowIfCancellationRequested();
                 // The file is read once Apple Music has finished writing it.
@@ -344,7 +360,20 @@ public partial class MainWindow
         catch (OperationCanceledException) { }
         catch (Exception) { /* Lyrics are optional; provider failures keep the no-lyrics layout. */ }
     }
-    private void AppleLyricsWritten() => Dispatcher.BeginInvoke(() => _appleLyricsWritten?.TrySetResult());
+    // Timed lyrics in place of timed lyrics (found again, or the player's own in place of a provider's) change only the lines
+    // shown, as the song plays; the page and the collapsed row are built again only when the lyrics take another form.
+    private void ShowLyrics(Lyrics lyrics, MediaTrack track)
+    {
+        bool sameForm = ReferenceEquals(lyrics, _lyrics) || LyricsForm(lyrics).Equals(LyricsForm(_lyrics)) && lyrics.Synced && lyrics.Lines.Count > 0;
+        _lyrics = lyrics; _lyricsTrack = track;
+        if (sameForm) { UpdateMusicPosition(); return; }
+        _musicRenderKey = "";
+        if (IsMusicPage) RenderMusic(); RenderCompact();
+    }
+    // What of the lyrics the page is built from (RenderMusic): timed lyrics fill its lines as the song plays, so other timed
+    // lyrics build no new page; untimed lyrics are shown whole.
+    private static object LyricsForm(Lyrics lyrics) => lyrics.Synced && lyrics.Lines.Count > 0 ? "timed" : lyrics;
+    private void LocalLyricsWritten() => Dispatcher.BeginInvoke(() => _localLyricsWritten?.TrySetResult());
     private void ToggleSourcePin(ContextMenu menu, MenuItem item, string id)
     {
         bool pin = !Equals(item.Tag, "pinned");
@@ -473,10 +502,7 @@ public partial class MainWindow
         var layout = MusicLayout.Calculate(w, h, hasLyrics, timeline, message.Length > 0, logMode || appleEntry || kugouEntry, transport: !showSmtcHint,
             lyricsExpected: Settings.LyricsEnabled);
         var c = layout.Metrics;
-        // With the usage page on, the controls are the usage page's, as it would lay them out now; see PanelHeader.WithControlsOf.
-        // Fitting the usage page for them is kept until its size, data or settings change (CachedUsageHeader): this runs on every
-        // update of the song and many times a second during a drag.
-        ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(CachedUsageHeader()) : PanelHeader.Music(c));
+        ApplyPageHeader(PanelHeader.Music(c));
         bool animate = Animates;
         // In the column layout the lyrics, or a message, take a column of their own right of the titles; with neither the titles
         // have the width.
@@ -485,7 +511,7 @@ public partial class MainWindow
         bool bare = !Settings.MusicPageCover && !Settings.LyricsEnabled;
         bool splitLyrics = Settings.MusicLyricsLayout == MusicLyricsLayout.Columns && !bare;
         bool lyricColumn = splitLyrics && (hasLyrics || message.Length > 0);
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{LyricsForm(_lyrics).GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
@@ -1075,7 +1101,10 @@ public partial class MainWindow
         bool page = _expanded && IsMusicPage;
         if (page && !_seeking && _musicSeek is not null) { _updatingSeek = true; _musicSeek.Value = track.Duration > TimeSpan.Zero ? position.TotalSeconds / track.Duration.TotalSeconds : 0; _updatingSeek = false; UpdateSeekLabels(_musicSeek.Value); }
         var line = CurrentLyrics(track);
-        if (page && _lyricCurrent is not null) _lyricCurrent.Text = line.Current;
+        // How far the current line is sung (Karaoke): the lyric area lights each character up as it is sung, sweeping through
+        // them, in the open page's line and in the collapsed row's middle text.
+        var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold, Settings.MusicSimulatedKaraoke);
+        if (page && _lyricCurrent is not null) { _lyricCurrent.Text = line.Current; _lyricCurrent.Karaoke(words, Animated(sweep)); }
         if (page && _lyricPrevious is not null) _lyricPrevious.Text = line.Previous;
         if (page && _lyricNext is not null) _lyricNext.Text = line.Next;
         if (page && _lyricsAbove.Length + _lyricsBelow.Length > 0)
@@ -1103,6 +1132,21 @@ public partial class MainWindow
                 else { RenderCompact(); if (TextFollowsLength) FitCompactToContent(); }
             }
         }
+        // The collapsed row's lyric lights each character up as it is sung (Karaoke), like the page's line; a row
+        // showing anything else (its title, an instrumental's caption) stays whole and fades nothing. During a new
+        // track notice the row shows the caption, not the lyric, so sweeping the lyric's words over the title would
+        // light characters that are not the song's; wait until the notice ends and the marquee holds the line.
+        bool notice = _trackNoticeUntil > DateTimeOffset.UtcNow;
+        bool compactKaraoke = CompactLyrics && !PausedHides(PausedMusicHide.Text) && !notice
+            && CompactLyricText(track, line.Current) == line.Current
+            && _compactMarquee is not null && _compactMarquee.Text == line.Current;
+        _karaokeCompact = compactKaraoke && words is not null;
+        if (_compactMarquee is not null) _compactMarquee.Karaoke(compactKaraoke ? words : null, compactKaraoke ? Animated(sweep) : default);
+        // The player reports four times a second; the highlight must cross a character in between. Drive the sweep on
+        // display frames from the position the player gave (extrapolated continuously by MediaTrack.Position), easing to it.
+        // Only start when something on screen will take the frames, so a hidden or caption row is not re-started every tick.
+        bool lyricTarget = page ? _lyricCurrent is not null : _karaokeCompact;
+        if (Animates && track.State == MediaState.Playing && lyricTarget && words is not null) Motion.Start(this, KaraokeFrame);
         MusicIndicator.Visibility = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && track.State != MediaState.Stopped && track.HasTimeline ? Visibility.Visible : Visibility.Collapsed;
         // Hidden, the bar keeps its last length: setting it four times a second laid the island out again for nothing.
         if (MusicIndicator.Visibility != Visibility.Visible) return;
@@ -1110,6 +1154,26 @@ public partial class MainWindow
         double length = double.IsFinite(Collapsed.Surface.Width) ? Math.Max(0, Collapsed.Surface.Width) : 0;
         double progress = track.HasTimeline && track.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / track.Duration.TotalSeconds, 0, 1) : 0;
         if (_frame.Across) MusicIndicator.Height = length * progress; else MusicIndicator.Width = length * progress;
+    }
+    // The sweep as the lyric area draws it: without the app's animations it steps on the player's reports alone, with no
+    // frames of its own carrying it between them.
+    private LyricSweep Animated(LyricSweep sweep) => Animates ? sweep : sweep with { Rate = 0 };
+    // One display frame of the karaoke sweep. The player reports only four times a second, but MediaTrack.Position keeps
+    // extrapolating from the reported anchor, so sampling it per frame gives a continuous target. The marquee eases to it
+    // (MusicMarquee.Karaoke). Stops on its own once the song stops or no word-timed line is showing; the 250 ms position
+    // tick starts it again when there is one.
+    private bool KaraokeFrame(double now)
+    {
+        if (_mediaTrack is not { } track || track.State != MediaState.Playing || !Animates) return false;
+        bool page = _expanded && IsMusicPage;
+        // Nothing on screen would take this sample: stop the frame loop instead of burning frames on a hidden
+        // or non-lyric row. The 250 ms position tick starts it again when a target becomes visible.
+        if (page ? _lyricCurrent is null : !_karaokeCompact || _compactMarquee is null) return false;
+        var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold, Settings.MusicSimulatedKaraoke);
+        if (words is null) return false;
+        if (page) _lyricCurrent!.Karaoke(words, sweep);
+        else _compactMarquee!.Karaoke(words, sweep);
+        return true;
     }
     private (string Previous, string Current, string Next) CurrentLyrics(MediaTrack track)
     {
@@ -1165,6 +1229,7 @@ public partial class MainWindow
     // The panel closed: the collapsed title scrolls its laps again, as the row comes back into view. (Reaching the island
     // opens the panel, so the collapsed title is not seen while the pointer is on it.)
     private void ReplayCompactTitle() { _compactTitleRested = null; _compactMarquee?.Replay(); }
+
     private void RenderCompactMusic()
     {
         // The collapsed shape gives the row's width in DIPs and the height scale; every size below follows from them.
@@ -1198,7 +1263,8 @@ public partial class MainWindow
         double transferWidth = transfer?.Width ?? 0, fixedFace = FixedFace(scale, clock?.ReservedWidth ?? 0, transferWidth, devicesWidth);
         // The system readings ask for the width of everything chosen, on whole device pixels; the whole ones that fit their region show.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings, Look), scale,
-            !(media && showCover) && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null && transfer is null && devices is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission, coreDisplay: Settings.CoreDisplay) : null;
+            !(media && showCover) && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null && transfer is null && devices is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission, coreDisplay: Settings.CoreDisplay, free: Settings.MonitorShowFree, matrixColumns: Settings.CoreMatrixColumns,
+                coreCount: _app.Monitor?.Latest?.Cpu.OrDefault?.Cores.Count ?? 0) : null;
         _stripLayout = _stripAdmission.Layout;
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
         double ringDiameter = QuotaRing.Diameter(Settings.QuotaRingStyle);
@@ -1306,8 +1372,8 @@ public partial class MainWindow
                     devices!.Width = devicesWidth;
                     element = CompactRegion(devices, room, devicesWidth, devices.Height, row, RegionAnchor.Left, dpi); break;
                 case CompactPart.Rings:
-                    element = _quotaCarousel = new QuotaCarousel(steadyItems, layout.RingSize, layout.RingThickness, layout.Scale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
-                        flow > 0 ? rings.Window : null, ringCut); break;
+                    element = _quotaCarousel = new QuotaCarousel(steadyItems, layout.RingSize, layout.RingThickness, layout.RingScale, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
+                        flow > 0 ? rings.Window : null, ringCut, rowHeight: row); break;
                 case CompactPart.Music:
                     element = _compactMarquee = CompactTitle(text, room, layout); break;
                 default:
@@ -1320,6 +1386,8 @@ public partial class MainWindow
                     else { strip.Width = room; element = strip; }
                     break;
             }
+            // What the part opens the panel on when the pointer is at it (HoverPartAt, MainWindow.Hover.cs).
+            element.Tag = HoverPartOf(shown[i].Part);
             // The carousels' fades lie outside their window (a negative margin); the margin puts the window at its place.
             element.Margin = new Thickness(element.Margin.Left + left, 0, element.Margin.Right, 0);
             element.HorizontalAlignment = HorizontalAlignment.Left; element.VerticalAlignment = VerticalAlignment.Center;
@@ -1487,5 +1555,5 @@ public partial class MainWindow
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
-    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= AppleLyricsWritten; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false, false); }
+    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= LocalLyricsWritten; _app.Lyrics.KugouLyricsWritten -= LocalLyricsWritten; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false, false); }
 }

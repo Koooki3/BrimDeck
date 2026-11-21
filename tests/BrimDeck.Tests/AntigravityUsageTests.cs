@@ -61,7 +61,76 @@ internal static class AntigravityUsageTests
         check("A missing Antigravity service folder gives no language servers", AntigravityUsage.ReadLanguageServers(Path.Combine(root, "none")).Count == 0);
         check("The Antigravity service folder is under .gemini", AntigravityUsage.DaemonFolder(@"C:\Users\A") == @"C:\Users\A\.gemini\antigravity\daemon");
 
+        CliFallback(root, now, check);
+        CliSwitch(root, now, check);
         PrefixPricing(root, now, check);
+    }
+
+    private static void CliSwitch(string root, DateTimeOffset now, Action<string, bool> check)
+    {
+        check("Reading Antigravity via the CLI is off by default", !new AppEntry().AntigravityCli);
+        var saved = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity }] }))!;
+        foreach (var app in saved["Apps"]!.AsArray()) app!.AsObject().Remove("AntigravityCli");
+        check("A settings file without the CLI switch does not read via the CLI", !SettingsMigrations.Read(saved.ToJsonString()).Apps.Single().AntigravityCli);
+
+        var fake = new Databases { Report = "Gemini Models\tWeekly Limit Remaining\t96%\t2026-11-25T02:00:10Z" };
+        using var service = new UsageService(fake, DataLocations.Resolve(root, root, root, null, null), clock: () => now);
+        var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity, AntigravityCli = true }] };
+        settings.Normalize();
+        ProviderSnapshot Read() => service.RefreshAsync(settings).GetAwaiter().GetResult().Single(x => x.Id == ProviderId.Antigravity);
+        check("The CLI is read while the switch is on", Read().Source == "Antigravity CLI" && fake.Calls == 1);
+        settings.Apps[0].AntigravityCli = false;
+        var off = Read();
+        check("With the switch off the CLI is not run and its reading is not shown", fake.Calls == 1 && off.Quotas.Count == 0 && !off.LiveQuota
+            && off.Status == "未检测到 Antigravity 应用或 IDE 的本地用量服务");
+        settings.Apps[0].AntigravityCli = true;
+        now = now.AddMinutes(1);
+        check("Turning the switch back on runs the CLI at once", Read().Source == "Antigravity CLI" && fake.Calls == 2);
+        settings.Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity, AntigravityCli = false }, new AppEntry { QuotaSource = ProviderId.Antigravity, AntigravityCli = true }];
+        settings.Normalize();
+        now = now.AddMinutes(5);
+        check("The CLI is run while any Antigravity row has the switch on", Read().Source == "Antigravity CLI" && fake.Calls == 3);
+    }
+
+    private static void CliFallback(string root, DateTimeOffset now, Action<string, bool> check)
+    {
+        var fake = new Databases { Report = "Gemini Models\tWeekly Limit Remaining\t96%\t2026-11-25T02:00:10Z\n"
+            + "bad row\nClaude and GPT models\tFive Hour Limit Remaining\t0%\t2026-11-20T13:28:20Z" };
+        var locations = DataLocations.Resolve(root, root, root, null, null);
+        using var service = new UsageService(fake, locations, clock: () => now) { Deadline = TimeSpan.FromSeconds(1) };
+        var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity, AntigravityCli = true }] };
+        settings.Normalize();
+        ProviderSnapshot Read() => service.RefreshAsync(settings).GetAwaiter().GetResult().Single(x => x.Id == ProviderId.Antigravity);
+        var first = Read();
+        check("Without a local endpoint the CLI supplies grouped quota and reset times", first.LiveQuota && first.Source == "Antigravity CLI"
+            && first.Quotas is [{ Label: "Gemini · 每周", UsedPercent: 4, Minutes: 10080 }, { UsedPercent: 100, Minutes: 300 }]
+            && first.Quotas[0].ResetAt == DateTimeOffset.Parse("2026-11-25T02:00:10Z"));
+        now = now.AddMinutes(4);
+        check("CLI quota keeps the original timestamp between polls", Read().QuotaTime == first.QuotaTime && fake.Calls == 1);
+        now = now.AddMinutes(1);
+        fake.Report = null;
+        var stale = Read();
+        check("CLI failure preserves the previous reading and throttles retries", stale.IsStale && stale.QuotaTime == first.QuotaTime
+            && Read().IsStale && fake.Calls == 2);
+        now = now.AddMinutes(5);
+        fake.Report = "Gemini 4 Argon\tGemini 4 Argon Weekly Limit\t100%\t2026-11-27T08:28:20Z";
+        var recovered = Read();
+        check("A successful retry replaces stale CLI quota", !recovered.IsStale && recovered.QuotaTime == now
+            && recovered.Quotas is [{ Label: "Argon · 每周", Remaining: 100 }]);
+        now = now.AddMinutes(5);
+        fake.OnCliRead = ct => Task.Delay(Timeout.Infinite, ct);
+        var timedOut = Read();
+        check("The refresh deadline preserves stale CLI quotas and their timestamp", timedOut.IsStale
+            && timedOut.Quotas.SequenceEqual(recovered.Quotas) && timedOut.QuotaTime == recovered.QuotaTime);
+        now = now.AddMinutes(4);
+        check("A timed-out CLI poll counts toward the five-minute interval", Read().IsStale && fake.Calls == 4);
+        now = now.AddMinutes(1);
+        using var lifetime = new CancellationTokenSource();
+        fake.OnCliRead = ct => { lifetime.Cancel(); return Task.FromCanceled(ct); };
+        bool cancelled = false;
+        try { service.RefreshAsync(settings, lifetime.Token).GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { cancelled = true; }
+        check("Lifetime cancellation during a CLI poll propagates even with cached quota", cancelled && fake.Calls == 5);
     }
 
     // Antigravity adds words to model names ("claude-opus-5-5-high", "gemini-3.8-flash-control"), while the online catalog lists
@@ -168,6 +237,15 @@ internal static class AntigravityUsageTests
     {
         public Dictionary<string, List<string?[]>> Steps { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, List<string?[]>> Models { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public string? Report { get; set; }
+        public int Calls { get; private set; }
+        public Func<CancellationToken, Task>? OnCliRead { get; set; }
+        public async Task<string?> ReadAntigravityCliAsync(CancellationToken cancellation)
+        {
+            Calls++;
+            if (OnCliRead is not null) await OnCliRead(cancellation);
+            return Report;
+        }
         public string? ReadCursorToken(string database) => null;
         public Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation) => Task.FromResult<IReadOnlyList<LocalEndpoint>>([]);
         public IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) =>

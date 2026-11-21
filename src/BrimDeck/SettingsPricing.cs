@@ -30,8 +30,8 @@ public sealed partial class SettingsWindow
     private void ModelPrices()
     {
         // Sits directly under the page title, closer to it than the usual gap below a title.
-        var description=TextLine(Loc.T("面板和模型明细中的费用按这里的单价估算。价格每天从 OpenRouter 更新，手动添加的价格优先。",
-            "Costs in the panel and model details are estimated with these unit prices. Prices are updated daily from OpenRouter; prices added by hand take precedence."),12,TextSecondary);
+        var description=TextLine(Loc.T("面板和模型明细中的费用按这里的单价估算。价格每天从 OpenRouter 更新，手动添加的价格优先。DeepSeek 使用官方单价，列表中为高峰价，低峰时段减半。",
+            "Costs in the panel and model details are estimated with these unit prices. Prices are updated daily from OpenRouter; prices added by hand take precedence. DeepSeek uses its own list prices: the list shows the peak price, and off-peak hours cost half."),12,TextSecondary);
         description.TextWrapping=TextWrapping.Wrap;description.Margin=new Thickness(0,-8,0,14);_content.Children.Add(description);
         var toolbar=new DockPanel {Margin=new Thickness(0,0,0,20)};
         var refresh=ActionButton(Loc.T("更新价格", "Update prices"),()=>{});refresh.BorderBrush=UI.Brush(_palette.Border);refresh.Background=UI.Brush(_palette.Input);

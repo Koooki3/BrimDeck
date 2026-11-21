@@ -4,7 +4,7 @@ namespace BrimDeck.Native;
 
 // The default playback device's master volume, held open while a drag adjusts it (MainWindow.MusicGestures.cs). Setting the level
 // directly changes it in any amount, unlike the volume keys' fixed steps, and shows no system flyout.
-internal sealed class SystemVolume : IDisposable
+internal sealed class SystemVolume : IVolumeLevel
 {
     private readonly MMDeviceEnumerator _enumerator;
     private readonly MMDevice _device;

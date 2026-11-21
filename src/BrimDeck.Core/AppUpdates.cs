@@ -136,7 +136,12 @@ public sealed class AppUpdates
             if (!value)
             {
                 if (ApplicationVersion.IsPrerelease(_state.AvailableVersion)) _state.AvailableVersion = null;
-                if (Stage == AppUpdateStage.Available && ApplicationVersion.IsPrerelease(Release?.Version)) { Release = null; Stage = AppUpdateStage.Idle; }
+                if (ApplicationVersion.IsPrerelease(Release?.Version))
+                {
+                    // A beta found earlier is withdrawn during a recheck too, so a failed recheck cannot bring it back.
+                    if (Stage == AppUpdateStage.Checking) Release = null;
+                    else if (Stage == AppUpdateStage.Available) { Release = null; Stage = AppUpdateStage.Idle; }
+                }
             }
             SaveState(); Notify();
         }
@@ -214,6 +219,13 @@ public sealed class AppUpdates
         {
             var release = await _backend.CheckAsync(Beta, cancellation);
             cancellation.ThrowIfCancellationRequested();
+            // Betas were turned off while the check ran: ask again for the newest stable release instead of reporting none.
+            if (!Beta && ApplicationVersion.IsPrerelease(release?.Version))
+            {
+                release = await _backend.CheckAsync(false, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+                if (ApplicationVersion.IsPrerelease(release?.Version)) release = null;
+            }
             Release = release; LastChecked = _clock();
             _failures = 0; _lastFailure = null; _retryUntil = null;
             _state.LastSuccess = LastChecked; _state.AvailableVersion = release?.Version; SaveState();

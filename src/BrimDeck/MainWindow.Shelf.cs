@@ -64,7 +64,7 @@ public partial class MainWindow
         Action tab = () => { _shelfStale = true; if (IsShelfPage && _expanded && !_preview) Dispatcher.BeginInvoke(() => RenderShelf(lazy: true)); };
         _app.Shelf.TabChanged += tab;
         ShelfFiles.Changed += figures;
-        Closed += (_, _) => { _app.Shelf.Changed -= changed; _app.Shelf.TabChanged -= tab; ShelfFiles.Changed -= figures; _movingTimer?.Stop(); StopDeckHover(); };
+        Closed += (_, _) => { _app.Shelf.Changed -= changed; _app.Shelf.TabChanged -= tab; ShelfFiles.Changed -= figures; _movingTimer?.Stop(); };
         HoverZone.AllowDrop = true;
         HoverZone.PreviewDragEnter += ShelfDragEnter;
         HoverZone.PreviewDragOver += ShelfDragOver;
@@ -73,7 +73,6 @@ public partial class MainWindow
         ShelfContent.Background = Brushes.Transparent;
         ExpandedContent.PreviewMouseDown += ShelfPreviewMouseDown;
         ExpandedContent.PreviewMouseUp += ShelfPreviewMouseUp;
-        ExpandedContent.PreviewMouseWheel += ShelfPreviewMouseWheel;
         // A press anywhere else on the panel lets go of the search box: the keyboard goes back to the window it came from, and the
         // search and its results stay. A panel holding the keyboard for a hotkey keeps it (PanelKeyboard).
         PreviewMouseLeftButtonDown += (_, e) =>
@@ -184,8 +183,7 @@ public partial class MainWindow
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
         var layout = _shelfLayout = ShelfLayoutFor(width, height);
-        var header = PanelHeader.For(ToolbarFor(height), layout.Side);
-        ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
+        ApplyPageHeader(PanelHeader.For(PanelHeader.ToolbarFor(height), layout.Side));
         bool showingDetail = _shelfDetail is { } open && Find(open.Side, open.Id) is not null;
         // In the lowest panels the toolbar leaves 2 DIP under the page switch (PanelHeader); the page keeps 4 more below it. Stacked,
         // the cards reach out to CardSide from the panel's edges, so that the columns in them start where they do side by side.
@@ -955,10 +953,12 @@ public partial class MainWindow
         rest = picked ? PickedFill : rest ?? Brushes.Transparent;
         Point? pressed = null;
         bool flashing() => _flash is { } flash && flash.Id == id && flash.Until > Environment.TickCount64;
-        // While the row's own menu is open the row stays lit, though the pointer is on the menu.
-        bool held = false;
+        // While the row's own menu is open the row stays lit, though the pointer is on the menu. The menu open now: a right click
+        // on the row with its menu open closes that menu and opens another, and the first one's Closed, which can come after the
+        // second has opened, must not put the row out; nor is there a MouseEnter to light it again, for the pointer never left.
+        ContextMenu? heldBy = null;
         frame.MouseEnter += (_, _) => { if (!flashing()) frame.Background = picked ? rest : UI.Brush(Look.Hex("hover")); if (!flashing()) ShowMore(aux, true); };
-        frame.MouseLeave += (_, _) => { pressed = null; if (!flashing() && !held) { frame.Background = rest; ShowMore(aux, false); } };
+        frame.MouseLeave += (_, _) => { pressed = null; if (!flashing() && heldBy is null) { frame.Background = rest; ShowMore(aux, false); } };
         frame.MouseLeftButtonDown += (_, e) => { pressed = e.GetPosition(frame); if (!flashing()) frame.Background = picked ? rest : UI.Brush(Look.Hex("pressed")); e.Handled = true; };
         frame.MouseLeftButtonUp += (_, e) =>
         {
@@ -971,8 +971,14 @@ public partial class MainWindow
         {
             e.Handled = true;
             var opened = menu();
-            held = true;
-            opened.Closed += (_, _) => { held = false; if (!frame.IsMouseOver && !flashing()) { frame.Background = rest; ShowMore(aux, false); } };
+            heldBy = opened;
+            if (!flashing()) { frame.Background = picked ? rest : UI.Brush(Look.Hex("hover")); ShowMore(aux, true); }
+            opened.Closed += (_, _) =>
+            {
+                if (!ReferenceEquals(heldBy, opened)) return;
+                heldBy = null;
+                if (!frame.IsMouseOver && !flashing()) { frame.Background = rest; ShowMore(aux, false); }
+            };
             OpenMenu(opened, frame, atPointer: true);
         };
         if (drag is not null)
@@ -1239,20 +1245,25 @@ public partial class MainWindow
     }
 
     // ---- Files dragged in ----
-    // Into the collapsed island the panel opens on this page; into the panel on another page it turns to this page. The file transfer
-    // column lights up; over a file category, that category does too. Taken away without dropping, the panel goes back.
-    private void ShelfDragEnter(object sender, DragEventArgs e)
+    // Files dragged onto the collapsed island arrive with a button held, and the hover may open the panel before the drag reaches
+    // the window: OLE looks for the window under the pointer only as the pointer moves. Opened so, the panel opens on this page
+    // with the file transfer in front, not on the page of the part under the pointer, so no other page shows first; the drag that
+    // follows finds the page ready and builds nothing again while the panel is still opening. A press that began on the island is no
+    // drag coming in; a drag that never reaches the window (not files) leaves the drop after a moment, as a drag taken away does.
+    private bool DragArriving => !_islandPressed && (PasteInput.KeyDown(0x01) || PasteInput.KeyDown(0x02))
+        && DeckPages.Shown(Settings, DeckPage.Clipboard) && Settings.ShelfShown != ShelfShown.Clipboard;
+    private void OpenForDrag()
     {
-        _dropLeave?.Stop();
-        // Showing the clipboard alone, files dragged over the panel have nowhere to go.
-        // A selection of desktop icons with "此电脑" or "回收站" among them comes without a list of paths: its files are read from
-        // the shell's own list (DroppedFiles).
-        if (_draggingOut || !Settings.ClipboardPage || Settings.ShelfShown == ShelfShown.Clipboard || DroppedFiles.Paths(e.Data).Length == 0) return;
-        e.Effects = DragDropEffects.Copy; e.Handled = true;
-        if (_dropping) return;
+        _hoverPart = null;
+        BeginDrop(opened: true);
+        StartDropLeave(400);
+    }
+    // The page turned into a place to drop files: the clipboard page with the file transfer in front, its column lit.
+    private void BeginDrop(bool opened)
+    {
         _dropping = true;
         _shelfDetail = null; _shelfEdit = null; _shelfSearching = false; _shelfQuery = "";
-        if (!_expanded)
+        if (opened)
         {
             _dropOpened = true; _dropReturn = null;
             _hover.Stop();
@@ -1267,6 +1278,26 @@ public partial class MainWindow
         }
         RenderShelf();
     }
+    private void StartDropLeave(double milliseconds)
+    {
+        _dropLeave ??= new DispatcherTimer(DispatcherPriority.Input, Dispatcher);
+        _dropLeave.Interval = TimeSpan.FromMilliseconds(milliseconds);
+        _dropLeave.Tick -= DropLeft; _dropLeave.Tick += DropLeft;
+        _dropLeave.Stop(); _dropLeave.Start();
+    }
+    // Into the collapsed island the panel opens on this page; into the panel on another page it turns to this page. The file transfer
+    // column lights up; over a file category, that category does too. Taken away without dropping, the panel goes back.
+    private void ShelfDragEnter(object sender, DragEventArgs e)
+    {
+        _dropLeave?.Stop();
+        // Showing the clipboard alone, files dragged over the panel have nowhere to go.
+        // A selection of desktop icons with "此电脑" or "回收站" among them comes without a list of paths: its files are read from
+        // the shell's own list (DroppedFiles).
+        if (_draggingOut || !Settings.ClipboardPage || Settings.ShelfShown == ShelfShown.Clipboard || DroppedFiles.Paths(e.Data).Length == 0) return;
+        e.Effects = DragDropEffects.Copy; e.Handled = true;
+        if (_dropping) return;
+        BeginDrop(opened: !_expanded);
+    }
     private void ShelfDragOver(object sender, DragEventArgs e)
     {
         _dropLeave?.Stop();
@@ -1280,9 +1311,7 @@ public partial class MainWindow
     {
         if (!_dropping) return;
         // Leave also fires when the pointer moves between parts of the panel; it counts only if no part takes the drag right after.
-        _dropLeave ??= new DispatcherTimer(DispatcherPriority.Input, Dispatcher) { Interval = TimeSpan.FromMilliseconds(120) };
-        _dropLeave.Tick -= DropLeft; _dropLeave.Tick += DropLeft;
-        _dropLeave.Stop(); _dropLeave.Start();
+        StartDropLeave(120);
     }
     private void DropLeft(object? sender, EventArgs e) => EndDrop(dropped: false);
     private void ShelfDrop(object sender, DragEventArgs e)
@@ -1347,6 +1376,8 @@ public partial class MainWindow
             Background = primary ? UI.Brush(Look.Primary) : UI.Brush(Look.FillSelected) };
         var button = new Button { Content = face, Cursor = Cursors.Hand, Focusable = false, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Brushes.Transparent };
         button.Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) };
+        // Its hover is its own (the face dims), so a theme's hover mark leaves it alone.
+        Feedback.SetOwnHover(button, true);
         button.MouseEnter += (_, _) => face.Opacity = .86;
         button.MouseLeave += (_, _) => face.Opacity = 1;
         button.Click += (_, e) => { e.Handled = true; click(); };

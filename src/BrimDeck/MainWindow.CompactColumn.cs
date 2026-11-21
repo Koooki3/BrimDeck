@@ -58,7 +58,8 @@ public partial class MainWindow
             _stripUnavailable = _stripAdmission.Hidden;
             void Line(CompactReading reading, MonitorStrip.DriveParts drives = MonitorStrip.DriveParts.All)
             {
-                var strip = new MonitorStrip([reading], colors, scale, true, _stripPresence, dpi, _stripUnavailable, _stripAdmission, drives, Settings.CoreDisplay);
+                var strip = new MonitorStrip([reading], colors, scale, true, _stripPresence, dpi, _stripUnavailable, _stripAdmission, drives, Settings.CoreDisplay, Settings.MonitorShowFree, Settings.CoreMatrixColumns,
+                    _app.Monitor?.Latest?.Cpu.OrDefault?.Cores.Count ?? 0);
                 if (strip.PreferredWidth > 0) strips.Add(strip);
             }
             foreach (var reading in CompactColumn.Readings(Settings.CompactReadings))
@@ -79,10 +80,12 @@ public partial class MainWindow
         double edge = Math.Min(Snap(layout.TextEdge, dpi), CompactMusicLayout.Whole(CollapsedLimits.ColumnPad * scale));
 
         var lines = new List<(FrameworkElement Element, double Height)>();
-        void Add(FrameworkElement element, double height)
+        // A line carries what its part opens the panel on, as the row's parts do (HoverPartAt, MainWindow.Hover.cs). The whole line
+        // is the part, so the column is shared out by lines.
+        void Add(FrameworkElement element, double height, object part)
         {
             element.HorizontalAlignment = HorizontalAlignment.Center; element.VerticalAlignment = VerticalAlignment.Center;
-            var line = new Grid { Width = column, Height = height };
+            var line = new Grid { Width = column, Height = height, Tag = HoverPartOf(part) };
             line.Children.Add(element);
             lines.Add((line, height));
         }
@@ -90,16 +93,16 @@ public partial class MainWindow
         {
             var image = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius, look: Look);
             System.Windows.Automation.AutomationProperties.SetName(image, _mediaTrack!.Caption);
-            Add(image, layout.CoverSize);
+            Add(image, layout.CoverSize, "cover");
         }
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
             switch (part)
             {
                 case CompactPart.Rings when apps.Count > 0:
-                    Add(ColumnRings(apps, layout, ringGap, column, out double ringsHeight), ringsHeight); break;
+                    Add(ColumnRings(apps, layout, ringGap, column, out double ringsHeight), ringsHeight, CompactPart.Rings); break;
                 case CompactPart.Music when text.Length > 0:
-                    Add(_compactMarquee = CompactTitle(text, column, layout), layout.TextHeight); break;
+                    Add(_compactMarquee = CompactTitle(text, column, layout), layout.TextHeight, CompactPart.Music); break;
                 case CompactPart.Monitor:
                     foreach (var strip in strips)
                     {
@@ -108,18 +111,18 @@ public partial class MainWindow
                         {
                             var carousel = new ReadingsCarousel(strip, column, strip.PreferredWidth - column, edge, _stripElapsed, animate);
                             _columnReadings.Add(carousel);
-                            Add(carousel, strip.Height);
+                            Add(carousel, strip.Height, CompactPart.Monitor);
                         }
-                        else { strip.Width = column; Add(strip, strip.Height); }
+                        else { strip.Width = column; Add(strip, strip.Height, CompactPart.Monitor); }
                     }
                     break;
                 case CompactPart.Equalizer when equalizer:
                     _compactEqualizer = new MusicEqualizer { Bars = Settings.EqualizerBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = EqualizerColor };
-                    Add(_compactEqualizer, layout.EqualizerHeight); break;
+                    Add(_compactEqualizer, layout.EqualizerHeight, CompactPart.Equalizer); break;
                 case CompactPart.Clock when clock is not null:
-                    clock.Width = clock.ReservedWidth; Add(clock, clock.Height); _compactClock = clock; break;
+                    clock.Width = clock.ReservedWidth; Add(clock, clock.Height, CompactPart.Clock); _compactClock = clock; break;
                 case CompactPart.Transfer when transfer is not null:
-                    Add(transfer, transfer.Height); break;
+                    Add(transfer, transfer.Height, CompactPart.Transfer); break;
                 // The devices a line each; should a device's line be wider than the column, they scroll as the readings do.
                 case CompactPart.Devices when devices is not null:
                     if (devices.PreferredWidth > column + .5)
@@ -127,9 +130,9 @@ public partial class MainWindow
                         devices.Width = devices.PreferredWidth;
                         var carousel = new ReadingsCarousel(devices, column, devices.PreferredWidth - column, edge, _stripElapsed, animate);
                         _columnReadings.Add(carousel);
-                        Add(carousel, devices.Height);
+                        Add(carousel, devices.Height, CompactPart.Devices);
                     }
-                    else { devices.Width = column; Add(devices, devices.Height); }
+                    else { devices.Width = column; Add(devices, devices.Height, CompactPart.Devices); }
                     break;
             }
         }
@@ -173,7 +176,7 @@ public partial class MainWindow
         {
             int line = i / perLine, inLine = Math.Min(perLine, rings.Length - line * perLine);
             double start = (column - (inLine * layout.RingSize + (inLine - 1) * gap)) / 2;
-            var ring = QuotaCarousel.Ring(rings[i], layout.RingSize, layout.RingThickness, layout.Scale, Look);
+            var ring = QuotaCarousel.Ring(rings[i], layout.RingSize, layout.RingThickness, layout.RingScale, Look);
             Canvas.SetLeft(ring, Math.Round(start + (i % perLine) * (layout.RingSize + gap)));
             Canvas.SetTop(ring, line * (layout.RingSize + gap));
             canvas.Children.Add(ring);

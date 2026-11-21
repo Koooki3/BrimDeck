@@ -96,11 +96,14 @@ internal static class MonitorDraw
     // only the arc moves while a reading eases (MonitorStrip).
     private const double DialStart = Math.PI * 1.25, DialSweep = Math.PI * 1.5;
     public static void Dial(DrawingContext drawing, Point center, double size, double ring, double letterSize, double? share, string color, string letter, double ppd,
-        DialParts parts = DialParts.All, PanelLook? look = null)
+        DialParts parts = DialParts.All, PanelLook? look = null, bool centerVisibleBounds = false)
     {
         var Look = look ?? PanelTheme.Main;
         double radius = size / 2 - ring / 2;
-        var c = new Point(center.X, center.Y + size / 32);
+        // A compact row mixes open dials with complete quota rings. Centre the open arc's visible bounds:
+        // its lower ends reach radius / sqrt(2), while its top reaches the full radius.
+        double offset = centerVisibleBounds ? radius * (1 - Math.Sqrt(.5)) / 2 : size / 32;
+        var c = new Point(center.X, center.Y + offset);
         if ((parts & DialParts.Face) != 0) DialArc(drawing, c, radius, ring, 1, Look.Hex("ringTrack"));
         if ((parts & DialParts.Share) != 0 && share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);
         if ((parts & DialParts.Face) == 0) return;
