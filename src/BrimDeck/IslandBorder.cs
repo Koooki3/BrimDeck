@@ -152,6 +152,8 @@ public sealed class IslandBorder : Border
     // GeometryGroup's cost about 18 KB of path objects per ring on every frame of an animation).
     private void DrawEdge(DrawingContext drawingContext, GlassEdge edge)
     {
+        // The rings for this frame's size, before they are drawn: an animation's frame is drawn once, with its own rings.
+        edge.Fit?.Invoke(RenderSize.Height);
         var key = (_outline, edge.Count, edge.Step, edge.Width);
         if (_rings is null || _ringsKey != key)
         {
@@ -369,7 +371,7 @@ public sealed class IslandBorder : Border
 // Liquid glass's optical edge (GlassBoundaryMath.Bands): up to MaxBands rings a step (one device pixel) wide inward from the outline,
 // ring k drawn with Brushes[k]. The brushes are the light's gradient across the island at each ring's strength; they stay mutable,
 // so the light's direction, the opening and the palette move them in place on any frame without a new brush. IslandBorder draws
-// anew only for new rings (Shape returns true).
+// anew only for new rings (Shape returns true); a new height is shaped for (Fit) as it is drawn.
 internal sealed class GlassEdge
 {
     public const int MaxBands = 8;
@@ -379,6 +381,9 @@ internal sealed class GlassEdge
     public int Count { get; private set; }
     public double Step { get; private set; }
     public double Width { get; private set; }
+    // Shapes the edge (Shape) for the island's height as it is drawn; MainWindow.Glass sets it, as the bevel's width follows the
+    // opening shown. IslandBorder calls it as it draws the rings, so a frame's new size never has to be drawn again for its rings.
+    internal Action<double>? Fit { get; set; }
 
     public GlassEdge()
     {
