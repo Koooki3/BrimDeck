@@ -518,15 +518,21 @@ public partial class MainWindow
 
     // The decision turned (or reversed): a new epoch for the shared look; the panels that animate head their palettes for it and
     // the leader publishes it at the readable frame; a leader that does not animate (or shows no glass) publishes it at once.
-    private void StartGlassTurn(GlassAppearance decision, long now)
+    // At once (an opening's own turn while the panel is mostly shut, GlassOpening.TurnsAtOnce): every panel of the look takes
+    // the new palette at rest now and the leader publishes it with them, so the opening grows in the new look from the next frame.
+    private void StartGlassTurn(GlassAppearance decision, long now, bool atOnce = false)
     {
         var group = GlassGroup;
         bool dark = decision.Dark;
         long epoch = group.Begin(dark);
         var leader = group.Leader ?? this;
-        if (!leader.Animates || leader._glassSurface?.Visible != true)
+        if (atOnce || !leader.Animates || leader._glassSurface?.Visible != true)
         {
             leader._glassGoalDark = dark; leader._glassTurnEpoch = epoch;
+            if (atOnce)
+                foreach (var deck in _app.Decks.ToList())
+                    if (ReferenceEquals(deck.Look, Look) && PanelThemes.NormalizeId(deck.Settings.PanelTheme) == PanelThemes.GlassAuto)
+                        deck.SetGlassPaletteAtRest(dark, now, epoch);
             if (group.TryPublish(leader, epoch, dark)) leader.PublishGlassPalette(dark, coordinated: false);
             decision.Arrived(now);
             return;
@@ -619,7 +625,7 @@ public partial class MainWindow
         var decision = GlassGroup.Decision ??= new GlassAppearance(Look.Current.IsDark, SettingsPalette.IsDark(SettingsTheme.System), videoGap: 2 * GlassProbeInterval);
         bool turned = scene is not null ? decision.Open(scene, now) : decision.Open(sample.MiddleMean, now);
         GlassCoverTrace?.Invoke($"cover decision={(turned ? decision.Dark ? "turn-dark" : "turn-light" : "kept")} dark={decision.Dark}");
-        if (turned) StartGlassTurn(decision, now);
+        if (turned) StartGlassTurn(decision, now, atOnce: GlassOpening.TurnsAtOnce(GlassOpenness(), Animates));
     }
 
     // The screen pixels the open panel will cover beyond the island shown now (a margin past it, as the ring keeps from its
@@ -650,6 +656,19 @@ public partial class MainWindow
         _glassHurried = false;
         _glassPalette.Retarget(dark ? 0 : 1, now, GlassPaletteOmega);
         GlassRenderingNeeded();
+        QueueGlass();
+    }
+
+    // The palette at rest on dark or light now, for the group's epoch (a turn taken at once); a turn of ours under way ends here.
+    private void SetGlassPaletteAtRest(bool dark, long now, long epoch)
+    {
+        _glassGoalDark = dark;
+        _glassTurnEpoch = epoch;
+        _glassTurning = false;
+        _glassHurried = false;
+        _glassPalette.Reset(dark ? 0 : 1, now);
+        GlassRenderingNeeded();
+        GlassOpticsNeeded();
         QueueGlass();
     }
 
