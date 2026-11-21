@@ -171,6 +171,14 @@ public sealed partial class WeTypeSyncClient(WeTypeIdentity identity, Action sav
             throw new InvalidDataException("Pairing peer mismatch.");
         identity.Paired = true; save();
     }
+    // Takes this device out of its group, so the other devices stop listing it. Command 35 with UnbindReq{1 uin, 2 platform,
+    // 3 unbind_uin} was read from WeType for Windows 3.0.2.44, which sends it when a device is removed from My devices.
+    public async Task LeaveGroupAsync(CancellationToken ct)
+    {
+        if (identity.Uin == 0) throw new WeTypeUnpairedException();
+        await InitializeAsync(ct);
+        Success(await ApiAsync(35, new WeTypeWire().Number(1, identity.Uin).Number(2, 1).Number(3, identity.Uin), ct));
+    }
     public async Task ReleasePairingCodeAsync(string code, CancellationToken ct) =>
         _ = await ApiAsync(33, new WeTypeWire().Number(1, identity.Uin).Number(2, 1).Text(3, code), ct);
     private async Task<WeTypeWire> GroupAsync(CancellationToken ct, bool clipboard = false, bool fileInvites = false)

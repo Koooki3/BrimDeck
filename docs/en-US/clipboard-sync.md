@@ -34,7 +34,7 @@ Notes:
 - WeType puts a received image on the clipboard as an image file, which programs that take only image data may not paste. That is WeType's own behaviour.
 - Other devices can rename this PC. The card then shows the name WeType uses for it. This PC's own name can be changed only before linking.
 - If another device removes this PC, the status says so. Choose Unlink, then link again.
-- BrimDeck cannot take this PC off the other devices' lists. After unlinking in BrimDeck, delete this PC under My devices (我的设备) in their cross-device pages, or linking again will list it twice.
+- Unlinking in BrimDeck also removes this PC from My devices (我的设备) on the other devices. If that fails, for example without a network connection, BrimDeck says so; you can still unlink, then delete this PC on those devices yourself, or linking again will list it twice.
 - Images are PNG or JPEG, up to 16 MiB.
 
 ### Send a file from the file shelf

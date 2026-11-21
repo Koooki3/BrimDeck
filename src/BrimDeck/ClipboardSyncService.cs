@@ -203,6 +203,21 @@ internal sealed partial class ClipboardSyncService : IDisposable
         }
         Disconnect(true);
     }
+    // Asks WeType to take this PC off the other devices' lists; false when that did not succeed. The link itself stays until
+    // Disconnect.
+    public async Task<bool> LeaveWeTypeGroupAsync()
+    {
+        if (!Accounts.WeType.Paired) return true;
+        try
+        {
+            using var client = new WeTypeSyncClient(Accounts.WeType, Save);
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await client.LeaveGroupAsync(limit.Token);
+            Log("wetype left the group");
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("wetype leaving the group failed: " + Describe(ex)); return false; }
+    }
     public void Disconnect(bool doubao)
     {
         Stop(doubao);
