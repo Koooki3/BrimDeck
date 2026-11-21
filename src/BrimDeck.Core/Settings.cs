@@ -66,7 +66,8 @@ public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, S
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
 public enum DeckPage { Usage, Music, Monitor, Clipboard, Devices }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices }
+// Hover: the page of the collapsed part under the pointer (MainWindow.Hover.cs); over a part that names none, the last page.
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Clipboard, Devices, Hover }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 // What a double click on an end of the collapsed notch or capsule does: turn its auto width on or off, or start moving it
@@ -600,9 +601,6 @@ public sealed class DeckSettings
     public int OpenDelay { get; set; } = 0;
     // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
     public bool ClickToExpand { get; set; }
-    // The collapsed panel opens on the page of the part under the pointer (the title, the readings, the devices, the rings),
-    // instead of on the page it would have opened on. A pointer over no part leaves that choice as it was.
-    public bool HoverPage { get; set; } = true;
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
     public bool Animations { get; set; } = true;

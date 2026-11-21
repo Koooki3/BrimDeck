@@ -34,6 +34,8 @@ public partial class MainWindow : Window
     // approaches at no more than 10 physical pixels per millisecond, so it still arrives within one short interval.
     // TrackFar: the longest pause while the pointer is far away, which the memory mode sets (MemoryPlan.PointerFarMilliseconds).
     private const double TrackNear = 40, ApproachSpeed = 10;
+    // The check's pause while the frame around the part under the pointer shows (TrackHoverFrame): about one display frame.
+    private const double HoverFrameTrack = 16;
     private double TrackFar => _app.MemoryPlan.PointerFarMilliseconds;
     private readonly WindowsHost _host;
     // Null for the main panel. The panels of other monitors take their usage data from it instead of reading their own.
@@ -1103,15 +1105,15 @@ public partial class MainWindow : Window
         target.BeginAnimation(property, null);
         ((DependencyObject)target).SetValue(property, value);
     }
-    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded), and it opens on the page the part
-    // under the pointer stands for (CompactPageAt), so a pointer over the readings opens the system monitor and one over the
-    // devices opens their page. No part under it, or the mapping turned off in the settings: the page it would have opened on.
+    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded), and, when the opening page follows
+    // the part under the pointer (DefaultDeckPage.Hover), it opens on that part's page (HoverPartAt, MainWindow.Hover.cs).
     private void OpenAtPointer()
     {
         // The line that opens into the capsule does that first; a click on the capsule opens the panel (MainWindow.Peek.cs).
         if (!_expanded && LineOpensIsland && !_peek.Active) { BeginPeek(); return; }
         if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
-        _hoverPage = !Settings.HoverPage || PresentationSource.FromVisual(Stage) is null ? null : CompactPageAt(Stage.PointFromScreen(WindowsHost.Cursor()));
+        _hoverPart = HoverPartUnderPointer();
+        HideHoverFrame();
         SetExpanded(true);
     }
     // With ClickToExpand on, a click on the collapsed surface opens the panel; the press must start on it, so a drag that ends
@@ -1138,14 +1140,14 @@ public partial class MainWindow : Window
     internal void TrackPointer()
     {
         CheckMoveOvertaken();
-        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) return;
+        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) { HideHoverFrame(); return; }
         var cursor = WindowsHost.Cursor();
         // Move mode: the panel does not open (MainWindow.Move.cs).
-        if (_moveArmed) { PassAroundSurface(false); TrackMove(cursor); return; }
+        if (_moveArmed) { HideHoverFrame(); PassAroundSurface(false); TrackMove(cursor); return; }
         // Mouse pass-through: hovering does nothing (MainWindow.ClickThrough.cs).
-        if (IgnorePointer()) { PassAroundSurface(false); return; }
+        if (IgnorePointer()) { HideHoverFrame(); PassAroundSurface(false); return; }
         var area = CompactHoverScreenRect();
-        if (area.IsEmpty) return;
+        if (area.IsEmpty) { HideHoverFrame(); return; }
         // The surface's ends resize it (MainWindow.Resize.cs); pointing there does not open the panel.
         var grip = TrackGrips(cursor);
         // Collapsed, clicks outside the area and the armed grip go to the window beneath (MainWindow.ClickThrough.cs); a press
@@ -1160,6 +1162,9 @@ public partial class MainWindow : Window
         double wait = _expanded ? TrackNear : Math.Clamp(Math.Floor(Math.Sqrt(dx * dx + dy * dy) / ApproachSpeed / 20) * 20, TrackNear, TrackFar);
         // The capsule of the line is left as quickly as the open panel is.
         if (IslandFromLine) wait = TrackNear;
+        // Near the collapsed surface the frame around the part under the pointer follows it closely (MainWindow.Hover.cs). Only
+        // the surface's shadow counts as near, so this costs nothing elsewhere.
+        if (TrackHoverFrame(cursor, !_preview && !_expanded && Collapsed.Style != CompactStyle.Line && !IslandFromLine && grip == ResizeEdges.None && !_app.WindowDrags.Active, Covered)) wait = HoverFrameTrack;
         _pointerTrack.Interval = TimeSpan.FromMilliseconds(wait);
         if (_preview)
         {

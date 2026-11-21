@@ -30,7 +30,8 @@ public static class DeckPages
     public static DeckPage Resolve(DeckSettings settings, DeckPage wanted)
         => Shown(settings, wanted) ? wanted : FirstVisible(settings);
 
-    // The page the panel opens on; null keeps the last viewed page.
+    // The page the panel opens on; null keeps the last viewed page. Hover follows the part under the pointer, which the panel
+    // itself finds (MainWindow.Hover.cs), and keeps the last viewed page elsewhere.
     public static DeckPage? Opening(DefaultDeckPage choice) => choice switch
     {
         DefaultDeckPage.Usage => DeckPage.Usage, DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Monitor => DeckPage.Monitor, DefaultDeckPage.Devices => DeckPage.Devices,

@@ -190,6 +190,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
             // The last time's readings, faded, while the devices are read again: the page as tiles, as one device and as a list,
             // and the collapsed row. For checking, not for the README.
             if (scenes.Contains("devices-earlier")) await DevicesEarlier();
+            // The frame around the part under the pointer, on each form and edge; for checking.
+            if (scenes.Contains("hover-frame")) await HoverFrames();
             if (scenes.Contains("line-capsule")) { await LineCapsule(); _settings.Style = CompactStyle.Line; await SettingsPage("line-capsule-settings", 1, 1300, tips: true); }
         }
         finally { Directory.Delete(folder, true); }
@@ -1841,6 +1843,60 @@ internal sealed class Renderer(App app, string output, string language, string[]
             await Task.Delay(8);
         }
         _clock = start + seconds;
+    }
+
+    // The frame around the part under the pointer (DefaultDeckPage.Hover, MainWindow.Hover.cs): for each part of the collapsed row,
+    // found by walking along the surface as the pointer would, the frame the panel draws around it, on the notch at each edge and on
+    // the capsule, in the dark and the light look. For checking, not for the README.
+    private async Task HoverFrames()
+    {
+        const double scale = 3;
+        Program.SetProperty(app, "Exiting", true);
+        bool animations = _settings.Animations;
+        _settings.Animations = false;
+        var snapshot = MonitorSample();
+        var use = Type.GetType("BrimDeck.PanelTheme, BrimDeck")!.GetMethod("Use", Program.Any)!;
+        // A window beside the panel on this computer must not turn it into the line (DeckSettings.Occupied).
+        var occupied = _settings.Occupied; _settings.Occupied = WindowBehavior.Normal;
+        _settings.DefaultPage = DefaultDeckPage.Hover; _settings.MusicText = CompactMusicText.Title;
+        _settings.NotchMonitor = true; _settings.CapsuleMonitor = true; _settings.NotchTransfer = true; _settings.CapsuleTransfer = true;
+        _settings.NotchClock = true; _settings.CapsuleClock = true; _settings.NotchDevices = true;
+        _settings.CompactReadings = CompactMonitor.Readings(CompactMonitorMode.Custom, CompactMonitorItems.Cpu | CompactMonitorItems.Memory);
+        _deck.SetExpanded(false, true);
+        foreach (var look in new[] { PanelThemes.Dark, PanelThemes.Light, PanelThemes.PixelBlocks, PanelThemes.IslandHoliday2, PanelThemes.Demo })
+        foreach (var (style, edge) in new[] { (CompactStyle.Notch, ScreenEdge.Top), (CompactStyle.Capsule, ScreenEdge.Top), (CompactStyle.Notch, ScreenEdge.Left), (CompactStyle.Notch, ScreenEdge.Bottom), (CompactStyle.Notch, ScreenEdge.Right) })
+        {
+            if (look != PanelThemes.Dark && edge is ScreenEdge.Bottom or ScreenEdge.Right) continue;
+            if (look != PanelThemes.Dark && look != PanelThemes.Light && edge == ScreenEdge.Left) continue;
+            _settings.PanelTheme = look; use.Invoke(null, [_settings, false, false]);
+            _settings.Style = style; _settings.NotchEdge = edge; Refresh();
+            await Settle(); Program.Call(_deck, "MonitorUpdated", [typeof(MonitorSnapshot)], snapshot); await Settle();
+            var surface = (Rect)Program.Call(_deck, "SurfaceOnStage", [])!;
+            string name = $"hover-{look}-{style.ToString().ToLowerInvariant()}-{edge.ToString().ToLowerInvariant()}";
+            Program.Call(_deck, "HideHoverFrame", []);
+            await Save(name + "-0-none", scale);
+            object? last = null; int shot = 0;
+            for (double along = surface.Left - 10; along <= surface.Right + 10; along += 1)
+            {
+                var found = Program.Call(_deck, "HoverPartAt", [typeof(double)], along);
+                if (found is null) continue;
+                var elements = found.GetType().GetField("Item1")!.GetValue(found)!;
+                var part = found.GetType().GetField("Item2")!.GetValue(found)!;
+                if (Equals(part, last)) continue;
+                last = part;
+                Console.WriteLine($"{name}: from {along - surface.Left:0} DIP along, {part}");
+                Program.Call(_deck, "HideHoverFrame", []);
+                if (part.GetType().GetProperty("Page")!.GetValue(part) is null) continue;
+                Program.Call(_deck, "ShowHoverFrame", [elements.GetType()], elements);
+                await Save($"{name}-{++shot}", scale);
+            }
+            Program.Call(_deck, "HideHoverFrame", []);
+        }
+        _settings.PanelTheme = PanelThemes.Dark; use.Invoke(null, [_settings, false, false]);
+        _settings.Style = CompactStyle.Notch; _settings.NotchEdge = ScreenEdge.Top; _settings.DefaultPage = DefaultDeckPage.Last;
+        _settings.Occupied = occupied; _settings.Animations = animations; Refresh();
+        Program.SetProperty(app, "Exiting", false);
+        await Settle();
     }
 
     private void Refresh() { _deck.ApplySettings(); Program.Call(_deck, "RenderCompact", []); }

@@ -505,8 +505,9 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
     private readonly HashSet<DeckPage> _openSizes = [];
     private void Expanded()
     {
-        // The last viewed page is always offered, followed by each page that is shown. A choice whose page is switched off
-        // reads as the last viewed page, which is what the panel does then, and returns when the page is shown again.
+        // The last viewed page and the part under the pointer are always offered, followed by each page that is shown. A choice
+        // whose page is switched off reads as the last viewed page, which is what the panel does then, and returns when the page
+        // is shown again.
         // Switching a page on or off refills the list in place, so the page is not rebuilt and the switch keeps its animation.
         var start = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo") };
         AutomationProperties.SetName(start, Loc.T("每次打开时显示", "Page shown on opening")); PopupMotion.Attach(start);
@@ -514,7 +515,7 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         bool filling = false;
         void FillStarts()
         {
-            starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page"))];
+            starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page")), (DefaultDeckPage.Hover, Loc.T("鼠标所在的区段", "Part under pointer"))];
             foreach (var page in DeckPages.Visible(S))
                 starts.Add(page switch
                 {
@@ -549,15 +550,13 @@ public sealed partial class SettingsWindow : Window, IKeepsAppFonts
         Group(pages);
         // Settings that apply across the expanded pages rather than to one of them.
         SectionTitle(Loc.T("通用", "General"));
-        Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start),
+        Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start,
+                help: () => Loc.T("选“鼠标所在的区段”时，鼠标靠近收起的面板会框出所在区段，展开后显示对应页面，例如标题对应音乐、读数对应系统监控；停在时钟上显示上次停留的页面。",
+                    "With “Part under pointer”, a frame marks the part of the collapsed panel the pointer is near, and the panel opens on its page, such as music for the title or the system monitor for the readings; the clock opens the last viewed page.")),
             Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value),
                 help: Loc.T("面板展开时，在面板内任意位置单击右键即可打开设置。", "When the panel is expanded, right-click anywhere inside it to open settings.")),
             MouseWheelRow(),
-            ExpandPlaceRow(),
-            // The collapsed panel opens on the part under the pointer; one switch for the whole mapping, as the wheel has.
-            Toggle(Loc.T("按悬停区段展开", "Open on the part under the pointer"), S.HoverPage, value => Change(s => s.HoverPage = value),
-                help: Loc.T("根据鼠标悬停位置，自动展开对应页面；停在标题上打开音乐，停在读数上打开系统监控，停在电量上打开设备电量。",
-                    "Opens the page that matches the part of the collapsed panel the pointer rests on: the title for music, the readings for the system monitor, the batteries for the devices.")));
+            ExpandPlaceRow());
     }
     private const double PageRowHeight = 44;
     private readonly List<(Border Row, StackPanel Sizes, Button Arrow)> _pageRows = [];

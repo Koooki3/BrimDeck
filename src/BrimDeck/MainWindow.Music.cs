@@ -121,11 +121,12 @@ public partial class MainWindow
     }
     private void ApplyDefaultMusicPage()
     {
-        // A part of the collapsed row under the pointer chose the page it opens on (_hoverPage, taken by OpenAtPointer); that
-        // choice is spent here, so the next opening with the pointer on no part falls back to the rules below. A page hotkey still
-        // wins, and a page the settings leave out is passed over.
-        var hover = _hoverPage; _hoverPage = null;
-        if (hover is { } chosen && !DeckPages.Shown(Settings, chosen)) hover = null;
+        // Opening on the part under the pointer (DefaultDeckPage.Hover), the part taken by OpenAtPointer chose the page; that
+        // choice is spent here. A page hotkey still wins; the clock, a page the settings leave out and an opening without the
+        // pointer (a hotkey) keep the last page. The file transfer's count opens its page with the file transfer in front.
+        var part = _hoverPart; _hoverPart = null;
+        DeckPage? hover = part is { Page: { } chosen } && DeckPages.Shown(Settings, chosen) ? chosen : null;
+        if (hover is not null && part!.Files && _hotkeyPage is null) _shelfFront = ShelfSide.Files;
         // A page hotkey opens on its page and remembers it, as choosing it on the page switch does (MainWindow.Hotkeys.cs).
         // Opened from the file transfer's count on the island, the panel opens on the clipboard and file transfer page.
         var wanted = _hotkeyPage ?? hover ?? (DeckPages.Shown(Settings, DeckPage.Clipboard) && OpensOnTransfer() ? DeckPage.Clipboard : (DeckPage?)null) ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
@@ -1227,19 +1228,6 @@ public partial class MainWindow
     // opens the panel, so the collapsed title is not seen while the pointer is on it.)
     private void ReplayCompactTitle() { _compactTitleRested = null; _compactMarquee?.Replay(); }
 
-    // The page a part of the collapsed row opens the panel on when the pointer rests over it. It follows the part's meaning, not
-    // its place, so the row may reorder or resize without the mapping going stale; the clock and a part the settings leave out
-    // name none and the page choice keeps its own rules. The transfer count names none on purpose: opening from it already turns
-    // the page to the clipboard and puts the files' card in front (OpensOnTransfer), which a page chosen here would skip.
-    private static DeckPage? CompactPartPage(object part) => part switch
-    {
-        "cover" => DeckPage.Music,
-        CompactPart.Equalizer or CompactPart.Music => DeckPage.Music,
-        CompactPart.Monitor => DeckPage.Monitor,
-        CompactPart.Devices => DeckPage.Devices,
-        CompactPart.Rings => DeckPage.Usage,
-        _ => null,
-    };
     private void RenderCompactMusic()
     {
         // The collapsed shape gives the row's width in DIPs and the height scale; every size below follows from them.
@@ -1396,9 +1384,8 @@ public partial class MainWindow
                     else { strip.Width = room; element = strip; }
                     break;
             }
-            // The part names the page the panel opens on when the pointer rests on it (CompactPageAt, MainWindow.Hover.cs); the
-            // clock and the file transfer's count say nothing, so the page choice falls back to its own rules there.
-            if (CompactPartPage(shown[i].Part) is { } opening) element.Tag = opening;
+            // What the part opens the panel on when the pointer is at it (HoverPartAt, MainWindow.Hover.cs).
+            element.Tag = HoverPartOf(shown[i].Part);
             // The carousels' fades lie outside their window (a negative margin); the margin puts the window at its place.
             element.Margin = new Thickness(element.Margin.Left + left, 0, element.Margin.Right, 0);
             element.HorizontalAlignment = HorizontalAlignment.Left; element.VerticalAlignment = VerticalAlignment.Center;
