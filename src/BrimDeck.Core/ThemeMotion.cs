@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace BrimDeck.Core;
 
 // How a theme answers the pointer on BrimDeck's own panel: a mark on the control the pointer hovers, drawn on the control's
@@ -112,7 +115,10 @@ public sealed class HoverTimeline
         => Leaving ? Presence(now, timing) > 0 : !double.IsNaN(ShownAt) && now - ShownAt < timing.HoverIn / 1000.0;
 }
 
-// The "motion" section of a theme file. Everything is optional and comes from the base theme when left out.
+// The "motion" section of a theme file. Everything is optional and comes from the base theme when left out. A value BrimDeck
+// cannot use (a word where a number goes, a style it does not know) is left out too and listed as a warning (PanelThemes.Warnings):
+// a hover mark is never worth refusing the whole theme, its colors and its other look included.
+[JsonConverter(typeof(PanelThemeMotionConverter))]
 public sealed class PanelThemeMotion
 {
     // none, reveal, lift, underline (HoverFx)
@@ -124,10 +130,96 @@ public sealed class PanelThemeMotion
     // A theme color key or "#RRGGBB"
     public string? Color { get; set; }
     public string? Secondary { get; set; }
+    // The values read from the file and left out, each with why. Not written back.
+    [JsonIgnore] public List<string> Problems { get; } = [];
+}
+
+// Reads the motion section field by field: a field of the wrong type is left out with a problem rather than failing the file.
+internal sealed class PanelThemeMotionConverter : JsonConverter<PanelThemeMotion>
+{
+    public override PanelThemeMotion Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var motion = new PanelThemeMotion();
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            string raw = Raw(ref reader);
+            motion.Problems.Add(Loc.T($"motion 应为对象，现在是 {raw}，已忽略", $"\"motion\" must be an object, not {raw}; it is ignored"));
+            return motion;
+        }
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            string name = reader.GetString() ?? "";
+            reader.Read();
+            switch (name.ToLowerInvariant())
+            {
+                case "hover": motion.Hover = Text(ref reader, "hover", motion.Problems); break;
+                case "hoverstrength": motion.HoverStrength = Number(ref reader, "hoverStrength", motion.Problems); break;
+                case "pace": motion.Pace = Number(ref reader, "pace", motion.Problems); break;
+                case "color": motion.Color = Text(ref reader, "color", motion.Problems); break;
+                case "secondary": motion.Secondary = Text(ref reader, "secondary", motion.Problems); break;
+                // Members of later versions (press, focus) are skipped.
+                default: reader.Skip(); break;
+            }
+        }
+        return motion;
+    }
+
+    private static string? Text(ref Utf8JsonReader reader, string field, List<string> problems)
+    {
+        if (reader.TokenType == JsonTokenType.String) return reader.GetString();
+        if (reader.TokenType != JsonTokenType.Null) problems.Add(Wrong(field, Raw(ref reader), Loc.T("文本", "text")));
+        return null;
+    }
+
+    private static double? Number(ref Utf8JsonReader reader, string field, List<string> problems)
+    {
+        if (reader.TokenType == JsonTokenType.Number && reader.TryGetDouble(out double value)) return value;
+        if (reader.TokenType != JsonTokenType.Null) problems.Add(Wrong(field, Raw(ref reader), Loc.T("数字", "a number")));
+        return null;
+    }
+
+    private static string Wrong(string field, string raw, string kind)
+        => Loc.T($"动效项“{field}”的值 {raw} 不是{kind}，已忽略", $"The motion value \"{field}\" is {raw}, not {kind}; it is ignored");
+
+    // The value as written, shortened; reading it moves the reader to the value's end.
+    private static string Raw(ref Utf8JsonReader reader)
+    {
+        using var value = JsonDocument.ParseValue(ref reader);
+        string raw = value.RootElement.GetRawText();
+        return raw.Length > 40 ? raw[..40] + "…" : raw;
+    }
+
+    public override void Write(Utf8JsonWriter writer, PanelThemeMotion value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        if (value.Hover is { } hover) writer.WriteString("hover", hover);
+        if (value.HoverStrength is { } strength) writer.WriteNumber("hoverStrength", strength);
+        if (value.Pace is { } pace) writer.WriteNumber("pace", pace);
+        if (value.Color is { } color) writer.WriteString("color", color);
+        if (value.Secondary is { } secondary) writer.WriteString("secondary", secondary);
+        writer.WriteEndObject();
+    }
 }
 
 public static partial class PanelThemes
 {
+    // What a usable file has wrong that is left out rather than refused, for the settings page: the motion values of each look.
+    public static IReadOnlyList<string> Warnings(PanelThemeFile file)
+    {
+        var warnings = new List<string>();
+        void Look(PanelThemeFile? look, string prefix)
+        {
+            if (look?.Motion is not { } motion) return;
+            warnings.AddRange(motion.Problems.Select(problem => prefix + problem));
+            if (motion.Hover is { } hover && !string.IsNullOrWhiteSpace(hover) && !MotionStyles.TryHover(hover, out _))
+                warnings.Add(prefix + Loc.T($"未知的悬停样式“{hover}”（可用：none、reveal、lift、underline），已忽略", $"Unknown hover style \"{hover}\" (use none, reveal, lift or underline); it is ignored"));
+        }
+        Look(file, "");
+        Look(file.Night, Loc.T("夜间外观：", "Night look: "));
+        Look(file.Dusk, Loc.T("黄昏外观：", "Dusk look: "));
+        return warnings;
+    }
+
     // The base chain's motion sections, merged from the dark theme up and held to MotionSafety.
     private static ThemeMotion MotionValues(IEnumerable<PanelThemeFile> chain)
     {

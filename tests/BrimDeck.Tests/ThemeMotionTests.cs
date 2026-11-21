@@ -45,9 +45,6 @@ internal static class ThemeMotionTests
         check("Colors are trimmed, and an empty one keeps the base's",
             Custom("""{ "base": "github-dark", "motion": { "color": "  #112233 ", "secondary": "" } }""").Motion is { Color: "#112233", Secondary: "#8B949E" }
             && Custom("""{ "base": "github-dark", "motion": { "color": "   " } }""").Motion.Color == "accent");
-        bool wrongType = false;
-        try { PanelThemes.Parse("""{ "motion": { "hoverStrength": "strong" } }"""); } catch (System.Text.Json.JsonException) { wrongType = true; }
-        check("A value of the wrong type is a file error, not a silent default", wrongType);
         check("Unknown members of the section are ignored (later versions add press and focus)",
             Custom("""{ "motion": { "hover": "reveal", "press": "sink", "focus": "ring", "particles": "dust", "trail": 0.3 } }""").Motion.Hover == HoverFx.Reveal);
         check("A section that is null is no section", Custom("""{ "base": "github-dark", "motion": null }""").Motion == githubDark);
@@ -80,10 +77,29 @@ internal static class ThemeMotionTests
             try { File.WriteAllText(Path.Combine(folder, "t.json"), json); return PanelThemes.LoadFolder(folder).Single().Error ?? ""; }
             finally { Directory.Delete(folder, true); }
         }
-        check("An unknown motion.hover name makes the file unusable, in the day and the night look",
-            Problem("""{ "id": "t", "motion": { "hover": "confetti" } }""").Contains("confetti")
-            && Problem("""{ "id": "t", "night": { "motion": { "hover": "2" } } }""").Contains("2"));
-        check("Valid or blank motion.hover names are no problem", new[] { "reveal", "LIFT", "none", "", "  " }.All(name => Problem("{ \"id\": \"t\", \"motion\": { \"hover\": \"" + name + "\" } }") == ""));
+        // A bad motion value is a warning on the settings page, never a file error: that field falls back (to the base's, or to the
+        // day look's for the night look), and everything else in the file, the other look's motion included, is used.
+        static IReadOnlyList<string> Warnings(string json) => PanelThemes.Warnings(PanelThemes.Parse(json));
+        check("An unknown motion.hover name is a warning, not a file error, in the day and the night look",
+            Problem("""{ "id": "t", "motion": { "hover": "confetti" } }""") == "" && Warnings("""{ "id": "t", "motion": { "hover": "confetti" } }""").Single().Contains("confetti")
+            && Problem("""{ "id": "t", "night": { "motion": { "hover": "2" } } }""") == "" && Warnings("""{ "id": "t", "night": { "motion": { "hover": "2" } } }""").Single().Contains('2'));
+        check("Valid or blank motion.hover names are no problem and no warning", new[] { "reveal", "LIFT", "none", "", "  " }
+            .All(name => Problem("{ \"id\": \"t\", \"motion\": { \"hover\": \"" + name + "\" } }") == "" && Warnings("{ \"motion\": { \"hover\": \"" + name + "\" } }").Count == 0));
+        check("A motion value of the wrong type is a warning, and that field keeps its base's value",
+            Problem("""{ "id": "t", "motion": { "hover": "lift", "hoverStrength": "strong" } }""") == ""
+            && Custom("""{ "base": "github-dark", "motion": { "hover": "lift", "hoverStrength": "strong" } }""").Motion is { Hover: HoverFx.Lift } typed && typed.HoverStrength == githubDark.HoverStrength
+            && Warnings("""{ "motion": { "hover": "lift", "hoverStrength": "strong" } }""").Single().Contains("hoverStrength"));
+        const string AllWrong = """{ "base": "github-dark", "motion": { "hover": 2, "hoverStrength": "0.2", "pace": "fast", "color": 5, "secondary": true } }""";
+        check("Every motion field of the wrong type is a warning of its own and keeps the base's value, a number written as text too",
+            Custom(AllWrong).Motion == githubDark && Warnings(AllWrong).Count == 5 && Problem(AllWrong.Replace("{ \"base\"", "{ \"id\": \"t\", \"base\"")) == "");
+        check("A motion section that is not an object is a warning and no section",
+            Custom("""{ "base": "github-dark", "motion": "fast" }""").Motion == githubDark && Warnings("""{ "motion": [1] }""").Count == 1 && Problem("""{ "id": "t", "motion": 3 }""") == "");
+        const string NightWrong = """{ "id": "t", "motion": { "hover": "lift", "hoverStrength": 0.2 }, "night": { "motion": { "hover": "confetti", "hoverStrength": "strong", "pace": 1.4 } } }""";
+        var nightWrong = PanelThemes.Parse(NightWrong);
+        check("Only the night look's motion wrong: the day look's motion loads, and the night keeps the day's for the bad fields",
+            Problem(NightWrong) == "" && PanelThemes.Build("t", nightWrong).Motion is { Hover: HoverFx.Lift, HoverStrength: .2, Pace: 1 }
+            && PanelThemes.Build("t", nightWrong, night: true).Motion is { Hover: HoverFx.Lift, HoverStrength: .2, Pace: 1.4 }
+            && PanelThemes.Warnings(nightWrong) is { Count: 2 } nightWarnings && nightWarnings.All(w => w.StartsWith(Loc.T("夜间外观：", "Night look: "), StringComparison.Ordinal)));
 
         // ----- Colors -----
         var dark = Palette("dark");

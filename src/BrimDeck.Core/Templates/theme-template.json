@@ -101,7 +101,8 @@
   // themes draw nothing over the controls. Each value is inherited on its own and held to a limit.
   // hover: none, reveal (a faint fill and a lit edge), lift (a soft shadow, for light themes), underline (a fill and a 2 px bar)
   // hoverStrength: 0 to 0.3; pace: 0.6 to 1.6, scales how long the mark takes; color and secondary: a color key above or "#RRGGBB"
-  // The marks follow the "animation effects" settings of BrimDeck and Windows, and are not drawn in high contrast.
+  // The marks follow the "animation effects" settings of BrimDeck and Windows, and are not drawn in high contrast. A value that
+  // cannot be used is ignored (the base's is kept) and shown as a warning on the settings page; the rest of the theme still loads.
   // "motion": { "hover": "underline", "hoverStrength": 0.22, "pace": 0.75, "color": "accent", "secondary": "#6E7781" },
 
   "effects": {
