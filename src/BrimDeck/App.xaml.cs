@@ -56,6 +56,8 @@ public partial class App : Application
     private readonly HashSet<MainWindow> _presentingPower = [];
     // The wireless devices' batteries, shared by every panel; created when first wanted (UpdateDeviceDemand).
     internal DeviceBatteries? Devices { get; private set; }
+    // Recent charge readings while DeviceBatteryEstimates is on, for time-left / time-to-full on the devices page.
+    internal DeviceBatteryPace DevicePace { get; } = new();
     internal event Action? DevicesChanged;
     private readonly HashSet<MainWindow> _devicePages = [], _deviceStrips = [];
     // The panels whose collapsed row shows readings or is only hidden for now (the panel open, a notice in it, PresentMonitor): the
@@ -108,6 +110,9 @@ public partial class App : Application
         // So is a first try of a device's read that the last run ended in (DeviceReadStore), with the reads kept for each device.
         DeviceReadStore.Start(folder);
         DeviceReadSwitches.Use(Settings.DeviceChoices);
+        // Recent charge readings for time estimates, kept across runs while the setting is on (DeviceBatteryPaceStore).
+        DeviceBatteryPaceStore.Start(folder);
+        if (Settings.DeviceBatteryEstimates) DevicePace.Load(DeviceBatteryPaceStore.Read(), DateTimeOffset.UtcNow);
         UseLanguage(); UseFont();
         PanelTheme.Use(Settings);
         ScheduleDaylight();
@@ -534,7 +539,18 @@ public partial class App : Application
             DeviceReadSwitches.Use(Settings.DeviceChoices);
             QueueSave();
         }
+        if (Settings.DeviceBatteryEstimates && Devices is { } paceDevices)
+        {
+            DevicePace.Observe(paceDevices.Showing, DateTimeOffset.UtcNow);
+            if (DevicePace.Dirty) ThreadPool.QueueUserWorkItem(_ => DeviceBatteryPaceStore.Save(DevicePace));
+        }
+        else if (!Settings.DeviceBatteryEstimates) ForgetDevicePace();
         DevicesChanged?.Invoke();
+    }
+    internal void ForgetDevicePace()
+    {
+        DevicePace.Clear();
+        DeviceBatteryPaceStore.Erase();
     }
     // Temperatures and drives are read for an open page with them on; also for a collapsed row showing them: the processor's and
     // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
@@ -667,7 +683,9 @@ public partial class App : Application
         Exiting = true; Lifetime.Cancel(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         ClipboardSync?.Dispose();
         if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
-        Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); DeviceReadStore.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); DeviceReadStore.Finish();
+        if (Settings.DeviceBatteryEstimates) DeviceBatteryPaceStore.Finish(DevicePace); else ForgetDevicePace();
+        Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

@@ -21,6 +21,8 @@ internal sealed class DevicesView : FrameworkElement
     private PanelLook Look => PanelLook.Of(this);
     private readonly DevicesLayout _layout;
     private readonly DeviceInks _inks;
+    // Recent readings while estimates are on (DeviceBatteryPace); null while the setting is off.
+    private readonly DeviceBatteryPace? _pace;
     private sealed class Card
     {
         public required string Key;
@@ -50,9 +52,9 @@ internal sealed class DevicesView : FrameworkElement
     private readonly System.Windows.Controls.ToolTip _tip = new() { Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
     private readonly System.Windows.Threading.DispatcherTimer _tipDelay = new() { Interval = TimeSpan.FromMilliseconds(450) };
 
-    public DevicesView(DevicesLayout layout, DeviceInks inks)
+    public DevicesView(DevicesLayout layout, DeviceInks inks, DeviceBatteryPace? pace = null)
     {
-        _layout = layout; _inks = inks;
+        _layout = layout; _inks = inks; _pace = pace;
         SnapsToDevicePixels = true;
         ClipToBounds = true;
         MouseMove += (_, e) => Hover(e.GetPosition(this));
@@ -396,7 +398,7 @@ internal sealed class DevicesView : FrameworkElement
 
     // The line under the name: the earbuds' parts, then charging, low or getting low, a level in steps or from the voltage, or
     // that the device reports no battery; otherwise where the reading comes from.
-    private static string Detail(DeviceBattery device, MemoryLevel level)
+    private string Detail(DeviceBattery device, MemoryLevel level)
     {
         var parts = new List<string>();
         if (device.Parts.Count > 0) parts.Add(string.Join("  ", device.Parts.Select(part => Devices.PartName(part.Part) + " " + Devices.Figure(part.Percent))));
@@ -406,6 +408,7 @@ internal sealed class DevicesView : FrameworkElement
         else if (level == MemoryLevel.Elevated) parts.Add(Loc.T("电量偏低", "Getting low"));
         else if (device.Accuracy == BatteryAccuracy.Steps) parts.Add(Loc.T("按电量档位", "Stepped level"));
         else if (device.Accuracy == BatteryAccuracy.Voltage) parts.Add(Loc.T("按电压换算", "From voltage"));
+        if (_pace?.Status(device, DateTimeOffset.UtcNow) is { } estimate) parts.Add(estimate);
         if (parts.Count == 0) parts.Add(Devices.SourceName(device.Source));
         return string.Join(" · ", parts);
     }
