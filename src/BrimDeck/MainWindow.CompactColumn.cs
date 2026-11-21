@@ -80,8 +80,11 @@ public partial class MainWindow
         double edge = Math.Min(Snap(layout.TextEdge, dpi), CompactMusicLayout.Whole(CollapsedLimits.ColumnPad * scale));
 
         var lines = new List<(FrameworkElement Element, double Height)>();
-        void Add(FrameworkElement element, double height)
+        // After the rows, the column's own: a line carries the page its part stands for, as the row's do, so a notch on a side
+        // edge opens the same page under the pointer (CompactPageAt, MainWindow.Hover.cs).
+        void Add(FrameworkElement element, double height, object? part = null)
         {
+            if (part is not null && CompactPartPage(part) is { } opening) element.Tag = opening;
             element.HorizontalAlignment = HorizontalAlignment.Center; element.VerticalAlignment = VerticalAlignment.Center;
             var line = new Grid { Width = column, Height = height };
             line.Children.Add(element);
@@ -91,16 +94,16 @@ public partial class MainWindow
         {
             var image = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius, look: Look);
             System.Windows.Automation.AutomationProperties.SetName(image, _mediaTrack!.Caption);
-            Add(image, layout.CoverSize);
+            Add(image, layout.CoverSize, "cover");
         }
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
             switch (part)
             {
                 case CompactPart.Rings when apps.Count > 0:
-                    Add(ColumnRings(apps, layout, ringGap, column, out double ringsHeight), ringsHeight); break;
+                    Add(ColumnRings(apps, layout, ringGap, column, out double ringsHeight), ringsHeight, CompactPart.Rings); break;
                 case CompactPart.Music when text.Length > 0:
-                    Add(_compactMarquee = CompactTitle(text, column, layout), layout.TextHeight); break;
+                    Add(_compactMarquee = CompactTitle(text, column, layout), layout.TextHeight, CompactPart.Music); break;
                 case CompactPart.Monitor:
                     foreach (var strip in strips)
                     {
@@ -109,14 +112,14 @@ public partial class MainWindow
                         {
                             var carousel = new ReadingsCarousel(strip, column, strip.PreferredWidth - column, edge, _stripElapsed, animate);
                             _columnReadings.Add(carousel);
-                            Add(carousel, strip.Height);
+                            Add(carousel, strip.Height, CompactPart.Monitor);
                         }
-                        else { strip.Width = column; Add(strip, strip.Height); }
+                        else { strip.Width = column; Add(strip, strip.Height, CompactPart.Monitor); }
                     }
                     break;
                 case CompactPart.Equalizer when equalizer:
                     _compactEqualizer = new MusicEqualizer { Bars = Settings.EqualizerBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = EqualizerColor };
-                    Add(_compactEqualizer, layout.EqualizerHeight); break;
+                    Add(_compactEqualizer, layout.EqualizerHeight, CompactPart.Equalizer); break;
                 case CompactPart.Clock when clock is not null:
                     clock.Width = clock.ReservedWidth; Add(clock, clock.Height); _compactClock = clock; break;
                 case CompactPart.Transfer when transfer is not null:
@@ -128,9 +131,9 @@ public partial class MainWindow
                         devices.Width = devices.PreferredWidth;
                         var carousel = new ReadingsCarousel(devices, column, devices.PreferredWidth - column, edge, _stripElapsed, animate);
                         _columnReadings.Add(carousel);
-                        Add(carousel, devices.Height);
+                        Add(carousel, devices.Height, CompactPart.Devices);
                     }
-                    else { devices.Width = column; Add(devices, devices.Height); }
+                    else { devices.Width = column; Add(devices, devices.Height, CompactPart.Devices); }
                     break;
             }
         }

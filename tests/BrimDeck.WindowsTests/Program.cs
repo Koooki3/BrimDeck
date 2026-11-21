@@ -31,6 +31,7 @@ internal static class Program
             if (args is ["--only", "themecards"]) { ThemeCardChecks.Run(Check); return Finish(); }
             if (args is ["--only", "glass"]) { GlassChecks.Run(Check); AcrylicProbeChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themelook"]) { ThemeLookChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "hoverowners"]) { HoverOwnerChecks.Run(Check); return Finish(); }
             if (args is ["--only", "fonts"]) { FontFollowTests.Run(Check); return Finish(); }
             // "--only notices": the notice checks alone. They lay out panels and call Windows; none sends input or captures the screen.
             if (args is ["--only", "notices"]) { NoticeChecks(); return Finish(); }
@@ -66,6 +67,7 @@ internal static class Program
             NoticePanelTests.Run(Check);
             ThemeCardChecks.Run(Check);
             ThemeLookChecks.Run(Check);
+            HoverOwnerChecks.Run(Check);
             PopupGhostChecks.Run(Check);
             GlassChecks.Run(Check);
             PanelKeyboardTests.Run(Check);

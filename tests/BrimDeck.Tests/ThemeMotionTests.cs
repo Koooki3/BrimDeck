@@ -9,14 +9,14 @@ internal static class ThemeMotionTests
         static PanelPalette Palette(string id) => PanelThemes.Resolve(PanelThemes.BuiltIn(id)!);
         static PanelPalette Custom(string json) => PanelThemes.Build("custom", PanelThemes.Parse(json));
 
-        // Every built-in theme but the default dark and light ones (which keep BrimDeck's own control looks) has its own answers
-        // to the pointer; ambient light is for the cyberpunk demo, the glass themes' drifting glint and the island's swell.
+        // Every built-in theme but the default dark and light ones and the GitHub pair (which keep the controls' own looks: the hover
+        // mark is off unless a theme turns it on) has its own answers to the pointer; ambient light is for the cyberpunk demo, the glass themes' drifting glint and the island's swell.
         string[] builtIns = ["dark", "light", PanelThemes.GlassLight, PanelThemes.GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl",
             PanelThemes.IslandHoliday, PanelThemes.IslandHoliday2, PanelThemes.PixelBlocks, PanelThemes.Demo, PanelThemes.Endfield];
         string[] ambient = [PanelThemes.Demo, PanelThemes.GlassLight, PanelThemes.GlassDark, PanelThemes.IslandHoliday, PanelThemes.IslandHoliday2];
         check("Every built-in theme is listed for motion", PanelThemes.BuiltIns.Select(theme => theme.Id).Order().SequenceEqual(builtIns.Order()));
-        check("Every built-in theme answers the pointer except the default dark and light, which draw nothing over the controls",
-            builtIns.All(id => Palette(id).Motion.AnyInteraction == id is not ("dark" or "light")));
+        check("Every built-in theme answers the pointer except the default dark and light and the GitHub pair, which draw nothing over the controls",
+            builtIns.All(id => Palette(id).Motion.AnyInteraction == id is not ("dark" or "light" or "github-dark" or "github-light")));
         check("Only the cyberpunk, glass and island themes have ambient light", builtIns.All(id => Palette(id).Motion.Ambient.Any == ambient.Contains(id)));
         check("Glass: only a slow drifting glint, no breathing, sweep or flicker; a lens on hover, no particles",
             new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion is { Hover: HoverFx.Lens, Particles: ParticleFx.None, Steps: 0 } m
@@ -39,8 +39,8 @@ internal static class ThemeMotionTests
         check("Cyberpunk: breathing, drifting, sweeping, a rare flicker; hard HUD answers in steps, and rain",
             cyber.Ambient is { Breathe: 6.5, BreatheDepth: .22, Drift: 11, Sweep: 16, SweepOpacity: .07, Flicker: 41, FlickerDepth: .1 }
             && cyber is { Hover: HoverFx.Brackets, Press: PressFx.Lock, Focus: FocusFx.Brackets, Color: "accent", Secondary: "shadow", Highlight: "clock", Particles: ParticleFx.Rain, Steps: 3, Pace: < 1, Spring: SpringTier.Firm });
-        check("GitHub themes are flat, precise and quick: an underline, a coral indicator, no particles",
-            new[] { "github-dark", "github-light" }.All(id => Palette(id).Motion is { Hover: HoverFx.Underline, Press: PressFx.Indicator, Focus: FocusFx.Ring, Particles: ParticleFx.None, Steps: 0, Pace: < 1 }));
+        check("GitHub themes have no motion section: no hover, press or focus marks",
+            new[] { "github-dark", "github-light" }.All(id => Palette(id).Motion is { Hover: HoverFx.None, Press: PressFx.None, Focus: FocusFx.None, AnyInteraction: false, Ambient.Any: false }));
         check("Dark and light keep BrimDeck's default look: no hover, press or focus marks",
             new[] { "dark", "light" }.All(id => Palette(id).Motion is { Hover: HoverFx.None, Press: PressFx.None, Focus: FocusFx.None, Particles: ParticleFx.None, Ambient.Any: false })
             && ThemeMotion.Default is { AnyInteraction: false });
@@ -49,10 +49,8 @@ internal static class ThemeMotionTests
         check("Dracula sparkles in purple and pink; Night Owl glows warm with fireflies",
             Palette("dracula").Motion is { Hover: HoverFx.Sheen, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Secondary: "liked" }
             && Palette("night-owl").Motion is { Hover: HoverFx.Glow, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 });
-        // The GitHub pair and the glass pair are one material each in two tones, and share their answers; dark and light share
-        // having none.
-        check("Every built-in theme has a language of its own", builtIns.Select(id => (Palette(id).Motion.Hover, Palette(id).Motion.Press)).Distinct().Count() == builtIns.Length - 3
-            && Palette("github-dark").Motion.Hover == Palette("github-light").Motion.Hover);
+        // The glass pair is one material in two tones, and shares its answers; dark, light and the GitHub pair share having none.
+        check("Every built-in theme has a language of its own", builtIns.Select(id => (Palette(id).Motion.Hover, Palette(id).Motion.Press)).Distinct().Count() == builtIns.Length - 4);
         check("Only the mechanical and pixel themes move in steps", builtIns.All(id => (Palette(id).Motion.Steps > 0) == (id is PanelThemes.Demo or PanelThemes.PixelBlocks)));
         check("Particle styles inherit and unknown ones keep the base's",
             Custom("""{ "base": "dracula", "motion": { "particles": "firefly" } }""").Motion.Particles == ParticleFx.Firefly

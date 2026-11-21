@@ -42,9 +42,11 @@ internal static class InteractionFx
     public static void ResetAll() { foreach (var surface in Surfaces) surface.Reset(); }
 
     // The panel's layer lies inside the island, above the content, so the island's outline clips it like the content.
-    public static FxSurface Island(MainWindow window, IslandBorder island, Panel content, Func<bool> interactive)
+    // It follows its own panel: that panel's animation rule (Soft.For its profile's settings) and look (its own theme, which another
+    // monitor's profile may differ in).
+    public static FxSurface Island(MainWindow window, IslandBorder island, Panel content, Func<bool> interactive, Func<bool> animates, Func<PanelLook> look)
     {
-        var surface = new FxSurface(island, content, interactive);
+        var surface = new FxSurface(island, content, interactive, animates, look);
         content.Children.Add(surface);
         Track(window, surface);
         return surface;
@@ -138,6 +140,9 @@ internal sealed partial class FxSurface : FrameworkElement
     private readonly UIElement _input;
     private readonly UIElement _scope;
     private readonly Func<bool> _interactive;
+    // A panel's layer: the owning panel's animation rule and look. Other windows' layers follow the app's.
+    private readonly Func<bool>? _animates;
+    private readonly Func<PanelLook>? _look;
     private readonly DrawingVisual _visual = new();
 
     private ThemeMotion _motion = ThemeMotion.Default;
@@ -170,9 +175,9 @@ internal sealed partial class FxSurface : FrameworkElement
 
     public event Action? Detached;
 
-    public FxSurface(UIElement input, UIElement scope, Func<bool> interactive)
+    public FxSurface(UIElement input, UIElement scope, Func<bool> interactive, Func<bool>? animates = null, Func<PanelLook>? look = null)
     {
-        _input = input; _scope = scope; _interactive = interactive;
+        _input = input; _scope = scope; _interactive = interactive; _animates = animates; _look = look;
         IsHitTestVisible = false; Focusable = false;
         AddVisualChild(_visual);
         input.PreviewMouseMove += Moved;
@@ -207,7 +212,7 @@ internal sealed partial class FxSurface : FrameworkElement
 
     private static DeckSettings? Settings => (Application.Current as App)?.Settings;
     // Motion allowed at all (BrimDeck's and Windows' animation settings, high contrast), and the window answering now.
-    private bool Allowed => !_detached && MotionGate.Interaction(Preview?.Conditions?.Invoke() ?? MotionEnvironment.Conditions(), _motion);
+    private bool Allowed => !_detached && (Preview is not null || _animates?.Invoke() != false) && MotionGate.Interaction(Preview?.Conditions?.Invoke() ?? MotionEnvironment.Conditions(), _motion);
     private bool Active => Allowed && _interactive();
     private double Clock() => Preview?.Clock() ?? Eased.Now;
 
@@ -224,13 +229,14 @@ internal sealed partial class FxSurface : FrameworkElement
     {
         // "System" and the theme it stands for share a palette, so the choice itself is part of what the layer was dressed for.
         bool system = Preview?.SystemTheme ?? (PanelThemes.NormalizeId(Settings?.PanelTheme) is PanelThemes.SystemId or PanelThemes.GlassAuto);
-        int generation = Preview?.Palette is null ? PanelTheme.Generation : _generation < 0 ? 0 : _generation;
+        var look = Preview?.Palette is null ? _look?.Invoke() : null;
+        int generation = Preview?.Palette is null ? look?.Generation ?? PanelTheme.Generation : _generation < 0 ? 0 : _generation;
         if (_generation != generation || system != _dressedSystem || _generation < 0)
         {
             bool restyled = _generation >= 0;
             _generation = generation; _dressedSystem = system;
             if (restyled) Reset();
-            var palette = Preview?.Palette?.Invoke() ?? PanelTheme.Current;
+            var palette = Preview?.Palette?.Invoke() ?? look?.Current ?? PanelTheme.Current;
             _motion = system ? palette.Motion.ForSystem() : palette.Motion;
             Dress(palette, system);
         }
@@ -239,6 +245,14 @@ internal sealed partial class FxSurface : FrameworkElement
         // A theme's own lengths for lock's slice and scan line.
         if (_motion.SliceMs > 0) _timing = _timing with { Glitch = _motion.SliceMs };
         if (_motion.ScanMs > 0) _timing = _timing with { Scan = _motion.ScanMs };
+    }
+
+    // After a change of settings or theme: what is shown ends at once when it may not be shown any more.
+    public void Check()
+    {
+        if (_detached) return;
+        EnsureDressed();
+        if (!Allowed) Reset();
     }
 
     // ----- Pointer -----
@@ -329,7 +343,8 @@ internal sealed partial class FxSurface : FrameworkElement
     // arrives on its own while the previous one fades.
     internal void HoverOn(FrameworkElement? target)
     {
-        if (_motion.Hover == HoverFx.None || _motion.HoverStrength <= 0) target = null;
+        // A control that already shows its own hover never wears a mark over it (HoverOwners); its press and focus still answer.
+        if (_motion.Hover == HoverFx.None || _motion.HoverStrength <= 0 || target is not null && HoverOwners.DrawsOwn(target)) target = null;
         if (ReferenceEquals(target, _hover?.Control)) return;
         double now = Clock();
         FxMark? next = null;

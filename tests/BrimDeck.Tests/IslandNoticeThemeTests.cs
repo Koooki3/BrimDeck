@@ -83,7 +83,7 @@ internal static class IslandNoticeThemeTests
         check("Notice arrival: a pixel theme keeps its outline still (the backlight and the words alone); every other built-in theme's island moves",
             !ThemeOf(pixel).Liquid && Looks().Where(l => l.Palette.Effects.Pixel <= 0).All(l => ThemeOf(l.Palette).Liquid));
         check("Notice arrival: a theme that moves slowly slows the liquid by at most a tenth, and none speeds it past the prototype's by more than a twentieth",
-            Looks().All(l => ThemeOf(l.Palette).Pace is >= .9 and <= 1.05) && ThemeOf(PanelThemes.Resolve(PanelThemes.BuiltIn("github-dark")!)).Pace == .9
+            Looks().All(l => ThemeOf(l.Palette).Pace is >= .9 and <= 1.05) && ThemeOf(PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.Demo)!)).Pace == .9
             && ThemeOf(PanelThemes.Resolve(PanelThemes.BuiltIn("night-owl")!)).Pace == 1.05);
 
         // Missing or odd values fall back to the prototype's.

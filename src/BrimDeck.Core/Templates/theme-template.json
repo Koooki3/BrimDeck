@@ -143,7 +143,8 @@
     // How the pointer is answered: a mark drawn on the control's own visible shape (never around its box, never following the
     // pointer), a press that answers as the button goes down, holds while it is held and completes on release, and a short
     // accent where keyboard focus lands. The settings window keeps its own styles. "none" everywhere (the default dark and light
-    // themes) draws nothing over the controls, which keep their own hover and press looks.
+    // themes, the GitHub pair) draws nothing over the controls, which keep their own hover and press looks.
+    // A control that already shows its own hover (the panel's buttons, the music controls) never gets a hover mark.
     "hover": "none",                // none, reveal (faint fill, edge lit from the top), lift (soft shadow outside, light top edge),
                                     // underline (subtle fill, 2 px bar along the bottom), caret (line highlight, caret bar at the left),
                                     // brackets (HUD corner brackets), sheen (two-color tint and edge), glow (warm inner glow, a glint)

@@ -21,7 +21,7 @@ public partial class MainWindow
     {
         var content = (Panel)Island.Child;
         _ambient = new AmbientGlow(Island, content, MotionState, () => _expanded, () => _glassActive);
-        _fx = InteractionFx.Island(this, Island, content, () => _expanded && !_preview);
+        _fx = InteractionFx.Island(this, Island, content, () => _expanded && !_preview, () => Animates, () => Look);
         IsVisibleChanged += (_, _) => _ambient.Update();
         MotionEnvironment.Changed += EnvironmentChanged;
         Closed += (_, _) => { MotionEnvironment.Changed -= EnvironmentChanged; _ambient.Stop(); };

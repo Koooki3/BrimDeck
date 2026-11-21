@@ -86,5 +86,11 @@
     <Compile Include="..\..\src\BrimDeck\PageToolTips.cs" Link="PageToolTips.cs" />
     <!-- The notices page's header, row and fade panels (laid out by WPF in NoticePanelTests). -->
     <Compile Include="..\..\src\BrimDeck\NoticePanels.cs" Link="NoticePanels.cs" />
+    <!-- Which controls show their own hover, so a theme's hover mark leaves them alone (HoverOwnerChecks), with the music
+         controls and their own style. -->
+    <Compile Include="..\..\src\BrimDeck\HoverOwners.cs" Link="HoverOwners.cs" />
+    <Compile Include="..\..\src\BrimDeck\Feedback.cs" Link="Feedback.cs" />
+    <Compile Include="..\..\src\BrimDeck\MusicControls.cs" Link="MusicControls.cs" />
+    <Page Include="..\..\src\BrimDeck\MusicResources.xaml" Link="MusicResources.xaml" />
   </ItemGroup>
 </Project>

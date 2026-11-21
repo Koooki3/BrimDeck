@@ -416,6 +416,7 @@ public partial class MainWindow : Window
         // The music page's text was set in the font of its day, and the monitor's column widths were measured in it: both are built again.
         if (_fontSeen != Fonts.Version) { _fontSeen = Fonts.Version; _musicRenderKey = ""; _monitorKey = ""; }
         ApplyTheme();
+        _fx?.Check();
         ApplySurface();
         UpdateGlassTheme();
         // A panel holding the keyboard stays one that can be active, whatever the setting (PanelKeyboard).
@@ -906,6 +907,7 @@ public partial class MainWindow : Window
     // hotkey showed while the panels are hidden hides again, and the collapsed title scrolls its laps anew.
     private void PanelClosed()
     {
+        _fx?.Release();
         _app.UpdateCollectionLatency();
         WatchOutsidePress(false);
         ResetShelf();
@@ -1173,10 +1175,13 @@ public partial class MainWindow : Window
         UpdateAmbient();
         ApplyClickThrough();
     }
-    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded).
+    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded), and it opens on the page the part
+    // under the pointer stands for (CompactPageAt), so a pointer over the readings opens the system monitor and one over the
+    // devices opens their page. No part under it, or the mapping turned off in the settings: the page it would have opened on.
     private void OpenAtPointer()
     {
         if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
+        _hoverPage = !Settings.HoverPage || PresentationSource.FromVisual(Stage) is null ? null : CompactPageAt(Stage.PointFromScreen(WindowsHost.Cursor()));
         SetExpanded(true);
     }
     // With ClickToExpand on, a click on the collapsed surface opens the panel; the press must start on it, so a drag that ends

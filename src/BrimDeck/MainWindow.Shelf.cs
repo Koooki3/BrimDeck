@@ -1346,6 +1346,8 @@ public partial class MainWindow
             Background = primary ? UI.Brush(Look.Primary) : UI.Brush(Look.FillSelected) };
         var button = new Button { Content = face, Cursor = Cursors.Hand, Focusable = false, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Brushes.Transparent };
         button.Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) };
+        // Its hover is its own (the face dims), so a theme's hover mark leaves it alone.
+        Feedback.SetOwnHover(button, true);
         button.MouseEnter += (_, _) => face.Opacity = .86;
         button.MouseLeave += (_, _) => face.Opacity = 1;
         button.Click += (_, e) => { e.Handled = true; click(); };
