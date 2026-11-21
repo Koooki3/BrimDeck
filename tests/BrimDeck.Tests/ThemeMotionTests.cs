@@ -194,5 +194,20 @@ internal static class ThemeMotionTests
                 && PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", Palette(id)))).Motion == Palette(id).Motion));
         check("Filling the template leaves the clock's color and style to the clock",
             PanelThemes.Parse(PanelThemes.FillTemplate("copy", Palette("dracula"))) is { Clock: { Color: "default", Style: "minimal" }, Motion.Color: "accent" });
+        // A custom theme's copy and its draft saved as new keep its day motion (upstream review, PR #287): this build writes the
+        // whole motion section out every time (FillMotion), so the copy does not fall back to the dark base's.
+        var daySource = PanelThemes.Parse("""{ "id": "own", "motion": { "hover": "lift", "hoverStrength": 0.2, "pace": 1.3, "color": "#336699", "secondary": "rim" } }""");
+        var dayStart = PanelThemes.Build("own", daySource);
+        var dayCopy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", dayStart, null, daySource)));
+        check("New from a custom theme keeps the day look's motion", dayCopy.Motion == dayStart.Motion && dayCopy.Motion.Hover == HoverFx.Lift);
+        var copyFolder = Directory.CreateTempSubdirectory("brimdeck-motion-copy").FullName;
+        try
+        {
+            var ownInfo = new PanelThemeInfo("own", PanelThemeKind.Custom, daySource, Path.Combine(copyFolder, "own.json"), null);
+            var draft = new PanelThemeDraft("own"); draft.SetColor(daySource, "accent", ThemeColor.Parse("#FF8800"));
+            var saved = PanelThemes.Parse(File.ReadAllText(PanelThemes.SaveDraftAsNew(copyFolder, ownInfo, draft)));
+            check("Saving a custom theme's draft as a new theme keeps the day look's motion", PanelThemes.Build("saved", saved).Motion == dayStart.Motion);
+        }
+        finally { Directory.Delete(copyFolder, true); }
     }
 }
