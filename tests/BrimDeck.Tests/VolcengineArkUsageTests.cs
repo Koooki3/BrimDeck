@@ -10,11 +10,11 @@ internal static class VolcengineArkUsageTests
     {
       "ResponseMetadata": { "Action": "GetAFPUsage", "Version": "2024-01-01" },
       "Result": {
-        "PlanType": "pro",
-        "AFPDaily": { "Quota": 500, "Used": 100 },
-        "AFPFiveHour": { "Quota": 200, "Used": 49, "ResetTime": 1796000000 },
-        "AFPWeekly": { "Quota": 1000, "Used": 512, "ResetTime": 1796500000 },
-        "AFPMonthly": { "Quota": 3000, "Used": 990, "ResetTime": 1798000000 }
+        "PlanType": "Large",
+        "AFPDaily": { "Quota": "500.0", "Used": "100.0", "SubscribeTime": 1795900000000, "ResetTime": 1796100000000 },
+        "AFPFiveHour": { "Quota": "200.0", "Used": "49.0", "SubscribeTime": 1795990000000, "ResetTime": 1796000000000 },
+        "AFPWeekly": { "Quota": "1000.0", "Used": "512.0", "SubscribeTime": 1795500000000, "ResetTime": 1796500000000 },
+        "AFPMonthly": { "Quota": "3000.0", "Used": "990.0", "SubscribeTime": 1795000000000, "ResetTime": 1798000000000 }
       }
     }
     """;
@@ -34,13 +34,20 @@ internal static class VolcengineArkUsageTests
 
     private const string SeatListCodingResponse = """
     {
-      "Result": { "Data": [ { "SeatID": "seat-c-1", "SeatStatus": "Active" }, { "SeatID": "seat-c-2", "SeatStatus": "Active" }, { "SeatID": "seat-old", "SeatStatus": "Released" } ] }
+      "Result": {
+        "Data": [
+          { "SeatID": "seat-c-1", "BillingStatus": 2, "SeatStatus": "2" },
+          { "SeatID": "seat-c-2", "BillingStatus": 2, "SeatStatus": "1" },
+          { "SeatID": "seat-old", "BillingStatus": 3, "SeatStatus": "2" }
+        ],
+        "Total": 3
+      }
     }
     """;
 
     private const string SeatListAgentResponse = """
     {
-      "Result": { "Data": [ { "SeatID": "seat-a-1", "SeatStatus": "Active" } ] }
+      "Result": { "Data": [ { "SeatID": "seat-a-1", "BillingStatus": 2, "SeatStatus": "2" } ], "Total": 1 }
     }
     """;
 
@@ -48,9 +55,18 @@ internal static class VolcengineArkUsageTests
     {
       "Result": {
         "Data": [
-          { "SeatID": "seat-c-1", "ShortTermUsage": 30, "WeeklyUsage": 50, "MonthlyUsage": 60, "ShortTermResetMilestone": 1796001500 },
-          { "SeatID": "seat-c-2", "ShortTermUsage": 10, "WeeklyUsage": 20, "MonthlyUsage": 40, "ShortTermResetMilestone": 1796001200 }
+          { "SeatID": "seat-c-1", "ShortTermUsage": "30", "WeeklyUsage": "50", "MonthlyUsage": "60", "MonthlyResetMilestone": 1798001500 },
+          { "SeatID": "seat-c-2", "ShortTermUsage": "10", "WeeklyUsage": "20", "MonthlyUsage": "40", "MonthlyResetMilestone": 1798001200 }
         ]
+      }
+    }
+    """;
+
+    // GetSeatInfoUsage wraps the seat in Result.SeatInfoUsage (API reference 82379/2306579).
+    private const string SingleSeatUsageResponse = """
+    {
+      "Result": {
+        "SeatInfoUsage": { "SeatID": "seat-c-1", "ProjectName": "default", "MonthlyResetMilestone": 1798001500, "ShortTermUsage": "12.5", "WeeklyUsage": "35.0", "MonthlyUsage": "46.0" }
       }
     }
     """;
@@ -61,9 +77,9 @@ internal static class VolcengineArkUsageTests
         "SeatAFPUsages": [
           {
             "SeatID": "seat-a-1",
-            "PlanType": "enterprise",
-            "AFPFiveHour": { "Quota": 400, "Used": 50, "ResetTime": 1796002000 },
-            "AFPMonthly": { "Quota": 5000, "Used": 2250, "ResetTime": 1798002000 }
+            "PlanType": "Medium",
+            "AFPFiveHour": { "Quota": "400.0", "Used": "50.0", "ResetTime": 1796002000000 },
+            "AFPMonthly": { "Quota": "5000.0", "Used": "2250.0", "ResetTime": 1798002000000 }
           }
         ]
       }
@@ -118,17 +134,25 @@ internal static class VolcengineArkUsageTests
             using (var staticSigned = VolcengineArkUsage.SignRequest(VolcengineArkUsage.International, creds, "billing", "2022-01-01", "QueryBalanceAcct", "{}", now))
             {
                 check("byteplus sign omits X-Security-Token for static AK/SK", !staticSigned.Headers.Contains("X-Security-Token"));
-                check("byteplus sign uses open.byteplusapi.com and ap-southeast-1",
-                    staticSigned.RequestUri!.Host == "open.byteplusapi.com" &&
+                check("byteplus billing goes to billing.byteplusapi.com, signed for ap-southeast-1",
+                    staticSigned.RequestUri!.Host == "billing.byteplusapi.com" &&
                     staticSigned.Headers.GetValues("Authorization").First().Contains("/ap-southeast-1/billing/request"));
             }
+            HttpRequestMessage Signed(VolcengineArkUsage.Edition edition, string service) =>
+                VolcengineArkUsage.SignRequest(edition, creds, service, service == "ark" ? "2024-01-01" : "2022-01-01", "Probe", "{}", now);
+            using (var arkCn = Signed(VolcengineArkUsage.China, "ark")) using (var billingCn = Signed(VolcengineArkUsage.China, "billing"))
+            using (var arkBp = Signed(VolcengineArkUsage.International, "ark"))
+                check("ark actions go to the documented ark hosts and Volcengine billing to open.volcengineapi.com",
+                    arkCn.RequestUri!.Host == "ark.cn-beijing.volcengineapi.com" && billingCn.RequestUri!.Host == "open.volcengineapi.com"
+                    && arkBp.RequestUri!.Host == "ark.ap-southeast-1.byteplusapi.com");
 
             // 4. Individual response parsers
             using (var doc = JsonDocument.Parse(AfpResponse))
             {
                 var (metrics, plan) = VolcengineArkUsage.ParseAfpUsage(doc.RootElement.Get("Result"), "afp-personal");
-                check("volcengine afp skips AFPDaily and keeps 3 windows", metrics.Count == 3 && plan == "Pro");
-                check("volcengine afp 5h count and window", metrics[0].Kind == MetricKind.Count && metrics[0].Used == 49 && metrics[0].Total == 200 && metrics[0].Window == 300);
+                check("volcengine afp skips AFPDaily and keeps 3 windows", metrics.Count == 3 && plan == "Large");
+                check("volcengine afp 5h count and window from string amounts", metrics[0].Kind == MetricKind.Count && metrics[0].Used == 49 && metrics[0].Total == 200 && metrics[0].Window == 300);
+                check("volcengine afp reset time is read in milliseconds", metrics[0].ResetAt == DateTimeOffset.FromUnixTimeMilliseconds(1796000000000));
             }
             using (var doc = JsonDocument.Parse(CodingPlanResponse))
             {
@@ -138,7 +162,12 @@ internal static class VolcengineArkUsageTests
             using (var doc = JsonDocument.Parse(SeatListCodingResponse))
             {
                 var seatIds = VolcengineArkUsage.ExtractSeatIds(doc.RootElement.Get("Result"));
-                check("volcengine extract seat ids skips Released seats", seatIds.Count == 2 && seatIds[0] == "seat-c-1" && seatIds[1] == "seat-c-2");
+                check("volcengine extract seat ids keeps running seats, idle or bound, and skips expired ones", seatIds.Count == 2 && seatIds[0] == "seat-c-1" && seatIds[1] == "seat-c-2");
+            }
+            using (var doc = JsonDocument.Parse(SingleSeatUsageResponse))
+            {
+                var metrics = VolcengineArkUsage.ParseCodingSeatUsage(doc.RootElement.Get("Result").Get("SeatInfoUsage"));
+                check("volcengine single seat usage is read from Result.SeatInfoUsage", metrics.Count == 3 && metrics[0].Percent == 12.5 && metrics[2].Percent == 46);
             }
             using (var doc = JsonDocument.Parse(BalanceResponse))
             {
@@ -189,6 +218,54 @@ internal static class VolcengineArkUsageTests
                 check("volcengine 403 AccessDenied skipped without blocking coding plan or balance",
                     reading.Metrics.Count == 4 && reading.Metrics.Any(m => m.Kind == MetricKind.Balance));
             }
+            // 6b. A team with one Coding Plan seat reads it from GetSeatInfoUsage (Result.SeatInfoUsage), asked with SeatID and ProjectName only.
+            string singleBody = "";
+            using (var singleHttp = new HttpClient(new StubHandler(req =>
+            {
+                var query = req.RequestUri!.Query;
+                var reqBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                if (query.Contains("Action=ListSeatInfos"))
+                    return JsonResponse(reqBody.Contains("coding_plan_enterprise") ? """{"Result":{"Data":[{"SeatID":"seat-c-1","BillingStatus":2,"SeatStatus":"2"}],"Total":1}}""" : """{"Result":{"Data":[],"Total":0}}""");
+                if (query.Contains("Action=GetSeatInfoUsage")) { singleBody = reqBody; return JsonResponse(SingleSeatUsageResponse); }
+                return JsonResponse("""{"Result":{}}""");
+            })))
+            {
+                var reading = await VolcengineArkUsage.ReadAsync(singleHttp, VolcengineArkUsage.China, creds, now, CancellationToken.None);
+                check("volcengine team with one Coding Plan seat shows that seat's usage",
+                    reading.Metrics.Count(m => m.Id.StartsWith("coding-seat")) == 3 && reading.Metrics.First(m => m.Id == "coding-seat-5h").Percent == 12.5
+                    && singleBody.Contains("\"SeatID\":\"seat-c-1\"") && !singleBody.Contains("Scene"));
+            }
+
+            // 6c. Seats are listed page by page, running seats only, and their usage is asked for all of them.
+            var listBodies = new List<string>();
+            int usageSeats = 0;
+            using (var pagedHttp = new HttpClient(new StubHandler(req =>
+            {
+                var query = req.RequestUri!.Query;
+                var reqBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                if (query.Contains("Action=ListSeatInfos"))
+                {
+                    if (!reqBody.Contains("coding_plan_enterprise")) return JsonResponse("""{"Result":{"Data":[],"Total":0}}""");
+                    listBodies.Add(reqBody);
+                    using var request = JsonDocument.Parse(reqBody);
+                    int page = request.RootElement.Get("PageNum").GetInt32();
+                    var seats = Enumerable.Range((page - 1) * 100, page == 1 ? 100 : 50).Select(i => $$"""{"SeatID":"seat-{{i}}","BillingStatus":2,"SeatStatus":"2"}""");
+                    return JsonResponse($$$"""{"Result":{"Data":[{{{string.Join(",", seats)}}}],"Total":150}}""");
+                }
+                if (query.Contains("Action=ListSeatInfoUsages"))
+                {
+                    using var request = JsonDocument.Parse(reqBody);
+                    usageSeats += request.RootElement.Get("SeatIDs").GetArrayLength();
+                    return JsonResponse(CodingSeatUsagesResponse);
+                }
+                return JsonResponse("""{"Result":{}}""");
+            })))
+            {
+                await VolcengineArkUsage.ReadAsync(pagedHttp, VolcengineArkUsage.China, creds, now, CancellationToken.None);
+                check("volcengine lists every page of running seats and asks for the usage of all of them",
+                    listBodies.Count == 2 && listBodies.All(b => b.Contains("\"BillingStatus\":[2]")) && usageSeats == 150);
+            }
+
             bool rejected = false;
             using (var badCredHttp = new HttpClient(new StubHandler(_ => JsonResponse("""{"ResponseMetadata":{"Error":{"Code":"InvalidAccessKey"}}}""", HttpStatusCode.Unauthorized))))
             {
@@ -205,7 +282,8 @@ internal static class VolcengineArkUsageTests
             {
                 var uri = req.RequestUri!.AbsoluteUri;
                 if (uri.EndsWith(VolcengineArkUsage.DeviceAuthPath))
-                    return JsonResponse("""{"device_code":"dev-1","user_code":"ABCD-1234","verification_uri_complete":"https://signin.volcengine.com/device?user_code=ABCD-1234","expires_in":600,"interval":1}""");
+                    // As signin.volcengine.com answers (checked 2026-11-21): no verification_uri_complete, so the page asks for the code.
+                    return JsonResponse("""{"device_code":"dev-1","user_code":"ABCD-1234","verification_uri":"https://signin.volcengine.com/authorize/oauth/device?trace_id=t1","expires_in":300,"interval":1}""");
                 if (uri.EndsWith(VolcengineArkUsage.TokenPath))
                 {
                     var form = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
@@ -226,16 +304,18 @@ internal static class VolcengineArkUsageTests
             })))
             {
                 using var service = new UsageService(new FakeDesktop(), DataLocations.Resolve(root, root, root, null, null), oauthHttp, () => now, secrets);
-                string openedUrl = "";
-                bool connected = await service.ConnectVolcengineAsync(ProviderId.VolcengineArk, url => { openedUrl = url; return true; }, CancellationToken.None);
+                string openedUrl = "", shownCode = "", codeWhenOpened = "";
+                bool connected = await service.ConnectVolcengineAsync(ProviderId.VolcengineArk, url => { openedUrl = url; codeWhenOpened = shownCode; return true; },
+                    userCode => shownCode = userCode, CancellationToken.None);
                 check("volcengine oauth device connect succeeds", connected && openedUrl.StartsWith("https://signin.volcengine.com/") && service.VolcengineConnected(ProviderId.VolcengineArk));
+                check("volcengine device code is shown before the sign-in page opens", shownCode == "ABCD-1234" && codeWhenOpened == "ABCD-1234");
 
-                // Expire the stored STS token to verify automatic refresh
+                // Expire the stored STS token to verify automatic refresh; a row without an AccessKey reads with the sign-in alone.
                 var expiring = new VolcengineArkUsage.Session("AK_OLD", "SK_OLD", "STS_OLD", "RT_INIT", now.AddSeconds(30));
                 secrets.Write(VolcengineArkUsage.China.SessionKey, expiring.Serialize());
-                var snaps = await service.RefreshAsync(new DeckSettings { Apps = [new AppEntry { Id = ProviderId.VolcengineArk }] });
-                var snap = snaps.Single(s => s.Id == ProviderId.VolcengineArk);
-                check("volcengine auto-refreshes expiring STS and reads live quota", refreshedCalled && snap.LiveQuota && snap.Metrics.Count >= 4);
+                using var signedIn = new ConfiguredProviders(secrets, oauthHttp, () => now);
+                var snap = (await signedIn.TestAsync(new AppEntry { Id = ProviderId.VolcengineArk })).Snapshot;
+                check("volcengine row without an AccessKey auto-refreshes the expiring sign-in and reads live quota", refreshedCalled && snap.LiveQuota && snap.Metrics.Count >= 4);
                 var savedAfter = VolcengineArkUsage.Session.Parse(secrets.Read(VolcengineArkUsage.China.SessionKey));
                 check("volcengine persists renewed STS session", savedAfter is { AccessKeyId: "AK_NEW", RefreshToken: "RT_NEW" });
 
@@ -243,9 +323,13 @@ internal static class VolcengineArkUsageTests
                 check("volcengine disconnect removes session", !service.VolcengineConnected(ProviderId.VolcengineArk));
             }
 
-            // 8. ConfiguredProviders (manual AK/SK for VolcengineArkApi & BytePlusArkApi) + secret redaction
+            // 8. ConfiguredProviders (AK/SK entered in a BytePlusArk row) + secret redaction
+            check("volcengine and byteplus rows are entered by hand with AK/SK or a sign-in",
+                !ProviderCatalog.IsBuiltIn(ProviderId.VolcengineArk) && ProviderCatalog.NeedsAkSk(ProviderId.VolcengineArk) && ProviderCatalog.NeedsAkSk(ProviderId.BytePlusArk)
+                && ProviderCatalog.Group(ProviderId.BytePlusArk) == ProviderCatalog.Group(ProviderId.DeepSeek)
+                && ProviderCatalog.Sources.Count(id => id is ProviderId.VolcengineArk or ProviderId.BytePlusArk) == 2);
             var manualSecrets = new MemorySecrets();
-            var entry = new AppEntry { Id = ProviderId.BytePlusArkApi };
+            var entry = new AppEntry { Id = ProviderId.BytePlusArk };
             using (var manualHttp = new HttpClient(new StubHandler(req =>
             {
                 if (req.RequestUri!.Query.Contains("Action=GetCodingPlanUsage")) return JsonResponse(CodingPlanResponse);
@@ -268,6 +352,28 @@ internal static class VolcengineArkUsageTests
                 var bad = await configured.TestAsync(entry);
                 check("byteplus manual rejected AK/SK reports invalid key and never leaks secret",
                     bad.Snapshot.StatusLabel == "密钥无效" && !bad.Snapshot.Status.Contains("SK_BP_SECRET_99") && !bad.Snapshot.Status.Contains("AK_BP_99"));
+            }
+
+            // 9. With both, a refused AccessKey falls back to the sign-in.
+            var bothSecrets = new MemorySecrets();
+            var both = new AppEntry { Id = ProviderId.VolcengineArk };
+            bothSecrets.Write(both.InstanceId, VolcengineArkUsage.PackStaticSecret("AK_REVOKED", "SK_REVOKED"));
+            bothSecrets.Write(VolcengineArkUsage.China.SessionKey, new VolcengineArkUsage.Session("AK_STS", "SK_STS", "STS_TOKEN", "RT", now.AddHours(1)).Serialize());
+            var keysUsed = new List<string>();
+            using (var bothHttp = new HttpClient(new StubHandler(req =>
+            {
+                var auth = req.Headers.Authorization?.ToString() ?? string.Join(" ", req.Headers.TryGetValues("Authorization", out var values) ? values : []);
+                keysUsed.Add(auth.Contains("AK_REVOKED") ? "keys" : auth.Contains("AK_STS") ? "sign-in" : "other");
+                if (auth.Contains("AK_REVOKED")) return JsonResponse("""{"ResponseMetadata":{"Error":{"Code":"InvalidAccessKey"}}}""", HttpStatusCode.Unauthorized);
+                if (req.RequestUri!.Query.Contains("Action=GetCodingPlanUsage")) return JsonResponse(CodingPlanResponse);
+                if (req.RequestUri.Query.Contains("Action=QueryBalanceAcct")) return JsonResponse(BalanceResponse);
+                return JsonResponse("""{"Result":{"Data":[]}}""");
+            })))
+            {
+                using var configured = new ConfiguredProviders(bothSecrets, bothHttp, () => now);
+                var read = (await configured.TestAsync(both)).Snapshot;
+                check("volcengine row with both tries its AccessKey first and falls back to the sign-in when the key is refused",
+                    keysUsed.FirstOrDefault() == "keys" && keysUsed.Contains("sign-in") && read.LiveQuota && read.Metrics.Any(m => m.Kind == MetricKind.Balance));
             }
         }
         finally { Loc.Use(previousLanguage); }

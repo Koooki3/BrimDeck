@@ -255,17 +255,15 @@ public sealed partial class SettingsWindow
         var edition = DoubaoQuotaUsage.For(id);
         string name = ProviderCatalog.Name(id);
         string title = Loc.T(name + " 账号", name + " account");
-        string help = edition.China
-            ? Loc.T("打开独立浏览器窗口登录豆包账号（豆包与豆包工作共用同一账号与订阅），自动读取个人、团队与企业订阅额度及额度包。登录凭据加密保存在本机，只发往 www.doubao.com，不触碰日常浏览器。",
-                "Opens an isolated browser window to sign in to your Doubao account (shared by Doubao and DoubaoWork) and read personal, team, and enterprise subscription quotas and quota packages. The sign-in is stored encrypted on this PC, sent only to www.doubao.com, and never touches your regular browser.")
-            : Loc.T("打开独立浏览器窗口登录 Dola 账号，自动读取个人、团队与企业订阅额度及额度包。登录凭据加密保存在本机，只发往 www.dola.com，不触碰日常浏览器。",
-                "Opens an isolated browser window to sign in to your Dola account and read personal, team, and enterprise subscription quotas and quota packages. The sign-in is stored encrypted on this PC, sent only to www.dola.com, and never touches your regular browser.");
+        // Only Doubao has something to add: the account is DoubaoWork's too. Dola's label has no help.
+        string? help = edition.China ? Loc.T("豆包与豆包工作共用这个账号。", "Doubao and DoubaoWork share this account.") : null;
         var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
         var line = new Grid();
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
         line.ColumnDefinitions.Add(new ColumnDefinition());
         var caption = TextLine(title, 12, TextSecondary);
-        var heading = new HelpHeading(caption, SmallHelp(title, () => help)) { Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
+        FrameworkElement heading = help is null ? caption : new HelpHeading(caption, SmallHelp(title, () => help));
+        heading.Margin = new Thickness(16, 0, 16, 0); heading.MinWidth = 52; heading.VerticalAlignment = VerticalAlignment.Center;
         line.Children.Add(heading);
         var controls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         var state = TextLine("", 12, TextPrimary); state.VerticalAlignment = VerticalAlignment.Center; state.Margin = new Thickness(0, 0, 12, 0);
@@ -281,10 +279,14 @@ public sealed partial class SettingsWindow
         var signOut = Outline(prefix + "-sign-out-" + entry.InstanceId.ToString("N"));
         signOut.Content = Loc.T("退出登录", "Sign out");
         controls.Children.Add(state); controls.Children.Add(signIn); controls.Children.Add(signOut);
+        var failure = TextLine("", 11.5, PanelTheme.WarningDefault); failure.TextWrapping = TextWrapping.Wrap; failure.Visibility = Visibility.Collapsed;
+        void Failed(string message) { failure.Text = message; failure.Visibility = message.Length > 0 ? Visibility.Visible : Visibility.Collapsed; }
         void Show()
         {
             bool waiting = _doubaoSignIns.ContainsKey(id), signedIn = _app.DoubaoQuota.SignedIn(id);
-            state.Text = waiting ? Loc.T("请在浏览器窗口中登录", "Sign in in the browser window") : signedIn ? Loc.T("已登录", "Signed in") : Loc.T("未登录", "Not signed in");
+            // The Dola session is read once its window is closed (DoubaoQuotaAccount.ReadClosedAsync).
+            string waitingText = edition.China ? Loc.T("请在浏览器窗口中登录", "Sign in in the browser window") : Loc.T("登录后关闭浏览器窗口", "Sign in, then close the browser window");
+            state.Text = waiting ? waitingText : signedIn ? Loc.T("已登录", "Signed in") : Loc.T("未登录", "Not signed in");
             signIn.Content = waiting ? Loc.T("取消", "Cancel") : signedIn ? Loc.T("重新登录", "Sign in again") : Loc.T("在浏览器中登录", "Sign in in the browser");
             signOut.Visibility = signedIn && !waiting ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -293,6 +295,7 @@ public sealed partial class SettingsWindow
             if (_doubaoSignIns.TryGetValue(id, out var running)) { running.Cancel(); return; }
             var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token);
             _doubaoSignIns[id] = cancellation;
+            Failed("");
             Show();
             try
             {
@@ -301,17 +304,24 @@ public sealed partial class SettingsWindow
                 _ = _app.Deck.RefreshAsync();
             }
             catch (OperationCanceledException) { }
-            catch (Native.DoubaoQuotaAccount.SignInException ex) { SaveStatus(ex.Message, true); }
+            catch (Native.DoubaoQuotaAccount.SignInException ex) { Failed(ex.Message); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or System.Net.WebSockets.WebSocketException or System.Net.Http.HttpRequestException or System.Text.Json.JsonException)
-            { SaveStatus(Loc.T("登录失败，请重试", "Signing in failed. Try again."), true); }
+            { Failed(Loc.T("登录失败，请重试", "Signing in failed. Try again.")); }
             finally { if (_doubaoSignIns.TryGetValue(id, out var current) && current == cancellation) _doubaoSignIns.Remove(id); cancellation.Dispose(); Show(); }
         };
-        signOut.Click += (_, _) => { _app.DoubaoQuota.SignOut(id); Show(); _ = _app.Deck.RefreshAsync(); };
+        signOut.Click += (_, _) => { _app.DoubaoQuota.SignOut(id); Failed(""); Show(); _ = _app.Deck.RefreshAsync(); };
         Show();
         Grid.SetColumn(controls, 1); line.Children.Add(controls);
         line.Margin = new Thickness(0, 5, 0, 5);
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Grid.SetColumn(line, 1); Grid.SetColumnSpan(line, 6); grid.Children.Add(line);
+        // Why the last sign-in failed stays under the line until the next one starts.
+        var noteLine = new Grid { Margin = new Thickness(0, 0, 0, 5) };
+        noteLine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
+        noteLine.ColumnDefinitions.Add(new ColumnDefinition());
+        Grid.SetColumn(failure, 1); noteLine.Children.Add(failure);
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(noteLine, 1); Grid.SetColumn(noteLine, 1); Grid.SetColumnSpan(noteLine, 6); grid.Children.Add(noteLine);
         return grid;
     }
 
@@ -326,7 +336,6 @@ public sealed partial class SettingsWindow
         if (entry.QuotaSource is ProviderId.WorkBuddy or ProviderId.WorkBuddyAi) return WorkBuddyDetails(entry);
         if (entry.QuotaSource is ProviderId.Qianwen or ProviderId.QwenCloud) return QianwenDetails(entry);
         if (entry.QuotaSource is ProviderId.Doubao or ProviderId.Dola) return DoubaoQuotaDetails(entry);
-        if (entry.QuotaSource is ProviderId.VolcengineArk or ProviderId.BytePlusArk) return VolcengineDetails(entry);
         if (ProviderCatalog.IsBuiltIn(entry.QuotaSource)) return null;
         var grid = AppColumns();
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };
@@ -445,6 +454,10 @@ public sealed partial class SettingsWindow
 
         if (ProviderCatalog.NeedsAkSk(entry.QuotaSource))
         {
+            // The browser sign-in comes first; either it or the AccessKey below is enough, and with both the AccessKey is tried first.
+            var signIn = VolcengineSignIn(entry);
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(signIn, grid.RowDefinitions.Count - 1); Grid.SetColumn(signIn, 1); Grid.SetColumnSpan(signIn, 6); grid.Children.Add(signIn);
             var akBox = Plain("ak", "AccessKey ID"); akBox.MaxLength = 1024;
             var skPassword = new PasswordBox { FontSize = 12.5, MaxLength = 4096, Padding = new Thickness(0), BorderThickness = new Thickness(0),
                 Background = Brushes.Transparent, Foreground = UI.Brush(TextPrimary), CaretBrush = UI.Brush(_palette.Accent),
@@ -553,6 +566,13 @@ public sealed partial class SettingsWindow
             skVisible.LostKeyboardFocus += (_, _) => { if (!swapping) SaveAkSk(false); };
             Line("AccessKey ID", Field(akBox, akHint));
             Line("Secret Access Key", Field(skInputs, skHint, reveal));
+            // Where the AccessKey comes from: the console's API access key page, not the API Key that calls models.
+            string keyPage = VolcengineArkUsage.For(entry.QuotaSource).China ? "https://console.volcengine.com/iam/keymanage" : "https://console.byteplus.com/iam/keymanage";
+            var where = new TextBlock { FontSize = 11.5, Foreground = UI.Brush(TextSecondary), TextWrapping = TextWrapping.Wrap };
+            where.Inlines.Add(new System.Windows.Documents.Run(Loc.T("在控制台的“API 访问密钥”页面创建，不是调用模型的 API Key。",
+                "Create one on the console's API access key page; it is not the API Key that calls models. ")));
+            where.Inlines.Add(InlineLink(Loc.T("打开密钥页面 ↗", "Open the key page ↗"), keyPage));
+            Line("", where);
             commitSecret = () => SaveAkSk(true);
         }
         else

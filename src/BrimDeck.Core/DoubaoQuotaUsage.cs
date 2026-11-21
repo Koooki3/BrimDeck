@@ -7,9 +7,10 @@ using System.Text.Json;
 namespace BrimDeck.Core;
 
 // Doubao (豆包 & 豆包工作, www.doubao.com, ProviderId.Doubao) and its international edition Dola (formerly Cici, www.dola.com,
-// ProviderId.Dola). Doubao and DoubaoWork share the same account, subscription and quota backend; Dola uses the exact same
-// commerce protocol under www.dola.com with a separate account. Neither desktop app exposes local or cloud token counts, so both
-// are quota-only sources.
+// ProviderId.Dola). Doubao and DoubaoWork share the same account, subscription and quota backend; Dola has a separate account
+// and the same commerce gateway under www.dola.com, but not its quota summary (404, checked 2026-11-21): Dola's quota is read from
+// the subscription overview, whose data carries the same member_info and window sections (Edition.QuotaPath). Neither desktop
+// app exposes local or cloud token counts, so both are quota-only sources.
 //
 // Sign-in. The desktop apps lock their Chromium Cookies database while running, so BrimDeck signs in through an isolated browser
 // profile (Native.DoubaoQuotaAccount, like MiMoAccount) and stores the captured session cookies encrypted with DPAPI on this PC.
@@ -28,7 +29,10 @@ namespace BrimDeck.Core;
 // holds both personal and team/enterprise plans.
 public static class DoubaoQuotaUsage
 {
-    public sealed record Edition(ProviderId Id, string Origin, string Host, string LoginUrl, string SessionFile, IReadOnlyList<string> CookieDomains, bool China);
+    public sealed record Edition(ProviderId Id, string Origin, string Host, string LoginUrl, string SessionFile, IReadOnlyList<string> CookieDomains, bool China)
+    {
+        public string QuotaPath => China ? SummaryPath : OverviewPath;
+    }
 
     public static readonly Edition China = new(
         ProviderId.Doubao, "https://www.doubao.com", "www.doubao.com", "https://www.doubao.com/chat/",
@@ -92,7 +96,7 @@ public static class DoubaoQuotaUsage
 
     public static async Task<Reading> ReadAsync(HttpClient http, Edition edition, Session session, CancellationToken ct)
     {
-        using var request = BuildRequest(edition, SummaryPath, session);
+        using var request = BuildRequest(edition, edition.QuotaPath, session);
         using var response = await http.SendAsync(request, ct);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             throw new RejectedException();
@@ -186,8 +190,10 @@ public static class DoubaoQuotaUsage
         if (num == 0) return;
         string msg = root.Get("msg").Text();
         if (msg.Length == 0) msg = root.Get("message").Text();
-        // Common Doubao / ByteDance AGW unauthenticated codes or messages.
-        if (num is 1000 or 10001 or 10004 or 401 or 403 or 70001
+        // Common Doubao / ByteDance AGW unauthenticated codes or messages. Both sites answer an expired or missing sign-in with
+        // 710012001, message "login invalid" (msg "登录已过期，请重新登录" / "Session expired. Log in again.").
+        if (num is 1000 or 10001 or 10004 or 401 or 403 or 70001 or 710012001
+            || root.Get("message").Text().Contains("login", StringComparison.OrdinalIgnoreCase)
             || msg.Contains("login", StringComparison.OrdinalIgnoreCase)
             || msg.Contains("auth", StringComparison.OrdinalIgnoreCase)
             || msg.Contains("未登录", StringComparison.Ordinal))

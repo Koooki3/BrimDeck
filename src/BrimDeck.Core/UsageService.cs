@@ -207,7 +207,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             // Xiaomi MiMo's linked keys have no records of their own: their statistics are MiMo's.
             if (required.Contains(ProviderId.MiMoLinked)) sources = sources.Append(ProviderId.MiMoLinked);
             // Quota-only built-in sources with browser sign-ins have no local usage records; they are read only for their quota rows.
-            sources = sources.Concat(new[] { ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.Doubao, ProviderId.Dola, ProviderId.VolcengineArk, ProviderId.BytePlusArk }.Where(required.Contains));
+            sources = sources.Concat(new[] { ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.Doubao, ProviderId.Dola }.Where(required.Contains));
             using var publisher = progress is not null && !_published ? new SnapshotPublisher(progress, ProgressInterval) : null;
             var finished = new Dictionary<string, ProviderSnapshot>();
             void Finished(string key, ProviderSnapshot snapshot)
@@ -442,9 +442,6 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
                     break;
                 case ProviderId.Doubao or ProviderId.Dola:
                     await ReadDoubaoQuotaAsync(snapshot, DoubaoQuotaUsage.For(id), now, ct);
-                    break;
-                case ProviderId.VolcengineArk or ProviderId.BytePlusArk:
-                    await ReadVolcengineArkAsync(snapshot, VolcengineArkUsage.For(id), now, ct);
                     break;
             }
         }
@@ -1806,75 +1803,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         KeepReading(snapshot, session.Account.Length > 0 ? session.Account : null, now);
     }
 
-    // Volcengine Ark (火山方舟) and BytePlus ModelArk, read with the browser OAuth 2.0 Device Flow STS sign-in (ConnectVolcengineAsync).
-    private async Task ReadVolcengineArkAsync(ProviderSnapshot snapshot, VolcengineArkUsage.Edition edition, DateTimeOffset now, CancellationToken ct)
-    {
-        var name = ProviderCatalog.Name(edition.Id);
-        void Expired()
-        {
-            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
-            snapshot.Status = Loc.T($"{name} 登录已失效，请在设置中重新登录", $"The {name} sign-in has expired. Sign in again in settings.");
-            ShowLastReading(snapshot, now, retrying: false);
-        }
-        var session = ReadVolcengineSession(edition);
-        if (session is null)
-        {
-            ForgetReading(snapshot.Id);
-            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
-            snapshot.Status = Loc.T($"请在设置中登录 {name}", $"Sign in to {name} in settings");
-            return;
-        }
-        if (session.NeedsRefresh(now) && session.RefreshToken.Length > 0)
-        {
-            try
-            {
-                if (await VolcengineArkUsage.RefreshSessionAsync(_http, edition, session, now, ct) is not { } renewed) { Expired(); return; }
-                session = renewed;
-                secrets?.Write(edition.SessionKey, session.Serialize());
-            }
-            catch (VolcengineArkUsage.RejectedException) { Expired(); return; }
-        }
-        VolcengineArkUsage.Reading reading;
-        try
-        {
-            reading = await VolcengineArkUsage.ReadAsync(_http, edition, session.ToCredentials(), now, ct);
-        }
-        catch (VolcengineArkUsage.RejectedException) when (session.RefreshToken.Length > 0)
-        {
-            try
-            {
-                if (await VolcengineArkUsage.RefreshSessionAsync(_http, edition, session, now, ct) is not { } renewed) { Expired(); return; }
-                session = renewed;
-                secrets?.Write(edition.SessionKey, session.Serialize());
-                reading = await VolcengineArkUsage.ReadAsync(_http, edition, session.ToCredentials(), now, ct);
-            }
-            catch (VolcengineArkUsage.RejectedException) { Expired(); return; }
-        }
-        catch (VolcengineArkUsage.RejectedException) { Expired(); return; }
-        snapshot.Scope = "account";
-        snapshot.PlanSource = name + Loc.T(" 账户", " account");
-        if (reading.Metrics.Count == 0 && reading.Warnings.Count > 0)
-        {
-            snapshot.StatusLabel = Loc.T("读取失败", "Read failed");
-            snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
-            ShowLastReading(snapshot, now, retrying: true);
-            return;
-        }
-        if (reading.Metrics.Count == 0)
-        {
-            ForgetReading(snapshot.Id);
-            snapshot.StatusLabel = Loc.T("无额度", "No quota");
-            snapshot.Status = Loc.T($"这个 {name} 账户没有生效中的 Coding Plan / Agent Plan，也没有可读取的余额",
-                $"This {name} account has no active Coding Plan / Agent Plan and no readable balance.");
-            return;
-        }
-        snapshot.Metrics = reading.Metrics;
-        snapshot.Plan = reading.Plan;
-        Connected(snapshot, snapshot.PlanSource, now);
-        KeepReading(snapshot, null, now);
-        if (reading.Warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
-    }
-
+    // The Volcengine Ark and BytePlus ModelArk sign-in from settings; each row reads its quota with it in ConfiguredProviders.
     private VolcengineArkUsage.Session? ReadVolcengineSession(VolcengineArkUsage.Edition edition)
     {
         try { return VolcengineArkUsage.Session.Parse(secrets?.Read(edition.SessionKey) ?? ""); }
@@ -1883,20 +1812,21 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
 
     public bool VolcengineConnected(ProviderId id) => ReadVolcengineSession(VolcengineArkUsage.For(id)) is not null;
 
-    public async Task<bool> ConnectVolcengineAsync(ProviderId id, Func<string, bool> open, CancellationToken ct)
+    // The sign-in page asks for the device code (its address does not carry it), so showCode receives it before the page opens.
+    public async Task<bool> ConnectVolcengineAsync(ProviderId id, Func<string, bool> open, Action<string> showCode, CancellationToken ct)
     {
         if (secrets is null) throw new InvalidOperationException("No secrets store");
         var edition = VolcengineArkUsage.For(id);
         var login = await VolcengineArkUsage.StartLoginAsync(_http, edition, _clock(), ct);
+        if (login.UserCode.Length > 0) showCode(login.UserCode);
         if (!open(login.Url)) throw new InvalidDataException(Loc.T("无法打开默认浏览器", "The default browser could not be opened"));
         var session = await VolcengineArkUsage.WaitForLoginAsync(_http, edition, login, _clock, ct);
         if (session is null) return false;
         secrets.Write(edition.SessionKey, session.Serialize());
-        ForgetReading(id);
         return true;
     }
 
-    public void DisconnectVolcengine(ProviderId id) { secrets?.Delete(VolcengineArkUsage.For(id).SessionKey); ForgetReading(id); }
+    public void DisconnectVolcengine(ProviderId id) => secrets?.Delete(VolcengineArkUsage.For(id).SessionKey);
 
     private QianwenUsage.Session? ReadQianwenSession(QianwenUsage.Edition edition)
     {

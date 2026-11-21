@@ -19,11 +19,11 @@ static class QianwenUsageTests
     {
         var menu = ProviderCatalog.Sources.ToList();
         var manual = ProviderCatalog.Sources.Where(id => !ProviderCatalog.IsBuiltIn(id)).ToList();
-        check("Qianwen and QwenCloud sign in from settings and are listed after Xiaomi MiMo Token Plan, with the sources entered by hand",
-            menu.IndexOf(ProviderId.Qianwen) == menu.IndexOf(ProviderId.MiMoTokenPlan) + 1 && menu.IndexOf(ProviderId.QwenCloud) == menu.IndexOf(ProviderId.Qianwen) + 1 &&
-            menu.IndexOf(ProviderId.DeepSeek) == menu.IndexOf(ProviderId.QwenCloud) + 1 && menu.Count(id => id == ProviderId.Qianwen) == 1 &&
+        check("Qianwen and QwenCloud sign in from settings and are listed together with the sources read automatically",
+            menu.IndexOf(ProviderId.QwenCloud) == menu.IndexOf(ProviderId.Qianwen) + 1 && menu.IndexOf(ProviderId.QwenCloud) < menu.IndexOf(ProviderId.GlmChina) &&
+            menu.Count(id => id == ProviderId.Qianwen) == 1 &&
             ProviderCatalog.IsBuiltIn(ProviderId.Qianwen) && ProviderCatalog.IsBuiltIn(ProviderId.QwenCloud) && !manual.Contains(ProviderId.Qianwen) &&
-            ProviderCatalog.Group(ProviderId.Qianwen) == ProviderCatalog.Group(ProviderId.DeepSeek) && ProviderCatalog.Group(ProviderId.QwenCloud) == ProviderCatalog.Group(ProviderId.DeepSeek));
+            ProviderCatalog.Group(ProviderId.Qianwen) == ProviderCatalog.Group(ProviderId.Claude) && ProviderCatalog.Group(ProviderId.QwenCloud) == ProviderCatalog.Group(ProviderId.Claude));
         check("Qianwen and QwenCloud are quota sources only, saved as qianwen and qwencloud, in the color of sources entered by hand",
             !ProviderCatalog.IsUsageSource(ProviderId.Qianwen) && !ProviderCatalog.IsUsageSource(ProviderId.QwenCloud) &&
             ProviderCatalog.Key(ProviderId.Qianwen) == "qianwen" && ProviderCatalog.Key(ProviderId.QwenCloud) == "qwencloud" &&

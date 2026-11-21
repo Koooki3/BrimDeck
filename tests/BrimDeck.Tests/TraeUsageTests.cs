@@ -173,6 +173,11 @@ internal static class TraeUsageTests
         var plainDb = TraeUsage.DecryptBytes(cipherDb, null);
         check("TRAE SQLCipher 4 decrypts multi-page image faithfully",
             plainDb is not null && plainDb.SequenceEqual(fakeSqlite));
+        var walSqlite = (byte[])fakeSqlite.Clone();
+        walSqlite[18] = 2; walSqlite[19] = 2; // WAL mode, as Trae keeps its databases
+        var walPlain = TraeUsage.DecryptBytes(TraeUsage.EncryptBytes(walSqlite), null);
+        check("TRAE SQLCipher 4 marks a decrypted WAL-mode image as a rollback-journal database so SQLite can open it in memory",
+            walPlain is not null && walPlain[18] == 1 && walPlain[19] == 1 && walPlain.AsSpan(20).SequenceEqual(walSqlite.AsSpan(20)));
         cipherDb[500] ^= 0x01;
         check("TRAE SQLCipher 4 rejects corrupted ciphertext page via HMAC",
             TraeUsage.DecryptBytes(cipherDb, null) is null);
@@ -192,18 +197,22 @@ internal static class TraeUsageTests
             [
                 // prompt=19317, completion=99 (includes reasoning=16), total=19416; model has __dev suffix
                 ["13", "ses-1", "1795256142", "deepseek-v4.1-flash__dev", "19317", "0", null, "99", "0", null, "0", "0", "16", null, "19416"],
-                // prompt=18505 includes cache_read=14136, completion=51, total=18556; display model name
-                ["4", "ses-1", "1795253197", "Seed-2.1-Turbo", "18505", "0", null, "51", "0", null, "14136", "0", "31", null, "18556"],
+                // prompt=18505 includes cache_read=14136, completion=51, total=18556; the model called, with its __dollar__dev suffix
+                ["4", "ses-1", "1795253197", "Dola-Seed-2.0-Code__dollar__dev", "18505", "0", null, "51", "0", null, "14136", "0", "31", null, "18556"],
                 // duplicate row with same id + session must be deduplicated
-                ["4", "ses-1", "1795253197", "Seed-2.1-Turbo", "18505", "0", null, "51", "0", null, "14136", "0", "31", null, "18556"]
+                ["4", "ses-1", "1795253197", "Dola-Seed-2.0-Code__dollar__dev", "18505", "0", null, "51", "0", null, "14136", "0", "31", null, "18556"]
             ]
         };
         var tokenSnap = new ProviderSnapshot(ProviderId.Trae);
         TraeUsage.ReadTokens(tokenSnap, tokenDesktop, roaming, TraeUsage.International, start, now);
         check("TRAE token reader reconciles cached input, reasoning-inclusive output, cleans __dev suffix and deduplicates",
             tokenSnap.UsageAvailable && tokenSnap.UsageComplete && tokenSnap.Entries.Count == 2
-            && tokenSnap.Entries[0] is { Key: "trae:ses-1:4", Model: "Seed-2.1-Turbo", Input: 4369, CacheRead: 14136, Output: 51, Total: 18556 }
+            && tokenSnap.Entries[0] is { Key: "trae:ses-1:4", Model: "Dola-Seed-2.0-Code", Input: 4369, CacheRead: 14136, Output: 51, Total: 18556 }
             && tokenSnap.Entries[1] is { Key: "trae:ses-1:13", Model: "deepseek-v4.1-flash", Input: 19317, CacheRead: 0, Output: 99, Total: 19416 });
+        // TRAE shows Dola-Seed-2.0-Code as "Seed-2.1-Turbo"; the records name the model called.
+        int Column(string field) => TraeUsage.TokenQuery.IndexOf($"model_info.{field}'", StringComparison.Ordinal);
+        check("TRAE token records name the model called before the name TRAE shows for it",
+            Column("model_name") >= 0 && Column("model_name") < Column("config_name") && Column("config_name") < Column("display_model_name"));
 
         var unreadable = new ProviderSnapshot(ProviderId.TraeCn);
         TraeUsage.ReadTokens(unreadable, new Desktop { Rows = null }, roaming, TraeUsage.China, start, now);

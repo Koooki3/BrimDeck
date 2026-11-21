@@ -7,12 +7,13 @@ using System.Text.Json;
 
 namespace BrimDeck.Core;
 
-// Volcengine Ark (火山方舟, ProviderId.VolcengineArk / VolcengineArkApi) and its international edition BytePlus ModelArk
-// (ProviderId.BytePlusArk / BytePlusArkApi). Inference API keys cannot query quotas or balances; BrimDeck supports both:
-//   1. Browser sign-in (VolcengineArk / BytePlusArk): OAuth 2.0 Device Authorization Grant matching the official
+// Volcengine Ark (火山方舟, ProviderId.VolcengineArk) and its international edition BytePlus ModelArk (ProviderId.BytePlusArk).
+// Inference API keys cannot query quotas or balances; a row reads with either credential, or both (ScriptSession):
+//   1. Static AccessKey ID + Secret Access Key entered by hand in the row, tried first.
+//   2. Browser sign-in from settings, one per edition: OAuth 2.0 Device Authorization Grant matching the official
 //      volcengine-cli (`ve login`, https://signin.volcengine.com) and byteplus-cli (https://signin.byteplus.com).
-//      Issues auto-refreshable temporary STS credentials (AccessKeyId + SecretAccessKey + SessionToken).
-//   2. Static AccessKey ID + Secret Access Key entered by hand (VolcengineArkApi / BytePlusArkApi).
+//      Issues auto-refreshable temporary STS credentials (AccessKeyId + SecretAccessKey + SessionToken). Used when the row
+//      has no AccessKey or the AccessKey is refused.
 //
 // Both paths share the exact same Volcengine / BytePlus V4 HMAC-SHA256 OpenAPI signer (STS adds X-Security-Token) and probe
 // every plan kind an account may hold at once:
@@ -25,23 +26,25 @@ namespace BrimDeck.Core;
 // account) are skipped without blocking the others; an invalid or expired credential throws RejectedException immediately.
 public static class VolcengineArkUsage
 {
-    public sealed record Edition(ProviderId Id, ProviderId ApiId, string SignInOrigin, string SignInHost,
-        string OpenApiHost, string Region, string Currency, Guid SessionKey, bool China);
+    // ArkHost serves the ark actions and BillingHost the billing one, as the API references name them: Volcengine's Ark pages
+    // use ark.cn-beijing.volcengineapi.com and its QueryBalanceAcct page open.volcengineapi.com; BytePlus's ModelArk pages use
+    // ark.ap-southeast-1.byteplusapi.com, and its SDK addresses billing, a global service, at billing.byteplusapi.com.
+    public sealed record Edition(ProviderId Id, string SignInOrigin, string SignInHost,
+        string ArkHost, string BillingHost, string Region, string Currency, Guid SessionKey, bool China);
 
     public static readonly Edition China = new(
-        ProviderId.VolcengineArk, ProviderId.VolcengineArkApi,
+        ProviderId.VolcengineArk,
         "https://signin.volcengine.com", "volcengine.com",
-        "open.volcengineapi.com", "cn-beijing", "CNY",
+        "ark.cn-beijing.volcengineapi.com", "open.volcengineapi.com", "cn-beijing", "CNY",
         new("8b4d7c1e-3f62-4a9b-91d4-2e7f5a0c8b13"), true);
 
     public static readonly Edition International = new(
-        ProviderId.BytePlusArk, ProviderId.BytePlusArkApi,
+        ProviderId.BytePlusArk,
         "https://signin.byteplus.com", "byteplus.com",
-        "open.byteplusapi.com", "ap-southeast-1", "USD",
+        "ark.ap-southeast-1.byteplusapi.com", "billing.byteplusapi.com", "ap-southeast-1", "USD",
         new("4f9a2d7c-1e85-4c3a-b6e9-7d0c3f1a5e28"), false);
 
-    public static Edition For(ProviderId id) =>
-        id is ProviderId.BytePlusArk or ProviderId.BytePlusArkApi ? International : China;
+    public static Edition For(ProviderId id) => id == ProviderId.BytePlusArk ? International : China;
 
     public const string ClientId = "trn:signin:::devtools/cross-device";
     public const string Scope = "Console:All:All";
@@ -50,6 +53,8 @@ public static class VolcengineArkUsage
     public const string DeviceGrantType = "urn:ietf:params:oauth:grant-type:device_code";
     private const string ArkService = "ark", ArkVersion = "2024-01-01";
     private const string BillingService = "billing", BillingVersion = "2022-01-01";
+    // ListSeatInfos takes at most 100 seats a page; the seat usage actions take at most 1000 SeatIDs a request.
+    private const int SeatPageSize = 100, MaxSeatPages = 50, SeatBatchSize = 1000, BillingRunning = 2;
     private const string UserAgent = "BrimDeck/1.0";
 
     // Signing credentials; never shown or logged.
@@ -238,6 +243,29 @@ public static class VolcengineArkUsage
         return refreshed.RefreshToken.Length > 0 ? refreshed : refreshed with { RefreshToken = session.RefreshToken };
     }
 
+    // Reads with the browser sign-in, renewing it when it is about to expire or is refused; a renewed sign-in is passed to save.
+    // Null when the sign-in has expired and cannot be renewed.
+    public static async Task<Reading?> ReadSignedInAsync(HttpClient http, Edition edition, Session session, Action<Session> save, DateTimeOffset now, CancellationToken ct)
+    {
+        async Task<bool> Renew()
+        {
+            if (await RefreshSessionAsync(http, edition, session, now, ct) is not { } renewed) return false;
+            session = renewed;
+            save(renewed);
+            return true;
+        }
+        try
+        {
+            if (session.NeedsRefresh(now) && session.RefreshToken.Length > 0 && !await Renew()) return null;
+            try { return await ReadAsync(http, edition, session.ToCredentials(), now, ct); }
+            catch (RejectedException) when (session.RefreshToken.Length > 0)
+            {
+                return await Renew() ? await ReadAsync(http, edition, session.ToCredentials(), now, ct) : null;
+            }
+        }
+        catch (RejectedException) { return null; }
+    }
+
     public static Session? ParseTokenResponse(JsonElement root, DateTimeOffset now, string clientId = ClientId)
     {
         var accessTokenRaw = root.Get("access_token").Text();
@@ -262,7 +290,7 @@ public static class VolcengineArkUsage
         string action, string bodyJson, DateTimeOffset utcNow, string? regionOverride = null)
     {
         string region = string.IsNullOrWhiteSpace(regionOverride) ? edition.Region : regionOverride;
-        string host = edition.OpenApiHost;
+        string host = service == BillingService ? edition.BillingHost : edition.ArkHost;
         string query = $"Action={Rfc3986(action)}&Version={Rfc3986(version)}";
         string xDate = utcNow.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
         string shortDate = utcNow.UtcDateTime.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
@@ -397,41 +425,61 @@ public static class VolcengineArkUsage
             if (doc is not null) codingPersonal = ParseCodingPlanUsage(doc.RootElement.Get("Result"), "coding-personal");
         }
 
+        // The seats of a team plan, page by page (ListSeatInfos: PageSize at most 100, Result.Total), only those being billed
+        // (Filter.BillingStatus 2 = running; 1 pending, 3 expired and 4 reclaimed seats are left out).
+        async Task<List<string>> SeatIdsAsync(string scene, string partChinese, string partEnglish)
+        {
+            var ids = new List<string>();
+            for (int page = 1; page <= MaxSeatPages; page++)
+            {
+                var body = JsonSerializer.Serialize(new { Scene = scene, ProjectName = "default", PageNum = page, PageSize = SeatPageSize, Filter = new { BillingStatus = new[] { BillingRunning } } });
+                using var listDoc = await CallOptionalAsync(ArkService, ArkVersion, "ListSeatInfos", body, partChinese, partEnglish);
+                if (listDoc is null) break;
+                var result = listDoc.RootElement.Get("Result");
+                ids.AddRange(ExtractSeatIds(result));
+                int listed = result.Get("Data").Items().Count();
+                if (listed < SeatPageSize || Decimal(result.Get("Total")) is { } total && page * SeatPageSize >= total) break;
+            }
+            return ids.Distinct(StringComparer.Ordinal).ToList();
+        }
+        // The usage of many seats, asked for in batches of at most 1000 seats (SeatIDs), with the items of every answer kept together.
+        async Task<JsonDocument?> SeatUsagesAsync(string action, List<string> seatIds, string listKey, bool project, string partChinese, string partEnglish)
+        {
+            var items = new List<string>();
+            foreach (var batch in seatIds.Chunk(SeatBatchSize))
+            {
+                var body = project ? JsonSerializer.Serialize(new { SeatIDs = batch, ProjectName = "default" }) : JsonSerializer.Serialize(new { SeatIDs = batch });
+                using var doc = await CallOptionalAsync(ArkService, ArkVersion, action, body, partChinese, partEnglish);
+                if (doc is null) return null;
+                items.AddRange(doc.RootElement.Get("Result").Get(listKey).Items().Select(item => item.GetRawText()));
+            }
+            return JsonDocument.Parse($"{{\"{listKey}\":[{string.Join(",", items)}]}}");
+        }
+
         var codingSeats = new List<UsageMetric>();
         int codingSeatCount = 0;
-        using (var listDoc = await CallOptionalAsync(ArkService, ArkVersion, "ListSeatInfos",
-            """{"Scene":"coding_plan_enterprise","ProjectName":"default","PageNum":1,"PageSize":100,"Filter":{}}""",
-            "团队/企业 Coding Plan ", "Team/Enterprise Coding Plan"))
+        var codingSeatIds = await SeatIdsAsync("coding_plan_enterprise", "团队/企业 Coding Plan ", "Team/Enterprise Coding Plan");
+        if (codingSeatIds.Count == 1)
         {
-            var seatIds = listDoc is not null ? ExtractSeatIds(listDoc.RootElement.Get("Result")) : [];
-            if (seatIds.Count == 1)
-            {
-                var body = JsonSerializer.Serialize(new { SeatID = seatIds[0], ProjectName = "default", Scene = "coding_plan_enterprise" });
-                using var usageDoc = await CallOptionalAsync(ArkService, ArkVersion, "GetSeatInfoUsage", body, "团队/企业 Coding Plan ", "Team/Enterprise Coding Plan");
-                if (usageDoc is not null) { codingSeats = ParseCodingSeatUsage(usageDoc.RootElement.Get("Result")); codingSeatCount = 1; }
-            }
-            else if (seatIds.Count > 1)
-            {
-                var body = JsonSerializer.Serialize(new { SeatIDs = seatIds, ProjectName = "default" });
-                using var usageDoc = await CallOptionalAsync(ArkService, ArkVersion, "ListSeatInfoUsages", body, "团队/企业 Coding Plan ", "Team/Enterprise Coding Plan");
-                if (usageDoc is not null) (codingSeats, codingSeatCount) = ParseCodingSeatUsages(usageDoc.RootElement.Get("Result"));
-            }
+            var body = JsonSerializer.Serialize(new { SeatID = codingSeatIds[0], ProjectName = "default" });
+            using var usageDoc = await CallOptionalAsync(ArkService, ArkVersion, "GetSeatInfoUsage", body, "团队/企业 Coding Plan ", "Team/Enterprise Coding Plan");
+            // The seat's usage is wrapped in Result.SeatInfoUsage.
+            if (usageDoc is not null) { codingSeats = ParseCodingSeatUsage(usageDoc.RootElement.Get("Result").Get("SeatInfoUsage")); codingSeatCount = codingSeats.Count > 0 ? 1 : 0; }
+        }
+        else if (codingSeatIds.Count > 1)
+        {
+            using var usageDoc = await SeatUsagesAsync("ListSeatInfoUsages", codingSeatIds, "Data", true, "团队/企业 Coding Plan ", "Team/Enterprise Coding Plan");
+            if (usageDoc is not null) (codingSeats, codingSeatCount) = ParseCodingSeatUsages(usageDoc.RootElement);
         }
 
         var afpSeats = new List<UsageMetric>();
         string afpSeatPlan = "";
         int afpSeatCount = 0;
-        using (var listDoc = await CallOptionalAsync(ArkService, ArkVersion, "ListSeatInfos",
-            """{"Scene":"agent_plan_enterprise","ProjectName":"default","PageNum":1,"PageSize":100,"Filter":{}}""",
-            "团队/企业 Agent Plan ", "Team/Enterprise Agent Plan"))
+        var afpSeatIds = await SeatIdsAsync("agent_plan_enterprise", "团队/企业 Agent Plan ", "Team/Enterprise Agent Plan");
+        if (afpSeatIds.Count > 0)
         {
-            var seatIds = listDoc is not null ? ExtractSeatIds(listDoc.RootElement.Get("Result")) : [];
-            if (seatIds.Count > 0)
-            {
-                var body = JsonSerializer.Serialize(new { SeatIDs = seatIds });
-                using var usageDoc = await CallOptionalAsync(ArkService, ArkVersion, "GetSeatAFPUsage", body, "团队/企业 Agent Plan ", "Team/Enterprise Agent Plan");
-                if (usageDoc is not null) (afpSeats, afpSeatPlan, afpSeatCount) = ParseSeatAfpUsages(usageDoc.RootElement.Get("Result"));
-            }
+            using var usageDoc = await SeatUsagesAsync("GetSeatAFPUsage", afpSeatIds, "SeatAFPUsages", false, "团队/企业 Agent Plan ", "Team/Enterprise Agent Plan");
+            if (usageDoc is not null) (afpSeats, afpSeatPlan, afpSeatCount) = ParseSeatAfpUsages(usageDoc.RootElement);
         }
 
         UsageMetric? balance = null;
@@ -554,22 +602,16 @@ public static class VolcengineArkUsage
         return metrics;
     }
 
+    // ListSeatInfos: Result.Data[] with SeatID and BillingStatus (1 pending, 2 running, 3 expired, 4 reclaimed). The request asks
+    // for running seats only; a seat answered with another billing status is still left out.
     public static List<string> ExtractSeatIds(JsonElement result)
     {
         var ids = new List<string>();
-        if (result.ValueKind != JsonValueKind.Object) return ids;
-        foreach (var key in new[] { "Data", "Items", "SeatInfos" })
+        foreach (var item in result.Get("Data").Items())
         {
-            var arr = result.Get(key);
-            if (arr.ValueKind != JsonValueKind.Array) continue;
-            foreach (var item in arr.Items())
-            {
-                var status = item.Get("SeatStatus").Text();
-                if (status.Length > 0 && status.Equals("Released", StringComparison.OrdinalIgnoreCase)) continue;
-                var id = item.Get("SeatID").Text().Trim();
-                if (id.Length > 0) ids.Add(id);
-            }
-            if (ids.Count > 0) break;
+            if (Decimal(item.Get("BillingStatus")) is { } billing && billing != BillingRunning) continue;
+            var id = item.Get("SeatID").Text().Trim();
+            if (id.Length > 0) ids.Add(id);
         }
         return ids.Distinct(StringComparer.Ordinal).ToList();
     }

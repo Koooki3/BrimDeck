@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace BrimDeck.Core;
 
-// Prices are USD per token, as the remote catalog returns them and as DeepSeek lists its own (BuiltIn).
+// Prices are USD per token, as the remote catalog returns them and as the built-in prices are kept (BuiltIn).
 public sealed record TokenPrices(decimal Input, decimal Output, decimal? CacheRead, decimal? CacheWrite, decimal? CacheWriteHour);
 public sealed record PriceTier(long MinimumPromptTokens, TokenPrices Prices);
 public sealed record ModelPrice(string Model, TokenPrices Prices, IReadOnlyList<PriceTier> Tiers)
@@ -37,7 +37,18 @@ public sealed class Pricing : IDisposable
         DeepSeek("deepseek-v4.1-flash", .30m, 1.20m, .006m),
         DeepSeek("deepseek-v4-flash", .30m, 1.20m, .006m),
         DeepSeek("deepseek-v4-pro", 1.32m, 3.96m, .044m),
+        // Seed 2.1 Pro has no dollar price: neither the catalog nor BytePlus ModelArk (docs.byteplus.com/en/docs/ModelArk/1544106,
+        // updated 2026-11-19) lists it; Volcengine Ark lists it in yuan only. Ark's yuan prices for Seed 2.1 Pro (6, 1.2 and 30 per
+        // million input, cache-hit and output tokens) are twice those of Seed 2.1 Turbo (3, 0.6 and 15), whose dollar prices BytePlus
+        // lists (0.5, 0.1 and 2.5); the Pro takes twice those. Neither table has a cache write price, so a written token costs the input price.
+        Flat("seed-2.1-pro", 1.00m, 5.00m, .20m),
+        // Seed 2.0 Code, which TRAE calls as Dola-Seed-2.0-Code and Doubao-Seed-2.0-Code, is not in the catalog; BytePlus ModelArk lists
+        // it as seed-2-0-code-preview-260328 (same page): 0.5, 0.1 and 3 USD up to 128K input tokens, 1, 0.2 and 6 above.
+        Flat("seed-2.0-code", .50m, 3.00m, .10m) with { Tiers = [new(128_000, PerMillion(1.00m, 6.00m, .20m))] },
     ];
+    private static TokenPrices PerMillion(decimal input, decimal output, decimal cacheRead) =>
+        new(input / 1_000_000m, output / 1_000_000m, cacheRead / 1_000_000m, input / 1_000_000m, input / 1_000_000m);
+    private static ModelPrice Flat(string model, decimal input, decimal output, decimal cacheRead) => new(model, PerMillion(input, output, cacheRead), []);
     // Peak prices per million tokens; the off-peak prices are half.
     private static ModelPrice DeepSeek(string model, decimal input, decimal output, decimal cacheRead)
     {
@@ -347,6 +358,16 @@ public sealed class Pricing : IDisposable
         return value.StartsWith("claude-", StringComparison.Ordinal) || value.StartsWith("anthropic/claude-", StringComparison.Ordinal)
             ? Regex.Replace(value, @"(?<=\d)\.(?=\d)", "-") : value;
     }
+    // ByteDance Seed versions are written both ways: the catalog has "bytedance-seed/seed-2-1-turbo" beside "seed-2.0-lite", and
+    // TRAE writes "Seed-2.1-Turbo". The price table takes the dotted form for all of them, as MaasName writes versions. Only the
+    // table does: the catalog IDs that official prices are asked for (OfficialBase) keep the catalog's own form. The models TRAE
+    // calls carry the name of the app that serves them ("Doubao-Seed-2.1-Pro", "Dola-Seed-2.0-Code"), which goes.
+    private static readonly Regex SeedName = new(@"^([a-z0-9-]+/)?seed-\d", RegexOptions.CultureInvariant);
+    private static string LookupKey(string model)
+    {
+        var key = Regex.Replace(Normalize(model), @"^(doubao|dola)-(?=seed-)", "");
+        return SeedName.IsMatch(key) ? Regex.Replace(key, @"^((?:[a-z0-9-]+/)?seed-\d+)-(\d+)(?=-|$)", "$1.$2") : key;
+    }
     private void SetCatalog(IReadOnlyList<ModelPrice> models, DateTimeOffset updated)
     {
         lock (_sync)
@@ -361,12 +382,12 @@ public sealed class Pricing : IDisposable
         var merged = MergedModels();
         var models = merged.Values.ToArray();
         var lookup = new Dictionary<string, ModelPrice>(StringComparer.OrdinalIgnoreCase);
-        foreach (var model in models) lookup[Normalize(model.Model)] = model;
-        foreach (var alias in models.GroupBy(x => Normalize(x.Model[(x.Model.IndexOf('/') + 1)..])))
+        foreach (var model in models) lookup[LookupKey(model.Model)] = model;
+        foreach (var alias in models.GroupBy(x => LookupKey(x.Model[(x.Model.IndexOf('/') + 1)..])))
             if (alias.Count() == 1) lookup.TryAdd(alias.Key, alias.Single());
         foreach (var remote in _remote.Values)
             if (_manual.TryGetValue(Normalize(remote.Model[(remote.Model.IndexOf('/') + 1)..]), out var manual))
-                lookup.TryAdd(Normalize(remote.Model), manual);
+                lookup.TryAdd(LookupKey(remote.Model), manual);
         var tiers = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var model in models)
         {
@@ -477,9 +498,11 @@ public sealed class Pricing : IDisposable
     {
         var found = _found; var lookup = _lookup;
         if (found.TryGetValue(model, out var known)) return known;
-        string key = Normalize(model);
-        // Only a dated snapshot can fall back to its exact base model. Variants remain distinct.
+        string key = LookupKey(model);
+        // Only a dated snapshot can fall back to its exact base model. Variants remain distinct. Seed names carry a month and
+        // day instead ("Seed-2.1-Pro-0915" in TRAE).
         string undated = Regex.Replace(key, @"-\d{8}$", "");
+        if (undated == key && SeedName.IsMatch(key)) undated = Regex.Replace(key, @"-(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$", "");
         var price = lookup.TryGetValue(key, out var exact) ? exact : undated != key && lookup.TryGetValue(undated, out var dated) ? dated : null;
         found[model] = price;
         return price;

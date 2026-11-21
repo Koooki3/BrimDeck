@@ -453,7 +453,7 @@ public static class TraeUsage
         var key = keyOverride ?? DbKey;
         if (key.Length != 32 || dbBytes.Length < PageSize || dbBytes.Length % PageSize != 0) return null;
         // Already plain SQLite (e.g., an unencrypted test fixture).
-        if (dbBytes.AsSpan(0, 16).SequenceEqual(SqliteHeader)) return [.. dbBytes];
+        if (dbBytes.AsSpan(0, 16).SequenceEqual(SqliteHeader)) { byte[] plain = [.. dbBytes]; LeaveWal(plain); return plain; }
 
         int totalPages = dbBytes.Length / PageSize;
         var walPages = new Dictionary<int, int>();
@@ -519,6 +519,7 @@ public static class TraeUsage
                     SqliteHeader.CopyTo(pageBuf, 0);
                     int headerPageSize = (pageBuf[16] << 8) | pageBuf[17];
                     if (headerPageSize != PageSize || pageBuf[20] != Reserved) return null;
+                    LeaveWal(pageBuf);
                 }
                 Buffer.BlockCopy(pageBuf, 0, output, (pno - 1) * PageSize, PageSize);
             }
@@ -532,6 +533,14 @@ public static class TraeUsage
             CryptographicOperations.ZeroMemory(macActual);
             CryptographicOperations.ZeroMemory(pageBuf);
         }
+    }
+
+    // Trae keeps its databases in WAL mode (header bytes 18 and 19 set to 2). The WAL frames are already merged into the image,
+    // and SQLite refuses to open an in-memory image still marked WAL, so the copy is marked as a rollback-journal database.
+    private static void LeaveWal(byte[] page1)
+    {
+        if (page1[18] == 2) page1[18] = 1;
+        if (page1[19] == 2) page1[19] = 1;
     }
 
     // Encrypts a plain 4096-byte-page SQLite image (with reserved=80) into SQLCipher 4 raw-key format; used by tests.
@@ -646,12 +655,14 @@ public static class TraeUsage
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 
+    // The model is the one the turn called (model_name, such as "Dola-Seed-2.0-Code__dollar__dev"), not the name TRAE shows for it
+    // (display_model_name), which can name another model: TRAE shows Dola-Seed-2.0-Code as "Seed-2.1-Turbo".
     public const string TokenQuery =
         "SELECT CAST(id AS TEXT), session_id, COALESCE(created_at, updated_at), " +
         "COALESCE(" +
-        "NULLIF(NULLIF(TRIM(json_extract(context, '$.persist_user_message_context.model_info.display_model_name')), ''), '-'), " +
         "NULLIF(NULLIF(TRIM(json_extract(context, '$.persist_user_message_context.model_info.model_name')), ''), '-'), " +
         "NULLIF(NULLIF(TRIM(json_extract(context, '$.persist_user_message_context.model_info.config_name')), ''), '-'), " +
+        "NULLIF(NULLIF(TRIM(json_extract(context, '$.persist_user_message_context.model_info.display_model_name')), ''), '-'), " +
         "NULLIF(NULLIF(TRIM(json_extract(context, '$.model_name')), ''), '-'), " +
         "NULLIF(NULLIF(TRIM(json_extract(context, '$.model')), ''), '-'), " +
         "''), " +

@@ -9,10 +9,9 @@ public static class ProviderCatalog
 {
     public static readonly ProviderId[] BuiltIns = [ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Cursor];
     // Sources read automatically from local applications; only the first four are added to new settings by default.
-    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.MiMoLinked, ProviderId.Qoder, ProviderId.QoderCn, ProviderId.QwenWorkCn, ProviderId.QwenWork, ProviderId.Trae, ProviderId.TraeCn, ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.Doubao, ProviderId.Dola, ProviderId.VolcengineArk, ProviderId.BytePlusArk];
-    // Sources read like automatic sources but needing a browser sign-in in settings, so the menu lists them with the manual sources.
-    private static bool SignsInFromSettings(ProviderId id) => id is ProviderId.MiMo or ProviderId.Qianwen or ProviderId.QwenCloud or ProviderId.Doubao or ProviderId.Dola or ProviderId.VolcengineArk or ProviderId.BytePlusArk;
-    public static readonly ProviderId[] Sources = [.. AutomaticSources.Where(id => !SignsInFromSettings(id)), ProviderId.GlmChina, ProviderId.GlmGlobal, ProviderId.MiMo, ProviderId.MiMoApi, ProviderId.MiMoTokenPlan, ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.DeepSeek, ProviderId.KimiApi, ProviderId.KimiPlatform, ProviderId.OpenCodeGo, ProviderId.CommandCodeApi, ProviderId.OpenRouter, ProviderId.NewApi, ProviderId.Sub2Api, ProviderId.Doubao, ProviderId.Dola, ProviderId.VolcengineArk, ProviderId.VolcengineArkApi, ProviderId.BytePlusArk, ProviderId.BytePlusArkApi, ProviderId.Custom];
+    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.MiMoLinked, ProviderId.Qoder, ProviderId.QoderCn, ProviderId.QwenWorkCn, ProviderId.QwenWork, ProviderId.Trae, ProviderId.TraeCn, ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.Doubao, ProviderId.Dola];
+    // Sources that need a browser sign-in in settings are read automatically after it, so the menu lists them with the automatic sources.
+    public static readonly ProviderId[] Sources = [.. AutomaticSources, ProviderId.GlmChina, ProviderId.GlmGlobal, ProviderId.MiMoApi, ProviderId.MiMoTokenPlan, ProviderId.DeepSeek, ProviderId.KimiApi, ProviderId.KimiPlatform, ProviderId.OpenCodeGo, ProviderId.CommandCodeApi, ProviderId.OpenRouter, ProviderId.NewApi, ProviderId.Sub2Api, ProviderId.VolcengineArk, ProviderId.BytePlusArk, ProviderId.Custom];
     // Grok Bot is quota-only; Pi is usage-only and must never appear in the quota-source menu. Qoder's statistics are its IDE's.
     public static readonly ProviderId[] UsageSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh, ProviderId.Kimi, ProviderId.OpenCode, ProviderId.Pi, ProviderId.CodeAgent, ProviderId.CommandCode, ProviderId.WorkBuddy, ProviderId.WorkBuddyAi, ProviderId.MiMo, ProviderId.Qoder, ProviderId.QoderCn, ProviderId.QwenWorkCn, ProviderId.QwenWork, ProviderId.Trae, ProviderId.TraeCn];
     public static bool IsBuiltIn(ProviderId id) => AutomaticSources.Contains(id);
@@ -64,28 +63,17 @@ public static class ProviderCatalog
             "The weekly allowance of the Xiaomi MiMo desktop membership; sign in to a Xiaomi account in Settings first. Token Plan is not included"),
         ProviderId.MiMoLinked => Loc.T("自动读取 Xiaomi MiMo 桌面版与 MiMo Code CLI 已关联的 API 密钥或 Token Plan", "Reads the API key or Token Plan linked in the Xiaomi MiMo desktop app and MiMo Code CLI"),
         ProviderId.Qoder or ProviderId.QoderCn => QoderDescription(id == ProviderId.QoderCn ? "Qoder CN" : "Qoder"),
-        ProviderId.QwenWorkCn or ProviderId.QwenWork => Loc.T(Loc.Joined($"{Name(id)} 桌面版登录账户的剩余积分，使用桌面版保存的登录读取；不续期登录"),
-            $"The credits left on the account signed in to the {Name(id)} desktop app, read with the sign-in the app keeps; the sign-in is never renewed"),
-        ProviderId.Trae => Loc.T("TRAE（国际版）登录账户的美元套餐额度与按量消费，使用客户端保存的登录读取；不续期登录",
-            "The USD plan allowance and on-demand usage of the account signed in to TRAE, read with the sign-in the app keeps; the sign-in is never renewed"),
-        ProviderId.TraeCn => Loc.T("TRAE CN（国内版）登录账户的积分额度，使用客户端保存的登录读取；不续期登录",
-            "The credits of the account signed in to TRAE CN, read with the sign-in the app keeps; the sign-in is never renewed"),
-        ProviderId.Doubao => Loc.T("豆包与豆包工作共用账户的个人、团队与企业订阅额度及额度包，需要在设置中通过浏览器登录；不提供 Token 统计",
-            "Personal, team and enterprise quotas and quota packs of a Doubao / DoubaoWork account; sign in in the browser from Settings first. Token statistics are not available"),
-        ProviderId.Dola => Loc.T("Dola（豆包国际版）账户的个人、团队与企业订阅额度及额度包，需要在设置中通过浏览器登录；不提供 Token 统计",
-            "Personal, team and enterprise quotas and quota packs of a Dola (international Doubao) account; sign in in the browser from Settings first. Token statistics are not available"),
-        ProviderId.VolcengineArk => Loc.T("火山方舟账户的 Coding Plan、Agent Plan（个人版、团队/企业席位）与账户余额，需要在设置中通过浏览器登录火山引擎账户",
-            "Coding Plan, Agent Plan (personal, team and enterprise seats) and account balance of a Volcengine Ark account; sign in in the browser from Settings first"),
-        ProviderId.BytePlusArk => Loc.T("BytePlus ModelArk 账户的 Coding Plan、Agent Plan（个人版、团队/企业席位）与账户余额，需要在设置中通过浏览器登录 BytePlus 账户",
-            "Coding Plan, Agent Plan (personal, team and enterprise seats) and account balance of a BytePlus ModelArk account; sign in in the browser from Settings first"),
-        ProviderId.VolcengineArkApi => Loc.T("使用火山引擎访问密钥（AK / SK）读取账户的 Coding Plan、Agent Plan（个人版、团队/企业席位）与账户余额；不使用推理 API 密钥",
-            "Reads Coding Plan, Agent Plan (personal, team and enterprise seats) and account balance with a Volcengine AccessKey ID and Secret Access Key (not an inference API key)"),
-        ProviderId.BytePlusArkApi => Loc.T("使用 BytePlus 访问密钥（AK / SK）读取账户的 Coding Plan、Agent Plan（个人版、团队/企业席位）与账户余额；不使用推理 API 密钥",
-            "Reads Coding Plan, Agent Plan (personal, team and enterprise seats) and account balance with a BytePlus AccessKey ID and Secret Access Key (not an inference API key)"),
-        ProviderId.Qianwen => Loc.T("千问 AI 平台账户的 Token Plan（个人版与团队版）、账户余额与本月扣费，需要在设置中通过浏览器登录",
-            "The Token Plans (personal and team), balance and this month's charges of a Qianwen AI platform account; sign in in the browser from Settings first"),
-        ProviderId.QwenCloud => Loc.T("QwenCloud 账户的 Token Plan（个人版与团队版）与本月扣费，需要在设置中通过浏览器登录；QwenCloud 不提供账户余额",
-            "The Token Plans (personal and team) and this month's charges of a QwenCloud account; sign in in the browser from Settings first. QwenCloud has no account balance"),
+        ProviderId.QwenWorkCn or ProviderId.QwenWork => Loc.T(Loc.Joined($"{Name(id)} 桌面版账户的剩余积分"), $"Credits left on the {Name(id)} desktop app account"),
+        ProviderId.Trae => Loc.T("TRAE 账户的美元套餐额度与按量消费", "USD plan allowance and on-demand usage of the TRAE account"),
+        ProviderId.TraeCn => Loc.T("TRAE CN 账户的积分", "Credits of the TRAE CN account"),
+        ProviderId.Doubao => Loc.T("豆包与豆包工作账户的订阅额度与额度包，需在设置中登录", "Subscription quotas and quota packs of the Doubao and DoubaoWork account; sign in from Settings"),
+        ProviderId.Dola => Loc.T("Dola 账户的订阅额度与额度包，需在设置中登录", "Subscription quotas and quota packs of the Dola account; sign in from Settings"),
+        ProviderId.VolcengineArk => Loc.T("火山方舟账户的 Coding Plan、Agent Plan 与余额，需在设置中填写 AK/SK 或登录",
+            "Coding Plan, Agent Plan and balance of the Volcengine Ark account; enter an AK/SK or sign in from Settings"),
+        ProviderId.BytePlusArk => Loc.T("BytePlus ModelArk 账户的 Coding Plan、Agent Plan 与余额，需在设置中填写 AK/SK 或登录",
+            "Coding Plan, Agent Plan and balance of the BytePlus ModelArk account; enter an AK/SK or sign in from Settings"),
+        ProviderId.Qianwen => Loc.T("千问账户的 Token Plan、余额与本月扣费，需在设置中登录", "Token Plan, balance and this month's charges of the Qianwen account; sign in from Settings"),
+        ProviderId.QwenCloud => Loc.T("QwenCloud 账户的 Token Plan 与本月扣费，需在设置中登录", "Token Plan and this month's charges of the QwenCloud account; sign in from Settings"),
         ProviderId.MiMoApi => Loc.T("按量计费 API 密钥所属的小米 MiMo 开放平台账户", "The Xiaomi MiMo Open Platform account of the pay-as-you-go API key"),
         ProviderId.KimiApi => Loc.T("用 Kimi Code 控制台的密钥读取会员套餐额度", "The membership plan quota, read with a key from the Kimi Code console"),
         ProviderId.KimiPlatform => Loc.T("Kimi 开放平台按量计费的账户余额，与会员额度分开计算",
@@ -102,15 +90,15 @@ public static class ProviderCatalog
     public static string UsageName(ProviderId id) => id == ProviderId.MiMo ? "Xiaomi MiMo" : Name(id);
     public static string QuotaTip(ProviderId id) => Loc.T("配额来源：", "Quota source: ") + Name(id) + (QuotaDescription(id) is { Length: > 0 } text ? "\n" + text : "");
     // The quota-source menu groups sources by whether the user has to fill anything in.
-    public static string Group(ProviderId id) => IsBuiltIn(id) && !SignsInFromSettings(id) ? Loc.T("自动读取", "Read automatically") : Loc.T("手动填写", "Entered by hand");
+    public static string Group(ProviderId id) => IsBuiltIn(id) ?Loc.T("自动读取", "Read automatically") : Loc.T("手动填写", "Entered by hand");
     public static string Name(ProviderId id) => id switch
     {
-        ProviderId.GlmChina => Loc.T("智谱 GLM", "Zhipu GLM"), ProviderId.GlmGlobal => "Z.ai GLM", ProviderId.Dsh => "DeepSeek Harness", ProviderId.GrokBot => "Grok Bot", ProviderId.Kimi => "Kimi Code", ProviderId.KimiApi => "Kimi Code API", ProviderId.KimiPlatform => Loc.T("Kimi 开放平台", "Kimi Open Platform"),ProviderId.OpenCode => "OpenCode", ProviderId.OpenCodeGo => "OpenCode Go", ProviderId.CommandCode => "Command Code", ProviderId.CommandCodeApi => "Command Code API", ProviderId.WorkBuddy => "WorkBuddy", ProviderId.WorkBuddyAi => "WorkBuddy AI", ProviderId.MiMo => Loc.T("Xiaomi MiMo 桌面订阅", "Xiaomi MiMo Desktop subscription"), ProviderId.MiMoApi => "Xiaomi MiMo API", ProviderId.MiMoLinked => "Xiaomi MiMo", ProviderId.MiMoTokenPlan => "Xiaomi MiMo Token Plan", ProviderId.Qoder => "Qoder", ProviderId.QoderCn => "Qoder CN", ProviderId.Qianwen => Loc.T("千问", "Qianwen"), ProviderId.QwenWorkCn => Loc.T("千问办公", "QwenWork CN"), ProviderId.QwenWork => "QwenWork", ProviderId.QwenCloud => "QwenCloud", ProviderId.Trae => "TRAE", ProviderId.TraeCn => "TRAE CN", ProviderId.Doubao => Loc.T("豆包", "Doubao"), ProviderId.Dola => "Dola", ProviderId.VolcengineArk => Loc.T("火山方舟", "Volcengine Ark"), ProviderId.BytePlusArk => "BytePlus ModelArk", ProviderId.VolcengineArkApi => Loc.T("火山方舟 AK/SK", "Volcengine Ark AK/SK"), ProviderId.BytePlusArkApi => "BytePlus ModelArk AK/SK", ProviderId.OpenRouter => "OpenRouter", ProviderId.DeepSeek => "DeepSeek", ProviderId.NewApi => "New API", ProviderId.Sub2Api => "Sub2API", ProviderId.Custom => Loc.T("自定义", "Custom"),
+        ProviderId.GlmChina => Loc.T("智谱 GLM", "Zhipu GLM"), ProviderId.GlmGlobal => "Z.ai GLM", ProviderId.Dsh => "DeepSeek Harness", ProviderId.GrokBot => "Grok Bot", ProviderId.Kimi => "Kimi Code", ProviderId.KimiApi => "Kimi Code API", ProviderId.KimiPlatform => Loc.T("Kimi 开放平台", "Kimi Open Platform"),ProviderId.OpenCode => "OpenCode", ProviderId.OpenCodeGo => "OpenCode Go", ProviderId.CommandCode => "Command Code", ProviderId.CommandCodeApi => "Command Code API", ProviderId.WorkBuddy => "WorkBuddy", ProviderId.WorkBuddyAi => "WorkBuddy AI", ProviderId.MiMo => Loc.T("Xiaomi MiMo 桌面订阅", "Xiaomi MiMo Desktop subscription"), ProviderId.MiMoApi => "Xiaomi MiMo API", ProviderId.MiMoLinked => "Xiaomi MiMo", ProviderId.MiMoTokenPlan => "Xiaomi MiMo Token Plan", ProviderId.Qoder => "Qoder", ProviderId.QoderCn => "Qoder CN", ProviderId.Qianwen => Loc.T("千问", "Qianwen"), ProviderId.QwenWorkCn => Loc.T("千问办公", "QwenWork CN"), ProviderId.QwenWork => "QwenWork", ProviderId.QwenCloud => "QwenCloud", ProviderId.Trae => "TRAE", ProviderId.TraeCn => "TRAE CN", ProviderId.Doubao => Loc.T("豆包", "Doubao"), ProviderId.Dola => "Dola", ProviderId.VolcengineArk => Loc.T("火山方舟", "Volcengine Ark"), ProviderId.BytePlusArk => "BytePlus ModelArk", ProviderId.OpenRouter => "OpenRouter", ProviderId.DeepSeek => "DeepSeek", ProviderId.NewApi => "New API", ProviderId.Sub2Api => "Sub2API", ProviderId.Custom => Loc.T("自定义", "Custom"),
         _ => id.ToString()
     };
     public static string Key(ProviderId id) => id switch
     {
-        ProviderId.GlmChina => "glm-cn", ProviderId.GlmGlobal => "glm-global", ProviderId.NewApi => "newapi", ProviderId.Sub2Api => "sub2api", ProviderId.KimiApi => "kimi-api", ProviderId.KimiPlatform => "kimi-platform",ProviderId.OpenCodeGo => "opencode-go", ProviderId.CommandCodeApi => "commandcode-api", ProviderId.MiMoApi => "mimo-api", ProviderId.MiMoLinked => "mimo-linked", ProviderId.MiMoTokenPlan => "mimo-token-plan", ProviderId.QoderCn => "qoder-cn", ProviderId.QwenWorkCn => "qwenwork-cn", ProviderId.TraeCn => "trae-cn", ProviderId.VolcengineArk => "volcengine-ark", ProviderId.BytePlusArk => "byteplus-ark", ProviderId.VolcengineArkApi => "volcengine-ark-api", ProviderId.BytePlusArkApi => "byteplus-ark-api",
+        ProviderId.GlmChina => "glm-cn", ProviderId.GlmGlobal => "glm-global", ProviderId.NewApi => "newapi", ProviderId.Sub2Api => "sub2api", ProviderId.KimiApi => "kimi-api", ProviderId.KimiPlatform => "kimi-platform",ProviderId.OpenCodeGo => "opencode-go", ProviderId.CommandCodeApi => "commandcode-api", ProviderId.MiMoApi => "mimo-api", ProviderId.MiMoLinked => "mimo-linked", ProviderId.MiMoTokenPlan => "mimo-token-plan", ProviderId.QoderCn => "qoder-cn", ProviderId.QwenWorkCn => "qwenwork-cn", ProviderId.TraeCn => "trae-cn", ProviderId.VolcengineArk => "volcengine-ark", ProviderId.BytePlusArk => "byteplus-ark",
         _ => id.ToString().ToLowerInvariant()
     };
     // Claude and Grok Bot rows each choose between the account API and the record the desktop app keeps on this PC.
@@ -120,8 +108,8 @@ public static class ProviderCatalog
     public static bool ReadsLocalQuota(AppEntry entry) => HasOnlineSwitch(entry.QuotaSource) && !entry.QuotaOnline;
     // Sources billed per API call whose account balance comes without a total; their rows can set a target balance
     // (AppEntry.BalanceTarget) that gives the balance a used share.
-    public static bool HasAccountBalance(ProviderId id) => id is ProviderId.Dsh or ProviderId.DeepSeek or ProviderId.KimiPlatform or ProviderId.MiMoApi or ProviderId.MiMoLinked or ProviderId.Qianwen or ProviderId.VolcengineArk or ProviderId.VolcengineArkApi or ProviderId.BytePlusArk or ProviderId.BytePlusArkApi or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api;
-    public static bool NeedsAkSk(ProviderId id) => id is ProviderId.VolcengineArkApi or ProviderId.BytePlusArkApi;
+    public static bool HasAccountBalance(ProviderId id) => id is ProviderId.Dsh or ProviderId.DeepSeek or ProviderId.KimiPlatform or ProviderId.MiMoApi or ProviderId.MiMoLinked or ProviderId.Qianwen or ProviderId.VolcengineArk or ProviderId.BytePlusArk or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api;
+    public static bool NeedsAkSk(ProviderId id) => id is ProviderId.VolcengineArk or ProviderId.BytePlusArk;
     public static bool IsAccountBalance(UsageMetric metric) => metric is { Kind: MetricKind.Balance, Label: "账户余额", Total: null };
     // Rows that allow HTTP are read apart from otherwise identical rows that do not; the keys of other rows stay as they were.
     public static string ConfigurationKey(AppEntry entry) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, entry.SecretRevision }))

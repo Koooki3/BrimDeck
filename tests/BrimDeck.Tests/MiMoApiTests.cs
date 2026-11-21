@@ -16,9 +16,9 @@ static class MiMoApiTests
         await Linked(root, check);
         var manual = ProviderCatalog.Sources.Where(id => !ProviderCatalog.IsBuiltIn(id)).ToList();
         var menu = ProviderCatalog.Sources.ToList();
-        check("Xiaomi MiMo, which needs a sign-in in settings, is listed with the sources entered by hand, right before Xiaomi MiMo API",
-            ProviderCatalog.Group(ProviderId.MiMo) == ProviderCatalog.Group(ProviderId.MiMoApi) && menu.IndexOf(ProviderId.MiMoApi) == menu.IndexOf(ProviderId.MiMo) + 1 &&
-            menu.IndexOf(ProviderId.MiMo) == menu.IndexOf(ProviderId.GlmGlobal) + 1 && ProviderCatalog.IsBuiltIn(ProviderId.MiMo) && menu.Count(id => id == ProviderId.MiMo) == 1);
+        check("Xiaomi MiMo, which needs a sign-in in settings, is listed with the sources read automatically",
+            ProviderCatalog.Group(ProviderId.MiMo) == ProviderCatalog.Group(ProviderId.Claude) && ProviderCatalog.Group(ProviderId.MiMo) != ProviderCatalog.Group(ProviderId.MiMoApi) &&
+            menu.IndexOf(ProviderId.MiMo) < menu.IndexOf(ProviderId.GlmChina) && ProviderCatalog.IsBuiltIn(ProviderId.MiMo) && menu.Count(id => id == ProviderId.MiMo) == 1);
         check("Xiaomi MiMo API and Xiaomi MiMo Token Plan are entered by hand after Z.ai GLM and before DeepSeek, in the color of sources entered by hand",
             manual.IndexOf(ProviderId.MiMoApi) == manual.IndexOf(ProviderId.GlmGlobal) + 1 && manual.IndexOf(ProviderId.MiMoTokenPlan) == manual.IndexOf(ProviderId.MiMoApi) + 1 &&
             manual.IndexOf(ProviderId.DeepSeek) == manual.IndexOf(ProviderId.MiMoTokenPlan) + 1 &&

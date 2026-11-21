@@ -16,7 +16,8 @@ public interface IProviderSecrets
 
 public sealed record ProviderTestResult(ProviderSnapshot Snapshot, double Seconds, IReadOnlyList<string> Logs);
 
-internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secret, DateTimeOffset now, CancellationToken cancellation, string? memory = null)
+// secrets gives the sign-ins kept for all rows, which the Volcengine Ark and BytePlus ModelArk rows also read with.
+internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secret, DateTimeOffset now, CancellationToken cancellation, string? memory = null, IProviderSecrets? secrets = null)
 {
     private readonly ConcurrentQueue<string> _logs = new();
     private readonly ConcurrentQueue<int> _statuses = new();
@@ -48,7 +49,7 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
         if (entry.QuotaSource == ProviderId.OpenCodeGo) return await RunOpenCodeGoAsync();
         if (entry.QuotaSource == ProviderId.CommandCodeApi) return await RunCommandCodeAsync();
         if (entry.QuotaSource is ProviderId.MiMoApi or ProviderId.MiMoTokenPlan) return await RunMiMoAsync();
-        if (entry.QuotaSource is ProviderId.VolcengineArkApi or ProviderId.BytePlusArkApi) return await RunVolcengineArkAsync();
+        if (ProviderCatalog.NeedsAkSk(entry.QuotaSource)) return await RunVolcengineArkAsync();
         using var engine = new Engine(options =>
         {
             options.ExperimentalFeatures = ExperimentalFeature.TaskInterop;
@@ -330,15 +331,30 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
     {
         var edition = VolcengineArkUsage.For(entry.QuotaSource);
         var name = ProviderCatalog.Name(entry.QuotaSource);
-        var creds = VolcengineArkUsage.ParseStaticSecret(secret)
-            ?? throw new InvalidDataException(Loc.T("请完整填写 AccessKey ID 和 Secret Access Key。", "Enter both AccessKey ID and Secret Access Key."));
-        VolcengineArkUsage.Reading reading;
-        try { reading = await VolcengineArkUsage.ReadAsync(http, edition, creds, now, cancellation); }
-        catch (VolcengineArkUsage.RejectedException)
+        // The AccessKey of the row is tried first; the sign-in from settings is used without one, or when the AccessKey is refused.
+        var keys = VolcengineArkUsage.ParseStaticSecret(secret);
+        VolcengineArkUsage.Session? signIn = null;
+        try { signIn = VolcengineArkUsage.Session.Parse(secrets?.Read(edition.SessionKey)); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException or JsonException or FormatException) { }
+        if (keys is null && signIn is null)
+            throw new InvalidDataException(Loc.T($"请在设置中填写 AccessKey ID 和 Secret Access Key，或登录 {name}。",
+                $"Enter the AccessKey ID and Secret Access Key, or sign in to {name}, in settings."));
+        VolcengineArkUsage.Reading? reading = null;
+        bool refused = false;
+        if (keys is not null)
+        {
+            try { reading = await VolcengineArkUsage.ReadAsync(http, edition, keys, now, cancellation); }
+            catch (VolcengineArkUsage.RejectedException) { refused = true; }
+        }
+        if (reading is null && signIn is not null)
+            reading = await VolcengineArkUsage.ReadSignedInAsync(http, edition, signIn, renewed => secrets?.Write(edition.SessionKey, renewed.Serialize()), now, cancellation);
+        if (reading is null)
         {
             _statuses.Enqueue(401);
-            throw new InvalidDataException(Loc.T($"{name} 拒绝了这组 AccessKey，请核对 AccessKey ID 与 Secret Access Key 是否正确且未被禁用。",
-                $"{name} rejected this AccessKey pair. Check that both AccessKey ID and Secret Access Key are correct and active."));
+            string keyRefused = Loc.T($"{name} 拒绝了这组 AccessKey，请核对 AccessKey ID 与 Secret Access Key 是否正确且未被禁用。",
+                $"{name} rejected this AccessKey pair. Check that both AccessKey ID and Secret Access Key are correct and active.");
+            string expired = Loc.T($"{name} 登录已失效，请在设置中重新登录。", $"The {name} sign-in has expired. Sign in again in settings.");
+            throw new InvalidDataException(refused && signIn is not null ? keyRefused + " " + expired : refused ? keyRefused : expired);
         }
         if (reading.Metrics.Count == 0)
         {
@@ -415,6 +431,12 @@ public sealed class ConfiguredProviders : IDisposable
         });
         return (await Task.WhenAll(tasks)).ToList();
     }
+    private bool SignedInToArk(ProviderId id)
+    {
+        try { return VolcengineArkUsage.Session.Parse(_secrets?.Read(VolcengineArkUsage.For(id).SessionKey)) is not null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException or JsonException or FormatException)
+        { return false; }
+    }
     private string ReadSecret(AppEntry entry)
     {
         try { return _secrets?.Read(entry.InstanceId) ?? ""; }
@@ -437,14 +459,16 @@ public sealed class ConfiguredProviders : IDisposable
             {
                 var now = _clock(); var timer = Stopwatch.StartNew();
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(10));
-                var session = new ScriptSession(_http, entry, secret, now, deadline.Token, _memory.GetValueOrDefault(requestKey));
+                var session = new ScriptSession(_http, entry, secret, now, deadline.Token, _memory.GetValueOrDefault(requestKey), _secrets);
                 ProviderSnapshot snapshot = new(entry.QuotaSource) { Configurations = [entry.ConfigurationKey], Source = ProviderCatalog.Name(entry.QuotaSource) };
                 try
                 {
                     if (_retryAt.TryGetValue(requestKey, out var retry) && now < retry) throw new ProviderReadException(Loc.T("请求频繁", "Too many requests"), Loc.T($"站点要求在 {retry.LocalDateTime:HH:mm:ss} 后重试。", $"The site asks to retry after {retry.LocalDateTime:HH:mm:ss}."));
-                    if (secret.Length == 0 && entry.QuotaSource != ProviderId.Custom) throw new ProviderReadException(Loc.T("未配置", "Not configured"),
-                        ProviderCatalog.NeedsAkSk(entry.QuotaSource)
-                            ? Loc.T("请在设置中填写此来源的 AccessKey ID 和 Secret Access Key。", "Enter this source's AccessKey ID and Secret Access Key in settings.")
+                    // A Volcengine Ark row can read with the sign-in from settings alone (ScriptSession.RunVolcengineArkAsync).
+                    if (secret.Length == 0 && entry.QuotaSource != ProviderId.Custom && !(ProviderCatalog.NeedsAkSk(entry.QuotaSource) && SignedInToArk(entry.QuotaSource)))
+                        throw new ProviderReadException(Loc.T("未配置", "Not configured"), ProviderCatalog.NeedsAkSk(entry.QuotaSource)
+                            ? Loc.T($"请在设置中填写 AccessKey ID 和 Secret Access Key，或登录 {ProviderCatalog.Name(entry.QuotaSource)}。",
+                                $"Enter the AccessKey ID and Secret Access Key, or sign in to {ProviderCatalog.Name(entry.QuotaSource)}, in settings.")
                             : Loc.T("请在设置中填写此来源的 API 密钥。", "Enter this source's API key in settings."));
                     if (ProviderCatalog.NeedsSite(entry.QuotaSource) && (entry.Site.Length > 0 || entry.QuotaSource != ProviderId.Custom))
                     {

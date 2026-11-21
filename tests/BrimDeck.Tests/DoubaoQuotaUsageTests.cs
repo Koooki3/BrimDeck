@@ -131,9 +131,36 @@ internal static class DoubaoQuotaUsageTests
                 check("doubao cn request uri", cnReq.RequestUri!.AbsoluteUri == "https://www.doubao.com/alice/commerce/sale/subscription/quota/summary/");
                 check("doubao cn request csrf header", cnReq.Headers.GetValues("x-csrf-token").First() == "csrf-fallback-1");
             }
-            using (var intlReq = DoubaoQuotaUsage.BuildRequest(DoubaoQuotaUsage.International, DoubaoQuotaUsage.SummaryPath, parsed))
+            // Dola has no quota summary (404); its quota is in the subscription overview.
+            using (var intlReq = DoubaoQuotaUsage.BuildRequest(DoubaoQuotaUsage.International, DoubaoQuotaUsage.International.QuotaPath, parsed))
             {
-                check("dola intl request uri", intlReq.RequestUri!.AbsoluteUri == "https://www.dola.com/alice/commerce/sale/subscription/quota/summary/");
+                check("dola reads the subscription overview, doubao the quota summary",
+                    intlReq.RequestUri!.AbsoluteUri == "https://www.dola.com/alice/commerce/sale/subscription/overview/"
+                    && DoubaoQuotaUsage.China.QuotaPath == DoubaoQuotaUsage.SummaryPath);
+            }
+            // The overview of a signed-in Dola account without a subscription, as www.dola.com answers it (2026-11-21, trimmed).
+            using (var doc = JsonDocument.Parse("""
+                {"data":{"current_subscription":{"display":{"product_name":"Dola Membership"},"status":0,"subscription_id":"0"},
+                 "enterprise_package_entitlement_groups":[],"enterprise_subscription":{"sku_key":""},
+                 "enterprise_window_limit_section":{"entitlement_count":0,"usage_exhausted":false,"window_limit_groups":[]},
+                 "entitlements":[],"incentive_quota_entitlements":[],
+                 "member_info":{"hasActiveSubscription":false,"hasEnterpriseSubscription":false,"has_business_subscription":false,"has_team_subscription":false,"usr_type":1},
+                 "package_entitlement_groups":[],"quota_package_entitlement_groups":[],"window_limit_section":{}},"code":0,"msg":"","message":""}
+                """))
+            {
+                var reading = DoubaoQuotaUsage.ParseSummary(doc.RootElement);
+                check("dola overview of a free account reads as no quota", reading.FreeWithoutQuota && reading.Metrics.Count == 0);
+            }
+            foreach (var expiredAnswer in new[]
+            {
+                """{"data":null,"code":710012001,"msg":"登录已过期，请重新登录","message":"login invalid"}""",
+                """{"data":null,"code":710012001,"msg":"Session expired. Log in again.","message":"login invalid"}"""
+            })
+            {
+                bool expiredRejected = false;
+                try { using var doc = JsonDocument.Parse(expiredAnswer); DoubaoQuotaUsage.ParseSummary(doc.RootElement); }
+                catch (DoubaoQuotaUsage.RejectedException) { expiredRejected = true; }
+                check("doubao and dola expired sign-in (710012001) is a refused sign-in", expiredRejected);
             }
 
             // 2. ParseSummary: simultaneous personal + team drill-down + creation pack + incentive reward
@@ -183,10 +210,10 @@ internal static class DoubaoQuotaUsageTests
             var now = new DateTimeOffset(2026, 11, 21, 18, 0, 0, TimeSpan.FromHours(8));
             var status = HttpStatusCode.OK;
             var body = CombinedSummaryJson;
-            string lastHost = "";
+            string lastHost = "", lastPath = "";
             using var http = new HttpClient(new StubHandler(req =>
             {
-                lastHost = req.RequestUri!.Host;
+                lastHost = req.RequestUri!.Host; lastPath = req.RequestUri.AbsolutePath;
                 return new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
             }));
             var desktop = new FakeDesktop();
@@ -215,7 +242,8 @@ internal static class DoubaoQuotaUsageTests
             status = HttpStatusCode.OK;
             body = FreeSummaryJson;
             var freeDola = await service.RefreshAsync(new DeckSettings { Apps = [new AppEntry { Id = ProviderId.Dola }] });
-            check("dola hits www.dola.com and reports no quota on free tier", lastHost == "www.dola.com" && freeDola.Single(s => s.Id == ProviderId.Dola).StatusLabel == "无额度");
+            check("dola hits www.dola.com's subscription overview and reports no quota on free tier", lastHost == "www.dola.com" && lastPath == DoubaoQuotaUsage.OverviewPath
+                && freeDola.Single(s => s.Id == ProviderId.Dola).StatusLabel == "无额度");
         }
         finally { Loc.Use(previousLanguage); }
     }

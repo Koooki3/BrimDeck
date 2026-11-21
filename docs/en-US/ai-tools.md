@@ -29,10 +29,9 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | QwenWork CN, QwenWork | ✓ | ✓ | Sign in to the QwenWork CN (千问办公) or QwenWork desktop app on this PC |
 | TRAE, TRAE CN | ✓ | ✓ | Sign in to TRAE (or TRAE SOLO) or TRAE CN (or TRAE SOLO CN) on this PC |
 | Doubao, Dola | ✓ | | Sign in to a Doubao (including DoubaoWork) or Dola account in the browser from settings |
-| Volcengine Ark, BytePlus ModelArk | ✓ | | Sign in to a Volcengine or BytePlus account in the browser from settings |
 | Qoder, Qoder CN | ✓ | ✓ | Sign in to Qoder CLI or the Qoder desktop app on this PC, or open a signed-in Qoder IDE (likewise for Qoder CN). Token usage of the CLI and desktop app has to be switched on in settings |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
-| Volcengine Ark (AK/SK), BytePlus ModelArk (AK/SK) | ✓ | | Enter an AccessKey ID and Secret Access Key in settings |
+| Volcengine Ark, BytePlus ModelArk | ✓ | | Enter an AccessKey ID and Secret Access Key, or sign in to a Volcengine or BytePlus account in the browser, in settings |
 | Xiaomi MiMo API | ✓ | | Enter a Xiaomi MiMo Open Platform pay-as-you-go API key in settings |
 | Xiaomi MiMo Token Plan | ✓ | | Enter a Xiaomi MiMo Token Plan key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
@@ -53,6 +52,8 @@ When a record carries its own amount (Cursor, OpenCode and Command Code, for exa
 A price in that list usually comes from the cheapest provider and can differ from the model maker's list price. For example, GLM-5.3 is listed at 0.07 and 1.4 USD per million input and output tokens, while Z.AI charges 1.4 and 4.4. So for each model your records use, BrimDeck looks up the model maker's own endpoint on OpenRouter and uses its prices instead; a model whose maker has no endpoint there keeps the list price. Each model's endpoint prices are looked up once a day and saved on this PC; when a lookup fails, the prices saved before are used. Prices added by hand take precedence.
 
 DeepSeek records (`deepseek-flash`, `deepseek-v4.1-flash`, `deepseek-v4-flash` and `deepseek-v4-pro`, including those through a MaaS gateway) are costed at DeepSeek's own US dollar prices, peak or off-peak by the time of each record: 9:00–12:00 and 14:00–18:00 Beijing time on weekdays are peak hours, and every other hour is off-peak at half the price. Chinese public holidays are not known here, so a holiday on a weekday is costed at the peak price during those hours.
+
+Two ByteDance Seed models that the OpenRouter catalog does not list take built-in prices: Seed 2.0 Code is costed at BytePlus ModelArk's own US dollar prices. Seed 2.1 Pro has no US dollar price of its own; its yuan prices on Volcengine Ark are twice those of Seed 2.1 Turbo, so it is costed at twice the US dollar prices of Seed 2.1 Turbo.
 
 ## Quota rings and off-peak time
 
@@ -181,7 +182,7 @@ TRAE (international, trae.ai) and TRAE CN (China, trae.com.cn) have separate acc
   - **TRAE CN**: shows all credits on the account (used against total) with the reset time; when credits come from multiple buckets (such as plan credits, monthly login credits, daily check-in, welcome credits or add-on packs), each bucket is shown with its own used/total and expiry.
 - **Sign-in**: reads the sign-in kept by TRAE / TRAE SOLO (or TRAE CN / TRAE SOLO CN) in the user folder; there is nothing to sign in to in BrimDeck. BrimDeck never renews the sign-in or modifies any client file; when it expires, open the app to renew it.
 - **Team and enterprise accounts**: SaaS team and enterprise sign-ins do not expose the personal entitlement usage endpoint and are not supported yet.
-- **Token usage**: decrypts and queries the local conversation database read-only in memory without writing any plaintext database to disk. Costs are estimates at list prices.
+- **Token usage**: decrypts and queries the local conversation database read-only in memory without writing any plaintext database to disk. Models are named as the model called (such as `Dola-Seed-2.0-Code`), which can differ from the name TRAE shows. Costs are estimates at list prices.
 
 ## Qianwen and QwenCloud
 
@@ -199,20 +200,20 @@ The Qianwen AI platform (platform.qianwenai.com) and its international edition Q
 Doubao and DoubaoWork share the same account, subscription and quota backend (www.doubao.com), and are merged under "Doubao". The international edition Dola (www.dola.com) has its own account and is chosen separately. Both are quota-only sources without token statistics.
 
 - **Quota**: displays every active subscription on the account together, including personal subscription windows (5-hour, 7-day, monthly, etc.), team and enterprise subscription windows (with enterprise entitlement groups), creation quota packages and activity rewards—even when an account holds both personal and team/enterprise subscriptions.
-- **Sign-in**: expand the Doubao or Dola row in settings and click "Sign in in the browser". BrimDeck opens an isolated browser window with a temporary profile, saves the session cookies once the server accepts them, closes the window and removes the temporary profile without touching your regular browser. The session is stored encrypted for the current Windows user.
+- **Sign-in**: expand the Doubao or Dola row in settings and click "Sign in in the browser". BrimDeck opens an isolated browser window with a temporary profile, without touching your regular browser. For Doubao it saves the session cookies once the server accepts them and closes the window; for Dola, close the window yourself after signing in and BrimDeck then reads the session (this lets Dola sign in with a Google account too). The temporary profile is then removed. The session is stored encrypted for the current Windows user.
 
 ## Volcengine Ark and BytePlus ModelArk
 
-Volcengine Ark (China) and BytePlus ModelArk (international) support both browser sign-in and manual AccessKey ID / Secret Access Key entry. Both are quota-only sources without token statistics.
+Volcengine Ark (China) and BytePlus ModelArk (international) provide quotas only. Choose one as the quota source and the row expands: enter an AK/SK, sign in in the browser, or both. With both, the AK/SK is used first, and the sign-in when the AK/SK is refused.
 
 - **Why not an inference API key**: Ark inference API keys can only call models and cannot query Coding Plan, Agent Plan quotas or account balances.
 - **Automatic multi-plan detection**: both browser sign-in and AK/SK automatically probe and display every active subscription on the account together in one column—personal Coding Plan (5-hour, weekly, monthly), personal Agent Plan (AFP 5-hour, weekly, monthly), team/enterprise Coding Plan seats, team/enterprise Agent Plan seats, and account balance (CNY for China, USD for international). Plans the account does not hold or lacks permission for are skipped without blocking the rest.
-- **Browser sign-in**: expand Volcengine Ark or BytePlus ModelArk in settings and click "Sign in in the browser" to authorize in the default browser. BrimDeck obtains auto-refreshable temporary credentials stored encrypted on this PC.
-- **Manual AK/SK**: choose "Volcengine Ark (AK/SK)" or "BytePlus ModelArk (AK/SK)" and enter an IAM AccessKey ID and Secret Access Key, stored encrypted on this PC.
+- **AK/SK**: enter a Volcengine or BytePlus IAM AccessKey ID and Secret Access Key, stored encrypted on this PC. Create them on the console's API access key page (Volcengine: <https://console.volcengine.com/iam/keymanage>; BytePlus: <https://console.byteplus.com/iam/keymanage>); they are not the API Key that calls models. The main account's keys can do a lot, so a sub-user with read-only Ark and billing permissions, and its keys, is the safer choice.
+- **Browser sign-in**: click "Sign in in the browser" to authorize in the default browser. BrimDeck obtains auto-refreshable temporary credentials stored encrypted on this PC. All columns of the same edition (Volcengine Ark or BytePlus ModelArk) share this sign-in.
 
 ## Sources entered by hand
 
-Choose Zhipu GLM, Z.ai GLM, Xiaomi MiMo API, Xiaomi MiMo Token Plan, Volcengine Ark (AK/SK), BytePlus ModelArk (AK/SK), DeepSeek, Kimi Code API, Kimi Open Platform, OpenCode Go, Command Code API, OpenRouter, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
+Choose Zhipu GLM, Z.ai GLM, Xiaomi MiMo API, Xiaomi MiMo Token Plan, DeepSeek, Kimi Code API, Kimi Open Platform, OpenCode Go, Command Code API, OpenRouter, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
 
 - **Key**: stored on this PC, encrypted by Windows, and never written to the settings file. It is deleted when you remove the column or change its quota source.
 - **Site address**: the home page address is enough. A trailing `/v1`, or the path of a console page you paste, is removed automatically. Requests carry the API key, so the address must use HTTPS; HTTP is only for this PC (`localhost`, `127.0.0.1`, `[::1]`).

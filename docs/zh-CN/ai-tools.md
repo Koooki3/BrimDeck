@@ -29,10 +29,9 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | 千问办公、QwenWork | ✓ | ✓ | 在本机登录千问办公或 QwenWork 桌面版 |
 | TRAE、TRAE CN | ✓ | ✓ | 在本机登录 TRAE（含 TRAE SOLO）或 TRAE CN（含 TRAE SOLO CN） |
 | 豆包、Dola | ✓ | | 在设置中通过浏览器登录豆包（含豆包工作）或 Dola 账号 |
-| 火山方舟、BytePlus ModelArk | ✓ | | 在设置中通过浏览器登录火山引擎或 BytePlus 账号 |
 | Qoder、Qoder CN | ✓ | ✓ | 在本机登录 Qoder CLI 或 Qoder 桌面版，或打开已登录的 Qoder IDE（Qoder CN 同理）。CLI 与桌面版的 Token 统计需要在设置中开启 |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
-| 火山方舟（AK/SK）、BytePlus ModelArk（AK/SK） | ✓ | | 在设置中填写 AccessKey ID 和 Secret Access Key |
+| 火山方舟、BytePlus ModelArk | ✓ | | 在设置中填写 AccessKey ID 和 Secret Access Key，或通过浏览器登录火山引擎或 BytePlus 账号 |
 | Xiaomi MiMo API | ✓ | | 在设置中填写小米 MiMo 开放平台按量计费 API 密钥 |
 | Xiaomi MiMo Token Plan | ✓ | | 在设置中填写小米 MiMo Token Plan 密钥 |
 | DeepSeek | ✓ | | 在设置中填写 API 密钥 |
@@ -53,6 +52,8 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 目录中的单价通常取自最便宜的服务商，可能与模型厂商的官方价格不同。例如 GLM-5.3 在目录中的输入与输出单价为每百万 Token 0.07 与 1.4 美元，Z.AI 官方为 1.4 与 4.4 美元。因此，对记录中用到的每个模型，BrimDeck 会查询 OpenRouter 上该模型厂商自己的渠道，并改用该渠道的单价；厂商没有渠道的模型，沿用目录单价。厂商渠道的单价每个模型每天查询一次，并保存在本机；查询失败时沿用上次保存的单价。手动添加的单价优先。
 
 DeepSeek 的记录（`deepseek-flash`、`deepseek-v4.1-flash`、`deepseek-v4-flash` 与 `deepseek-v4-pro`，包括经 MaaS 网关调用的记录）按 DeepSeek 官方的美元单价估算，并按每条记录的请求时间区分高峰与低峰时段：北京时间工作日 9:00–12:00、14:00–18:00 为高峰时段，其余为低峰时段，单价减半。法定节假日不在判断范围内，节假日的白天按高峰价估算。
+
+OpenRouter 目录中没有的两个字节跳动 Seed 模型使用内置单价：Seed 2.0 Code 按 BytePlus ModelArk 官方的美元单价估算；Seed 2.1 Pro 没有官方美元单价，它在火山方舟的人民币单价是 Seed 2.1 Turbo 的两倍，因此按 Seed 2.1 Turbo 官方美元单价的两倍估算。
 
 ## 配额环与低峰时间
 
@@ -181,7 +182,7 @@ TRAE（国际版，trae.ai）与 TRAE CN（国内版，trae.com.cn）账号与�
   - **TRAE CN（国内版）**：显示账户的全部积分（已用与总额）及重置时间；账户同时包含多个积分来源（例如套餐积分、每月登录积分、每日签到、用户福利、加购积分）时，按类别分别显示各自的已用量、总额与到期时间。
 - **登录**：直接读取 TRAE / TRAE SOLO（或 TRAE CN / TRAE SOLO CN）保存在用户目录的登录，不需要在 BrimDeck 中另外登录。BrimDeck 不续期登录，也不修改客户端文件；登录过期后状态显示“登录已失效”，打开对应的客户端即可续期。
 - **团队版与企业版**：使用 SaaS 团队或企业账号登录的客户端没有提供个人用量余额接口，暂不支持读取其配额。
-- **Token 用量**：以只读方式在内存中解密读取本机对话数据库中的每次模型请求与 Token 数量，不向磁盘写入任何解密后的数据库文件。费用为按公开单价的估算。
+- **Token 用量**：以只读方式在内存中解密读取本机对话数据库中的每次模型请求与 Token 数量，不向磁盘写入任何解密后的数据库文件。模型名称为实际调用的模型（例如 `Dola-Seed-2.0-Code`），可能与 TRAE 界面上显示的名称不同。费用为按公开单价的估算。
 
 ## 千问与 QwenCloud
 
@@ -199,20 +200,20 @@ TRAE（国际版，trae.ai）与 TRAE CN（国内版，trae.com.cn）账号与�
 豆包与豆包工作共用同一账号、订阅与额度体系（www.doubao.com），在“配额来源”中合并为“豆包”。海外版 Dola（www.dola.com）使用独立账号，在“配额来源”中单独选择。两者均只提供配额，不提供 Token 统计。
 
 - **配额**：同时展示该账号下所有生效中的订阅与额度，包括个人订阅窗口（5 小时、7 日、每月等）、团队版与企业版订阅额度（含企业多分组明细）、创作额度包与活动奖励；账号同时拥有个人订阅与团队/企业订阅时一并显示。
-- **登录**：在设置中展开豆包或 Dola 行，点击“在浏览器中登录”。BrimDeck 会以独立的临时配置目录打开浏览器窗口，登录完成后自动捕获会话并关闭窗口、删除临时目录，不触碰日常浏览器。登录凭据按当前 Windows 用户加密保存在本机。
+- **登录**：在设置中展开豆包或 Dola 行，点击“在浏览器中登录”。BrimDeck 会以独立的临时配置目录打开浏览器窗口，不触碰日常浏览器。豆包登录完成后自动捕获会话并关闭窗口；Dola 需要在登录完成后自行关闭窗口，BrimDeck 随后读取会话（这样 Dola 也能使用 Google 账号登录）。读取后删除临时目录。登录凭据按当前 Windows 用户加密保存在本机。
 
 ## 火山方舟与 BytePlus ModelArk
 
-火山方舟（中国站）与 BytePlus ModelArk（国际站）支持“浏览器登录”与“手动填写 AK/SK”两种方式，均只提供配额，不提供 Token 统计。
+火山方舟（中国站）与 BytePlus ModelArk（国际站）只提供配额。在“配额来源”中选择后，该行会展开，可以填写 AK/SK，也可以通过浏览器登录，填写其中一种即可。两种都填写时，先使用 AK/SK；AK/SK 被拒绝时改用登录读取。
 
 - **为什么不能用模型 API 密钥**：方舟推理 API Key 仅用于调用模型，无法查询 Coding Plan、Agent Plan 用量或账户余额。
 - **自动识别多种套餐**：无论是浏览器登录还是 AK/SK，都会在同一列中自动探测并同时显示当前账号下全部生效的项目，包括个人 Coding Plan（5 小时、每周、每月）、个人 Agent Plan（AFP 5 小时、每周、每月）、团队/企业 Coding Plan 席位、团队/企业 Agent Plan 席位，以及账户余额（中国站为人民币，国际站为美元）。未开通或无权限的部分会自动跳过，不影响其他套餐显示。
-- **浏览器登录**：在设置中展开“火山方舟”或“BytePlus ModelArk”行，点击“在浏览器中登录”，在默认浏览器中完成火山引擎或 BytePlus 账号授权。BrimDeck 获取可自动续期的临时凭据并加密保存在本机。
-- **手动填写 AK/SK**：选择“火山方舟（AK/SK）”或“BytePlus ModelArk（AK/SK）”，在展开的行中分别填写火山引擎或 BytePlus 访问控制（IAM）的 AccessKey ID 与 Secret Access Key，加密保存在本机。
+- **AK/SK**：填写火山引擎或 BytePlus 访问控制（IAM）的 AccessKey ID 与 Secret Access Key，加密保存在本机。AK/SK 在控制台的 API 访问密钥页面创建（火山引擎：<https://console.volcengine.com/iam/keymanage>；BytePlus：<https://console.byteplus.com/iam/keymanage>），不是调用模型用的 API Key。主账号的密钥权限较大，建议新建子用户，只授予方舟与费用中心的只读权限，再使用子用户的密钥。
+- **浏览器登录**：点击“在浏览器中登录”，在默认浏览器中完成火山引擎或 BytePlus 账号授权。BrimDeck 获取可自动续期的临时凭据并加密保存在本机。同一版本（火山方舟或 BytePlus ModelArk）的各列共用这个登录。
 
 ## 手动填写的来源
 
-在"配额来源"中选择智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、火山方舟（AK/SK）、BytePlus ModelArk（AK/SK）、DeepSeek、Kimi Code API、Kimi 开放平台、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
+在"配额来源"中选择智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、Kimi 开放平台、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
 
 - **密钥**：使用 Windows 的加密功能保存在本机，不写入设置文件。删除该列或更换配额来源时，密钥一并删除。
 - **站点地址**：填写站点首页地址即可。末尾的 `/v1`，以及直接粘贴的控制台页面路径，会自动去掉。请求会带上 API 密钥，所以站点地址须使用 HTTPS；HTTP 仅限本机地址（`localhost`、`127.0.0.1`、`[::1]`）。
