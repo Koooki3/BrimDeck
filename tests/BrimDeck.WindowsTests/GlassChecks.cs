@@ -23,17 +23,19 @@ internal static class GlassChecks
         var brushes = new List<CompositionEffectBrush>();
         for (int i = 0; i < 20; i++)
             if (GlassEffect.Graph(compositor) is { } brush) brushes.Add(brush);
-        check("Composition accepts the persistent glass graph with its two animatable amounts", brushes.Count == 20 && GlassEffect.GraphAvailable);
+        check("Composition accepts the persistent glass graph with its three animatable amounts", brushes.Count == 20 && GlassEffect.GraphAvailable);
         var rng = new Random(11);
         bool set = true;
         try
         {
             for (int frame = 0; frame < 2000; frame++)
-                GlassEffect.Present(brushes[frame % brushes.Count], rng.NextDouble(), rng.NextDouble(), rng.NextDouble());
+                GlassEffect.Present(brushes[frame % brushes.Count], rng.NextDouble(), rng.NextDouble(), rng.NextDouble(),
+                    // A clarity drag 0 -> 100 -> 0: the tint opacity and saturation move on the same factory.
+                    GlassClarityPolicy.Tint(Math.Abs(frame % 200 - 100) / 100d), GlassClarityPolicy.Saturation(Math.Abs(frame % 200 - 100) / 100d));
         }
         catch (Exception) { set = false; }
         var after = GlassEffect.Stats;
-        check($"2000 material frames on 20 brushes compile nothing after the first graph ({after.Compiled - start.Compiled} compiled)",
+        check($"2000 material frames on 20 brushes, the clarity dragged 0-100-0, compile nothing after the first graph ({after.Compiled - start.Compiled} compiled)",
             set && after.Compiled - start.Compiled <= 1 && after.Brushes - start.Brushes == 20);
         foreach (var brush in brushes) GlassEffect.Release(brush);
         brushes.Clear();

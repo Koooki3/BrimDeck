@@ -1,7 +1,8 @@
 namespace BrimDeck.Core;
 
-// Controls the acrylic's base luminosity veil. The backdrop's readability requirement can
-// raise this floor, and is independent of the user's preference.
+// The acrylic's luminosity veil for the user's clarity (stored as the glass transparency, 0..100, default 50): the clarity's own
+// veil weighed against what the backdrop asks for the text (GlassClarityPolicy: at 50 each counts half, at 100 the text no longer
+// thickens the glass, at 0 it does in full).
 public static class GlassMaterial
 {
     public const int DefaultTransparency = 50;
@@ -9,8 +10,6 @@ public static class GlassMaterial
     public const double MaximumVeil = .95;
 
     public static int NormalizeTransparency(int percent) => Math.Clamp(percent, 0, 100);
-
-    public static double DarkBackdropLimit(int transparency) => .26 + .06 * Math.Max(0, NormalizeTransparency(transparency) - 50) / 50;
 
     public static double RimStrength(int transparency, double openness)
     {
@@ -29,12 +28,8 @@ public static class GlassMaterial
         return Math.Min(current, Math.Max(wanted, double.IsFinite(previousWanted) ? previousWanted : current));
     }
 
-    public static double LuminosityOpacity(double required, double openness, int transparency)
-    {
-        double amount = NormalizeTransparency(transparency) / 100d;
-        double baseVeil = amount <= .5 ? DefaultCollapsedVeil + (.5 - amount) * .50
-            : DefaultCollapsedVeil - (amount - .5) * .20;
-        double openingVeil = (DefaultExpandedVeil - DefaultCollapsedVeil) * Math.Clamp(openness, 0, 1);
-        return Math.Clamp(Math.Max(required, baseVeil + openingVeil), 0, MaximumVeil);
-    }
+    // Required: the luminosity opacity the text asks for (GlassRecipe.LuminosityFor, through GlassOpening while the panel opens).
+    // Force: the readability is the user's explicit choice (the whole of it, whatever the clarity).
+    public static double LuminosityOpacity(double required, double openness, int transparency, bool force = false)
+        => GlassClarityPolicy.Veil(GlassClarityPolicy.Unit(transparency), required, openness, force);
 }

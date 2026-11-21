@@ -145,10 +145,11 @@ public sealed partial class SettingsWindow
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
         if (theme.BuiltIn && PanelThemes.Resolve(theme).Effects.Glass is not null)
         {
-            var glass = SliderRow(Loc.T("玻璃透明度", "Glass transparency"), S.GlassTransparency, 0, 100, 1, "%",
+            // Stored as GlassTransparency (0-100, default 50) as before; read as the clarity (GlassClarityPolicy).
+            var glass = SliderRow(Loc.T("玻璃清透度", "Glass clarity"), S.GlassTransparency, 0, 100, 1, "",
                 value => Change(settings => settings.GlassTransparency = (int)value),
-                help: Loc.T("数值越高，玻璃越清透。为保持文字清晰，某些背景上的变化可能不明显。",
-                    "Higher values make the glass clearer. The backdrop may limit the visible change to keep text readable."));
+                help: Loc.T("0 阅读优先 · 50 平衡（推荐） · 100 光学优先。越清透，背景的颜色和变化越明显，文字在某些背景上可能不清楚。背景始终经过系统模糊，清透度不会让它变清晰。",
+                    "0 favors reading · 50 balanced (recommended) · 100 favors the glass. Clearer glass shows more of the backdrop's colour and motion; text may be hard to read on some backdrops. The backdrop stays blurred by Windows; clarity does not sharpen it."));
             glass.IsEnabled = MainWindow.GlassAvailable;
             rows.Add(glass);
         }
