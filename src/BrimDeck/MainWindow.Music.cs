@@ -61,7 +61,7 @@ public partial class MainWindow
     private DispatcherTimer? _timelineHoldEnd;
     private Slider? _musicSeek;
     private readonly ScaleTransform _musicCoverScale = new(1, 1);
-    private TextBlock? _musicElapsed, _musicDuration, _lyricPrevious, _lyricNext, _musicMessage;
+    private TextBlock? _musicElapsed, _musicDuration, _musicMessage;
     // The current line scrolls when it is wider than the column; the lines around it are cut off with an ellipsis.
     private MusicMarquee? _lyricCurrent, _musicTitle;
     // Without the cover the lyrics column shows more lines around the current one (MusicLayout.Columns).
@@ -541,7 +541,7 @@ public partial class MainWindow
         // Keep the transport layer attached: replacing a hovered button restarts
         // hit testing and its fade-in on every metadata, artwork or lyric update.
         _handover.Hold(MusicContent, keep: _musicControls);
-        _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _musicTitle = null; _lyricCurrent = null; _lyricPrevious = null; _lyricNext = null; _lyricsAbove = []; _lyricsBelow = []; _musicMessage = null; _musicInfo = null;
+        _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _musicTitle = null; _lyricCurrent = null; _lyricsAbove = []; _lyricsBelow = []; _musicMessage = null; _musicInfo = null;
         MusicContent.Margin = new Thickness(c.Side, 0, c.Side, c.Bottom);
         if (track is null)
         {
@@ -624,13 +624,17 @@ public partial class MainWindow
             var middle = new Grid(); Grid.SetRow(middle, 1); right.Children.Add(middle); _musicInfo = middle;
             if (hasLyrics && lyricLines > 0 && synchronized)
             {
+                // As many lines as the room under the titles holds, not just the current one and its neighbours: the lines
+                // above are filled from the bottom and the lines below from the top, as in the column layout.
+                int above = Math.Max(0, lyricLines - 1) / 2, below = lyricLines - 1 - above;
                 var lyrics = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+                TextBlock Dim() { var dim = UI.Fixed("", c.Lyric, c.LyricLine, Look.Tertiary); dim.TextAlignment = centered ? TextAlignment.Center : TextAlignment.Left; lyrics.Children.Add(dim); return dim; }
+                _lyricsAbove = [.. Enumerable.Range(0, above).Select(_ => Dim())];
                 // All lines share one size; only its color (MusicLyricColor) marks the current one.
-                if (lyricLines == 3) { _lyricPrevious = UI.Fixed("", c.Lyric, c.LyricLine, Look.Tertiary); _lyricPrevious.TextAlignment = centered ? TextAlignment.Center : TextAlignment.Left; lyrics.Children.Add(_lyricPrevious); }
                 _lyricCurrent = new MusicMarquee { FontSize = c.Lyric, Height = c.LyricLine, CenterWhenFits = centered, Foreground = LyricInk,
                     Backdrop = Look.MarqueeBackdrop, InkFade = Look.InkFade };
                 lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
-                if (lyricLines >= 2) { _lyricNext = UI.Fixed("", c.Lyric, c.LyricLine, Look.Tertiary); _lyricNext.TextAlignment = centered ? TextAlignment.Center : TextAlignment.Left; lyrics.Children.Add(_lyricNext); }
+                _lyricsBelow = [.. Enumerable.Range(0, below).Select(_ => Dim())];
                 lyrics.Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible; middle.Children.Add(lyrics);
             }
             else if (hasLyrics && lyricLines > 0)
@@ -1118,8 +1122,6 @@ public partial class MainWindow
         // them, in the open page's line and in the collapsed row's middle text.
         var (words, sweep) = _lyrics.Karaoke(track, DateTimeOffset.UtcNow, _lyricHold, Settings.MusicSimulatedKaraoke);
         if (page && _lyricCurrent is not null) { _lyricCurrent.Text = line.Current; _lyricCurrent.Karaoke(words, Animated(sweep)); }
-        if (page && _lyricPrevious is not null) _lyricPrevious.Text = line.Previous;
-        if (page && _lyricNext is not null) _lyricNext.Text = line.Next;
         if (page && _lyricsAbove.Length + _lyricsBelow.Length > 0)
         {
             // The lines above are filled from the bottom, so the line just sung stays next to the current one.
