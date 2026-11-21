@@ -518,21 +518,18 @@ public partial class MainWindow
 
     // The decision turned (or reversed): a new epoch for the shared look; the panels that animate head their palettes for it and
     // the leader publishes it at the readable frame; a leader that does not animate (or shows no glass) publishes it at once.
-    // At once (an opening's own turn while the panel is mostly shut, GlassOpening.TurnsAtOnce): every panel of the look takes
-    // the new palette at rest now and the leader publishes it with them, so the opening grows in the new look from the next frame.
+    // At once (an opening's own turn while the panel is mostly shut, GlassOpening.TurnsAtOnce): the panels that animate take the
+    // new palette at rest now and the leader publishes it at once, as at a readable frame (the opening's motion goes on), so the
+    // opening grows in the new look from the next frame.
     private void StartGlassTurn(GlassAppearance decision, long now, bool atOnce = false)
     {
         var group = GlassGroup;
         bool dark = decision.Dark;
         long epoch = group.Begin(dark);
         var leader = group.Leader ?? this;
-        if (atOnce || !leader.Animates || leader._glassSurface?.Visible != true)
+        if (!leader.Animates || leader._glassSurface?.Visible != true)
         {
             leader._glassGoalDark = dark; leader._glassTurnEpoch = epoch;
-            if (atOnce)
-                foreach (var deck in _app.Decks.ToList())
-                    if (ReferenceEquals(deck.Look, Look) && PanelThemes.NormalizeId(deck.Settings.PanelTheme) == PanelThemes.GlassAuto)
-                        deck.SetGlassPaletteAtRest(dark, now, epoch);
             if (group.TryPublish(leader, epoch, dark)) leader.PublishGlassPalette(dark, coordinated: false);
             decision.Arrived(now);
             return;
@@ -541,8 +538,10 @@ public partial class MainWindow
         {
             if (!ReferenceEquals(deck.Look, Look) || PanelThemes.NormalizeId(deck.Settings.PanelTheme) != PanelThemes.GlassAuto
                 || !deck.Animates || deck._glassSurface?.Visible != true) continue;
-            deck.BeginGlassPaletteTurn(dark, now, epoch);
+            deck.BeginGlassPaletteTurn(dark, now, epoch, atOnce);
         }
+        // The turn ends on the panels' next pass (GlassTurnStep: arrived, the look shown is the goal).
+        if (atOnce && group.TryPublish(leader, epoch, dark)) leader.PublishGlassPalette(dark, coordinated: true);
     }
 
     // The panel begins to open or close (SetExpanded, as the intent comes: before the opening's first frame). Opening: a new
@@ -646,29 +645,17 @@ public partial class MainWindow
             ? clipped : null;
     }
 
-    // Heads the palette for dark or light from wherever it is now (a reversal mid-way included), for the group's epoch. The veils
-    // of both looks are already following the backdrop, so the goal's branch is ready.
-    private void BeginGlassPaletteTurn(bool dark, long now, long epoch)
+    // Heads the palette for dark or light from wherever it is now (a reversal mid-way included), for the group's epoch; at once:
+    // at rest there now. The veils of both looks are already following the backdrop, so the goal's branch is ready.
+    private void BeginGlassPaletteTurn(bool dark, long now, long epoch, bool atOnce = false)
     {
         _glassGoalDark = dark;
         _glassTurnEpoch = epoch;
         _glassTurning = true;
         _glassHurried = false;
-        _glassPalette.Retarget(dark ? 0 : 1, now, GlassPaletteOmega);
+        if (atOnce) _glassPalette.Reset(dark ? 0 : 1, now);
+        else _glassPalette.Retarget(dark ? 0 : 1, now, GlassPaletteOmega);
         GlassRenderingNeeded();
-        QueueGlass();
-    }
-
-    // The palette at rest on dark or light now, for the group's epoch (a turn taken at once); a turn of ours under way ends here.
-    private void SetGlassPaletteAtRest(bool dark, long now, long epoch)
-    {
-        _glassGoalDark = dark;
-        _glassTurnEpoch = epoch;
-        _glassTurning = false;
-        _glassHurried = false;
-        _glassPalette.Reset(dark ? 0 : 1, now);
-        GlassRenderingNeeded();
-        GlassOpticsNeeded();
         QueueGlass();
     }
 
