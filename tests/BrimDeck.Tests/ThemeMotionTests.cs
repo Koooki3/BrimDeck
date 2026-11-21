@@ -116,6 +116,15 @@ internal static class ThemeMotionTests
         check("Allowed is the app-wide rule: BrimDeck's setting, Windows' effects, no high contrast",
             MotionConditions.Allowed(true, true, false) && !MotionConditions.Allowed(false, true, false) && !MotionConditions.Allowed(true, false, false) && !MotionConditions.Allowed(true, true, true));
 
+        // ----- How strongly a mark draws -----
+        double[] strengths = [.. Enumerable.Range(0, 301).Select(i => i / 1000.0)];
+        var highlight = strengths.Select(strength => HoverMarkOpacity.LiftHighlight(strength, 1)).ToArray();
+        check("The lift's top highlight fades with the strength: nothing at zero, faint at 0.01, its full 0.9 only at the strongest",
+            highlight[0] == 0 && HoverMarkOpacity.LiftHighlight(.01, 1) <= .05 && Near(HoverMarkOpacity.LiftHighlight(MotionSafety.HoverMax, 1), .9)
+            && highlight.Zip(highlight.Skip(1)).All(pair => pair.Second >= pair.First && pair.Second - pair.First <= .01));
+        check("The highlight follows the mark's presence, and a negative strength draws nothing",
+            Near(HoverMarkOpacity.LiftHighlight(.2, .5), HoverMarkOpacity.LiftHighlight(.2, 1) / 2) && HoverMarkOpacity.LiftHighlight(.2, 0) == 0 && HoverMarkOpacity.LiftHighlight(-1, 1) == 0);
+
         // ----- Timing -----
         var normal = MotionTiming.For(1);
         check("At pace 1 a mark arrives in the monitor's hover time and leaves in seven tenths of it",

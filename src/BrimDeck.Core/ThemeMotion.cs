@@ -56,6 +56,15 @@ public static class MotionSafety
     public static double Pace(double? value, double fallback) => value is { } v && double.IsFinite(v) ? Math.Clamp(v, PaceMin, PaceMax) : fallback;
 }
 
+// How strongly parts of a hover mark are drawn (InteractionFx.Draw), from the theme's strength and the mark's presence (0 to 1).
+public static class HoverMarkOpacity
+{
+    // lift: the light top edge of a raised card on a light theme. It fades with the strength as the shadow does, to nothing at
+    // zero, and reaches 0.9 only at the strongest a theme may be.
+    public static double LiftHighlight(double strength, double presence)
+        => .9 * Math.Clamp(strength, 0, MotionSafety.HoverMax) / MotionSafety.HoverMax * Math.Clamp(presence, 0, 1);
+}
+
 public static class MotionGate
 {
     // allowed: the app-wide rule (MotionConditions.Allowed, which Soft.Enabled applies).

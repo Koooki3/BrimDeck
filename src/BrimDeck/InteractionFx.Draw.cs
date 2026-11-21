@@ -114,7 +114,7 @@ internal sealed partial class FxSurface
                         var ring = r; ring.Inflate(Px(i), Px(i)); ring.Offset(0, Px(.4 + .5 * i * h));
                         Edge(dc, _liftLine, ring, radius + i, ellipse, hs * (i == 1 ? 1.6 : i == 2 ? .9 : .4) * h);
                     }
-                    if (!_darkSurface && !ellipse) Line(dc, _lightLine, r.Left + Px(Math.Max(radius, 2)), r.Top + _line / 2, r.Right - Px(Math.Max(radius, 2)), r.Top + _line / 2, .9 * h);
+                    if (!_darkSurface && !ellipse) Line(dc, _lightLine, r.Left + Px(Math.Max(radius, 2)), r.Top + _line / 2, r.Right - Px(Math.Max(radius, 2)), r.Top + _line / 2, HoverMarkOpacity.LiftHighlight(hs, h));
                 }
                 break;
             case HoverFx.Underline:
