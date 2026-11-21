@@ -75,6 +75,10 @@ internal sealed partial class MonitorView
         {
             if (scroll.ScrollableHeight < 1) e.Handled = false;
         }), true);
+        scroll.ScrollChanged += (_, e) =>
+        {
+            if (e.VerticalChange != 0) CloseCard();
+        };
         AutomationProperties.SetName(scroll, Loc.T("展开监控网格", "Expanded monitor grid"));
         Children.Add(scroll);
         SetColumnSpan(_overlay, columns);
