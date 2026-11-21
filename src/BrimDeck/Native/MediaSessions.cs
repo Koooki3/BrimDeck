@@ -42,6 +42,8 @@ internal sealed class MediaSessions : IDisposable
         // The artwork on screen before a song change stays there while the new song's cover downloads.
         public BitmapSource? Previous;
         public string CoverKey = "";
+        // The song part of CoverKey, so another address for the same song is not downloaded again.
+        public string CoverSong = "";
         public byte[]? CoverBytes;
         public CancellationTokenSource? CoverCancellation;
         // Every address under CoverKey was tried and none gave a picture; NetEase's song/detail may then have another.
@@ -379,9 +381,12 @@ internal sealed class MediaSessions : IDisposable
                     {
                         track = FromDesktop(native) with { Id = route.Id, Source = SourceName(route.ProcessName) };
                         var log = track;
-                        // NetEase's SMTC session, when switched on, reports a skip before its log does; it leads and the log fills in.
+                        // NetEase's SMTC session reports the same song independently of the log. It is used only when the log
+                        // is on its song, has none, or has stopped reporting: a session that lags behind the log (or runs ahead
+                        // of it) would otherwise put a neighbouring song's title, artwork and lyrics on screen.
                         var leading = route.Supplement && route.System?.Track is { } smtc && !string.IsNullOrWhiteSpace(smtc.Title) ? smtc : null;
-                        if (leading is not null) track = MediaRouting.PreferSystem(log, leading);
+                        bool sessionLeads = MediaRouting.PreferSession(log, leading);
+                        if (sessionLeads) track = MediaRouting.PreferSystem(log, leading);
                         else
                         {
                             // If the log format is unavailable, the system source owns metadata.
@@ -407,25 +412,34 @@ internal sealed class MediaSessions : IDisposable
                         if (!_covers.TryGetValue(route.Id, out var cache)) _covers[route.Id] = cache = new();
                         // Not SongKey: it includes the duration, which QQ's pipe reports about a second after the song.
                         // Every candidate is in the key so that a detail arriving later (adding a new URL) retries the cover.
-                        string key = (native.SongId ?? $"{track.Title}\n{track.Artist}\n{track.Album}") + "|" + string.Join("|", coverUrls);
+                        string coverSong = native.SongId ?? $"{track.Title}\n{track.Artist}\n{track.Album}";
+                        string key = coverSong + "|" + string.Join("|", coverUrls);
                         bool bytesChanged = native.Cover is { } bytes && (cache.CoverBytes is null || !bytes.AsSpan().SequenceEqual(cache.CoverBytes));
                         if (cache.CoverKey != key || bytesChanged)
                         {
                             cache.CoverCancellation?.Cancel(); cache.CoverKey = key; cache.CoverBytes = native.Cover; cache.CoverFailed = false;
-                            var shown = cache.Cover ?? cache.Previous;
-                            cache.Cover = DecodeCover(native.Cover ?? RecentCover(coverUrls));
-                            cache.Previous = null;
-                            if (cache.Cover is null && coverUrls.Length > 0) { cache.Previous = shown; _ = ReadCoverAsync(cache, key, coverUrls); }
+                            // Another address for the same song (the player's resource URL, then the album's, or a detail that
+                            // arrived later) is the same picture: downloading it again would make the cover arrive a beat late.
+                            // A song change, or a failed earlier read, starts the download as before.
+                            if (bytesChanged || cache.CoverSong != coverSong || cache.Cover is null)
+                            {
+                                var shown = cache.Cover ?? cache.Previous;
+                                cache.Cover = DecodeCover(native.Cover ?? RecentCover(coverUrls));
+                                cache.Previous = null;
+                                if (cache.Cover is null && coverUrls.Length > 0) { cache.Previous = shown; _ = ReadCoverAsync(cache, key, coverUrls); }
+                            }
+                            cache.CoverSong = coverSong;
                         }
                         // The details are asked for only when the player left something out: the artist, the album, or artwork it
                         // gave no picture or working address for. They are fetched once in the background and schedule a refresh.
                         if (neteaseId is not null && details is null && (string.IsNullOrWhiteSpace(track.Artist) || string.IsNullOrWhiteSpace(track.Album)
                             || native.Cover is null && (coverUrls.Length == 0 || cache.CoverFailed)))
                             _ = FetchDetailsAsync(neteaseId, track.SongId);
-                        // The log's cover is the full-size album picture, so it is used once the log has reached the session's song.
-                        // Until then the session's thumbnail stands in; neither borrows another player's artwork.
-                        if (leading is not null)
-                            artwork = MediaRouting.LogMatchesSession(log, leading) && cache.Cover is { } logCover ? logCover : route.System!.Cover ?? cache.Cover ?? cache.Previous;
+                        // Artwork is only ever taken from the song on screen. The log's cover is the full-size album picture, used
+                        // once the log has reached the session's song; while the session leads with another song, only its own
+                        // thumbnail is used, and the previous song's cover is never shown in its place.
+                        if (leading is not null && sessionLeads)
+                            artwork = MediaRouting.LogMatchesSession(log, leading) && cache.Cover is { } logCover ? logCover : route.System!.Cover;
                         else artwork = native.IsNeteaseLog && native.Title.Length == 0 ? route.System?.Cover : cache.Cover ?? cache.Previous;
                     }
                     else
