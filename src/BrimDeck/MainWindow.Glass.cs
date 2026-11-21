@@ -139,7 +139,20 @@ public partial class MainWindow
         QueueGlass();
     }
 
-    private void GlassLayout(object? sender, EventArgs e) => QueueGlass();
+    // A layout pass asks for the glass again only when it changed what the glass is placed or shaped by: the island's size and
+    // corners, its place and scale in the window, what is shown of it. Other layout passes (the content's own) leave the glass as it is.
+    private readonly record struct GlassLayoutKey(Size Size, Point Origin, Point Far, double Dpi, bool Shown, double Opacity, bool Expanded, WindowState State, CornerRadius Corners);
+    private GlassLayoutKey? _glassLayoutKey;
+    private void GlassLayout(object? sender, EventArgs e)
+    {
+        var key = new GlassLayoutKey(Island.RenderSize, default, default, VisualTreeHelper.GetDpi(Island).PixelsPerDip,
+            IsVisible && Island.IsVisible && HoverZone.IsVisible, HoverZone.Opacity * Island.MaterialOpacity, _expanded, WindowState, Island.CornerRadius);
+        if (Island.IsVisible && Island.RenderSize is { Width: > 0, Height: > 0 } size && Island.TransformToAncestor(this) is { } toWindow)
+            key = key with { Origin = toWindow.Transform(new Point()), Far = toWindow.Transform(new Point(size.Width, size.Height)) };
+        if (_glassActive && key == _glassLayoutKey) return;
+        _glassLayoutKey = key;
+        QueueGlass();
+    }
     private void GlassLocation(object? sender, EventArgs e)
     {
         _glassGeneration++;
@@ -147,9 +160,10 @@ public partial class MainWindow
         QueueGlass();
     }
     private void GlassForeground() => GlassBurst();
-    private double GlassOpenness()
+    private double GlassOpenness() => GlassOpenness(Island.ActualHeight);
+    private double GlassOpenness(double height)
     {
-        double compact = Collapsed.Surface.Height, height = Island.ActualHeight;
+        double compact = Collapsed.Surface.Height;
         return _glassOpenHeight > compact + 1 && double.IsFinite(height)
             ? Math.Clamp((height - compact) / (_glassOpenHeight - compact), 0, 1) : _expanded ? 1 : 0;
     }
@@ -660,14 +674,18 @@ public partial class MainWindow
     }
 
     // The optical edge (GlassEdge) for the light's direction, the opening and the palette shown now. The edge's brushes are moved
-    // in place, so this runs on any frame without a new brush; the island draws anew only when the rings change (a new width).
+    // in place, so this runs on any frame without a new brush; the island draws anew only when the rings change. The island
+    // shapes the edge for its own height as it draws (GlassEdge.Fit), so an opening's frame already has its rings here and is
+    // not drawn twice.
     private void ApplyGlassOptics()
     {
         if (!_glassActive) return;
-        double openness = GlassOpenness();
-        double strength = Math.Min(1, GlassMaterial.RimStrength(Settings.GlassTransparency, openness));
-        var (peak, baseline) = GlassBoundaryMath.Light(_glassPalette.Evaluate(Environment.TickCount64).Position);
-        var edge = _glassEdge ??= new GlassEdge();
+        if (_glassEdge is null)
+        {
+            var created = _glassEdge = new GlassEdge();
+            created.Fit = height => { if (_glassActive) ShapeGlassEdge(created, height); };
+        }
+        var edge = _glassEdge;
         var stops = Look.Current.Effects.RimGradient;
         if (!ReferenceEquals(_glassEdgeStops, stops))
         {
@@ -676,9 +694,19 @@ public partial class MainWindow
         }
         var (start, end) = GlassLight.Gradient(_glassLight);
         edge.Light(start, end);
-        bool rings = edge.Shape(GlassBoundaryMath.BevelWidth(openness), 1 / VisualTreeHelper.GetDpi(Island).PixelsPerDip, peak, baseline, strength);
+        bool rings = ShapeGlassEdge(edge, Island.ActualHeight);
         if (!ReferenceEquals(Island.Edge, edge)) Island.Edge = edge;
         else if (rings) Island.InvalidateVisual();
+    }
+
+    // The edge's rings and strengths for the island at this height (the opening it shows) and the palette now; true when the
+    // rings changed.
+    private bool ShapeGlassEdge(GlassEdge edge, double height)
+    {
+        double openness = GlassOpenness(height);
+        double strength = Math.Min(1, GlassMaterial.RimStrength(Settings.GlassTransparency, openness));
+        var (peak, baseline) = GlassBoundaryMath.Light(_glassPalette.Evaluate(Environment.TickCount64).Position);
+        return edge.Shape(GlassBoundaryMath.BevelWidth(openness), 1 / VisualTreeHelper.GetDpi(Island).PixelsPerDip, peak, baseline, strength);
     }
 
     // The light turns toward the latest reading's direction on the display's frames (GlassLight.Follow by the time passed), and the
@@ -744,6 +772,7 @@ public partial class MainWindow
         _glassLastMiddle = double.NaN;
         _glassGeneration++;
         _glassLight = _glassLightTarget = GlassLight.Default;
+        _glassLayoutKey = null;
         GlassOpticsNeeded();
         Island.Edge = null;
         ApplySurface();
