@@ -120,6 +120,7 @@ try
     ConfigBackupTests.Run(root, Check);
     MemoryModeTests.Run(Check);
     OffPeakTests.Run(root, Check);
+    UsageTrendTests.Run(Check);
     FullscreenRuleTests.Run(Check);
     IndicatorCapsuleTests.Run(Check);
     LanguageTests.Run(root, Check);

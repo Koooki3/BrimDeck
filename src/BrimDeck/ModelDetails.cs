@@ -19,6 +19,8 @@ public partial class MainWindow
     private Window? _detailPopup;
     // Set while a pop-up is closed without its fade (ShowModelDetails).
     private bool _popupAtOnce;
+    // Model-details usage trend: Cost when true, Tokens when false (session only).
+    private bool _trendCost;
     internal UsageDateRange ModelRange => _customRange ?? UsageDateRange.Recent(_days, DateTime.Today);
 
     private Button DetailLink(UIElement content, string name, Action click)
@@ -454,7 +456,15 @@ public partial class MainWindow
             return (row, cells);
         }
         panel.Children.Add(new Border { Child = Row(Loc.T("应用", "App"), Loc.T("模型", "Model"), headings, true, false).Row, BorderBrush = UI.Brush(Look.Hairline), BorderThickness = new Thickness(0, 0, 0, 1) });
+        // Chart sits in the scroll content so the model rows stay reachable; pinning it above the table left no room to scroll.
+        // RowsInView only lays out children with an explicit Height.
         var list = new RowsInView();
+        if (!tiny)
+        {
+            var chart = ModelTrendChart(result.Entries, ModelRange);
+            chart.Height = 128;
+            list.Children.Add(chart);
+        }
         for (int i = 0; i < result.Rows.Count; i++)
         {
             var record = result.Rows[i];
@@ -499,6 +509,42 @@ public partial class MainWindow
         for (int column = 0; column < totalCells.Length; column++) totalCells[column].ToolTip = column >= 2 ? totalTips[column - 2] : totalTip;
         if (restored.Count > 0) totalRow.Opacity = UsageLastSeen.Dimmed;
         var footer = new Border { Child = totalRow, BorderBrush = UI.Brush(Look.Outline), BorderThickness = new Thickness(0, 1, 0, 0) };
-        Grid.SetRow(footer, 2); panel.Children.Add(footer); UsageContent.Children.Add(panel);
+        Grid.SetRow(footer, 2); panel.Children.Add(footer);
+        UsageContent.Children.Add(panel);
+    }
+
+    private FrameworkElement ModelTrendChart(IReadOnlyList<TokenEntry> entries, UsageDateRange range)
+    {
+        var days = UsageTrend.Days(entries, range, list => _app.Prices.Summarize(list).Amount);
+        long peakTokens = 0; decimal peakCost = 0;
+        foreach (var day in days) { if (day.Tokens > peakTokens) peakTokens = day.Tokens; if (day.Cost > peakCost) peakCost = day.Cost; }
+        // Peak figure changes with the toggle so Tokens vs Cost is obvious even when daily shapes look alike.
+        string peak = _trendCost
+            ? Loc.T($"峰值 {UI.Amount(new CostSummary(peakCost, peakCost > 0 ? 1 : 0, 0, 0))}", $"Peak {UI.Amount(new CostSummary(peakCost, peakCost > 0 ? 1 : 0, 0, 0))}")
+            : Loc.T($"峰值 {UI.Number(peakTokens)}", $"Peak {UI.Number(peakTokens)}");
+        var head = new Grid { Margin = new Thickness(0, 2, 0, 4) };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition());
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var title = UI.Centered(Loc.T("用量趋势", "Usage trend"), 11, Look.Tertiary);
+        title.VerticalAlignment = VerticalAlignment.Center; head.Children.Add(title);
+        var scale = UI.Centered(peak, 11, Look.Secondary);
+        scale.HorizontalAlignment = HorizontalAlignment.Left; scale.VerticalAlignment = VerticalAlignment.Center;
+        scale.Margin = new Thickness(10, 0, 8, 0); Grid.SetColumn(scale, 1); head.Children.Add(scale);
+        var toggle = Segmented(
+        [
+            new(Loc.T("Token", "Tokens"), Loc.T("按 Token", "By tokens"), !_trendCost, () => { _trendCost = false; _usageHandover = Handover.Dissolve; RenderUsage(); }),
+            new(Loc.T("费用", "Cost"), Loc.T("按费用", "By cost"), _trendCost, () => { _trendCost = true; _usageHandover = Handover.Dissolve; RenderUsage(); }),
+        ], 11, 20, 8, centerText: true, glide: "trend");
+        Grid.SetColumn(toggle, 2); head.Children.Add(toggle);
+        var graph = new UsageTrendGraph();
+        string color = _modelApps.Count == 1
+            ? Settings.EnabledApps.FirstOrDefault(app => app.UsageSource == _modelApps.Single()) is { } app ? Look.AppTheme(app) : Look.DefaultAppColor(_modelApps.Single())
+            : Look.Primary;
+        graph.Set(days, _trendCost, color);
+        var block = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+        block.Children.Add(head);
+        block.Children.Add(graph);
+        return block;
     }
 }
