@@ -32,6 +32,7 @@ public static class SettingsMigrations
         foreach (var (version, apply) in Steps)
             if (version > saved && version <= running) { apply(root); foreach (var values in profiles) apply(values); }
         MemoryModeFromSwitch(root);
+        RetiredWindowBehaviors.PeekToLine(root); foreach (var values in profiles) RetiredWindowBehaviors.PeekToLine(values);
         var settings = root.Deserialize<DeckSettings>() ?? new();
         settings.Normalize();
         return settings;

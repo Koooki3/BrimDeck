@@ -160,6 +160,7 @@ try
     MemoryModeTests.Run(Check);
     OffPeakTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);
+    RetiredPeekRuleTests.Run(Check);
     LanguageTests.Run(root, Check);
     FontTests.Run(root, Check);
     ExpandStillTests.Run(Check);
