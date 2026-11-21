@@ -4,7 +4,7 @@ The "Clipboard and file transfer" page of the open panel has two columns: the cl
 
 Under Settings › Page layout › Show the page can show only the clipboard or only the file transfer, which then fills the page. While only the clipboard shows, files dragged onto the panel are not added to the file transfer, and the collapsed view does not show their number. The arrangements below apply only while both columns show.
 
-Drag the divider between the columns to change their widths; double-click it to go back to 60% for the clipboard and 40% for the file transfer. Under Settings › Page layout the columns can also be stacked as two cards, the one behind showing only a side strip with its icon, name and number of entries. Click that strip, the title of the card in front, or the page's button once more to switch cards. Three more ways of switching can be turned on under Settings › Page layout: hovering the pointer over the strip, a middle click (on by default), and a two-finger sideways swipe or Shift + wheel.
+Drag the divider between the columns to change their widths; double-click it to go back to 60% for the clipboard and 40% for the file transfer. Under Settings › Page layout the columns can also be stacked as two cards, the one behind showing only a side strip with its icon, name and number of entries. Click that strip, the title of the card in front, or the page's button once more to switch cards. Three more ways of switching can be turned on under Settings › Page layout: turning the wheel over the strip (either way switches), a middle click (on by default), and a two-finger sideways swipe on a touchpad (on by default, either way switches).
 
 Each column can show its entries in several ways, chosen for each under Settings › Page layout and combined freely. By default the clipboard shows one line an entry and the file transfer two:
 
@@ -18,7 +18,7 @@ In the grid, the row, the column and on two lines, picture files show a thumbnai
 BrimDeck keeps the text and pictures you copy, newest first.
 
 - **Display**: text shows its first line, with the number of further lines at the end; a link shows its domain and path in two colors, code in a monospaced font, a color value with a swatch, and a picture as a thumbnail with its size.
-- **Click**: pastes the entry into the window you are working in.
+- **Click**: pastes the entry into the window you are working in. With "Click copies only" on under Settings › Clipboard, a click only copies the entry, which moves to the top, and you paste it yourself.
 - **Right-click**: Paste, Paste as plain text, Copy only, Details, Edit (text), Add to category, Add to favorites, Delete.
 - **Details**: the whole panel shows the entry in full, with the app it came from, the time, and its length or size; a link can be opened in the browser.
 - **Drag out**: drag the entry into another app.

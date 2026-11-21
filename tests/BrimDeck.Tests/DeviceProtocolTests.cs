@@ -40,9 +40,9 @@ static class DeviceProtocolTests
         check("HID++: an event (software id 0) is not a reply", Hidpp.Match([0x11, 1, 0x08, 0x00, 50, 0, 0], 1, 0x08, 0) == (null, null));
         check("HID++: receivers hold six devices, a cable one", Hidpp.Indices(Hidpp.IsReceiver(0xC52B, "USB Receiver")).Count == 6 && Hidpp.Indices(Hidpp.IsReceiver(0xC08B, "G502 HERO")).SequenceEqual(new byte[] { 0xFF })
             && Hidpp.IsReceiver(0xC548, "") && Hidpp.IsReceiver(0x1234, "LIGHTSPEED Receiver"));
-        check("HID++: 0x1004 with a state of charge, charging", Hidpp.Unified([55, 4, 1, 0], [0x0F, 0x03]) == new BatteryRead(55, true, false));
-        check("HID++: 0x1004 without one maps its steps", Hidpp.Unified([0, 2, 0, 0], [0x0F, 0x01]) == new BatteryRead(20, false, true)
-            && Hidpp.Unified([0, 8, 3, 0], [0x0F, 0x01]) == new BatteryRead(100, true, true));
+        check("HID++: 0x1004 with a state of charge, charging", Hidpp.Unified([55, 4, 1, 0], [0x0F, 0x03]) == new BatteryRead(55, true));
+        check("HID++: 0x1004 without one maps its steps", Hidpp.Unified([0, 2, 0, 0], [0x0F, 0x01]) == new BatteryRead(20, false, BatteryAccuracy.Steps)
+            && Hidpp.Unified([0, 8, 3, 0], [0x0F, 0x01]) == new BatteryRead(100, true, BatteryAccuracy.Steps));
         check("HID++: 0x1000 level and status", Hidpp.Status([70, 50, 0]) == new BatteryRead(70) && Hidpp.Status([90, 50, 1]).Charging && Hidpp.Status([0, 0, 3]).Percent == 100
             && Hidpp.Status([0, 0, 0]).Percent is null);
         // The events as a G502 X LIGHTSPEED on a C547 receiver sent them, the cable put in and pulled out (slot 1, 0x1004 at index 6).
@@ -61,12 +61,12 @@ static class DeviceProtocolTests
         check("Battery Level Status: the charge state, else wired power",
             BatteryService.Charging([0x00, 0x20, 0x00]) == true && BatteryService.Charging([0x00, 0x40, 0x00]) == false && BatteryService.Charging([0x00, 0x60, 0x00]) == false
             && BatteryService.Charging([0x00, 0x02, 0x00]) == true && BatteryService.Charging([0x00, 0x00, 0x00]) is null && BatteryService.Charging([0x00]) is null);
-        check("HID++: 0x1001 millivolts big endian on the curve", Hidpp.Voltage([0x0F, 0x50, 0x00]) is { Percent: 70, Charging: false, Coarse: true } && Hidpp.Voltage([0x10, 0x5A, 0x80]) is { Percent: 100, Charging: true });
+        check("HID++: 0x1001 millivolts big endian on the curve", Hidpp.Voltage([0x0F, 0x50, 0x00]) is { Percent: 70, Charging: false, Accuracy: BatteryAccuracy.Voltage } && Hidpp.Voltage([0x10, 0x5A, 0x80]) is { Percent: 100, Charging: true });
         check("HID++: the voltage curve's ends and a point between", Hidpp.VoltageToPercent(4300) == 100 && Hidpp.VoltageToPercent(3400) == 0 && Hidpp.VoltageToPercent(3811) == 50);
-        check("HID++: 0x1F20 headsets, full and charging by bit", Hidpp.Adc([0x0F, 0xA0, 0x07]) is { Percent: 100, Charging: true } && Hidpp.Adc([0x0F, 0xA0, 0x01]) is { Charging: false, Coarse: true }
+        check("HID++: 0x1F20 headsets, full and charging by bit", Hidpp.Adc([0x0F, 0xA0, 0x07]) is { Percent: 100, Charging: true } && Hidpp.Adc([0x0F, 0xA0, 0x01]) is { Charging: false, Accuracy: BatteryAccuracy.Voltage }
             && Hidpp.Adc([0x0F, 0x50, 0x03]) is { Percent: 70, Charging: true });
         check("HID++: 0x1F20 without a valid measurement (the headset off) is no reading, not 0 %", Hidpp.Adc([0, 0, 0]) is null && Hidpp.Adc([0x0F, 0xA0, 0x02]) is null);
-        check("HID++ 1.0: register 0x0D and 0x07", Hidpp.Mileage([80, 0, 0x40]) == new BatteryRead(80, true) && Hidpp.Level([5, 0x00]) is { Percent: 50, Coarse: true } && Hidpp.Level([3, 0x22]).Percent == 100
+        check("HID++ 1.0: register 0x0D and 0x07", Hidpp.Mileage([80, 0, 0x40]) == new BatteryRead(80, true) && Hidpp.Level([5, 0x00]) is { Percent: 50, Accuracy: BatteryAccuracy.Steps } && Hidpp.Level([3, 0x22]).Percent == 100
             && Hidpp.RegisterRequest(2, 0x0D).SequenceEqual(new byte[] { 0x10, 2, 0x81, 0x0D, 0, 0, 0 }));
         check("HID++: device types", Hidpp.Kind(0) == DeviceKind.Keyboard && Hidpp.Kind(3) == DeviceKind.Mouse && Hidpp.Kind(5) == DeviceKind.Mouse && Hidpp.Kind(8) == DeviceKind.Headphones && Hidpp.Kind(7) == DeviceKind.Other);
     }
@@ -297,7 +297,7 @@ static class DeviceProtocolTests
         var chakram = Asus.Find(0x0B05, 0x18E5)!;
         var steps = (byte[])reply.Clone(); steps[5] = 3; steps[10] = 0;
         var carry = (byte[])reply.Clone(); carry[5] = 0; carry[7] = 2; carry[10] = 0;
-        check("ASUS: the older mice count four steps (the Strix Carry at 7)", Asus.Reply(chakram, steps) is BatteryRead { Percent: 75, Coarse: true }
+        check("ASUS: the older mice count four steps (the Strix Carry at 7)", Asus.Reply(chakram, steps) is BatteryRead { Percent: 75, Accuracy: BatteryAccuracy.Steps }
             && Asus.Reply(Asus.Find(0x0B05, 0x18B4)!, carry) is BatteryRead { Percent: 50 } && Asus.Reply(chakram, reply) == Asus.Refused);
         var unknown = new byte[65]; unknown[1] = 0xFF; unknown[2] = 0xAA;
         var other = (byte[])reply.Clone(); other[2] = 0x04;
@@ -322,8 +322,8 @@ static class DeviceProtocolTests
         var aerox = SteelSeriesMice.Find(0x1038, 0x1838)!;
         check("SteelSeries Aerox: 00 D2 through the receiver, 00 92 on the cable", SteelSeriesMice.Request(aerox).SequenceEqual(new byte[] { 0x00, 0xD2 })
             && SteelSeriesMice.Request(SteelSeriesMice.Find(0x1038, 0x183A)!).SequenceEqual(new byte[] { 0x00, 0x92 }));
-        check("SteelSeries Aerox: steps of five, a percent above 21, charging in bit 7, 0 asleep", SteelSeriesMice.Battery(aerox, [0x00, 0xD2, 0x10]) == new BatteryRead(75, Coarse: true)
-            && SteelSeriesMice.Battery(aerox, [0xD2, 0x95]) == new BatteryRead(100, true, true) && SteelSeriesMice.Battery(aerox, [0x00, 0xD2, 0xC5]) == new BatteryRead(69, true)
+        check("SteelSeries Aerox: steps of five, a percent above 21, charging in bit 7, 0 asleep", SteelSeriesMice.Battery(aerox, [0x00, 0xD2, 0x10]) == new BatteryRead(75, Accuracy: BatteryAccuracy.Steps)
+            && SteelSeriesMice.Battery(aerox, [0xD2, 0x95]) == new BatteryRead(100, true, BatteryAccuracy.Steps) && SteelSeriesMice.Battery(aerox, [0x00, 0xD2, 0xC5]) == new BatteryRead(69, true)
             && SteelSeriesMice.Battery(aerox, [0x00, 0xD2, 0x00]) == new BatteryRead(null, Asleep: true) && SteelSeriesMice.Battery(aerox, [0x00, 0x92, 0x10]) is null);
         var rival = SteelSeriesMice.Find(0x1038, 0x1830)!;
         check("SteelSeries Rival 3 Wireless: either layout, the charging byte 0 or 1", SteelSeriesMice.Request(rival).SequenceEqual(new byte[] { 0x00, 0xAA, 0x01 })
@@ -338,8 +338,22 @@ static class DeviceProtocolTests
     private static void Pushed(Action<string, bool> check)
     {
         check("Beken: misaka310's X1 sample (90 %), the X6 in tenths, charging on its dock", Pushes.Battery(Pushes.Kind.Beken, Bytes("03 B1 40 01 5A")) == new BatteryRead(90)
-            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 85 40 01 05")) == new BatteryRead(50, Coarse: true) && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 55 40 03 40")) == new BatteryRead(64, true)
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 85 40 01 05")) == new BatteryRead(50, Accuracy: BatteryAccuracy.Steps) && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 55 40 03 40")) == new BatteryRead(64, true)
             && Pushes.Battery(Pushes.Kind.Beken, Bytes("01 00 00 00 00")) is null && Pushes.Name(Pushes.Kind.Beken, Bytes("03 B1 40 01 5A")) == "ATTACK SHARK X1");
+        check("Beken: the X3 / R1 (0x10) in tenths (measured: 03 10 40 01 09 is 90 % in the X3's own driver), an X6 level above 10 taken as it is",
+            Pushes.Battery(Pushes.Kind.Beken, Bytes("03 10 40 01 09")) == new BatteryRead(90, Accuracy: BatteryAccuracy.Steps)
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 10 40 03 0A")) == new BatteryRead(100, true, BatteryAccuracy.Steps)
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 85 40 01 32")) == new BatteryRead(50)
+            && Pushes.Name(Pushes.Kind.Beken, Bytes("03 10 40 01 09")) == "ATTACK SHARK X3 / R1");
+        check("Beken: the V6's 41 frame, the X3 Max and V3 Pro in percent, the vendor table's names, another event is none",
+            Pushes.Battery(Pushes.Kind.Beken, Bytes("03 24 41 01 64")) == new BatteryRead(100) && Pushes.Name(Pushes.Kind.Beken, Bytes("03 24 41 01 64")) == "ATTACK SHARK V6"
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 4E 40 01 1E")) == new BatteryRead(30) && Pushes.Name(Pushes.Kind.Beken, Bytes("03 4E 40 01 1E")) == "ATTACK SHARK X3 Max"
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 E5 40 03 22")) == new BatteryRead(34, true)
+            && Pushes.Name(Pushes.Kind.Beken, Bytes("03 42 40 01 50")) == "Inphic IN9" && Pushes.Name(Pushes.Kind.Beken, Bytes("03 FF 40 01 50")) == "ATTACK SHARK"
+            && Pushes.Battery(Pushes.Kind.Beken, Bytes("03 10 42 01 09")) is null);
+        check("Compx: Attack Shark's pairs named by the brand when the receiver gives no product string",
+            Dongles.CompxName(0x3554, 0xFB44) == "ATTACK SHARK R11 Ultra" && Dongles.CompxName(0x3554, 0xFB43) == "ATTACK SHARK R11 Ultra"
+            && Dongles.CompxName(0x3554, 0xF516) == "ATTACK SHARK" && Dongles.CompxName(0x3554, 0xF508) == "Compx");
         check("DELUX M900 Pro and Inphic ZHEN: one receiver id, told apart by the collection", Pushes.Battery(Pushes.Kind.Delux, Bytes("03 30 40 01 59")) == new BatteryRead(89)
             && Pushes.Battery(Pushes.Kind.Delux, Bytes("03 30 40 03 59")) == new BatteryRead(89, true) && Pushes.Battery(Pushes.Kind.InphicZhen, Bytes("03 76 41 01 55")) == new BatteryRead(85)
             && Pushes.Battery(Pushes.Kind.InphicZhen, Bytes("03 76 41 03 54")) == new BatteryRead(84, true)
@@ -368,9 +382,9 @@ static class DeviceProtocolTests
             && Pushes.Apply(Pushes.Kind.Jbl, new BatteryRead(30), [0x09, 0x00]) == new BatteryRead(30, Asleep: true) && Pushes.Apply(Pushes.Kind.Jbl, new BatteryRead(30, Asleep: true), [0x09, 0x01]) == new BatteryRead(30)
             && Pushes.Apply(Pushes.Kind.Jbl, null, [0x09, 0x01]) is null && Pushes.Apply(Pushes.Kind.Jbl, null, [0x2F, 0x01]) is null
             && Pushes.Find(0x0ECB, 0x2088, 0xFF13, 0x0001, 5, 64) == Pushes.Kind.Jbl && Pushes.Find(0x0ECB, 0x2088, 0x000C, 0x0001, 5, 64) is null);
-        check("PULSE 3D: steps of ten, charging without a level, disconnected asleep", Pushes.Apply(Pushes.Kind.Pulse3D, null, Bytes("B0 00 00 50 08 00 00 00")) == new BatteryRead(80, Coarse: true)
-            && Pushes.Apply(Pushes.Kind.Pulse3D, new BatteryRead(80, Coarse: true), Bytes("B0 00 00 80 08 00 00 00")) == new BatteryRead(80, true, true)
-            && Pushes.Apply(Pushes.Kind.Pulse3D, new BatteryRead(80, Coarse: true), Bytes("B0 00 00 50 00 00 00 00")) == new BatteryRead(80, Coarse: true, Asleep: true)
+        check("PULSE 3D: steps of ten, charging without a level, disconnected asleep", Pushes.Apply(Pushes.Kind.Pulse3D, null, Bytes("B0 00 00 50 08 00 00 00")) == new BatteryRead(80, Accuracy: BatteryAccuracy.Steps)
+            && Pushes.Apply(Pushes.Kind.Pulse3D, new BatteryRead(80, Accuracy: BatteryAccuracy.Steps), Bytes("B0 00 00 80 08 00 00 00")) == new BatteryRead(80, true, BatteryAccuracy.Steps)
+            && Pushes.Apply(Pushes.Kind.Pulse3D, new BatteryRead(80, Accuracy: BatteryAccuracy.Steps), Bytes("B0 00 00 50 00 00 00 00")) == new BatteryRead(80, Accuracy: BatteryAccuracy.Steps, Asleep: true)
             && Pushes.Apply(Pushes.Kind.Pulse3D, null, Bytes("01 00 00 50 08")) is null && Pushes.Find(0x054C, 0x0D5E, 0xFF01, 0x0020, 3, 8) == Pushes.Kind.Pulse3D
             && Pushes.Source(Pushes.Kind.Pulse3D) == DeviceSource.Sony);
         check("Cloud Flight 2: the level at each step, charging only from FB 09, off and on from FB 0A (vigil-watt's samples)",
@@ -414,7 +428,7 @@ static class DeviceProtocolTests
     private static void RapooFirst(Action<string, bool> check)
     {
         var request = Dongles.RapooGen1Request(cable: false);
-        check("Rapoo first generation: the battery query, on the receiver and the cable", request.Length == 33 && request[..8].SequenceEqual(new byte[] { 0xBA, 0xA5, 0xAA, 0, 0, 0, 0, 0 })
+        check("Rapoo first generation: the battery query, on the receiver and the cable", request.SequenceEqual(new byte[] { 0xBA, 0xA5, 0xAA, 0, 0, 0, 0, 0 })
             && Dongles.RapooGen1Request(cable: true)[1] == 0xFF);
         check("Rapoo first generation: busy, the answer, and a stale block answer", Dongles.RapooGen1Status(Bytes("BA 02 00 00")) == false && Dongles.RapooGen1Status(Bytes("01 02 37")) == true
             && Dongles.RapooGen1Battery(Bytes("BA 01 02 37 00")) == new BatteryRead(55, true) && Dongles.RapooGen1Battery(Bytes("01 01 4B")) == new BatteryRead(75)
@@ -422,6 +436,19 @@ static class DeviceProtocolTests
         check("Rapoo first generation: only its receiver and cable, on a vendor collection with the 33-byte report",
             Dongles.Find(0x24AE, 0x1231, 0xFF00, "", 0, 1, 1, 33, 33) == Dongles.Protocol.RapooGen1 && Dongles.Find(0x24AE, 0x1231, 0x0001, "", 0, 0, 2, 8, 0) is null
             && Dongles.Find(0x24AE, 0x1412, 0xFF00, "", 0, 1, 2, 19, 33) is null);
+        var ba = new HashSet<byte> { 0xBA };
+        check("Rapoo's other receivers: any product's vendor collection declaring output report 0xBA, as on the measured 1870",
+            Dongles.Find(0x24AE, 0x1870, 0xFF00, "", 0, 1, 0x0E, 32, 32, 3, ba) == Dongles.Protocol.RapooQuery
+            && Dongles.Find(0x24AE, 0x1876, 0x00FF, "", 0, 1, 0x0E, 32, 32, -1, null) == Dongles.Protocol.RapooQuery
+            && Dongles.Find(0x24AE, 0x1999, 0xFF00, "", 0, 1, 0x05, 64, 64, -1, ba) == Dongles.Protocol.RapooQuery);
+        check("Rapoo's other receivers: not another report id, a standard page, a short report, the first generation or a listened product",
+            Dongles.Find(0x24AE, 0x1870, 0xFF00, "", 0, 1, 0x02, 7, 7, 4, new HashSet<byte> { 0x07 }) is null
+            && Dongles.Find(0x24AE, 0x1870, 0xFF01, "", 29, 2, 0x00, 29, 29, -1, null) is null
+            && Dongles.Find(0x24AE, 0x1870, 0x0001, "", 0, 1, 0x06, 9, 2, 0, ba) is null
+            && Dongles.Find(0x24AE, 0x1870, 0xFF00, "", 0, 1, 0x0E, 4, 4, 3, ba) is null
+            && Dongles.Find(0x24AE, 0x1231, 0xFF00, "", 0, 1, 0x0E, 32, 32, -1, ba) is null
+            && Dongles.Find(0x24AE, 0x14A5, 0xFF00, "", 0, 1, 0x0E, 33, 33, -1, ba) is null
+            && Dongles.Find(0x24AF, 0x1870, 0xFF00, "", 0, 1, 0x0E, 32, 32, 3, ba) is null);
     }
 
     private static void DongleFrames(Action<string, bool> check)
@@ -458,7 +485,7 @@ static class DeviceProtocolTests
         var endgame = new byte[32]; endgame[0] = 0xA1; endgame[1] = 0x01; endgame[16] = 77;
         check("Endgame Gear: the request and a reply; a busy one is none", Dongles.EndgameRequest(32)[..2].SequenceEqual(new byte[] { 0xA1, 0xB4 }) && Dongles.EndgameBattery(endgame) == new BatteryRead(77)
             && Dongles.EndgameBattery([0xA1, 0x03, .. new byte[30]]) is null);
-        check("VAXEE: five points a step", Dongles.VaxeeRequest(8)[..5].SequenceEqual(new byte[] { 0x0E, 0xA5, 0x0B, 0x01, 0x01 }) && Dongles.VaxeeBattery([0x0E, 0, 0, 0, 0, 17]) == new BatteryRead(85, Coarse: true));
+        check("VAXEE: five points a step", Dongles.VaxeeRequest(8)[..5].SequenceEqual(new byte[] { 0x0E, 0xA5, 0x0B, 0x01, 0x01 }) && Dongles.VaxeeBattery([0x0E, 0, 0, 0, 0, 17]) == new BatteryRead(85, Accuracy: BatteryAccuracy.Steps));
         var nordic = new byte[32]; nordic[0] = 0x05; nordic[9] = 52; nordic[12] = 1;
         var nordicCharging = (byte[])nordic.Clone(); nordicCharging[10] = 1;
         var nordicOffline = (byte[])nordic.Clone(); nordicOffline[12] = 0;
@@ -468,9 +495,16 @@ static class DeviceProtocolTests
         check("Nordic receivers: only the Ninjutso Sora V2's, on its vendor collection", Dongles.Find(0x1915, 0xAE1C, 0xFFA0, "", 33) == Dongles.Protocol.Nordic
             && Dongles.Find(0x1915, 0xAE1C, 0x0001, "", 0) is null && Dongles.Find(0x1915, 0x7777, 0xFFA0, "", 33) is null);
         var inphic = new byte[33]; inphic[0] = 0x0C; inphic[2] = 0x20; inphic[6] = 1; inphic[0x12] = 66; inphic[0x13] = 2;
-        check("Inphic IN9: the handshake with its payload, the query, a reply", Dongles.InphicRequest(0xF0, 3, Dongles.InphicHandshake)[..9].SequenceEqual(new byte[] { 0x0C, 0x01, 0xF0, 0x00, 0x03, 0x01, 0x01, 0xFF, 0 })
-            && Dongles.InphicRequest(0x20, 3)[..6].SequenceEqual(new byte[] { 0x0C, 0x01, 0x20, 0x00, 0x03, 0 }) && Dongles.InphicRequest(0x20, 3).Length == 33
-            && Dongles.InphicBattery(inphic) == new BatteryRead(66, true));
+        static byte[] With(byte[] frame, int at, byte value) { var copy = (byte[])frame.Clone(); copy[at] = value; return copy; }
+        check("Inphic IN9 and Machenike's M7 Pro, M720, M840: the query, a reply charging (2, InphicBatteryTray-IN9) or charging and full (1 and 2, Machenike), on battery, and an empty one",
+            Dongles.InphicRequest(0x20, 3)[..6].SequenceEqual(new byte[] { 0x0C, 0x01, 0x20, 0x00, 0x03, 0 }) && Dongles.InphicRequest(0x20, 3).Length == 33
+            && Dongles.InphicRequest(0x20, 3)[5..].All(b => b == 0)
+            && Dongles.InphicBattery(inphic) == new BatteryRead(66, true) && Dongles.InphicBattery(With(inphic, 0x13, 1)) == new BatteryRead(66, true)
+            && Dongles.InphicBattery(With(inphic, 0x13, 0)) == new BatteryRead(66) && Dongles.InphicBattery(With(inphic, 0x13, 3)) == new BatteryRead(66)
+            && Dongles.InphicBattery(With(inphic, 6, 0)) is null && Dongles.InphicBattery(With(inphic, 0x12, 101)) is null);
+        check("Inphic: Machenike's mice on 248A:5B2E and 5B2F, read only on the 33-byte feature collection",
+            Dongles.Find(0x248A, 0x5B2E, 0xFF00, "", 33) == Dongles.Protocol.Inphic && Dongles.Find(0x248A, 0x5B2F, 0xFF00, "", 33) == Dongles.Protocol.Inphic
+            && Dongles.Find(0x248A, 0x5B2F, 0x0001, "", 0) is null);
         check("MCHOSE: the device info request with its checksum", Dongles.MchoseRequest()[..9].SequenceEqual(new byte[] { 0x4D, 0x01, 0x01, 0x00, 0x00, 0x09, 0x00, 0x00, 0x08 }));
         // mitsimi/mchose-tray's capture from a K7 V2 Ultra+ (3837:1014): 83 %, not charging, and that frame changed (its XOR
         // recomputed) for the other states.
@@ -552,16 +586,16 @@ static class DeviceProtocolTests
             Headsets.Battery(Headsets.Kind.Arctis7, [0x06, 0x18, 200]) is null && Headsets.Battery(Headsets.Kind.Arctis7, [0x01, 0, 0]) is null && Headsets.Battery(Headsets.Kind.Arctis9, [0x02, 0, 0, 0x10, 0]) is null
             && Headsets.Battery(Headsets.Kind.Nova7Steps, [0xB0, 0, 9, 3]) is null);
         check("Headsets: Nova 7 in percent and in steps, off is none", Headsets.Battery(Headsets.Kind.Nova7Percent, [0xB0, 0, 64, 3]) == new BatteryRead(64)
-            && Headsets.Battery(Headsets.Kind.Nova7Steps, [0xB0, 0, 3, 1]) == new BatteryRead(75, true, true) && Headsets.Battery(Headsets.Kind.Nova7Percent, [0xB0, 0, 64, 0]) is null);
+            && Headsets.Battery(Headsets.Kind.Nova7Steps, [0xB0, 0, 3, 1]) == new BatteryRead(75, true, BatteryAccuracy.Steps) && Headsets.Battery(Headsets.Kind.Nova7Percent, [0xB0, 0, 64, 0]) is null);
         var pro = new byte[16]; pro[0] = 0x06; pro[1] = 0xB0; pro[6] = 4; pro[15] = 0x02;
-        check("Headsets: Nova Pro in eighths", Headsets.Battery(Headsets.Kind.NovaPro, pro) == new BatteryRead(50, true, true));
+        check("Headsets: Nova Pro in eighths", Headsets.Battery(Headsets.Kind.NovaPro, pro) == new BatteryRead(50, true, BatteryAccuracy.Steps));
         check("Headsets: HyperX Cloud Alpha level and charging", Headsets.Battery(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x0B, 58]) == new BatteryRead(58)
             && Headsets.Charging(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x0C, 1]) == true && Headsets.Battery(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x0C, 1]) is null);
         check("Headsets: HyperX Cloud Alpha asked whether its headset is connected first", Headsets.ConnectionRequest(Headsets.Kind.CloudAlpha) is [0x21, 0xBB, 0x03, ..] and { Length: 31 }
             && Headsets.Connected(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x03, 0x01]) == false && Headsets.Connected(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x03, 0x02]) == true
             && Headsets.Connected(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x0B, 0x01]) is null && Headsets.ConnectionRequest(Headsets.Kind.CloudII) is null);
         check("Headsets: HyperX Cloud II", Headsets.Battery(Headsets.Kind.CloudII, [0x06, 0xFF, 0xBB, 0x02, 0, 0x0F, 0xA0, 81]) == new BatteryRead(81));
-        check("Headsets: HyperX Cloud Flight by voltage, on its cable", Headsets.Battery(Headsets.Kind.CloudFlight, [0x21, 0xFF, 0x05, 0x0E, 0xA0]) is { Coarse: true, Percent: 29 }
+        check("Headsets: HyperX Cloud Flight by voltage, on its cable", Headsets.Battery(Headsets.Kind.CloudFlight, [0x21, 0xFF, 0x05, 0x0E, 0xA0]) is { Accuracy: BatteryAccuracy.Voltage, Percent: 29 }
             && Headsets.Battery(Headsets.Kind.CloudFlight, [0x21, 0xFF, 0x05, 0x10, 0x40]) is { Charging: true, Percent: null });
         check("Headsets: HyperX Cloud III and II Core, the capture's 48 % and its charging state", Headsets.Find(0x03F0, 0x0995) == Headsets.Kind.CloudIII
             && Headsets.Request(Headsets.Kind.CloudIII) is [0x66, 0x89, ..] and { Length: 62 } && Headsets.Battery(Headsets.Kind.CloudIII, Bytes("66 89 0e d7 30 00")) == new BatteryRead(48)
@@ -619,7 +653,34 @@ static class DeviceProtocolTests
         // AirPods Max: one level (byte 6's low nibble, 7 = 70 %), charging, no parts.
         byte[] max = [0x07, 0x19, 0x01, 0x0A, 0x20, 0x2B, 0x07, 0x1F, 0, 0];
         check("AirPods Max and the one-piece Beats: one level, no left and right", AppleAdvert.Model(max) == "AirPods Max" && AppleAdvert.Parts(max) is { Count: 0 }
-            && AppleAdvert.Single(max) == new BatteryRead(70, true, true) && AppleAdvert.Single([0x07, 0x19, 0x01, 0x10, 0x20, 0x2B, 0x0F, 0x0F]) is null);
+            && AppleAdvert.Single(max) == new BatteryRead(70, true, BatteryAccuracy.Steps) && AppleAdvert.Single([0x07, 0x19, 0x01, 0x10, 0x20, 0x2B, 0x0F, 0x0F]) is null);
+        // AirPods 4 (0x1920) and its noise-cancelling model (0x1B20) are earbuds with a case; AirPods Max with USB-C (0x1F20)
+        // is one piece; Beats Fit Pro (0x1220) are earbuds of the Beats family.
+        byte[] four = [0x07, 0x19, 0x01, 0x19, 0x20, 0x2B, 0x86, 0x43, 0, 0], fourAnc = [0x07, 0x19, 0x01, 0x1B, 0x20, 0x2B, 0x86, 0x43, 0, 0];
+        check("AirPods 4: read as earbuds with a case", AppleAdvert.Model(four) == "AirPods 4" && AppleAdvert.Parts(four) is { Count: 3 } && AppleAdvert.Single(four) is null
+            && AppleAdvert.Model(fourAnc) == "AirPods 4" && AppleAdvert.Parts(fourAnc) is { Count: 3 });
+        byte[] maxUsbC = [0x07, 0x19, 0x01, 0x1F, 0x20, 0x2B, 0x07, 0x1F, 0, 0], fitPro = [0x07, 0x19, 0x01, 0x12, 0x20, 0x2B, 0x86, 0x43, 0, 0];
+        check("AirPods Max with USB-C: one level; Beats Fit Pro: earbuds", AppleAdvert.Model(maxUsbC) == "AirPods Max" && AppleAdvert.Single(maxUsbC) == new BatteryRead(70, true, BatteryAccuracy.Steps)
+            && AppleAdvert.Model(fitPro) == "Beats Fit Pro" && AppleAdvert.Parts(fitPro) is { Count: 3 });
+        // A model not in the table (a newer one): no name, its parts read as earbuds all the same.
+        byte[] unknown = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0x86, 0x43, 0, 0];
+        var unknownParts = AppleAdvert.Parts(unknown)!;
+        check("AirPods: a model not in the table is read as earbuds", AppleAdvert.Model(unknown) is null && AppleAdvert.Single(unknown) is null
+            && unknownParts.Count == 3 && unknownParts[0] == new PartBattery(BatteryPart.Left, 60, false) && unknownParts[2] == new PartBattery(BatteryPart.Case, 30, true));
+        // A model not in the table with one level and no case is taken for a one-piece model, whichever nibble holds the level;
+        // two levels without a case are still earbuds.
+        byte[] loneLow = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0xF7, 0x1F, 0, 0], loneHigh = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0x7F, 0x2F, 0, 0];
+        byte[] budsNoCase = [0x07, 0x19, 0x01, 0x99, 0x20, 0x2B, 0x86, 0x0F, 0, 0];
+        check("AirPods: an unknown model with one level and no case shows one level", AppleAdvert.Parts(loneLow) is { Count: 0 }
+            && AppleAdvert.Single(loneLow) == new BatteryRead(70, true, BatteryAccuracy.Steps)
+            && AppleAdvert.Parts(loneHigh) is { Count: 0 } && AppleAdvert.Single(loneHigh) == new BatteryRead(70, true, BatteryAccuracy.Steps)
+            && AppleAdvert.Single(budsNoCase) is null && AppleAdvert.Parts(budsNoCase) is { Count: 2 });
+        // The exact model takes the place of a plain Apple name of its line; a name the user gave, another line or no model keeps it.
+        check("AirPods: the exact model", AppleAdvert.Product(four) == "AirPods 4" && AppleAdvert.Product(advert) == "AirPods Pro 1"
+            && AppleAdvert.Product(maxUsbC) == "AirPods Max USB-C" && AppleAdvert.Product(fitPro) is null && AppleAdvert.Product(unknown) is null);
+        check("AirPods: a plain name shows the exact model, a given name stays", AppleAdvert.Shown("AirPods", "AirPods 4") == "AirPods 4"
+            && AppleAdvert.Shown(" airpods pro ", "AirPods Pro 2 USB-C") == "AirPods Pro 2 USB-C" && AppleAdvert.Shown("AirPods Pro", "AirPods 4") == "AirPods Pro"
+            && AppleAdvert.Shown("Koooki's AirPods", "AirPods 4") == "Koooki's AirPods" && AppleAdvert.Shown("AirPods", null) == "AirPods");
         check("AirPods: another advertisement is none", AppleAdvert.Parts([0x10, 0x05, 0, 0, 0, 0, 0, 0]) is null && AppleAdvert.Model([0x07, 0x19, 0x01, 0x99, 0x99]) is null);
     }
 }

@@ -103,6 +103,7 @@ public sealed partial class SettingsWindow
         var detail = new StackPanel { Margin = new Thickness(0, 0, 0, 12) }; Grid.SetIsSharedSizeScope(detail, true);
         Grid.SetRow(detail, 1); Grid.SetColumnSpan(detail, 9);
         if (SourceDetails(entry) is { } source) { source.Margin = new Thickness(0); detail.Children.Add(source); }
+        if (entry.UsageSource is ProviderId.Qoder or ProviderId.QoderCn) detail.Children.Add(QoderTokenDetails(entry.UsageSource));
         detail.Children.Add(RingDetails(entry));
         detail.Children.Add(OffPeakDetails(entry));
         bool open = _expandedSource == entry.InstanceId;
@@ -141,7 +142,6 @@ public sealed partial class SettingsWindow
     // Claude and Grok Bot need no site or key; the expanded row holds this row's own switch for reading the quota online.
     private FrameworkElement OnlineQuotaDetails(AppEntry entry)
     {
-        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
         bool grokBot = entry.QuotaSource == ProviderId.GrokBot;
         string title = Loc.T("联网获取额度", "Fetch quota online");
         string help = grokBot
@@ -149,6 +149,23 @@ public sealed partial class SettingsWindow
                 "On: fetches the weekly allowance online with the Grok Bot desktop app sign-in.\nOff: no network access; shows the latest weekly allowance the Grok Bot desktop app cached on this PC.")
             : Loc.T("开启：使用 Claude Code 或桌面版的登录，联网获取额度。\n关闭：不联网，只显示 Claude 桌面版在本机记录的最新额度。",
                 "On: fetches the quota online with the Claude Code or desktop app sign-in.\nOff: no network access; shows the latest quota the Claude desktop app recorded on this PC.");
+        return SwitchDetails(entry, title, help, grokBot ? "grokbot-online-" : "claude-online-", e => e.QuotaOnline, (e, on) => e.QuotaOnline = on);
+    }
+
+    // Antigravity: this row's switch for reading the quota from the Antigravity CLI while neither the app nor the IDE runs.
+    private FrameworkElement AntigravityCliDetails(AppEntry entry)
+    {
+        string title = Loc.T("通过 CLI 读取", "Read via CLI");
+        string help = Loc.T("开启：Antigravity 应用和 IDE 都未运行时，运行 agy -p /usage 读取额度。运行 agy 较耗资源，所以每 5 分钟最多运行一次。\n关闭：只从应用或 IDE 读取。",
+            "On: while neither the Antigravity app nor the IDE runs, reads the quota by running agy -p /usage. Running agy uses a lot of resources, so it runs at most every 5 minutes.\nOff: reads only from the app or IDE.");
+        return SwitchDetails(entry, title, help, "antigravity-cli-", e => e.AntigravityCli, (e, on) => e.AntigravityCli = on);
+    }
+
+    // One labeled switch of the row's own.
+    private FrameworkElement SwitchDetails(AppEntry entry, string title, string help, string automationPrefix,
+        Func<AppEntry, bool> read, Action<AppEntry, bool> write)
+    {
+        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
         var line = new Grid();
         // The label column is shared with the off-peak lines below, so the switch starts where their controls start.
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
@@ -157,14 +174,14 @@ public sealed partial class SettingsWindow
         var caption = TextLine(title, 12, TextSecondary);
         var heading = new HelpHeading(caption, SmallHelp(title, () => help)) { Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
         line.Children.Add(heading);
-        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.QuotaOnline, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = read(entry), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title); AutomationProperties.SetHelpText(toggle, help);
-        AutomationProperties.SetAutomationId(toggle, (grokBot ? "grokbot-online-" : "claude-online-") + entry.InstanceId.ToString("N"));
+        AutomationProperties.SetAutomationId(toggle, automationPrefix + entry.InstanceId.ToString("N"));
         Grid.SetColumn(toggle, 1); line.Children.Add(toggle);
-        void Set(bool online)
+        void Set(bool on)
         {
-            if (S.Entry(entry.InstanceId) is not { } current || current.QuotaOnline == online) return;
-            Change(s => s.Entry(entry.InstanceId)!.QuotaOnline = online);
+            if (S.Entry(entry.InstanceId) is not { } current || read(current) == on) return;
+            Change(s => write(s.Entry(entry.InstanceId)!, on));
         }
         toggle.Checked += (_, _) => Set(true); toggle.Unchecked += (_, _) => Set(false);
         line.Margin = new Thickness(0, 5, 0, 5);
@@ -232,12 +249,14 @@ public sealed partial class SettingsWindow
 
     // The expanded configuration starts under the quota source: a short label column, then fields that end midway
     // between the warning and critical colors. Labels share one width so every field starts at the same place.
-    // Built-in sources other than Claude and Grok Bot have no configuration of their own; their rows open on the off-peak time alone.
+    // Built-in sources without a switch, account or settings of their own open on the off-peak time alone.
     private FrameworkElement? SourceDetails(AppEntry entry)
     {
         if (ProviderCatalog.HasOnlineSwitch(entry.QuotaSource)) return OnlineQuotaDetails(entry);
+        if (entry.QuotaSource == ProviderId.Antigravity) return AntigravityCliDetails(entry);
         if (entry.QuotaSource == ProviderId.MiMo) return MiMoAccountDetails();
         if (entry.QuotaSource is ProviderId.WorkBuddy or ProviderId.WorkBuddyAi) return WorkBuddyDetails(entry);
+        if (entry.QuotaSource is ProviderId.Qianwen or ProviderId.QwenCloud) return QianwenDetails(entry);
         if (ProviderCatalog.IsBuiltIn(entry.QuotaSource)) return null;
         var grid = AppColumns();
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };

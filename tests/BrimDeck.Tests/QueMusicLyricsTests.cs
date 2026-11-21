@@ -87,14 +87,14 @@ internal static class QueMusicLyricsTests
                 && kugou.Query.Contains("hash=abcdef0123456789abcdef0123456789", StringComparison.Ordinal));
             WriteSettings(settings, ("002WCV372JMZJw", 3, "在线歌曲"));
             web.Uris.Clear(); await service.FindAsync(online with { Album = "QQ" }, true, CancellationToken.None);
-            check("A QQ Music song is looked up by its mid, without a title search",
-                web.Uris.Count > 0 && web.Uris.All(uri => uri.Host.EndsWith(".y.qq.com", StringComparison.Ordinal)
-                    && !uri.AbsolutePath.Contains("search", StringComparison.Ordinal)
+            var qq = web.Uris.Where(uri => uri.Host.EndsWith(".y.qq.com", StringComparison.Ordinal)).ToArray();
+            check("A QQ Music song is looked up by its mid, without a title search on QQ",
+                qq.Length > 0 && web.Uris[0].Host.EndsWith(".y.qq.com", StringComparison.Ordinal) && qq.All(uri => !uri.AbsolutePath.Contains("search", StringComparison.Ordinal)
                     && Uri.UnescapeDataString(uri.Query).Contains("002WCV372JMZJw", StringComparison.Ordinal)));
             WriteSettings(settings, ("BV1xx411c7mD", 2, "在线歌曲"));
             web.Uris.Clear(); await service.FindAsync(online with { Album = "哔哩哔哩" }, true, CancellationToken.None);
-            check("A song from a platform without an ID lookup here is found by title",
-                web.Uris.FirstOrDefault()?.Host == "lrclib.net");
+            check("A song from a platform without an ID lookup here is found by title, KuGou first",
+                web.Uris.FirstOrDefault()?.Host == "mobiles.kugou.com");
 
             string untitled = Path.Combine(folder, "无标签歌曲.flac"); File.WriteAllBytes(untitled, Flac(("LYRICS", "[00:00.00]无标签")));
             WriteSettings(settings, (new Uri(untitled).AbsoluteUri, -1, "无标签歌曲.flac"));

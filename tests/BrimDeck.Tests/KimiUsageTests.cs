@@ -206,7 +206,7 @@ static class KimiUsageTests
             failEndpoints = true;
             await first.RefreshAsync();
             check("Kimi Code records stay unpriced before Moonshot AI's prices were ever read, while other apps use the catalog",
-                first.ModelCount == catalog.Length && first.Estimate(entry with { Model = "kimi-k3" }) is null && first.Estimate(entry with { Model = "k3-256k" }) is null &&
+                first.ModelCount == catalog.Length + Pricing.BuiltInModels.Count && first.Estimate(entry with { Model = "kimi-k3" }) is null && first.Estimate(entry with { Model = "k3-256k" }) is null &&
                 first.Estimate(new TokenEntry("dsh:x", DateTimeOffset.Now, "moonshotai/kimi-k3", 1000, 2000, 0, 0, 100)) == Cost(Price(1)));
             failEndpoints = false;
             await first.RefreshAsync(force: true);
@@ -224,7 +224,7 @@ static class KimiUsageTests
             var listed = first.Models.ToDictionary(m => m.Model);
             check("The price list shows Moonshot AI's prices, including a model the catalog lacks", listed["moonshotai/kimi-k3"].Prices == Price(3, true) &&
                 listed["moonshotai/kimi-k3.1-pro"].Prices == Price(2) && listed["moonshotai/kimi-k3.1-pro-highspeed"].Prices == Price(4) &&
-                listed["moonshotai/kimi-k2.7-code"].Prices == Price(1) && first.ModelCount == catalog.Length + 1);
+                listed["moonshotai/kimi-k2.7-code"].Prices == Price(1) && first.ModelCount == catalog.Length + 1 + Pricing.BuiltInModels.Count);
         }
 
         // After a restart with no connection, the saved prices still apply; an answer without Moonshot AI keeps them.

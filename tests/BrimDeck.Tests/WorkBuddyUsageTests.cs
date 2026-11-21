@@ -73,6 +73,75 @@ static class WorkBuddyUsageTests
         await CheckInternationalAsync(root, now, check);
         CheckQuota(check);
         await CheckReadingAsync(check);
+        await CheckKeptReadingAsync(root, check);
+    }
+
+    // A reading that fails shows the last one, marked as old with the time it was read, until a new one replaces it; signing out, another
+    // account, or a reading over a day old keeps nothing. The previous run's reading stands in for a first read that fails.
+    private static async Task CheckKeptReadingAsync(string root, Action<string, bool> check)
+    {
+        var start = DateTimeOffset.Now;
+        var clock = start;
+        string mode = "ok";
+        using var handler = new Site(request => mode switch
+        {
+            "down" => (HttpStatusCode.ServiceUnavailable, "{}"),
+            "refused" => (HttpStatusCode.Unauthorized, """{"code":12153}"""),
+            _ => request.RequestUri!.AbsolutePath == "/billing/meter/get-user-resource-summary" ? (HttpStatusCode.OK, TrialSummary) : (HttpStatusCode.OK, """{"code":0,"data":{"Accounts":[]}}""")
+        });
+        using var http = new HttpClient(handler);
+        var secrets = new Secrets();
+        void SignIn(string uid) => secrets.Write(WorkBuddyUsage.China.SessionKey, new WorkBuddyUsage.Session("token", "refresh", uid, "www.workbuddy.cn").Serialize());
+        SignIn("uid-1");
+        var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.WorkBuddy }] };
+        settings.Normalize();
+        using var service = new UsageService(new Desktop(), new DataLocations("", "", "", "", "") { WorkBuddyHome = Path.Combine(root, "no-workbuddy") }, http, () => clock, secrets);
+        async Task<ProviderSnapshot> Read() => (await service.RefreshAsync(settings)).Single(s => s.Id == ProviderId.WorkBuddy);
+        string[] labels = ["套餐积分", "购买积分"];
+
+        var read = await Read();
+        check("WorkBuddy reads its credits with the sign-in", read is { LiveQuota: true, IsStale: false } && read.Metrics.Select(m => m.Label).SequenceEqual(labels));
+        var readAt = start.LocalDateTime.ToString("HH:mm");
+
+        clock = start.AddMinutes(5); mode = "down";
+        var down = await Read();
+        check("A WorkBuddy reading that fails shows the last one, marked as old with its time", down is { LiveQuota: true, IsStale: true } && down.QuotaTime == start
+            && down.Metrics.Select(m => m.Label).SequenceEqual(labels) && down.Metrics[0] is { Total: 500, Used: 80 } && down.Plan == "体验版"
+            && down.StatusLabel == Loc.T("稍后重试", "Retrying later") && down.Status.Contains(Loc.T("读取的额度", "showing the quota read at")) && down.Status.Contains(readAt));
+
+        mode = "refused";
+        var refused = await Read();
+        check("A refused WorkBuddy sign-in asks to sign in again while the last reading stays", refused is { IsStale: true } && refused.Metrics.Count == 2
+            && refused.StatusLabel == Loc.T("登录已失效", "Sign-in expired") && refused.Status.Contains(Loc.T("重新登录", "Sign in again")));
+
+        clock = start.AddHours(25); mode = "down";
+        check("A last WorkBuddy reading over a day old is not shown", (await Read()) is { LiveQuota: false } old && old.Metrics.Count == 0);
+
+        clock = start.AddMinutes(10); mode = "ok";
+        await Read();
+        SignIn("uid-2"); mode = "down";
+        check("Another WorkBuddy account does not show the last account's reading", (await Read()) is { LiveQuota: false } other && other.Metrics.Count == 0);
+
+        SignIn("uid-1"); mode = "ok";
+        await Read();
+        service.DisconnectWorkBuddy(ProviderId.WorkBuddy);
+        SignIn("uid-1"); mode = "down";
+        check("Signing out of WorkBuddy keeps no reading", (await Read()) is { LiveQuota: false } signedOut && signedOut.Metrics.Count == 0);
+
+        // A new run: the previous run's reading (UsageLastSeen) stands in for a first read that fails.
+        using var next = new UsageService(new Desktop(), new DataLocations("", "", "", "", "") { WorkBuddyHome = Path.Combine(root, "no-workbuddy") }, http, () => clock, secrets);
+        next.RestoreLastReadings([new ProviderSnapshot(ProviderId.WorkBuddy) { Metrics = read.Metrics, Plan = "体验版", QuotaTime = start, LastSeenAt = start, IsStale = true }]);
+        var restored = (await next.RefreshAsync(settings)).Single(s => s.Id == ProviderId.WorkBuddy);
+        check("The previous run's WorkBuddy reading stands in for a first read that fails", restored is { LiveQuota: true, IsStale: true, LastSeenAt: null }
+            && restored.QuotaTime == start && restored.Metrics.Select(m => m.Label).SequenceEqual(labels));
+    }
+
+    private sealed class Secrets : IProviderSecrets
+    {
+        private readonly Dictionary<Guid, string> _values = [];
+        public string Read(Guid instanceId) => _values.TryGetValue(instanceId, out var value) ? value : "";
+        public void Write(Guid instanceId, string secret) => _values[instanceId] = secret;
+        public void Delete(Guid instanceId) => _values.Remove(instanceId);
     }
 
     private static void CheckPrices(string root, Action<string, bool> check)

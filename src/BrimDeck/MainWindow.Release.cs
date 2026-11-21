@@ -20,9 +20,9 @@ public partial class MainWindow
             switch (page)
             {
                 case DeckPage.Usage:
-                    held |= _usageBuilt is not null || _usageHeader is not null;
+                    held |= _usageBuilt is not null;
                     ModelToolbar.Children.Clear(); ApplicationPages.Children.Clear();
-                    _usageBuilt = null; _usageHeader = null; _usageForm = ""; _modelScroll = null;
+                    _usageBuilt = null; _usageForm = ""; _modelScroll = null;
                     break;
                 case DeckPage.Music:
                     _musicControls = null; _musicFullControl = null; _musicSmtcHint = null; _musicControlButtons.Clear();

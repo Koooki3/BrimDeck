@@ -96,9 +96,9 @@ public partial class SettingsWindow
                     SectionTitle(Loc.T("切换方式", "Switching"), help: () => Loc.T(
                         "单击侧条、卡片标题或当前页图标也能切换。",
                         "A click on the side strip, the card's title or the current page's icon switches as well."));
-                    Group(Toggle(Loc.T("指针悬停在侧条时切换", "Switch when the pointer hovers over the side strip"), S.ShelfHoverSwitch, value => Change(s => s.ShelfHoverSwitch = value)),
+                    Group(Toggle(Loc.T("在侧条上滚动滚轮切换", "Switch by turning the wheel over the side strip"), S.ShelfStripWheelSwitch, value => Change(s => s.ShelfStripWheelSwitch = value)),
                         Toggle(Loc.T("按下鼠标中键切换", "Switch with a middle click"), S.ShelfMiddleSwitch, value => Change(s => s.ShelfMiddleSwitch = value)),
-                        Toggle(Loc.T("触控板双指横滑或 Shift + 滚轮切换", "Switch with a two-finger sideways swipe or Shift + wheel"), S.ShelfSwipeSwitch, value => Change(s => s.ShelfSwipeSwitch = value)));
+                        Toggle(Loc.T("触控板双指横滑切换", "Switch with a two-finger sideways swipe"), S.ShelfSwipeSwitch, value => Change(s => s.ShelfSwipeSwitch = value)));
                 }
             });
             SwapOptions(options, incoming, previous is { } from && from != arrangement ? (arrangement > from ? 1 : -1) : 0);

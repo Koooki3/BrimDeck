@@ -1010,7 +1010,9 @@ SOFTWARE.
 MouseDock
 https://github.com/late-autumn-gif/mousedock
 
-The devices page's LAMZU Inca ids on the 0x83 exchange follow MouseDock's device table.
+The devices page's LAMZU Inca ids on the 0x83 exchange follow MouseDock's device table. Its Rapoo office receivers
+(the 0xBA battery query on the 0xFF00 / 0x0E collection, read about 100 ms after the request) led to the devices page's
+reading of Rapoo receivers other than the first generation.
 
 MIT License
 

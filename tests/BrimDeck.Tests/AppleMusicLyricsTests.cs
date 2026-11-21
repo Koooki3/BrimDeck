@@ -96,14 +96,18 @@ internal static class AppleMusicLyricsTests
                 _ => "{}" } };
             using var service = new LyricsService(web.Http, () => []);
             var result = await service.FindAsync(Track, true, default);
-            check("Apple plain LRCLIB continues to " + (qqWorks ? "QQ before NetEase" : "NetEase after QQ fails"), result.Source == (qqWorks ? "QQ 音乐" : "网易云音乐") && result.Synced &&
-                (!qqWorks || web.Urls.All(u => u.Host != "music.163.com")));
+            check("Without its own lyrics Apple Music asks KuGou, then " + (qqWorks ? "QQ before NetEase" : "NetEase after QQ fails") + ", before LRCLIB's untimed lyrics",
+                result.Source == (qqWorks ? "QQ 音乐" : "网易云音乐") && result.Synced && web.Urls[0].Host == "mobiles.kugou.com"
+                && web.Urls.All(u => u.Host != "lrclib.net") && (!qqWorks || web.Urls.All(u => u.Host != "music.163.com")));
         }
         using (var web = new Web { Others = u => u.Host == "lrclib.net" ? Lrc(true) : "{}" })
         using (var service = new LyricsService(web.Http, () => []))
         {
             var result = await service.FindAsync(Track, true, default);
-            check("Apple synced LRCLIB stops before QQ", result.Synced && result.Source == "LRCLIB" && web.Urls.All(u => !u.Host.EndsWith("qq.com") && u.Host != "music.163.com"));
+            int Asked(string host) => web.Urls.FindIndex(u => u.Host == host);
+            check("LRCLIB's timed lyrics are taken when KuGou, QQ and NetEase have none", result.Synced && result.Source == "LRCLIB"
+                && Asked("mobiles.kugou.com") is >= 0 and var kugou && Asked("c.y.qq.com") is > 0 and var qq && kugou < qq
+                && Asked("music.163.com") is var netease && qq < netease && netease < Asked("lrclib.net"));
         }
         using (var web = new Web { Others = u => u.Host == "lrclib.net" ? Lrc(false) : "{}" })
         using (var service = new LyricsService(web.Http, () => []))
@@ -113,9 +117,7 @@ internal static class AppleMusicLyricsTests
             using var web = new Web();
             using var service = new LyricsService(web.Http, () => throw new InvalidOperationException("Non-Apple source touched Apple cache"));
             await service.FindAsync(Track with { Source = source }, true, default);
-            check("Only Apple desktop gets the new lookup chain: " + source,
-                web.Urls.All(u => !u.Host.EndsWith("apple.com")) &&
-                (source == "QQ 音乐" ? web.Urls.All(u => u.Host.EndsWith("qq.com")) : web.Urls.All(u => !u.Host.EndsWith("qq.com"))));
+            check("Only Apple Music reads Apple Music's cache: " + source, web.Urls.All(u => !u.Host.EndsWith("apple.com")));
         }
 
         // A song played again gets no new file; the lyric ID it was matched to is kept on disk.

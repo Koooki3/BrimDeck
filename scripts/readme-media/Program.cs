@@ -124,6 +124,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
         Program.SetField(devices, "_roster", roster);
         Program.SetField(devices, "_disposed", true);
         Program.SetProperty(devices, "Settled", true);
+        Program.SetProperty(devices, "Showing", roster.All);
+        _devices = devices; _roster = roster;
         Program.SetProperty(app, "Devices", devices);
 
         _deck = new MainWindow(app) { Opacity = 0, IsHitTestVisible = false };
@@ -184,6 +186,18 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (scenes.Contains("notice-levels")) await NoticeLevelsScene();
             // The notices page with conversations of several messages, and the notices settings page; for checking.
             if (scenes.Contains("notices-page")) await NoticesPageScene();
+            // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
+            if (scenes.Contains("monitor-free")) { await MonitorFree(); await SettingsPage("monitor-free-settings", 9, 1100, tips: true); }
+            // The backup section of the displays and profiles page, and the export and import windows in each state; for checking.
+            if (scenes.Contains("config-backup")) { await ConfigBackupScene(); await SettingsPage("backup-settings", 16, 1500); }
+            // The indicator that opens into the capsule or the notch on each edge: the line, that style in its place, the panel opened from it, and
+            // the line after the panel closes; its option on the collapsed view page. For checking, not for the README.
+            // The last time's readings, faded, while the devices are read again: the page as tiles, as one device and as a list,
+            // and the collapsed row. For checking, not for the README.
+            if (scenes.Contains("devices-earlier")) await DevicesEarlier();
+            // The frame around the part under the pointer, on each form and edge; for checking.
+            if (scenes.Contains("hover-frame")) await HoverFrames();
+            if (scenes.Contains("line-capsule")) { await LineCapsule(); _settings.Style = CompactStyle.Line; await SettingsPage("line-capsule-settings", 1, 1300, tips: true); }
         }
         finally { Directory.Delete(folder, true); }
     }
@@ -863,6 +877,46 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Settle();
     }
 
+    // As Monitor(), once with memory and the drives showing what is in use and once what is free: the page with room for the drives,
+    // the page so low that memory and the network share a line, and the notch with every reading.
+    private async Task MonitorFree()
+    {
+        const double scale = 2;
+        Program.SetProperty(app, "Exiting", true);
+        _settings.Animations = false;
+        var snapshot = MonitorSample();
+        void Feed() => Program.Call(_deck, "MonitorUpdated", [typeof(MonitorSnapshot)], snapshot);
+        var readings = _settings.CompactReadings;
+        _settings.CompactReadings = CompactMonitor.Readings(CompactMonitorMode.Custom, CompactMonitorItems.Memory | CompactMonitorItems.Storage);
+        _settings.CompactReadings.Single(r => r.Item == CompactMonitorItems.Storage).Sources = ["C:", "D:"];
+        foreach (bool free in new[] { false, true })
+        {
+            string name = free ? "free" : "used";
+            _settings.MonitorShowFree = free;
+            foreach (var (width, height) in new[] { (760.0, 330.0), (560.0, 170.0) })
+            {
+                _settings.MonitorWidth = width; _settings.MonitorHeight = height;
+                SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+                _deck.SetExpanded(true, true);
+                await Settle(); Feed();
+                await Save($"monitor-{name}-{height:0}", scale);
+            }
+            SelectPage(DeckPage.Usage);
+            _settings.NotchMonitor = true; _settings.NotchMusic = false;
+            _deck.SetExpanded(false, true); Refresh();
+            // The drives join the row once their first figures have come (StripAdmission): fed, built again, fed.
+            await Settle(); Feed(); Refresh();
+            await Settle(); Feed();
+            await Save($"compact-monitor-{name}", scale);
+            _settings.NotchMonitor = false; _settings.NotchMusic = true; Refresh();
+        }
+        _settings.MonitorShowFree = false;
+        _settings.CompactReadings = readings;
+        Program.SetProperty(app, "Exiting", false);
+        _settings.Animations = true;
+        await Settle();
+    }
+
     // The devices page, and the notch with the devices' rings and the file transfer's count. App.Exiting keeps the panel's demand
     // from reaching the devices object.
     private async Task DevicesScene()
@@ -888,6 +942,64 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Save("compact-devices", scale);
         _settings.NotchOrder = order;
         _settings.NotchDevices = false; _settings.NotchTransfer = false; _settings.NotchMusic = true; Refresh();
+        Program.SetProperty(app, "Exiting", false);
+        _settings.Animations = true;
+        await Settle();
+    }
+
+    private object _devices = null!;
+    private DeviceRoster _roster = null!;
+    // What the panels show (DeviceBatteries.Showing), told to the open page and the collapsed row.
+    private void ShowDevices(IReadOnlyList<DeviceBattery> showing)
+    {
+        Program.SetProperty(_devices, "Showing", showing);
+        Program.Call(_deck, "DevicesChanged", []);
+    }
+
+    // The mouse and the controller read again, the others still the last time's; then one device alone and a list, all the last
+    // time's; then the collapsed row with the earlier ones among the read.
+    private async Task DevicesEarlier()
+    {
+        const double scale = 2;
+        Program.SetProperty(app, "Exiting", true);
+        _settings.Animations = false;
+        var all = _roster.All;
+        var some = DeviceRoster.WithEarlier([.. all.Where(device => device.Key is "demo:mouse" or "demo:controller")], all);
+        _settings.DevicesWidth = 760; _settings.DevicesHeight = 240;
+        SelectPage(DeckPage.Devices);
+        _deck.SetExpanded(true, true);
+        ShowDevices(some);
+        await Settle();
+        await Save("devices-earlier-tiles", scale);
+        ShowDevices(DeviceRoster.WithEarlier([], [all[0]]));
+        await Settle();
+        await Save("devices-earlier-single", scale);
+        foreach (var (width, height) in new[] { (440, 150), (380, 140) })
+        {
+            _settings.DevicesWidth = width; _settings.DevicesHeight = height;
+            SelectPage(DeckPage.Usage); SelectPage(DeckPage.Devices);
+            ShowDevices(some);
+            await Settle();
+            await Save($"devices-earlier-{width}x{height}", scale);
+        }
+        SelectPage(DeckPage.Usage);
+        _deck.SetExpanded(false, true);
+        // The collapsed row's devices drawn by themselves on the notch's black, with and without figures.
+        foreach (bool figures in new[] { true, false })
+        {
+            _settings.DeviceFigures = figures;
+            var devices = Program.Call(_deck, "CurrentStripDevices", [])!;
+            var strip = (FrameworkElement)Activator.CreateInstance(Type.GetType("BrimDeck.DeviceStrip, BrimDeck")!, Program.Any, null, [devices, 1.0], null)!;
+            strip.Width = (double)Program.GetProperty(strip, "PreferredWidth")!;
+            var row = new System.Windows.Controls.Border { Background = Brushes.Black, Padding = new Thickness(14, 4, 14, 4), Child = strip };
+            row.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            row.Arrange(new Rect(row.DesiredSize));
+            var picture = new RenderTargetBitmap((int)Math.Ceiling(row.ActualWidth * 4), (int)Math.Ceiling(row.ActualHeight * 4), 96 * 4, 96 * 4, PixelFormats.Pbgra32);
+            picture.Render(row);
+            Write(picture, Path.Combine(output, $"compact-devices-earlier-{(figures ? "figures" : "rings")}.png"));
+        }
+        _settings.DeviceFigures = true;
+        ShowDevices(all);
         Program.SetProperty(app, "Exiting", false);
         _settings.Animations = true;
         await Settle();
@@ -1662,6 +1774,110 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Dialog("sync-lan-choose", lanTitle, Part<FrameworkElement>(lan, "Root"));
     }
 
+    // The export and import windows (SettingsBackup.cs), each state drawn from invented data: what the PC has to export, a file with
+    // displays this PC lacks, files that cannot be imported, and what is left to do after an import.
+    private async Task ConfigBackupScene()
+    {
+        _settings.Theme = SettingsTheme.Dark;
+        var window = new SettingsWindow(app);
+        T Part<T>(object view, string name) => (T)view.GetType().GetProperty(name)!.GetValue(view)!;
+        object Call(string name, Type[] types, params object?[] args) => Program.Call(window, name, types, args)!;
+        void Say(object status, string text, bool error = true) => window.GetType().GetMethod("SetBackupStatus", Program.Any)!.Invoke(null, [status, text]);
+        string Short(string name) => (string)window.GetType().GetMethod("ShortName", Program.Any)!.Invoke(null, [name])!;
+        async Task Dialog(string name, string title, FrameworkElement content, double width)
+        {
+            var body = new System.Windows.Controls.StackPanel();
+            body.Children.Add(content);
+            var frame = (FrameworkElement)Call("SyncDialogFrame", [typeof(string), typeof(System.Windows.Controls.StackPanel), typeof(Action)], title, body, (Action)(() => { }));
+            const double scale = 1.5;
+            var host = new System.Windows.Controls.Border { Child = frame, Resources = window.Resources, Width = width };
+            System.Windows.Documents.TextElement.SetFontFamily(host, window.FontFamily);
+            TextOptions.SetTextFormattingMode(host, TextFormattingMode.Ideal);
+            host.Measure(new Size(width, double.PositiveInfinity)); host.Arrange(new Rect(host.DesiredSize));
+            await Settle();
+            host.UpdateLayout();
+            var bitmap = new RenderTargetBitmap((int)(width * scale), (int)Math.Ceiling(host.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            bitmap.Render(host); bitmap.Freeze();
+            Write(bitmap, Path.Combine(output, name + ".png"));
+            Console.WriteLine(name + " " + host.ActualHeight.ToString("0"));
+            host.Child = null;
+        }
+        string exportTitle = _english ? "Export settings" : "导出配置", importTitle = _english ? "Import settings" : "导入配置";
+
+        object Export(int themes, int prices, int keys, bool scripts) => Call("BackupExportView", [typeof(int), typeof(int), typeof(int), typeof(bool)], themes, prices, keys, scripts);
+        await Dialog("backup-export", exportTitle, Part<FrameworkElement>(Export(3, 5, 4, true), "Root"), 420);
+        var keyed = Export(3, 5, 4, true);
+        Part<System.Windows.Controls.CheckBox>(keyed, "Keys").IsChecked = true;
+        await Dialog("backup-export-keys", exportTitle, Part<FrameworkElement>(keyed, "Root"), 420);
+        await Dialog("backup-export-settings-only", exportTitle, Part<FrameworkElement>(Export(0, 0, 0, false), "Root"), 420);
+        var failed = Export(0, 1, 1, false);
+        Say(Part<object>(failed, "Status"), _english ? "The file could not be written there. Try another folder." : "无法写入这个位置，请换一个文件夹再试。", true);
+        await Dialog("backup-export-error", exportTitle, Part<FrameworkElement>(failed, "Root"), 420);
+        var exported = (FrameworkElement)Call("BackupExportedView", [typeof(string), typeof(Action)],
+            _english ? @"D:\Users\Study\Documents\BrimDeck backups\BrimDeck-settings-2026-11-17-with-keys.brimbackup" : @"D:\Users\书房\Documents\BrimDeck 备份\BrimDeck-配置-2026-11-17-含密钥.brimbackup", null);
+        await Dialog("backup-exported", exportTitle, exported, 420);
+
+        // A file from another PC: three profiles, two rules, seven sources; two of its three displays are not here.
+        var imported = new DeckSettings();
+        imported.Normalize();
+        var main = imported.CurrentProfile;
+        imported.Profiles.Add(Profiles.Duplicate(imported, main, _english ? "Work" : "工作"));
+        imported.Profiles.Add(Profiles.Duplicate(imported, main, _english ? "Games" : "游戏"));
+        imported.DisplayMonitors = [new(@"\\?\DISPLAY#DEL40B6#OLD-A", "DELL U2720Q"), new(@"\\?\DISPLAY#BOE0A1C#OLD-B", _english ? "Built-in display" : "内置显示器"),
+            new(@"\\?\DISPLAY#SAM7179#OLD-C", "Samsung Odyssey OLED G9 G95SC 49-inch Super Ultra-Wide")];
+        imported.Display = DisplayPlacement.Chosen;
+        imported.ProfileRules = [new ProfileRule { Name = "Code" }, new ProfileRule { Name = "Photoshop" }];
+        imported.Apps = [.. new[] { ProviderId.Claude, ProviderId.Codex, ProviderId.Cursor, ProviderId.DeepSeek, ProviderId.OpenRouter, ProviderId.Kimi, ProviderId.Custom }
+            .Select(id => new AppEntry { QuotaSource = id })];
+        var theme = System.Text.Encoding.UTF8.GetBytes("{}");
+        var themes = new Dictionary<string, byte[]> { ["dusk.json"] = theme, ["sea.json"] = theme, ["night/theme.json"] = theme };
+        var prices = Enumerable.Range(1, 5).Select(i => new ModelPrice($"acme/model-{i}", new TokenPrices(0, 0, null, null, null), [])).ToList();
+        var keys = imported.Apps.Skip(3).Take(4).ToDictionary(a => a.InstanceId, _ => "sk");
+        var manifest = new BackupManifest { Version = "1.3.2", Exported = new DateTimeOffset(2026, 11, 17, 21, 30, 0, TimeSpan.FromHours(8)), Computer = "DESKTOP-STUDY-7QK2M4" };
+        var full = new BackupPackage(manifest, imported, themes, prices, keys, null);
+        var here = new List<BackupDisplay> { new(@"\\?\DISPLAY#DEL40B6#NEW-1", _english ? "DELL U2720Q (2560×1440) · primary" : "DELL U2720Q (2560×1440) · 主显示器"),
+            new(@"\\?\DISPLAY#GSM5B09#NEW-2", "LG ULTRAFINE (2560×1440)"), new(@"\\?\DISPLAY#SAM0F9A#NEW-3", Short("Samsung Odyssey OLED G9 G95SC 49-inch") + " (5120×1440)") };
+        var missing = ConfigBackup.DisplaysToMatch(imported, here.Select(d => d.Id));
+        var guesses = ConfigBackup.GuessDisplays(missing, [new(@"\\?\DISPLAY#DEL40B6#NEW-1", "DELL U2720Q"), new(@"\\?\DISPLAY#GSM5B09#NEW-2", "LG ULTRAFINE")], []);
+        object Import(string file, BackupPackage package, IReadOnlyList<BackupDisplay> lacking, IReadOnlyList<string?> starts) => Call("BackupImportView",
+            [typeof(string), typeof(BackupPackage), typeof(IReadOnlyList<BackupDisplay>), typeof(IReadOnlyList<BackupDisplay>), typeof(IReadOnlyList<string?>)], file, package, lacking, here, starts);
+        string fileName = ConfigBackup.FileName(new DateTime(2026, 11, 17), true);
+        await Dialog("backup-import-displays", importTitle, Part<FrameworkElement>(Import(fileName, full, missing, guesses), "Root"), 460);
+        var one = new List<BackupDisplay> { missing[1] };
+        await Dialog("backup-import-one-display", importTitle, Part<FrameworkElement>(Import(fileName, full with { Themes = new Dictionary<string, byte[]>(), Prices = [] }, one, [null]), "Root"), 460);
+        var plain = new BackupPackage(manifest, imported, new Dictionary<string, byte[]>(), [], new Dictionary<Guid, string>(), null);
+        await Dialog("backup-import-plain", importTitle, Part<FrameworkElement>(Import(ConfigBackup.FileName(new DateTime(2026, 11, 17), false), plain, [], []), "Root"), 460);
+        var before = full with { Manifest = new BackupManifest { Version = "1.3.2", Exported = manifest.Exported, Computer = "DESKTOP-STUDY-7QK2M4", BeforeImport = true } };
+        await Dialog("backup-import-before-import", importTitle, Part<FrameworkElement>(Import(ConfigBackup.BackupName(new DateTime(2026, 11, 17, 21, 30, 0)), before, [], []), "Root"), 460);
+        var stuck = Import(fileName, plain, [], []);
+        Say(Part<object>(stuck, "Status"), _english ? "The current settings could not be backed up in the data folder, so nothing was imported. Check the data folder's permissions."
+            : "无法在数据文件夹中备份当前配置，没有导入。请检查数据文件夹的权限。", true);
+        await Dialog("backup-import-error", importTitle, Part<FrameworkElement>(stuck, "Root"), 460);
+
+        string Problem(Exception ex) => (string)window.GetType().GetMethod("BackupProblemText", Program.Any)!.Invoke(null, [ex])!;
+        FrameworkElement ProblemView(string file, string message)
+        {
+            var view = Call("BackupProblemView", [typeof(string), typeof(string)], file, message);
+            return (FrameworkElement)view.GetType().GetField("Item1")!.GetValue(view)!;
+        }
+        await Dialog("backup-problem-damaged", importTitle, ProblemView("notes.zip", Problem(new BackupException(BackupProblem.NotBackup, null))), 460);
+        await Dialog("backup-problem-newer", importTitle, ProblemView(fileName, Problem(new BackupException(BackupProblem.Newer, "1.4.0"))), 460);
+        await Dialog("backup-problem-unreadable", importTitle, ProblemView(fileName, Problem(new IOException())), 460);
+
+        string backupPath = Path.Combine(@"C:\Users\me\AppData\Local\BrimDeck\backups", ConfigBackup.BackupName(new DateTime(2026, 11, 17, 21, 42, 5)));
+        var notes = ConfigBackup.Notes(["Samsung Odyssey OLED G9 G95SC 49-inch Super Ultra-Wide"],
+            ["Logitech G Pro X Superlight 2", "AirPods Pro", _english ? "Xbox Wireless Controller" : "Xbox 无线控制器"],
+            ["WorkBuddy", _english ? "Xiaomi MiMo Desktop subscription" : "Xiaomi MiMo 桌面订阅"],
+            ["DeepSeek", "OpenRouter", _english ? "Office gateway" : "公司网关"], [_english ? "WeType" : "微信输入法", _english ? "Local network" : "局域网"]);
+        notes.Insert(0, ConfigBackup.ThemesNotWritten);
+        Task Done(string name, IReadOnlyList<ImportNote> list) => Dialog(name, _english ? "Import complete" : "导入完成",
+            (FrameworkElement)Call("BackupDoneView", [typeof(string), typeof(IReadOnlyList<ImportNote>), typeof(Action)], backupPath, list, null), 460);
+        await Done("backup-done-notes", notes);
+        await Done("backup-done-some", ConfigBackup.Notes([], [], [], ["DeepSeek"], []));
+        await Done("backup-done-clean", []);
+        try { window.Close(); } catch (ArgumentOutOfRangeException) { }
+    }
+
     private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
     {
         foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
@@ -1757,7 +1973,103 @@ internal sealed class Renderer(App app, string output, string language, string[]
         _clock = start + seconds;
     }
 
+    // The frame around the part under the pointer (DefaultDeckPage.Hover, MainWindow.Hover.cs): for each part of the collapsed row,
+    // found by walking along the surface as the pointer would, the frame the panel draws around it, on the notch at each edge and on
+    // the capsule, in the dark and the light look. For checking, not for the README.
+    private async Task HoverFrames()
+    {
+        const double scale = 3;
+        Program.SetProperty(app, "Exiting", true);
+        bool animations = _settings.Animations;
+        _settings.Animations = false;
+        var snapshot = MonitorSample();
+        var use = Type.GetType("BrimDeck.PanelTheme, BrimDeck")!.GetMethod("Use", Program.Any)!;
+        // A window beside the panel on this computer must not turn it into the line (DeckSettings.Occupied).
+        var occupied = _settings.Occupied; _settings.Occupied = WindowBehavior.Normal;
+        _settings.DefaultPage = DefaultDeckPage.Hover; _settings.MusicText = CompactMusicText.Title;
+        _settings.NotchMonitor = true; _settings.CapsuleMonitor = true; _settings.NotchTransfer = true; _settings.CapsuleTransfer = true;
+        _settings.NotchClock = true; _settings.CapsuleClock = true; _settings.NotchDevices = true;
+        _settings.CompactReadings = CompactMonitor.Readings(CompactMonitorMode.Custom, CompactMonitorItems.Cpu | CompactMonitorItems.Memory);
+        _deck.SetExpanded(false, true);
+        foreach (var look in new[] { PanelThemes.Dark, PanelThemes.Light, PanelThemes.PixelBlocks, PanelThemes.IslandHoliday2, PanelThemes.Demo })
+        foreach (var (style, edge) in new[] { (CompactStyle.Notch, ScreenEdge.Top), (CompactStyle.Capsule, ScreenEdge.Top), (CompactStyle.Notch, ScreenEdge.Left), (CompactStyle.Notch, ScreenEdge.Bottom), (CompactStyle.Notch, ScreenEdge.Right) })
+        {
+            if (look != PanelThemes.Dark && edge is ScreenEdge.Bottom or ScreenEdge.Right) continue;
+            if (look != PanelThemes.Dark && look != PanelThemes.Light && edge == ScreenEdge.Left) continue;
+            _settings.PanelTheme = look; use.Invoke(null, [_settings, false, false]);
+            _settings.Style = style; _settings.NotchEdge = edge; Refresh();
+            await Settle(); Program.Call(_deck, "MonitorUpdated", [typeof(MonitorSnapshot)], snapshot); await Settle();
+            var surface = (Rect)Program.Call(_deck, "SurfaceOnStage", [])!;
+            string name = $"hover-{look}-{style.ToString().ToLowerInvariant()}-{edge.ToString().ToLowerInvariant()}";
+            Program.Call(_deck, "HideHoverFrame", []);
+            await Save(name + "-0-none", scale);
+            object? last = null; int shot = 0;
+            for (double along = surface.Left - 10; along <= surface.Right + 10; along += 1)
+            {
+                var found = Program.Call(_deck, "HoverPartAt", [typeof(double)], along);
+                if (found is null) continue;
+                var elements = found.GetType().GetField("Item1")!.GetValue(found)!;
+                var part = found.GetType().GetField("Item2")!.GetValue(found)!;
+                if (Equals(part, last)) continue;
+                last = part;
+                Console.WriteLine($"{name}: from {along - surface.Left:0} DIP along, {part}");
+                Program.Call(_deck, "HideHoverFrame", []);
+                if (part.GetType().GetProperty("Page")!.GetValue(part) is null) continue;
+                Program.Call(_deck, "ShowHoverFrame", [elements.GetType()], elements);
+                await Save($"{name}-{++shot}", scale);
+            }
+            Program.Call(_deck, "HideHoverFrame", []);
+        }
+        _settings.PanelTheme = PanelThemes.Dark; use.Invoke(null, [_settings, false, false]);
+        _settings.Style = CompactStyle.Notch; _settings.NotchEdge = ScreenEdge.Top; _settings.DefaultPage = DefaultDeckPage.Last;
+        _settings.Occupied = occupied; _settings.Animations = animations; Refresh();
+        Program.SetProperty(app, "Exiting", false);
+        await Settle();
+    }
+
     private void Refresh() { _deck.ApplySettings(); Program.Call(_deck, "RenderCompact", []); }
+
+    // The places are written out too, in DIPs from the monitor's corner: the line's, and the capsule's on the screen.
+    private async Task LineCapsule()
+    {
+        const double scale = 1;
+        bool animations = _settings.Animations;
+        var style = _settings.Style;
+        _settings.Animations = false; _settings.Style = CompactStyle.Line;
+        string Place()
+        {
+            var shape = (CollapsedShape)Program.GetProperty(_deck, "Collapsed")!;
+            var frame = (EdgeFrame)Program.Field(_deck, "_frame")!;
+            var r = frame.ToScreen(shape.Surface);
+            return $"{shape.Style} on {frame.Edge}: {r.X:0.#},{r.Y:0.#} {r.Width:0.#}x{r.Height:0.#}";
+        }
+        foreach (var opens in new[] { IndicatorOpens.Capsule, IndicatorOpens.Notch })
+        foreach (var edge in new[] { ScreenEdge.Top, ScreenEdge.Bottom, ScreenEdge.Left, ScreenEdge.Right })
+        {
+            _settings.LineOpens = opens;
+            string name = $"line-{opens.ToString().ToLowerInvariant()}-{edge.ToString().ToLowerInvariant()}";
+            _settings.LineEdge = edge; Refresh();
+            await Settle(); await Settle();
+            Console.WriteLine($"{opens} {edge} line: {Place()}");
+            await Save(name + "-1-line", scale);
+            // Without pointer tracking here, the line that turned back on the last edge would rest until the pointer left it.
+            Program.Call(Program.Field(_deck, "_peek")!, "Reset", []);
+            Program.Call(_deck, "BeginPeek", []);
+            await Settle(); await Settle();
+            Console.WriteLine($"{opens} {edge} capsule: {Place()}, active {Program.GetProperty(_deck, "IslandFromLine")}");
+            await Save(name + "-2-capsule", scale);
+            _deck.SetExpanded(true, true);
+            await Settle(); await Settle();
+            Console.WriteLine($"{opens} {edge} panel: {Place()}");
+            await Save(name + "-3-panel", scale);
+            _deck.SetExpanded(false, true);
+            await Settle(); await Settle(); await Settle();
+            Console.WriteLine($"{opens} {edge} closed: {Place()}, active {Program.GetProperty(_deck, "IslandFromLine")}");
+            await Save(name + "-4-closed", scale);
+        }
+        _settings.LineEdge = ScreenEdge.Top; _settings.LineOpens = IndicatorOpens.Panel; _settings.Style = style; _settings.Animations = animations;
+        Refresh(); await Settle();
+    }
     private void SelectPage(DeckPage page) => Program.Call(_deck, "SelectPage", [typeof(DeckPage), typeof(bool)], page, false);
 
     private void SetSyncRing(double fraction)

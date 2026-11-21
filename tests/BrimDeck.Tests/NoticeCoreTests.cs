@@ -483,7 +483,7 @@ internal static class NoticeCoreTests
         settings.UsagePage = false; settings.MusicPage = false; settings.MonitorPage = false; settings.ClipboardPage = false; settings.DevicesPage = false;
         check("With only the notices page it is the one shown", DeckPages.Resolve(settings, DeckPage.Usage) == DeckPage.Notices && DeckPages.Largest(settings) == (settings.NoticesWidth, settings.NoticesHeight));
         check("The notices page opens by choice", DeckPages.Opening(DefaultDeckPage.Notices) == DeckPage.Notices && DeckPages.Opening(DefaultDeckPage.Last) is null);
-        check("The notices page is saved as number 5, after the devices page", (int)DeckPage.Devices == 4 && (int)DeckPage.Notices == 5 && (int)DefaultDeckPage.Notices == 6);
+        check("The notices page is saved as number 5, after the devices page; as the opening page, 7, after the part under the pointer", (int)DeckPage.Devices == 4 && (int)DeckPage.Notices == 5 && (int)DefaultDeckPage.Notices == 7);
         DeckPages.SetSize(settings, DeckPage.Notices, 100, 9999);
         check("Dragging the notices page keeps it within the page limits", settings.NoticesWidth == DeckPages.MinWidth && settings.NoticesHeight == DeckPages.MaxHeight);
     }

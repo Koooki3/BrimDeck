@@ -27,6 +27,55 @@ static class DeviceReadTests
         check("Device reads: after three searches nothing more is sent, and a device plugged in again is searched again",
             thirtyLater && stopped && book.Plan(device, mouse, ways, 10L * 24 * 3600_000, false).Kind == DeviceReadBook.Kind.Probe);
 
+        // A search that ran out (a keyboard asleep behind its receiver through all three) is made once more when input comes
+        // back, the first time at once (a keyboard woken a minute after the last search and then used brings no more coming
+        // back), later at most once in AgainMs after the last try, AgainLimit times a run; and once each time the machine wakes.
+        var again = new DeviceReadBook();
+        long ranOut = 35 * 60_000, back = ranOut + 60_000;
+        again.Silent(device, mouse, DeviceReadBook.Kind.Probe, 0);
+        again.Silent(device, mouse, DeviceReadBook.Kind.Probe, 5 * 60_000);
+        again.Silent(device, mouse, DeviceReadBook.Kind.Probe, ranOut);
+        again.Again(back, woke: false);
+        bool atOnce = again.Plan(device, mouse, ways, back, false).Kind == DeviceReadBook.Kind.Probe;
+        again.Silent(device, mouse, DeviceReadBook.Kind.Probe, back);
+        bool oneTry = again.Plan(device, mouse, ways, 10L * 24 * 3600_000, false).Kind == DeviceReadBook.Kind.None;
+        again.Again(back + 60_000, woke: false);
+        bool notSoon = again.Plan(device, mouse, ways, back + 60_000, false).Kind == DeviceReadBook.Kind.None;
+        check("Device reads: input coming back right after a search ran out makes it once at once, then not again too soon",
+            atOnce && oneTry && notSoon);
+        again.Again(back + 60_000, woke: true);
+        bool onWake = again.Plan(device, mouse, ways, back + 60_000, false).Kind == DeviceReadBook.Kind.Probe;
+        again.Silent(device, mouse, DeviceReadBook.Kind.Probe, back + 60_000);
+        check("Device reads: a search that ran out is made once when the machine wakes, however soon after the last",
+            onWake && again.Plan(device, mouse, ways, 10L * 24 * 3600_000, false).Kind == DeviceReadBook.Kind.None);
+        long last = back + 60_000;
+        int tries = 1;
+        for (int i = 0; i <= DeviceReadBook.AgainLimit; i++)
+        {
+            long when = last + DeviceReadBook.AgainMs;
+            again.Again(when, woke: false);
+            if (again.Plan(device, mouse, ways, when, false).Kind != DeviceReadBook.Kind.Probe) break;
+            tries++;
+            again.Silent(device, mouse, DeviceReadBook.Kind.Probe, when);
+            last = when;
+        }
+        again.Again(last + DeviceReadBook.AgainMs, woke: true);
+        check("Device reads: input coming back gives a search that ran out a try at most AgainLimit times a run, waking still one",
+            tries == DeviceReadBook.AgainLimit && again.Plan(device, mouse, ways, last + DeviceReadBook.AgainMs, false).Kind == DeviceReadBook.Kind.Probe);
+        // Woken while nothing is read (no page shows the devices): the try waits for the next reading, however late.
+        var later = new DeviceReadBook();
+        later.Silent(device, mouse, DeviceReadBook.Kind.Probe, 0);
+        later.Silent(device, mouse, DeviceReadBook.Kind.Probe, 5 * 60_000);
+        later.Silent(device, mouse, DeviceReadBook.Kind.Probe, ranOut);
+        later.Again(2 * 3600_000, woke: true);
+        check("Device reads: a waking while nothing is read keeps its try for when the devices are read again",
+            later.Plan(device, mouse, ways, 9 * 3600_000, false).Kind == DeviceReadBook.Kind.Probe);
+        var searching = new DeviceReadBook();
+        searching.Silent(device, mouse, DeviceReadBook.Kind.Probe, 0);
+        searching.Again(60_000, woke: true);
+        check("Device reads: a search still waiting out its interval is not hurried by waking or input",
+            searching.Plan(device, mouse, ways, 60_000, false).Kind == DeviceReadBook.Kind.None);
+
         book.Answered(device, mouse, "mchose.frame4d", at);
         var kept = book.Plan(device, mouse, ways, 0, keptPresent: true);
         check("Device reads: the read that answered is the only one sent, and only to its collection",

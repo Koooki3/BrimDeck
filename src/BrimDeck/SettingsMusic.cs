@@ -53,12 +53,28 @@ public sealed partial class SettingsWindow
         var enterMotion = Slide(0); enterMotion.Completed += (_, _) => { if (host.Children.Count == 1) host.ClipToBounds = false; };
         leave.BeginAnimation(TranslateTransform.XProperty, leaveMotion); enter.BeginAnimation(TranslateTransform.XProperty, enterMotion);
     }
+    // What hovering or clicking the indicator opens (DeckSettings.LineOpens): the panel, or first the capsule or the notch in its place.
+    private FrameworkElement LineOpensRow()
+    {
+        var title = Loc.T("展开为", "Opens");
+        var options = new UniformGrid { Columns = 3, Width = 324 };
+        foreach (var (opens, label) in new[] { (IndicatorOpens.Panel, Loc.T("面板", "Panel")), (IndicatorOpens.Capsule, StyleName(CompactStyle.Capsule)), (IndicatorOpens.Notch, StyleName(CompactStyle.Notch)) })
+        {
+            var option = new RadioButton { Content = label, Style = (Style)FindResource("SettingsSegment"), GroupName = "LineOpens", IsChecked = S.LineOpens == opens };
+            AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.LineOpens = opens); options.Children.Add(option);
+        }
+        return Row(title, SegmentBorder(options), help: () => Loc.T(
+            "指示条先变成胶囊或刘海，点击后再打开面板。显示的内容在对应样式中设置。",
+            "The indicator first turns into the capsule or the notch; click it to open the panel. Set what it shows under that style."));
+    }
     private void StyleOptions(CompactStyle style)
     {
         SectionTitle(Loc.T("显示内容 · ", "Content · ") + StyleName(style));
         if (style == CompactStyle.Line)
         {
             Group(Toggle(Loc.T("显示播放进度", "Show playback progress"), S.MusicIndicatorProgress, v => Change(s => s.MusicIndicatorProgress = v)));
+            SectionTitle(Loc.T("展开 · ", "Opening · ") + StyleName(style));
+            Group(LineOpensRow());
             return;
         }
         // The rows are in the order the collapsed row shows the parts, left to right; only the cover keeps its place at the left.
@@ -236,7 +252,10 @@ public sealed partial class SettingsWindow
             pageBars,
             MusicChoice(Loc.T("收起时律动条显示时机", "Collapsed equalizer shown"), S.EqualizerAlways, [(false, Loc.T("播放音乐时", "While music plays")), (true, Loc.T("始终显示", "Always"))],
                 v => Change(s => s.EqualizerAlways = v), help: Loc.T("在收起形态中打开律动条后生效。始终显示时，没有音乐播放也会显示，读取系统的全部声音。",
-                    "Applies once the equalizer is switched on in the collapsed content. When always shown, it also shows while no music plays, reading all system sound.")));
+                    "Applies once the equalizer is switched on in the collapsed content. When always shown, it also shows while no music plays, reading all system sound.")),
+            Toggle(Loc.T("模拟逐字高亮", "Simulate word highlighting"), S.MusicSimulatedKaraoke,
+                v => Change(s => s.MusicSimulatedKaraoke = v),
+                help: Loc.T("歌词没有逐字时间时，估算进度让歌词逐字亮起。可能与演唱不同步，展开和收起时都适用。", "Lights up lyrics without word timings word by word, from an estimate. It may not match the vocals. Applies when expanded and collapsed.")));
         SectionTitle(Loc.T("收起时", "When collapsed"));
         // The instrumental choice belongs to the lyric, so it shows only while the middle text is the lyric.
         var text = new List<FrameworkElement> { MusicChoice(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) },

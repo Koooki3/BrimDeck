@@ -38,7 +38,7 @@ public static class FinalmouseMice
         var payload = Payload(r, BatteryVoltage);
         if (payload.Length < 2) return null;
         int millivolts = payload[0] | payload[1] << 8;
-        return millivolts is >= 2500 and <= 4600 && Percent(millivolts) is int percent and > 0 ? new(percent, Coarse: true) : null;
+        return millivolts is >= 2500 and <= 4600 && Percent(millivolts) is int percent and > 0 ? new(percent, Accuracy: BatteryAccuracy.Voltage) : null;
     }
 
     private static readonly double[] Volts = [3.0, 3.62, 3.66, 3.74, 3.88, 4.17, 4.38];

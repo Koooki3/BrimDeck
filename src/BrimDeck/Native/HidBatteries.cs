@@ -192,7 +192,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     {
         string key = Key("push", info) + (kind == Pushes.Kind.SteamPuck ? ":" + info.Interface : "");
         return new DeviceBattery(key, name ?? Pushes.Name(kind, null), Pushes.KindOf(kind), Pushes.Source(kind), state.Percent)
-            { Charging = state.Charging, Coarse = state.Coarse, Asleep = state.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product) };
+            { Charging = state.Charging, Accuracy = state.Accuracy, Asleep = state.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product) };
     }
 
     // HID collections that come or go while the page shows wake the worker; the first listing (every collection there is) does not.
@@ -745,7 +745,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 charging |= Hid.Transact<object>(listeners, () => Send(second), r => Headsets.Charging(kind, r) is { } state ? state : null, wait) is true;
             claimed.Add(info.Path);
             return [new DeviceBattery(Key("headset", info), NameOf(info, Headsets.Name(kind)), DeviceKind.Headphones, Headsets.Source(kind), battery.Percent)
-                { Charging = charging, Coarse = battery.Coarse, Hardware = Devices.Hardware(info.Vendor, info.Product), Address = AddressOf(info) }];
+                { Charging = charging, Accuracy = battery.Accuracy, Hardware = Devices.Hardware(info.Vendor, info.Product), Address = AddressOf(info) }];
         }
         finally { foreach (var other in listeners.Skip(1)) other.Dispose(); }
     }
@@ -798,9 +798,11 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             Dongles.Protocol.Asus => ReadAsus,
             Dongles.Protocol.SteelSeries => SteelSeriesMouse,
             Dongles.Protocol.RapooGen1 => RapooGen1,
+            Dongles.Protocol.RapooQuery => RapooQuery,
             Dongles.Protocol.Aula => Aula,
             Dongles.Protocol.MchoseKeyboard => MchoseKeyboard,
             Dongles.Protocol.AtkSerial => AtkSerial,
+            Dongles.Protocol.EposSerial => EposSerial,
             Dongles.Protocol.CompxSplit => CompxSplit,
             _ => null
         };
@@ -808,7 +810,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private static DeviceBattery Mouse(string prefix, HidInfo info, string fallback, BatteryRead battery, DeviceKind kind = DeviceKind.Mouse, string? preferredName = null)
         => new(Key(prefix, info), preferredName is { Length: > 0 } ? preferredName : NameOf(info, fallback),
             Devices.Named(info.ProductName) is { } named and not DeviceKind.Other ? named : kind, DeviceSource.Hid, battery.Percent)
-        { Charging = battery.Charging, Coarse = battery.Coarse, Asleep = battery.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product) };
+        { Charging = battery.Charging, Accuracy = battery.Accuracy, Asleep = battery.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product) };
 
     private static IEnumerable<DeviceBattery> BitMouse(HidInfo info, HashSet<string> claimed)
     {
@@ -915,12 +917,10 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         ? Feature(info, claimed, "pulsar", "Pulsar", Dongles.VaxeeRequest(info.FeatureLength), 120, Dongles.VaxeeBattery)
         : Feature(info, claimed, "vaxee", "VAXEE", Dongles.VaxeeRequest(info.FeatureLength), 120, Dongles.VaxeeBattery);
 
-    // Inphic IN9: the handshake, then the battery, with one sequence number (InphicBatteryTray's order).
+    // Inphic IN9 and Machenike's mice on the same ids: the battery query alone (Dongles.InphicRequest), as Machenike's app sends it.
     private static IEnumerable<DeviceBattery> Inphic(HidInfo info, HashSet<string> claimed)
     {
         using var device = new HidDevice(info);
-        device.SetFeature(Dongles.InphicRequest(0xF0, 1, Dongles.InphicHandshake));
-        Thread.Sleep(10);
         if (!device.SetFeature(Dongles.InphicRequest(0x20, 1))) return [];
         Thread.Sleep(10);
         if (device.GetFeature(0x0C, 33) is not { } reply || Dongles.InphicBattery(reply) is not { } battery) return [];
@@ -958,7 +958,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     // runs under the mark on disk (DeviceReadStore.Probe). The device gone half way (it cannot be opened or written any more),
     // no other read is tried on it. Null when no read answered; the device stays unread, never stopped, for that.
     // Each call counts in _familyCalls, each read it goes on to ask in _familyAsks.
-    private static (BatteryRead Read, string? Model, string Way)? Family(HidInfo info, IReadOnlyList<string> ways, Func<string, (BatteryRead Read, string? Model)?> ask)
+    private static (BatteryRead Read, string? Model, string Way)? Family(HidInfo info, IReadOnlyList<string> ways, Func<string, (BatteryRead Read, string? Model)?> ask,
+        IReadOnlySet<string>? probeOnAsleep = null)
     {
         _familyCalls++;
         string device = Devices.Hardware(info.Vendor, info.Product), collection = Collection(info);
@@ -971,7 +972,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         if (plan.Kind == DeviceReadBook.Kind.Probe && ArrivedAt.TryGetValue(device, out var came) && now - came < SettleMs) return null;
         // In a check of a kept read gone quiet, another read that finds the device asleep tells why it is quiet, not that it
         // reads the device better: the kept read stays, and the device shows asleep.
-        (BatteryRead Read, string? Model, string Way)? asleep = null;
+        (BatteryRead Read, string? Model, string Way)? asleep = null, tentative = null;
         foreach (var way in plan.Ways)
         {
             bool first = way != plan.Kept;
@@ -986,8 +987,15 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             if (first) lock (Probed) Probed.Add(new(device, way, start, Environment.TickCount64));
             if (answer is not { } found) continue;
             if (plan.Kind == DeviceReadBook.Kind.Recheck && way != plan.Kept && found.Read is { Percent: null, Asleep: true }) { asleep ??= (found.Read, found.Model, way); continue; }
+            // A first try that finds the device asleep, of a read that does not settle it (BrandWay.ProbeOnAsleep): the next is tried.
+            if (first && probeOnAsleep?.Contains(way) == true && found.Read is { Percent: null, Asleep: true }) { tentative ??= (found.Read, found.Model, way); continue; }
             book.Answered(device, collection, way, DateTimeOffset.Now);
             return (found.Read, found.Model, way);
+        }
+        if (tentative is { } settled)
+        {
+            book.Answered(device, collection, settled.Way, DateTimeOffset.Now);
+            return settled;
         }
         book.Silent(device, collection, plan.Kind, Environment.TickCount64);
         return asleep;
@@ -1045,15 +1053,16 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     // ----- Brand families (BrandFamilies): the reads each brand declares, run as it says -----
 
     internal static HidShape Shape(HidInfo info) => new(info.Vendor, info.Product, info.UsagePage, info.Usage, info.Interface, info.InputLength,
-        info.OutputLength, info.FeatureLength, info.OutputIds, info.FeatureIds, info.ProductName);
+        info.OutputLength, info.FeatureLength, info.OutputIds, info.FeatureIds, info.ProductName) { InputIds = info.InputIds };
 
     private static IEnumerable<DeviceBattery> ReadBrand(HidInfo info, HashSet<string> claimed, BrandFamily family, IReadOnlyList<BrandWay> ways)
     {
         var shape = Shape(info);
         var byName = ways.ToDictionary(way => way.Name);
-        if (Family(info, [.. byName.Keys], name => Run(info, byName[name]) is { } read ? (read, null) : null) is not { } found) return [];
+        var onAsleep = ways.Where(way => way.ProbeOnAsleep).Select(way => way.Name).ToHashSet();
+        if (Family(info, [.. byName.Keys], name => Run(info, byName[name]) is { } read ? (read, null) : null, onAsleep) is not { } found) return [];
         claimed.Add(info.Path);
-        return [Mouse(family.Prefix, info, family.Brand, found.Read, family.Kind(shape) ?? DeviceKind.Other, family.DisplayName(shape))];
+        return [Mouse(family.Prefix, info, family.Brand, found.Read, family.WayKind(found.Way) ?? family.Kind(shape) ?? DeviceKind.Other, family.DisplayName(shape))];
     }
 
     // One read as its family declares it (BrandWay): its frames before, its gate, the request and the answer, its charging
@@ -1120,6 +1129,12 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         try
         {
             foreach (var frame in way.Before) { Send(frame); Thread.Sleep(way.GapMs); }
+            if (way.Transport == WayTransport.Converse)
+            {
+                if (way.Converse is not { } converse) return null;
+                device.Flush();
+                return converse(new Exchange(info.Path, device));
+            }
             // The gate the same way as the request: a feature read's gate is set and got back as a feature report.
             if (way.Gate is { Length: > 0 } gate && way.Gated is { } gated)
             {
@@ -1148,12 +1163,21 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         }
     }
 
+    // A collection as a Converse read talks to it.
+    private sealed class Exchange(string key, HidDevice device) : IHidExchange
+    {
+        public string Key => key;
+        public void Write(byte[] report) => device.Write(report);
+        public byte[]? Read(int timeoutMs) => device.Read(Math.Max(1, timeoutMs));
+    }
+
     // MCHOSE on its own vendor id 0x3837: the reads Dongles.MchoseReads gives the collection (by its shape and the report ids it
     // declares), in that order, through Family.
     private static string WayName(Dongles.MchoseRead read) => "mchose." + read.ToString().ToLowerInvariant();
     private static IEnumerable<DeviceBattery> Mchose(HidInfo info, HashSet<string> claimed)
     {
-        var reads = Dongles.MchoseReads(info.Product, info.ProductName, info.UsagePage, info.Usage, info.FeatureLength, info.OutputLength, info.OutputIds, info.FeatureIds)
+        var reads = Dongles.MchoseReads(info.Product, info.ProductName, info.UsagePage, info.Usage, info.FeatureLength, info.OutputLength, info.OutputIds, info.FeatureIds,
+                info.InputIds)
             .ToDictionary(WayName);
         if (Family(info, [.. reads.Keys], way => MchoseAsk(info, reads[way])) is not { } found) return [];
         claimed.Add(info.Path);
@@ -1236,7 +1260,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         // An ATK mouse listed from ATK HUB was read with BitMouse on its 0xFF05 collection before (key "atk:"); it keeps that key
         // whichever of its collections answers, so its settings stay and it is one device.
         string prefix = info.Vendor == Dongles.AtkVendor && Dongles.IsCompxOfficial(info.Vendor, info.Product) ? "atk" : "compx";
-        return [Mouse(prefix, info, "Compx", battery, Dongles.CompxKind(info.Vendor, info.Product))];
+        return [Mouse(prefix, info, Dongles.CompxName(info.Vendor, info.Product), battery, Dongles.CompxKind(info.Vendor, info.Product))];
     }
 
     // The Compx frame split over two collections (Dongles.CompxSplit): set as a feature report on the command collection this
@@ -1325,6 +1349,19 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         claimed.Add(info.Path);
         string name = AtkHeadsets.SerialProducts.First(p => p.Product == info.Product).Name;
         return [Mouse("atk-headset", info, name, found.Read, DeviceKind.Headphones, name)];
+    }
+
+    // EPOS's GSP 370: read on its dongle's serial port (Epos.Serial*), through Family; nothing is sent to the HID collection.
+    private static IEnumerable<DeviceBattery> EposSerial(HidInfo info, HashSet<string> claimed)
+    {
+        var ports = UsbSerial.Ports(info.Vendor, info.Product);
+        if (ports.Count == 0) return [];
+        if (Family(info, ["epos.gsp370-serial"], _ => ports.Select(port => UsbSerial.AskStream<BatteryRead>(port, Epos.SerialBaud, Epos.SerialRequest(),
+                Epos.SerialBattery, Epos.SerialSettleMs, 2000)).FirstOrDefault(read => read is not null) is { } read ? (read, null) : null) is not { } found)
+            return [];
+        claimed.Add(info.Path);
+        string name = Epos.SerialProducts.First(p => p.Product == info.Product).Name;
+        return [Mouse("epos", info, name, found.Read, DeviceKind.Headphones, name)];
     }
 
     // MCHOSE's 7 series on 0x5253 (the RealTek exchange alone; MCHOSE's other reads are for 0x3837).
@@ -1458,7 +1495,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 using var device = new HidDevice(info);
                 if (AskAsus(device, model) is not { } battery) continue;
                 found.Add(new DeviceBattery(Key("asus", info) + $":{model.Product:X4}", model.Name, Asus.Kind(model), DeviceSource.Hid, battery.Percent)
-                    { Charging = battery.Charging, Coarse = battery.Coarse, Hardware = Devices.Hardware(info.Vendor, info.Product) });
+                    { Charging = battery.Charging, Accuracy = battery.Accuracy, Hardware = Devices.Hardware(info.Vendor, info.Product) });
             }
             catch (Exception error) when (error is System.ComponentModel.Win32Exception or TimeoutException or IOException) { }
         }
@@ -1493,6 +1530,29 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                     return [Mouse("rapoo", info, "Rapoo VT3 PRO", battery)];
                 }
                 if (Environment.TickCount64 - sent >= 100) break;
+            }
+        }
+        return [];
+    }
+
+    // The rest of Rapoo's receivers (Dongles.RapooQueryCollection): the same query, its input report got once 100 ms later (as
+    // MouseDock waits); busy or no answer, and the request is sent again, within 1.5 s in all.
+    private static IEnumerable<DeviceBattery> RapooQuery(HidInfo info, HashSet<string> claimed)
+    {
+        using var device = new HidDevice(info);
+        var request = Dongles.RapooGen1Request(cable: false);
+        long deadline = Environment.TickCount64 + 1500;
+        for (int sends = 0; sends < 4 && Environment.TickCount64 < deadline; sends++)
+        {
+            device.Write(request);
+            Thread.Sleep(100);
+            byte[]? reply;
+            try { reply = device.GetInput(Dongles.RapooGen1Report, device.InputLength, 300); }
+            catch (TimeoutException) { continue; }
+            if (reply is not null && Dongles.RapooGen1Status(reply) == true && Dongles.RapooGen1Battery(reply) is { } battery)
+            {
+                claimed.Add(info.Path);
+                return [Mouse("rapoo", info, "Rapoo Mouse", battery)];
             }
         }
         return [];
@@ -1597,7 +1657,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 if (channel.HeadsetRegister(index, 0x0D) is not { } battery) return Remembered(slot is { Legacy: true } ? slot : null);
                 string name = info.ProductName.Length > 0 ? info.ProductName : "Logitech G535";
                 var read = new DeviceBattery($"logitech:{info.Product:X4}:{index}", name, DeviceKind.Headphones, DeviceSource.Logitech, battery.Percent)
-                    { Charging = battery.Charging, Coarse = battery.Coarse, Hardware = Devices.Hardware(info.Vendor, info.Product) };
+                    { Charging = battery.Charging, Accuracy = battery.Accuracy, Hardware = Devices.Hardware(info.Vendor, info.Product) };
                 _known[slotKey] = new Slot { Key = read.Key, Name = name, Legacy = true, Last = read, LastAt = Environment.TickCount64 };
                 return read;
             }
@@ -1647,7 +1707,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         private static DeviceBattery Take(Slot slot, BatteryRead battery)
         {
             slot.Last = new DeviceBattery(slot.Key, slot.Name, slot.Kind != DeviceKind.Other ? slot.Kind : Devices.Named(slot.Name) ?? DeviceKind.Other, DeviceSource.Logitech, battery.Percent)
-            { Charging = battery.Charging, Coarse = battery.Coarse, Hardware = slot.Hardware.Length > 0 ? slot.Hardware : null };
+            { Charging = battery.Charging, Accuracy = battery.Accuracy, Hardware = slot.Hardware.Length > 0 ? slot.Hardware : null };
             slot.LastAt = Environment.TickCount64;
             return slot.Last;
         }
@@ -1694,7 +1754,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             if (read is not { } battery) return null;
             string name = index == 0xFF && info.ProductName.Length > 0 ? info.ProductName : "Logitech #" + index;
             return new DeviceBattery($"logitech:{info.Product:X4}:{index}", name, Devices.Named(name) ?? DeviceKind.Other, DeviceSource.Logitech, battery.Percent)
-            { Charging = battery.Charging, Coarse = battery.Coarse, Hardware = Devices.Hardware(info.Vendor, info.Product) };
+            { Charging = battery.Charging, Accuracy = battery.Accuracy, Hardware = Devices.Hardware(info.Vendor, info.Product) };
         }
 
         private sealed class HidppError(int code) : Exception($"HID++ error 0x{code:X2}") { public int Code { get; } = code; }

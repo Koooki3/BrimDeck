@@ -84,7 +84,7 @@ public partial class MainWindow
     // Which form the grips take now: the open monitor page, the collapsed surface, or none (another page, a preview, hidden,
     // a quota alert widening the surface, powering off).
     private bool PanelResizable => _expanded && !_preview && IsVisible && !IsSuppressed && !_poweringOff;
-    private bool CompactResizable => !_expanded && !_preview && IsVisible && !IsSuppressed && _alert is null && !_poweringOff;
+    private bool CompactResizable => !_expanded && !_preview && IsVisible && !IsSuppressed && _alert is null && !_poweringOff && !IslandFromLine;
 
     // The island's box in the window's coordinates, where the grip layer draws.
     private DipRect IslandBox()
@@ -93,6 +93,9 @@ public partial class MainWindow
         var origin = Island.TranslatePoint(new Point(), Stage);
         return new DipRect(origin.X, origin.Y, Island.ActualWidth, Island.ActualHeight);
     }
+
+    // Anchor the side handles to the shared toolbar, independently of each page's body row.
+    private double GripHeaderHeight => _header.Height * _scale;
 
     // Brings the layer up to date with the island; cheap when nothing changed.
     private void UpdateGrips()
@@ -104,7 +107,7 @@ public partial class MainWindow
         var form = PanelResizable && !PanelIgnoresPointer ? ResizeGripLayer.Form.Panel
             : CompactResizable && !ClickThrough && Settings.GripDoubleClick != GripDoubleClick.Off || Resizing && _resizeCompact ? ResizeGripLayer.Form.Compact : ResizeGripLayer.Form.None;
         if (Resizing && !_resizeCompact) form = ResizeGripLayer.Form.Panel;
-        _grips.Show(form, IslandBox(), _header.Row * _scale, PanelRadius, EffectiveStyle == CompactStyle.Line);
+        _grips.Show(form, IslandBox(), GripHeaderHeight, PanelRadius, EffectiveStyle == CompactStyle.Line);
         if (form == ResizeGripLayer.Form.None && _hoverEdge != ResizeEdges.None && !Dragging) SetHoverEdge(ResizeEdges.None);
     }
 
@@ -120,7 +123,7 @@ public partial class MainWindow
         var r = _grips.Rect;
         // The distance to the nearest grip: zero on one, growing inside the panel; nothing above the header.
         double near = 0;
-        if (point.Y >= r.Y + _header.Row * _scale && point.X >= r.X - ResizeGrips.PanelOuter && point.X <= r.Right + ResizeGrips.PanelOuter && point.Y <= r.Bottom + ResizeGrips.PanelOuter)
+        if (point.Y >= r.Y + GripHeaderHeight && point.X >= r.X - ResizeGrips.PanelOuter && point.X <= r.Right + ResizeGrips.PanelOuter && point.Y <= r.Bottom + ResizeGrips.PanelOuter)
         {
             double distance = Math.Max(0, Math.Min(Math.Min(point.X - r.X, r.Right - point.X), r.Bottom - point.Y) - ResizeGrips.PanelInner);
             near = 1 - Math.Clamp(distance / HintReach, 0, 1);
@@ -131,12 +134,17 @@ public partial class MainWindow
         return edge;
     }
 
+    // Whether the pointer, a place on screen in physical pixels, is on a grip the layer offers now.
+    private bool OnGrip(Point screen)
+        => _grips is { Shape: not ResizeGripLayer.Form.None } grips && PresentationSource.FromVisual(Stage) is not null
+            && grips.EdgeAt(Stage.PointFromScreen(screen)) != ResizeEdges.None;
+
     private bool NearGrips(Point screen)
     {
         if (!PanelResizable || PresentationSource.FromVisual(Stage) is null) return false;
         var area = ResizeGrips.PanelArea(IslandBox());
         var point = Stage.PointFromScreen(screen);
-        return point.X >= area.X - GripSlack && point.X <= area.Right + GripSlack && point.Y >= area.Y + _header.Row * _scale && point.Y <= area.Bottom + GripSlack;
+        return point.X >= area.X - GripSlack && point.X <= area.Right + GripSlack && point.Y >= area.Y + GripHeaderHeight && point.Y <= area.Bottom + GripSlack;
     }
 
     private void SetHoverEdge(ResizeEdges edge)
@@ -202,7 +210,8 @@ public partial class MainWindow
         bool compact = _grips.Shape == ResizeGripLayer.Form.Compact;
         var style = EffectiveStyle;
         // A double click on an end does what the settings choose (MainWindow.Move.cs).
-        if (compact && e.ClickCount >= 2 && !_resizeSettling) { GripDoubleClicked(style); return; }
+        bool second = SecondGripPress(e);
+        if (compact && second && !_resizeSettling) { GripDoubleClicked(style); return; }
         BeginResize(compact);
         _resizeSettling = false; _resizeByKey = false;
         _resizeEdge = edge; _resizeStart = WindowsHost.Cursor();
@@ -210,6 +219,23 @@ public partial class MainWindow
         _grips.Light(edge, true, SizeLabel(_resizeFrom.Width, _resizeFrom.Height));
         _grips.CaptureMouse();
     }
+
+    // Whether a press on a grip is the second of a double click. Presses handed on by the taskbar mirror (TaskbarMirror) carry no
+    // click count, so a press within the system's double-click time and distance of the previous one counts as well.
+    private long _gripPressAt = long.MinValue;
+    private Point _gripPressPoint;
+    private bool SecondGripPress(MouseButtonEventArgs e)
+    {
+        long now = Environment.TickCount64;
+        var point = WindowsHost.Cursor();
+        bool second = e.ClickCount >= 2 || now - _gripPressAt <= GetDoubleClickTime()
+            && Math.Abs(point.X - _gripPressPoint.X) <= GetSystemMetrics(36) / 2.0 && Math.Abs(point.Y - _gripPressPoint.Y) <= GetSystemMetrics(37) / 2.0; // SM_CXDOUBLECLK, SM_CYDOUBLECLK
+        // A third press starts afresh rather than counting as another double click.
+        _gripPressAt = second ? long.MinValue : now; _gripPressPoint = point;
+        return second;
+    }
+    [System.Runtime.InteropServices.DllImport("user32")] private static extern uint GetDoubleClickTime();
+    [System.Runtime.InteropServices.DllImport("user32")] private static extern int GetSystemMetrics(int index);
 
     // Starts resizing the open page or the collapsed surface, for a drag's press or the resize shortcut. A start while the same
     // form still settles picks it up where it is heading; the other form still settling is saved first. A page starts from the
@@ -312,7 +338,6 @@ public partial class MainWindow
         _resizeChanged = true;
         DeckPages.SetSize(Settings, _resizePage, width, height);
         _pageWidth = width;
-        if (_resizePage == DeckPage.Usage) _usageWidth = width;
         SetExpanded(true, instant: true);
         // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
         // layout step and stretch in between, so they follow too; the notices page stretches as it is, its header and margins

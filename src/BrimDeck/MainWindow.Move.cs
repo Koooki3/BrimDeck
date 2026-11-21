@@ -39,6 +39,8 @@ public partial class MainWindow
     private (ScreenEdge Edge, bool OverTaskbar) Dock(CompactStyle style)
     {
         if (_dockOverride is { } dragged && _moveOverlay is not null && style == _moveStyle) return dragged;
+        // The notch the line opens into hangs where the line does (MainWindow.Peek.cs).
+        if (style == CompactStyle.Notch && NotchFromLine) return Settings.Dock(CompactStyle.Line);
         return style == CompactStyle.Capsule && CapsuleBottomDock() is { } bottom ? bottom : Settings.Dock(style);
     }
     private void ReportMoveShape()
@@ -235,7 +237,7 @@ public partial class MainWindow
     // dragged or resized are left alone.
     internal void MoveFromKeyboard(int arrow)
     {
-        if (_expanded || _preview || !IsVisible || IsSuppressed || _poweringOff || Resizing || _moveOverlay is not null) return;
+        if (_expanded || _preview || !IsVisible || IsSuppressed || _poweringOff || Resizing || _moveOverlay is not null || IslandFromLine) return;
         var style = EffectiveStyle;
         var (along, down) = KeyboardMove.Delta(arrow, style, _frame.Edge);
         double height = style switch { CompactStyle.Capsule => Settings.CapsuleHeight, CompactStyle.Line => Settings.LineThickness, _ => Settings.NotchHeight };

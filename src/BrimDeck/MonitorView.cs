@@ -83,7 +83,7 @@ internal sealed class MonitorView : Grid
     // network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
     public MonitorView(ExpandedPlan plan, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
         Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures = false, bool smallTemperature = false,
-        PowerOptions? power = null, FrameworkElement? message = null, CoreDisplay coreDisplay = CoreDisplay.Auto)
+        PowerOptions? power = null, FrameworkElement? message = null, CoreDisplay coreDisplay = CoreDisplay.Auto, bool free = false, int matrixColumns = 0)
     {
         var layout = plan.Steps;
         _layout = layout; _colors = colors; _temperatures = temperatures;
@@ -143,7 +143,7 @@ internal sealed class MonitorView : Grid
             {
                 // Fill the main graph's width even on CPUs with few cores. The fill is the
                 // load, the tick the clock, and pointing at a core gives both.
-                _cpuGraph = new ColumnGraph(double.PositiveInfinity, layout.Caption, labels: false, name: cores, display: coreDisplay);
+                _cpuGraph = new ColumnGraph(double.PositiveInfinity, layout.Caption, labels: false, name: cores, display: coreDisplay, matrixColumns: matrixColumns);
                 graphs.Children.Add(_cpuGraph);
                 if (pair)
                 {
@@ -159,7 +159,7 @@ internal sealed class MonitorView : Grid
                 graphs.Children.Add(_gpuGraph);
                 if (pair)
                 {
-                    _cpuGraph = new ColumnGraph(6, layout.Caption, false, gap: 1.5, button: swapToCpu, name: cores, display: coreDisplay);
+                    _cpuGraph = new ColumnGraph(6, layout.Caption, false, gap: 1.5, button: swapToCpu, name: cores, display: coreDisplay, matrixColumns: matrixColumns);
                     _cpuGraph.Clicked += () => mainChanged(MonitorMain.Cpu);
                     SetColumn(_cpuGraph, 2); graphs.Children.Add(_cpuGraph);
                 }
@@ -171,7 +171,7 @@ internal sealed class MonitorView : Grid
         bool hasMemory = plan.Part(ExpandedItem.Memory) is not null, hasNetwork = plan.Downloads || plan.Uploads;
         if (hasMemory || hasNetwork)
         {
-            if (hasMemory) _memory = new MemoryBlock(colors, layout.Metrics != MetricsMode.Blocks, layout.Body, layout.Caption);
+            if (hasMemory) _memory = new MemoryBlock(colors, layout.Metrics != MetricsMode.Blocks, layout.Body, layout.Caption, free);
             if (hasNetwork) _network = new NetworkBlock(colors, layout.Metrics, layout.Body, layout.Caption, plan.Downloads, plan.Uploads, plan.UploadFirst);
             // In the table's order: whichever of memory and the network comes first is first.
             var order = plan.Parts.Select(part => part.Item).ToList();
@@ -211,7 +211,7 @@ internal sealed class MonitorView : Grid
         if (plan.Part(ExpandedItem.Storage) is not null && layout.StorageLines > 0)
         {
             // Its lines are tighter than the list's rows.
-            _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, layout.StorageLines, layout.StorageColumns, temperatures);
+            _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, layout.StorageLines, layout.StorageColumns, temperatures, free);
             bands.Add((ExpandedItem.Storage, _storage));
         }
         if (plan.Part(ExpandedItem.Power) is not null && layout.PowerLines > 0 && power is not null)

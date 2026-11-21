@@ -8,7 +8,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | --- | --- | --- |
 | Claude | 读取 Claude Code 的登录（`%USERPROFILE%\.claude\.credentials.json`），不可用时改用 Claude 桌面版的登录，向 Anthropic 查询账户用量。账户同时属于多个组织（例如个人 Pro 与 Team）时，用桌面版为各组织保存的登录分别查询。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Claude 桌面版在本机记录的额度（`plan-usage-history.json`） | 读取 Claude Code 的本地会话记录（`projects\**\*.jsonl`），不含 Claude 桌面版的普通聊天 |
 | Codex | 读取 `%USERPROFILE%\.codex\auth.json` 中的登录，向 OpenAI 查询账户用量；查询失败时显示会话记录中的配额，并标明可能已过时 | 读取本地会话记录（`sessions` 与 `archived_sessions`） |
-| Antigravity | 从正在运行的 Antigravity 桌面版的本机服务（仅限 127.0.0.1）读取 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
+| Antigravity | 从正在运行的 Antigravity 桌面版或 Antigravity IDE 的本机服务（仅限 127.0.0.1）读取；两者都未运行时，在后台运行 `agy -p /usage` 读取，最多每 5 分钟一次；关闭“通过 CLI 读取”后不运行 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
 | Cursor | 以只读方式从 `%APPDATA%\Cursor\User\globalStorage\state.vscdb` 读取登录，向 Cursor 查询账户用量 | 向 Cursor 查询账户用量明细，包含该账户在其他设备上的用量 |
 | Grok Bot | 读取 Grok Bot 桌面版自己的登录（`%APPDATA%\Grok Bot\sand-secrets.json`），向 Cursor 查询该账户的每周额度。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Grok Bot 桌面版在本机缓存的每周额度（`%APPDATA%\Grok Bot\sand-client-persistence`） | 不提供 |
 | ZCode | 读取 ZCode 的登录，查询 Coding Plan、Start Plan 与 MCP 每日额度 | 读取本地请求记录（`%USERPROFILE%\.zcode\cli\db\db.sqlite`） |
@@ -20,6 +20,9 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | WorkBuddy AI | 与 WorkBuddy 相同，凭据单独保存，只发往 www.workbuddy.ai；不读取 WorkBuddy AI 桌面版的登录 | 读取本地会话记录（`%USERPROFILE%\.workbuddy-ai\projects`）中的 Token 数 |
 | Xiaomi MiMo 桌面订阅 | 使用在设置中通过浏览器登录小米账号获得的登录信息（加密保存在 BrimDeck 设置目录的 `mimo-session.dat`），向 mimo-server-cn.xiaomimimo.com 查询桌面版会员额度，过期时经 account.xiaomi.com 续期；登录时打开的浏览器窗口使用独立的临时目录，登录后删除 | 读取本地数据库（`%USERPROFILE%\.local\share\mimocode\mimocode.db`） |
 | Xiaomi MiMo | 读取 Xiaomi MiMo 桌面版与 MiMo Code CLI 保存的开放平台密钥（`%USERPROFILE%\.local\share\mimocode\auth.json`），向 api.xiaomimimo.com 查询余额与本月扣费，向对应集群的 token-plan 地址查询 Token Plan 额度；不修改这个文件 | 使用 Xiaomi MiMo 的本机记录 |
+| Qoder、Qoder CN | 读取 Qoder 桌面版的登录（`%APPDATA%\com.qoder.app.stable\auth.v1.dat`，按 Windows 当前用户解密），用其中的令牌向 Qoder 的服务器（`openapi.qoder.sh`）查询积分与套餐；令牌只发往这个服务器。没有可用的桌面版登录时，在后台启动本机的 Qoder CLI，使用 CLI 的登录（`%USERPROFILE%\.qoder\.auth\user`，由 CLI 自己读取）查询；都不可用时，向正在运行的 Qoder IDE 的本机端口查询（端口记录在 `%APPDATA%\Qoder\SharedClientCache\.info.json`）。不续期登录，不修改这些文件。Qoder CN 对应 `.qoder-cn`、`com.qodercn.app.stable`、`QoderCN` 与 `openapi.qoder.com.cn` | 以只读方式读取 Qoder IDE 的本地数据库（`%APPDATA%\Qoder\SharedClientCache\cache\db\local.db`）与模型列表（`User\globalStorage\state.vscdb`），以及 CLI 与桌面版的会话记录（`%USERPROFILE%\.qoder\projects`）；在设置中开启“CLI 与桌面版 Token”时，为当前用户设置环境变量 `QODER_EXPOSE_TOKEN_USAGE`（Qoder CN 为 `QODERCN_EXPOSE_TOKEN_USAGE`）；设置中显示这一行时，每隔几秒读取正在运行的 Qoder CLI 与桌面版进程是否带有这个变量 |
+| 千问办公、QwenWork | 读取桌面版保存的登录（千问办公为 `%APPDATA%\QwenWorkCN\auth-v2.dat`，QwenWork 为 `%APPDATA%\QwenWork\auth-v2.dat`，按 Windows 当前用户解密），只向登录中记录的服务地址查询剩余积分与套餐：千问办公只发往 qwenwork.cn 下的地址（gateway.qwenwork.cn），QwenWork 只发往 qwenwork.ai 下的地址（gateway.qwenwork.ai）；不续期登录，不修改这个文件 | 以只读方式读取对话引擎的数据库（千问办公为 `%USERPROFILE%\.qwenworkcn\.harness\` 下各引擎目录中的 `qwenwork\qwenwork.db`，QwenWork 为 `%USERPROFILE%\.qwenwork\.harness\` 下的同名文件）与档位名称（`%APPDATA%\QwenWorkCN\data\dynamic-text\qwenwork.json`，QwenWork 为 `%APPDATA%\QwenWork` 下的同名文件） |
+| 千问、QwenCloud | 使用在设置中通过浏览器登录获得的凭据（加密保存在 BrimDeck 设置目录的 `secrets.dat`）查询 Token Plan、账户余额与本月扣费。千问的凭据只发往 t.qianwenai.com、cli.qianwenai.com 与 cs-data.qianwenai.com；QwenCloud 的凭据只发往 t.qwencloud.com 与 cli.qwencloud.com。凭据不续期 | 不提供 |
 | 智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、Kimi 开放平台、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址；Kimi Code API 的密钥只发往 api.kimi.com 与 api.kimi.ai，读取的额度不写入 `kimi-quota.json`；Kimi 开放平台的密钥只发往 api.moonshot.cn 与 api.moonshot.ai；OpenCode Go 的密钥只发往 opencode.ai；Command Code API 的密钥只发往 api.commandcode.ai；Xiaomi MiMo API 的密钥只发往 api.xiaomimimo.com；Xiaomi MiMo Token Plan 的密钥只发往 token-plan-cn、token-plan-sgp 与 token-plan-ams.xiaomimimo.com；OpenRouter 的密钥只发往 openrouter.ai。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
 
 - 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ZCODE_HOME`、`DSH_HOME` 或 `KIMI_CODE_HOME`（须为绝对路径）时，从该目录读取。OpenCode 按 `XDG_DATA_HOME` 与 `OPENCODE_DB` 确定数据库位置。
@@ -33,7 +36,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | 文件 | 内容 |
 | --- | --- |
 | `settings.json` | 设置，不含任何登录令牌或 API 密钥 |
-| `secrets.dat` | 手动填写的 API 密钥与 WorkBuddy 的登录凭据，使用 Windows 的加密功能按当前用户加密 |
+| `secrets.dat` | 手动填写的 API 密钥与 WorkBuddy、千问、QwenCloud 的登录凭据，使用 Windows 的加密功能按当前用户加密 |
 | `mimo-session.dat` | Xiaomi MiMo 的小米账号登录信息，使用 Windows 的加密功能按当前用户加密 |
 | `model-prices.json`、`manual-model-prices.json` | 同步的模型单价、手动添加的单价 |
 | `official-prices.json` | 从 OpenRouter 同步的模型厂商官方渠道单价，只包含记录中用到的模型，以及 Kimi Code 计费所需的 Kimi K3、K3.1 Pro 与 K3.1 Pro Highspeed。没有这个文件时，读取旧版本保存的 `moonshot-prices.json` |
@@ -45,12 +48,19 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | `apple-music-lyrics.json` | Apple Music 中每首歌匹配到的歌词编号，重启后再次播放时直接使用 |
 | `shelf.dat`、`shelf\` | 剪贴板记录、文件中转的文件路径和两者的分类，以及复制的图片和网页、Word 等附带的格式（每条一个文件），不加密。普通的剪贴板记录在退出 BrimDeck 时清除（异常退出的，在下次启动时清除），开启“退出后保留历史”时改为保留，超过所选保存时长后删除；“常用”和一直保留的分类中的内容保留到手动删除 |
 | `themes\` | 自定义的面板主题文件 |
+| `backups\` | 导入配置前自动保存的备份（最近 5 份），内容与导出的配置文件相同；其中的 API 密钥是 `secrets.dat` 的原样副本，仍按当前用户加密，只能在本机本账户导入 |
 | `sensor-stops.json`、`sensor-pending.json` | 系统监控因电脑卡住而停止读取的项目（硬盘或显卡的型号、主板型号与 BIOS 版本），以及正在读取的项目，用于在下次启动时发现上次卡住的读取；在设置中重新开启后删除对应记录 |
 | `crash.log` | 错误记录，超过 1 MB 时清空 |
 | `notices\notices.dat`、`notices\icons\` | 开启灵动提示且保存通知历史时：通知历史（默认 24 小时、最多 500 条），使用 Windows 的加密功能按当前用户加密；应用图标（来自 Windows，不含通知内容）。**默认保存在 BrimDeck 安装目录的 `notices` 文件夹**（权限只开放给当前用户），安装目录不可写时才放在这里；保存位置可在设置中更改；卸载时勾选删除用户数据只删除默认位置，自行选择的文件夹需要手动删除（或卸载前先清空通知历史） |
 | `notices.log` | 灵动提示的错误记录，只含错误类型、错误码与调用位置，不含标题和正文；超过 256 KB 时轮换 |
 | `notice-banners.json` | 打开“统一关闭其他应用的通知横幅”时：BrimDeck 关掉了横幅的应用 ID 和改动前 `ShowBanner` 的原值，用于原样恢复；以及你在 Windows 里重新打开了横幅、BrimDeck 不再改动的应用 ID。全部恢复且开关关闭后删除 |
 | `monitor.log` | 系统监控读取失败的记录（错误信息，以及读取没有回应的硬盘、显卡或主板的名称），同一项失败十分钟内只记一次，不含读数；超过 1 MB 时清空 |
+
+## 导出的配置文件
+
+在“设置 › 显示器与配置 › 备份”中导出的 `.brimbackup` 文件是普通的 ZIP 压缩包，不加密，保存在你选择的位置，BrimDeck 不会上传。它包含全部设置（所有配置、自动切换规则、每台显示器使用的配置），以及导出时选择的自定义主题、手动添加的模型单价和手动填写的 API 密钥。选择导出 API 密钥时，密钥以明文写入文件，请自行妥善保管，需要时可以用压缩软件加密。
+
+以下内容不会导出：WorkBuddy 与小米账号的登录、剪贴板同步的连接与配对、剪贴板记录、文件中转、缓存的额度与价格、日志。自定义来源的脚本按原样导出，写在脚本里的内容也会一起导出。
 
 ## 联网与安全
 

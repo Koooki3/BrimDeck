@@ -84,7 +84,8 @@ public partial class MainWindow
     private DipRect _screenMonitor = FallbackMonitor, _screenWork = FallbackWork;
     private (ScreenEdge Edge, bool OverTaskbar)? CapsuleBottomDock()
     {
-        var surface = CollapsedGeometry.Resolve(Settings, CompactStyle.Capsule, _screenMonitor, _screenWork, _pixelsPerDip, null, 0, _scale).Surface;
+        // The capsule the line opens into is docked from the line's place (MainWindow.Peek.cs).
+        var surface = CapsuleFromLine ? PeekCapsule(null).Surface : CollapsedGeometry.Resolve(Settings, CompactStyle.Capsule, _screenMonitor, _screenWork, _pixelsPerDip, null, 0, _scale).Surface;
         if (surface.Y - _screenWork.Y <= CollapsedHover.BridgeMaxGap) return null;
         if (surface.Bottom > _screenWork.Bottom + .5) return (ScreenEdge.Bottom, true);
         return _screenWork.Bottom - surface.Bottom <= CollapsedHover.BridgeMaxGap ? (ScreenEdge.Bottom, false) : null;

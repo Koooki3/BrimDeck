@@ -10,7 +10,7 @@ public enum DeviceKind { Mouse, Keyboard, Headphones, Earbuds, Controller, Pen, 
 
 // Where a reading comes from, roughly from the most to the least exact. A device seen by more than one source keeps the
 // reading of the first in this order that has a percentage (DeviceRoster.Merge).
-public enum DeviceSource { PhoneLink, Logitech, Razer, SteelSeries, HyperX, Sony, Apple, Gatt, Gaming, Hid, Bluetooth }
+public enum DeviceSource { PhoneLink, Logitech, Razer, SteelSeries, HyperX, Sony, Apple, EncoDeck, Gatt, Gaming, Hid, Bluetooth }
 
 // The parts of earbuds that report their own charge.
 public enum BatteryPart { Left, Right, Case }
@@ -18,13 +18,13 @@ public readonly record struct PartBattery(BatteryPart Part, int? Percent, bool C
 
 // One device's reading. Key is the device's own: "bt:<address>" for anything Bluetooth (12 hex digits, upper case), so the
 // several Bluetooth sources meet on one entry; other sources key by what identifies the device on its link. Percent is null
-// while the device is connected but reports no battery ("not available"); Coarse marks a level the device reports in a few
-// steps (a voltage or a four-step level), shown as such. Address is the Bluetooth address when the source knows it, which
+// while the device is connected but reports no battery ("not available"); Accuracy says whether the level is the device's
+// own figure, one of a few steps, or worked out from the voltage, shown as such. Address is the Bluetooth address when the source knows it, which
 // lets a vendor source's entry replace the plain Bluetooth one.
 public sealed record DeviceBattery(string Key, string Name, DeviceKind Kind, DeviceSource Source, int? Percent)
 {
     public bool Charging { get; init; }
-    public bool Coarse { get; init; }
+    public BatteryAccuracy Accuracy { get; init; }
     // The wireless mouse is asleep / out of range while the receiver still reports the last battery: show that percent, never 0 %.
     public bool Asleep { get; init; }
     public string? Address { get; init; }
@@ -32,10 +32,12 @@ public sealed record DeviceBattery(string Key, string Name, DeviceKind Kind, Dev
     // controller and as a Bluetooth device is one device.
     public string? Hardware { get; init; }
     public IReadOnlyList<PartBattery> Parts { get; init; } = [];
+    // The reading of the last time the devices were read, shown faded while they are being read again (DeviceRoster.WithEarlier).
+    public bool Earlier { get; init; }
     // The lowest of the parts with a reading (the earbuds, not the case), or the device's own.
     public int? Lowest => Parts.Where(part => part.Part != BatteryPart.Case && part.Percent is not null).Select(part => part.Percent).Min() ?? Percent;
     public bool Same(DeviceBattery other) => Key == other.Key && Name == other.Name && Kind == other.Kind && Source == other.Source && Percent == other.Percent
-        && Charging == other.Charging && Coarse == other.Coarse && Asleep == other.Asleep && Parts.SequenceEqual(other.Parts);
+        && Charging == other.Charging && Accuracy == other.Accuracy && Asleep == other.Asleep && Earlier == other.Earlier && Parts.SequenceEqual(other.Parts);
 }
 
 // A device's own choices (DeckSettings.DeviceChoices): a name of the user's (Label, null for the device's own), and whether it
@@ -313,6 +315,7 @@ public static class Devices
         DeviceSource.Logitech => Loc.T("罗技接收器", "Logitech receiver"), DeviceSource.Razer => "Razer", DeviceSource.SteelSeries => "SteelSeries",
         DeviceSource.HyperX => "HyperX", DeviceSource.Sony => "PlayStation", DeviceSource.Gatt => Loc.T("蓝牙电池服务", "Bluetooth battery service"),
         DeviceSource.Gaming => Loc.T("游戏控制器", "Game controller"), DeviceSource.Hid => Loc.T("HID 电量", "HID battery"), DeviceSource.Apple => Loc.T("Apple 广播", "Apple broadcast"),
+        DeviceSource.EncoDeck => "EncoDeck",
         _ => Loc.T("蓝牙", "Bluetooth")
     };
 
@@ -320,18 +323,6 @@ public static class Devices
 
     // The figure as shown: "85%", or "—" for a device that reports no battery.
     public static string Figure(int? percent) => percent is { } p ? Clamp(p).ToString(System.Globalization.CultureInfo.InvariantCulture) + "%" : "—";
-
-    // A line for the tooltip and the settings: "左 80% · 右 75% · 盒 60% · 充电中 · 蓝牙".
-    public static string Describe(DeviceBattery device)
-    {
-        var parts = new List<string>();
-        if (device.Parts.Count > 0) parts.AddRange(device.Parts.Select(part => PartName(part.Part) + " " + Figure(part.Percent) + (part.Charging ? Loc.T("（充电）", " (charging)") : "")));
-        else parts.Add(device.Percent is null ? Loc.T("未报告电量", "No battery reported") : Figure(device.Percent) + (device.Coarse ? Loc.T("（约）", " (approx.)") : ""));
-        if (device.Asleep) parts.Add(Loc.T("休眠", "Sleeping"));
-        if (device.Charging) parts.Add(Loc.T("充电中", "Charging"));
-        parts.Add(SourceName(device.Source));
-        return device.Name + "\n" + string.Join(" · ", parts);
-    }
 
     // The steady order: by kind, then by name, then by key.
     public static IComparer<DeviceBattery> Order { get; } = Comparer<DeviceBattery>.Create((a, b) =>
@@ -494,6 +485,21 @@ public sealed class DeviceRoster
             var kind = best.Kind != DeviceKind.Other ? best.Kind : group.Select(device => device.Kind).FirstOrDefault(kind => kind != DeviceKind.Other, DeviceKind.Other);
             result.Add(best with { Key = key, Kind = kind, Charging = group.Any(device => device.Charging && device.Percent is not null || device == best && best.Charging) });
         }
+        result.Sort(Devices.Order);
+        return result;
+    }
+
+    // What shows while the devices are read again, until every source has listed what is connected: the readings now, and for a
+    // device without one yet its reading from the last time, marked Earlier. Once listed, only the readings now show, so a
+    // device switched off since, or one that gives no reading this time, never keeps the old one.
+    public static IReadOnlyList<DeviceBattery> WithEarlier(IReadOnlyList<DeviceBattery> now, IReadOnlyList<DeviceBattery> earlier)
+    {
+        var read = now.Where(device => device.Lowest is not null).Select(device => device.Key).ToHashSet(StringComparer.Ordinal);
+        var standIns = new Dictionary<string, DeviceBattery>(StringComparer.Ordinal);
+        foreach (var device in earlier)
+            if (device.Lowest is not null && !read.Contains(device.Key)) standIns.TryAdd(device.Key, device with { Earlier = true });
+        if (standIns.Count == 0) return now;
+        var result = now.Where(device => !standIns.ContainsKey(device.Key)).Concat(standIns.Values).ToList();
         result.Sort(Devices.Order);
         return result;
     }

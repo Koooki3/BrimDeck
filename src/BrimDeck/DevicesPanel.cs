@@ -26,7 +26,7 @@ public partial class MainWindow
     {
         get
         {
-            var all = _app.Devices?.All ?? [];
+            var all = _app.Devices?.Showing ?? [];
             var choices = Settings.DeviceChoices;
             if (!ReferenceEquals(all, _shownFrom.All) || !ReferenceEquals(choices, _shownFrom.Choices))
             {
@@ -51,7 +51,9 @@ public partial class MainWindow
         bool page = _expanded && CurrentPage == DeckPage.Devices && seen;
         // The collapsed part is read for while it is chosen, before it shows: it joins the row only once a device reports.
         bool strip = !_expanded && Settings.ShowsDevices(EffectiveStyle) && seen && _alert is null;
-        _app.PresentDevices(this, page, strip);
+        // The line that opens into the capsule or the notch keeps that style's devices read, as it would (MonitorPanel.UpdateMonitorDemand).
+        bool ahead = !_expanded && LineIsland is { } island && Settings.ShowsDevices(island) && EffectiveStyle == CompactStyle.Line && seen && _alert is null;
+        _app.PresentDevices(this, page, strip || ahead);
         // Opened again, the page shows the readings as they are now, not as it left them. Devices that came or went while it was
         // closed (DevicesChanged skips the page then) can need another layout step: one device's layout puts every device in the
         // same place, so a second one found while the panel was closed was drawn over the first. The page is built again for the
@@ -95,7 +97,7 @@ public partial class MainWindow
     private StripDevices CurrentStripDevices()
     {
         var inks = Inks;
-        return new([.. DeviceLists.Collapsed(_app.Devices?.All ?? [], Settings.DeviceChoices).Select(device => StripDevice.Of(device, inks))], Settings.DeviceFigures);
+        return new([.. DeviceLists.Collapsed(_app.Devices?.Showing ?? [], Settings.DeviceChoices).Select(device => StripDevice.Of(device, inks))], Settings.DeviceFigures);
     }
     // What the collapsed row shows: the devices as they are, kept while they are being listed again (the display came back on, a
     // suppression ended), so the part does not drop out for the moment the sources take to report.
@@ -119,7 +121,7 @@ public partial class MainWindow
     private DevicesLayout CurrentDevicesLayout()
     {
         double height = ContentCanvas.Height;
-        return DevicesLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), ShownDevices.Count, _devicesView is not null ? _devicesLayout : null);
+        return DevicesLayout.For(ContentCanvas.Width - 2 * _header.ContentSide, height - _header.Row - MonitorBottom(height), ShownDevices.Count, _devicesView is not null ? _devicesLayout : null);
     }
     private string DevicesKey() => string.Join("|", CurrentDevicesLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "",
         Inks.Key, Loc.Language, Look.Generation, SystemParameters.HighContrast);
@@ -134,10 +136,8 @@ public partial class MainWindow
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
-        // The header keeps the usage page's controls, as the monitor page does, so the switch does not move between pages.
-        var header = PanelHeader.For(ToolbarFor(height), height < 170 ? 14 : 20);
-        ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
-        DevicesContent.Margin = new Thickness(_header.Side, 0, _header.Side, MonitorBottom(height));
+        ApplyPageHeader(PanelHeader.ForPanel(height));
+        DevicesContent.Margin = new Thickness(_header.ContentSide, 0, _header.ContentSide, MonitorBottom(height));
         var key = DevicesKey();
         // The same step: the page stays, and only shows the devices as they are now (a device switched off in the settings).
         if (_devicesView is not null && key == _devicesKey && DevicesContent.Children.Contains(_devicesView)) { _devicesView.Update(ShownDevices, DevicesSettled, Animates); return; }

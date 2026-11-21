@@ -219,6 +219,10 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
             {
                 var connection = new NeteaseCdpConnection(_process);
                 _cdp = connection; connection.Changed += CdpChanged;
+                // A file-patched player opens its port a moment after it starts, so its log was read until then. The connection
+                // now leads: the log is closed, or each line the player writes on a seek or skip would stand in for full control
+                // until the connection's next report. It is read again if the connection fails.
+                if (_log is { } log) { _log = null; log.Changed -= LogChanged; log.Dispose(); }
                 await connection.StartAsync().ConfigureAwait(false);
             }
             if (_cdp is { Failed: true })
@@ -249,7 +253,8 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
     private void LogChanged() => PublishLog();
     private void PublishLog()
     {
-        if (_stop.IsCancellationRequested || _process is null) return;
+        // A report from the log already in flight when the connection took over is dropped.
+        if (_stop.IsCancellationRequested || _process is null || _cdp is not null) return;
         var state = _log?.State;
         // A session known only by its id is not a media entry. Without a title the
         // route is not created and any system session of the player stands on its own.

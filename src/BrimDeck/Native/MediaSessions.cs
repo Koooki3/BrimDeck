@@ -44,6 +44,8 @@ internal sealed class MediaSessions : IDisposable
         public string CoverKey = "";
         public byte[]? CoverBytes;
         public CancellationTokenSource? CoverCancellation;
+        // Every address under CoverKey was tried and none gave a picture; NetEase's song/detail may then have another.
+        public bool CoverFailed;
     }
     private sealed record Route(string Id, string ProcessName, SystemSource? System, IMediaPlayerConnection? Connection = null, bool Supplement = false, bool Departed = false);
 
@@ -56,6 +58,8 @@ internal sealed class MediaSessions : IDisposable
     private readonly IMediaPlayerConnection[] _connections;
     private readonly AppleMusicControls _appleMusic;
     private readonly HttpClient _coverHttp = new() { Timeout = TimeSpan.FromSeconds(6) };
+    // NetEase's song/detail fills the artwork and artist a log or CDP may leave out, keyed by the id they already report.
+    private readonly NeteaseSongDetailService _songDetails = new();
     private readonly Dictionary<Session, SystemSource> _sessions = new();
     private readonly Dictionary<string, CoverCache> _covers = new();
     // Downloaded artwork of recent songs, so switching back to one shows its cover at once.
@@ -385,18 +389,39 @@ internal sealed class MediaSessions : IDisposable
                                 track = fallback with { Id = route.Id, IsNeteaseLog = true, CanSeek = false, CanShuffle = false, CanRepeat = false };
                             if (route.Supplement) track = MediaRouting.Merge(track, route.System?.Track);
                         }
+                        // A NetEase id lets song/detail supply the artwork and the full artist list a log or CDP may omit. A known
+                        // detail is used at once. The track keeps its live title/position/state: FillDetails fills only an empty
+                        // artist or album.
+                        NeteaseSongDetails? details = null;
+                        string? neteaseId = track.SongId.StartsWith("netease:", StringComparison.Ordinal) ? track.SongId[8..] : null;
+                        if (neteaseId is not null)
+                        {
+                            details = _songDetails.Known(neteaseId);
+                            track = MediaRouting.FillDetails(track, details);
+                        }
+                        // Artwork candidates, in priority order: the player's own URL first, the song/detail URL as a
+                        // fallback. A local URL can be stale or blocked; trying the next one keeps the cover from going
+                        // blank when another source has a working copy. Distinct keeps a duplicate URL from being fetched twice.
+                        string[] coverUrls = [.. new[] { native.CoverUrl, details?.CoverUrl }
+                            .Where(u => !string.IsNullOrWhiteSpace(u)).Select(u => u!).Distinct(StringComparer.Ordinal)];
                         if (!_covers.TryGetValue(route.Id, out var cache)) _covers[route.Id] = cache = new();
                         // Not SongKey: it includes the duration, which QQ's pipe reports about a second after the song.
-                        string key = (native.SongId ?? $"{track.Title}\n{track.Artist}\n{track.Album}") + "|" + native.CoverUrl;
+                        // Every candidate is in the key so that a detail arriving later (adding a new URL) retries the cover.
+                        string key = (native.SongId ?? $"{track.Title}\n{track.Artist}\n{track.Album}") + "|" + string.Join("|", coverUrls);
                         bool bytesChanged = native.Cover is { } bytes && (cache.CoverBytes is null || !bytes.AsSpan().SequenceEqual(cache.CoverBytes));
                         if (cache.CoverKey != key || bytesChanged)
                         {
-                            cache.CoverCancellation?.Cancel(); cache.CoverKey = key; cache.CoverBytes = native.Cover;
+                            cache.CoverCancellation?.Cancel(); cache.CoverKey = key; cache.CoverBytes = native.Cover; cache.CoverFailed = false;
                             var shown = cache.Cover ?? cache.Previous;
-                            cache.Cover = DecodeCover(native.Cover ?? RecentCover(native.CoverUrl));
+                            cache.Cover = DecodeCover(native.Cover ?? RecentCover(coverUrls));
                             cache.Previous = null;
-                            if (cache.Cover is null && native.CoverUrl is not null) { cache.Previous = shown; _ = ReadCoverAsync(cache, key, native.CoverUrl); }
+                            if (cache.Cover is null && coverUrls.Length > 0) { cache.Previous = shown; _ = ReadCoverAsync(cache, key, coverUrls); }
                         }
+                        // The details are asked for only when the player left something out: the artist, the album, or artwork it
+                        // gave no picture or working address for. They are fetched once in the background and schedule a refresh.
+                        if (neteaseId is not null && details is null && (string.IsNullOrWhiteSpace(track.Artist) || string.IsNullOrWhiteSpace(track.Album)
+                            || native.Cover is null && (coverUrls.Length == 0 || cache.CoverFailed)))
+                            _ = FetchDetailsAsync(neteaseId, track.SongId);
                         // The log's cover is the full-size album picture, so it is used once the log has reached the session's song.
                         // Until then the session's thumbnail stands in; neither borrows another player's artwork.
                         if (leading is not null)
@@ -515,44 +540,72 @@ internal sealed class MediaSessions : IDisposable
         return routes;
     }
 
-    private async Task ReadCoverAsync(CoverCache cache, string key, string url)
+    // Fetch a song's details once, then refresh so the cached artwork and artist are read on the next pass. The id is
+    // checked against the current song again on arrival: a slow reply from a skipped song must not relabel the new one.
+    private async Task FetchDetailsAsync(string songId, string trackId)
     {
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+        var details = await _songDetails.GetAsync(songId);
+        if (details is null || _disposed) return;
+        bool stillCurrent = Tracks.Any(t => t.Id == trackId && t.SongId == "netease:" + songId)
+            || _routes.Values.Any(r => r.Connection?.Snapshot?.SongId == "netease:" + songId);
+        if (stillCurrent) Schedule();
+    }
+
+    private async Task ReadCoverAsync(CoverCache cache, string key, IReadOnlyList<string> urls)
+    {
+        // The outer token means "this read is obsolete" — a different song or disposal. A separate per-candidate
+        // timeout lets a slow or stalled first URL give up without cancelling the fallback candidates; a single
+        // shared token would leave every later URL already cancelled once the first one ran past six seconds.
+        using var cancellation = new CancellationTokenSource();
         cache.CoverCancellation = cancellation;
-        var token = cancellation.Token;
         try
         {
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http")) return;
-            // Netease originals reach 3000 px and more than the size limit below. Its image CDN returns
-            // the size DecodeCover keeps anyway when asked with its own resize parameter.
-            if (uri.Query.Length == 0 && uri.Host.EndsWith(".music.126.net", StringComparison.OrdinalIgnoreCase))
-                uri = new Uri(uri.AbsoluteUri + $"?param={CoverPixels}y{CoverPixels}");
-            using var response = await _coverHttp.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token);
-            response.EnsureSuccessStatusCode();
-            if (response.Content.Headers.ContentLength > 8_388_608) return;
-            await using var stream = await response.Content.ReadAsStreamAsync(token);
-            using var buffer = new MemoryStream();
-            var bytes = new byte[16_384];
-            int length;
-            while ((length = await stream.ReadAsync(bytes, token)) > 0)
+            foreach (var url in urls)
             {
-                if (buffer.Length + length > 8_388_608) return;
-                buffer.Write(bytes, 0, length);
+                if (_disposed || cache.CoverKey != key || cancellation.IsCancellationRequested) return;
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http")) continue;
+                // Netease originals reach 3000 px and more than the size limit below. Its image CDN returns
+                // the size DecodeCover keeps anyway when asked with its own resize parameter.
+                if (uri.Query.Length == 0 && uri.Host.EndsWith(".music.126.net", StringComparison.OrdinalIgnoreCase))
+                    uri = new Uri(uri.AbsoluteUri + $"?param={CoverPixels}y{CoverPixels}");
+                try
+                {
+                    using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
+                    attempt.CancelAfter(TimeSpan.FromSeconds(6));
+                    var token = attempt.Token;
+                    using var response = await _coverHttp.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token);
+                    response.EnsureSuccessStatusCode();
+                    if (response.Content.Headers.ContentLength > 8_388_608) continue;
+                    await using var stream = await response.Content.ReadAsStreamAsync(token);
+                    using var buffer = new MemoryStream();
+                    var bytes = new byte[16_384];
+                    int length;
+                    while ((length = await stream.ReadAsync(bytes, token)) > 0)
+                    {
+                        if (buffer.Length + length > 8_388_608) break;
+                        buffer.Write(bytes, 0, length);
+                    }
+                    if (buffer.Length == 0 || buffer.Length > 8_388_608) continue;
+                    var downloaded = buffer.ToArray();
+                    var decoded = await Task.Run(() => DecodeCover(downloaded));
+                    if (_disposed || cache.CoverKey != key || cancellation.IsCancellationRequested) return;
+                    if (decoded is null) continue;
+                    // Cache only bytes that actually decode: a bad first URL would otherwise be remembered and,
+                    // on the next play of this song, win over a fallback that had decoded successfully.
+                    RememberCover(url, downloaded);
+                    cache.Cover = decoded; cache.Previous = null; Schedule();
+                    return;
+                }
+                catch { /* This candidate timed out or failed; try the next one. */ }
             }
-            var downloaded = buffer.ToArray();
-            if (_disposed) return;
-            RememberCover(url, downloaded);
-            if (cache.CoverKey != key) return;
-            var decoded = await Task.Run(() => DecodeCover(downloaded));
-            if (_disposed || cache.CoverKey != key) return;
-            cache.Cover = decoded; cache.Previous = null; Schedule();
         }
         catch { /* A cover request cannot block playback state or controls. */ }
         finally
         {
             if (ReferenceEquals(cache.CoverCancellation, cancellation)) cache.CoverCancellation = null;
-            // A failed download stops holding the previous song's artwork; the placeholder replaces it.
-            if (!_disposed && cache.CoverKey == key && cache.Previous is not null) { cache.Previous = null; Schedule(); }
+            // A failed download stops holding the previous song's artwork; the placeholder replaces it. The refresh it
+            // schedules may ask song/detail for another address (CoverFailed).
+            if (!_disposed && cache.CoverKey == key && cache.Cover is null) { cache.CoverFailed = true; cache.Previous = null; Schedule(); }
         }
     }
     private byte[]? RecentCover(string? url)
@@ -560,6 +613,12 @@ internal sealed class MediaSessions : IDisposable
         if (url is null) return null;
         for (var node = _recentCovers.First; node is not null; node = node.Next)
             if (node.Value.Url == url) { _recentCovers.Remove(node); _recentCovers.AddFirst(node); return node.Value.Bytes; }
+        return null;
+    }
+    // A cover previously downloaded from any candidate can be reused at once.
+    private byte[]? RecentCover(IReadOnlyList<string> urls)
+    {
+        foreach (var url in urls) if (RecentCover(url) is { } bytes) return bytes;
         return null;
     }
     private void RememberCover(string url, byte[] bytes)
@@ -820,6 +879,7 @@ internal sealed class MediaSessions : IDisposable
         _sessions.Clear(); _covers.Clear(); _routes.Clear(); _departed.Clear();
         foreach (var connection in _connections) { connection.Changed -= Schedule; connection.Dispose(); }
         _coverHttp.Dispose();
+        _songDetails.Dispose();
         _meter.Dispose();
     }
 }

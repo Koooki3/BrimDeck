@@ -35,6 +35,8 @@ public partial class MainWindow : Window
     // approaches at no more than 10 physical pixels per millisecond, so it still arrives within one short interval.
     // TrackFar: the longest pause while the pointer is far away, which the memory mode sets (MemoryPlan.PointerFarMilliseconds).
     private const double TrackNear = 40, ApproachSpeed = 10;
+    // The check's pause while the frame around the part under the pointer shows (TrackHoverFrame): about one display frame.
+    private const double HoverFrameTrack = 16;
     private double TrackFar => _app.MemoryPlan.PointerFarMilliseconds;
     private readonly WindowsHost _host;
     // Null for the main panel. The panels of other monitors take their usage data from it instead of reading their own.
@@ -126,7 +128,8 @@ public partial class MainWindow : Window
     {
         _app = app; _lead = lead;
         _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip,
-            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove, OccupiedArea);
+            () => Settings.ForceTopmost, () => Settings.BackgroundWindows, () => KeepsAbove, OccupiedArea,
+            () => Settings.WindowCapture && _expanded && !_preview && InsideOpenPanel(WindowsHost.Cursor()));
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () =>
         {
@@ -144,6 +147,7 @@ public partial class MainWindow : Window
             if (_expanded && !_preview) PointerChanged(_pointerInside);
         }) { Interval = TimeSpan.FromSeconds(1) };
         InitializeComponent();
+        MenuDismissal.Attach(this);
         // Out of sight until the boot (or, without animations, until it has its place): the window shows before it is placed.
         HoverZone.Opacity = 0;
         // The island stays in sight over a taskbar that Start or search has lifted above every application window, and above
@@ -242,8 +246,8 @@ public partial class MainWindow : Window
             const int DisplayChange = 0x007E, SettingChange = 0x001A, SetWorkArea = 0x002F, Wheel = 0x020A, SideWheel = 0x020E;
             if (message == DisplayChange || message == SettingChange && wParam == SetWorkArea) _app.DisplaysChanged();
             // WPF has no event for the horizontal wheel; the vertical one is only noted, and WPF still handles it.
-            else if (message == Wheel) { _swipe.Vertical(DateTimeOffset.UtcNow); if (!Native.PasteInput.KeyDown(0x10)) _shelfSwipe.Vertical(DateTimeOffset.UtcNow); }
-            else if (message == SideWheel) { int delta = unchecked((short)((long)wParam >> 16)); handled = MusicWheelSwipe(delta) || ShelfSideWheel(delta); }
+            else if (message == Wheel) VerticalWheel();
+            else if (message == SideWheel) handled = HorizontalWheel(unchecked((short)((long)wParam >> 16)));
             return IntPtr.Zero;
         });
         Closed += (_, _) => DisposeMusic();
@@ -267,7 +271,7 @@ public partial class MainWindow : Window
     private Rect? OccupiedArea()
     {
         if (Settings.Occupied == WindowBehavior.Normal) return null;
-        if (Collapsed.Style == Settings.Style && _pixelsPerDip > 0 && Collapsed.Surface.Width > 0 && Collapsed.Surface.Height > 0)
+        if (Collapsed.Style == Settings.Style && !IslandFromLine && _pixelsPerDip > 0 && Collapsed.Surface.Width > 0 && Collapsed.Surface.Height > 0)
         {
             var r = _frame.ToScreen(Collapsed.Surface);
             _ownArea = new Rect((MonitorBoundsDip.X + r.X) * _pixelsPerDip, (MonitorBoundsDip.Y + r.Y) * _pixelsPerDip,
@@ -282,7 +286,11 @@ public partial class MainWindow : Window
     {
         if (IslandStrip() is not { } strip) return null;
         double room = 24 * (_pixelsPerDip > 0 ? _pixelsPerDip : 1);
-        return Resizing || Rect.Inflate(strip, 2 * room, 2 * room).Contains(WindowsHost.Cursor()) ? Rect.Inflate(strip, room, room) : strip;
+        // Only on a grip, while resizing or in move mode: a lens lets the mouse through its clear parts only to this app's own
+        // windows, so a wider lens would keep clicks around the island from the window it covers (TaskbarMirror).
+        var cursor = WindowsHost.Cursor();
+        bool wide = Resizing || OnGrip(cursor) || _moveArmed && Rect.Inflate(strip, 2 * room, 2 * room).Contains(cursor);
+        return wide ? Rect.Inflate(strip, room, room) : strip;
     }
 
     // What the taskbar mirror (TaskbarMirror) asks of a window of the panel it shows: the panel itself (its stage, as the window
@@ -294,6 +302,11 @@ public partial class MainWindow : Window
     }
     // Whether that window draws at a place on screen, in physical pixels; where it does not, the mouse passes the mirror.
     private bool MirrorHit(IntPtr window, Point screen) => MirrorRoot(window) is { } root && root.InputHitTest(root.PointFromScreen(screen)) is not null;
+
+    // The vertical wheel is only noted: a swipe that also scrolls is a scroll (HorizontalSwipe). The horizontal wheel (a touchpad's
+    // two-finger sideways swipe) runs the music page's or the file shelf's swipe; true when one took it.
+    private void VerticalWheel() { _swipe.Vertical(DateTimeOffset.UtcNow); _shelfSwipe.Vertical(DateTimeOffset.UtcNow); }
+    private bool HorizontalWheel(int delta) => MusicWheelSwipe(delta) || ShelfSideWheel(delta);
 
     // A press, a release or a wheel turn over the taskbar mirror, at a place on screen in physical pixels. It is raised as WPF's
     // own mouse events on the element at that place (or on the element that holds the mouse, as during a drag), so the island
@@ -308,8 +321,12 @@ public partial class MainWindow : Window
             : root.InputHitTest(root.PointFromScreen(screen)) as UIElement;
         if (target is null) return false;
         int time = Environment.TickCount;
+        // The wheel over a lens never reaches the panel's window (its hook), so it is passed on from here as it would be there.
+        bool own = window == new WindowInteropHelper(this).Handle;
+        if (message is 0x020E) return own && HorizontalWheel(delta); // WM_MOUSEHWHEEL
         if (message is 0x020A) // WM_MOUSEWHEEL
         {
+            if (own) VerticalWheel();
             var preview = new MouseWheelEventArgs(Mouse.PrimaryDevice, time, delta) { RoutedEvent = Mouse.PreviewMouseWheelEvent };
             target.RaiseEvent(preview);
             target.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, time, delta) { RoutedEvent = Mouse.MouseWheelEvent, Handled = preview.Handled });
@@ -326,9 +343,11 @@ public partial class MainWindow : Window
         var first = new MouseButtonEventArgs(Mouse.PrimaryDevice, time, button) { RoutedEvent = press ? Mouse.PreviewMouseDownEvent : Mouse.PreviewMouseUpEvent };
         target.RaiseEvent(first);
         target.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, time, button) { RoutedEvent = press ? Mouse.MouseDownEvent : Mouse.MouseUpEvent, Handled = first.Handled });
+        // A press or release held back (one that only closed a menu, MenuDismissal) clicks no button.
+        if (press && button == MouseButton.Left && first.Handled) _mirrorPressed = null;
         if (!press && button == MouseButton.Left)
         {
-            if (owner is not null && ReferenceEquals(owner, _mirrorPressed) && !pressed && owner.IsEnabled && UIElementAutomationPeer.CreatePeerForElement(owner) is { } peer)
+            if (!first.Handled && owner is not null && ReferenceEquals(owner, _mirrorPressed) && !pressed && owner.IsEnabled && UIElementAutomationPeer.CreatePeerForElement(owner) is { } peer)
             {
                 if (peer.GetPattern(PatternInterface.Invoke) is IInvokeProvider invoke) invoke.Invoke();
                 else if (peer.GetPattern(PatternInterface.Toggle) is IToggleProvider toggle) toggle.Toggle();
@@ -384,6 +403,7 @@ public partial class MainWindow : Window
         // An exception added or removed in settings changes the context before the next poll; read it again so that the
         // panel hides or returns in this pass.
         _context = _host.DetectNow();
+        KeepPeekCurrent();
         // A new edge waits for the island to be cleared before the window moves (MainWindow.Edge.cs).
         if (ClearBeforeMoving(animatePage)) return;
         bool wasVisible = IsVisible;
@@ -410,7 +430,7 @@ public partial class MainWindow : Window
         NoteCollapsedWidth(shapeBefore, dipBefore);
         // Page widths are unscaled; drawn at the panel's scale they fit the work area less 12 DIP each side.
         double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
-        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
+        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width);
         // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
         // only the page that shows, which SetExpanded takes from _pageWidth; this is set again when the size is saved (ApplySettings).
         _widestPage = Fit(DeckPages.Largest(Settings).Width);
@@ -528,6 +548,7 @@ public partial class MainWindow : Window
         // Both in the frame of the edge the panel hangs from (MainWindow.Edge.cs); for the top edge, the monitor's own.
         var screenWork = new DipRect((work.Left - bounds.Left) / scale, (work.Top - bounds.Top) / scale, work.Width / scale, work.Height / scale);
         _screenMonitor = new DipRect(0, 0, bounds.Width / scale, bounds.Height / scale); _screenWork = screenWork;
+        _monitorOriginPx = new Point(bounds.Left, bounds.Top);
         // The style shown decides the edge: a window rule that turns the notch or the capsule into the line shows it where the line's
         // own settings put it.
         var (edge, overTaskbar) = Dock(EffectiveStyle);
@@ -541,6 +562,13 @@ public partial class MainWindow : Window
     private CollapsedShape ShapeFor(CompactStyle style)
     {
         double? wanted = Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null;
+        // The capsule or the notch the line opens into takes the line's place (MainWindow.Peek.cs).
+        if (style == CompactStyle.Capsule && CapsuleFromLine)
+        {
+            var placed = PeekCapsule(wanted);
+            return placed with { Surface = _frame.FromScreen(placed.Surface) };
+        }
+        if (style == CompactStyle.Notch && NotchFromLine) return PeekNotch(wanted);
         // The capsule keeps its place on the screen; docked with the bottom (MainWindow.Edge.cs) it is only seen from there.
         if (style == CompactStyle.Capsule && _frame.Edge != ScreenEdge.Top)
         {
@@ -578,6 +606,8 @@ public partial class MainWindow : Window
     }
     // SetExpanded runs for FitCompactToContent: the surface at rest takes the width its content asks for (ContentResize).
     private bool _contentResize;
+    // The collapsed surface was last laid out as the line (SetExpanded), so the line turning into another style can tell.
+    private bool _laidOutIndicator;
     // When the last such move ends (Environment.TickCount64), so that a new one while it is under way carries it on.
     private long _contentResizeEnds;
     // The limits the settings window offers for a collapsed style on this window's monitor, whatever values are saved.
@@ -617,8 +647,6 @@ public partial class MainWindow : Window
         double height = Math.Max(0, Math.Min(wanted, (FrameHeight - (panel.Top > 0 ? 0 : 12) - panel.Top - panel.HeaderExtra) / _scale));
         return panel.Top > 0 ? Math.Max(0, Math.Min(height, (PanelBottom - panel.Top - panel.HeaderExtra) / _scale)) : height;
     }
-    // The usage page's height in the current window, while the music page is shown too.
-    private double UsagePageHeight => PageHeight(Settings.Height, PanelFor(Settings.Height));
     // pageHeight is unscaled; the panel's place depends on its height as drawn.
     // On the bottom, left and right edges the panel's top is a free side, rounded as a floating capsule panel's is, so it keeps the
     // same space above its header (CollapsedLimits.FloatingHeaderExtra) rather than the 4 DIPs under the screen edge.
@@ -728,6 +756,8 @@ public partial class MainWindow : Window
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); return; }
         if (restored.Count == 0) return;
         _app.RestoredUsage = restored;
+        // A source whose first read fails keeps showing what it read last time (UsageService.RestoreLastReadings).
+        _app.Usage.RestoreLastReadings(restored);
         foreach (var deck in _app.Decks) deck.ShowRestored(restored);
     }
     private void ShowRestored(IReadOnlyList<ProviderSnapshot> restored)
@@ -822,7 +852,8 @@ public partial class MainWindow : Window
         if (!_expanded) SetExpanded(false);
     }
 
-    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    // The capsule while the line has opened into it (MainWindow.Peek.cs).
+    private CompactStyle EffectiveStyle => IslandFromLine && LineIsland is { } island ? island : RestStyle;
     // One animated track: where it starts and ends, as fractions of the configured duration.
     private readonly record struct Track(double Start, double End);
     // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
@@ -847,6 +878,8 @@ public partial class MainWindow : Window
     private void PanelClosed()
     {
         _app.UpdateCollectionLatency();
+        // A panel opened from the capsule of the line closes back to the line (MainWindow.Peek.cs).
+        PeekPanelClosed();
         WatchOutsidePress(false);
         ResetShelf();
         HotkeyPanelCollapsed();
@@ -888,6 +921,10 @@ public partial class MainWindow : Window
         var shape = Collapsed;
         var style = shape.Style;
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
+        // The line turning into the capsule or the notch: Collapsed already holds the new style here (UpdateCollapsedGeometry), so
+        // whether the surface was last laid out as the line is kept apart.
+        bool fromIndicator = _laidOutIndicator && !expanded && !line;
+        _laidOutIndicator = indicator;
         double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height;
         var panel = PanelFor(wantedHeight);
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
@@ -969,8 +1006,11 @@ public partial class MainWindow : Window
         HoverExtension.Width = stretch ? double.NaN : Math.Max(0, box.Width);
         // Collapsed, hovering is detected by polling the cursor (TrackPointer), so the strip is not drawn: its nearly transparent
         // pixels would still catch clicks for this layered window (Windows only lets clicks through fully transparent pixels).
-        HoverExtension.IsHitTestVisible = expanded;
-        HoverExtension.Visibility = expanded ? Visibility.Visible : Visibility.Hidden;
+        // The indicator that a click opens (ClickToExpand) is the exception: it is a few pixels thick and stands off the screen's
+        // edge, so the strip takes the clicks around it, up to the edge, where the pointer pushed against the edge lands.
+        bool strip = expanded || indicator && Settings.ClickToExpand && !_preview && !ClickThrough;
+        HoverExtension.IsHitTestVisible = strip;
+        HoverExtension.Visibility = strip ? Visibility.Visible : Visibility.Hidden;
         double boxTop = double.IsFinite(box.Top) ? box.Top : 0;
         // Collapsing runs in three stages: the content leaves first, the surface follows a moment later on the drawer's curve
         // (leaving at once, landing softly), the compact content lands last.
@@ -1088,8 +1128,9 @@ public partial class MainWindow : Window
         var tone = Look.ColorOf(indicator ? "indicator" : "surface");
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
-        // indicator's color.
-        if (duration == 0 || expanded && line && !wasExpanded) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
+        // indicator's color. The line turning into the capsule or the notch without a morph (a window rule letting go of it, the
+        // line opening into either) does the same: on the closing's track the tint came late, after the surface had grown.
+        if (duration == 0 || expanded && line && !wasExpanded || fromIndicator && !morphing) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
@@ -1117,10 +1158,15 @@ public partial class MainWindow : Window
         target.BeginAnimation(property, null);
         ((DependencyObject)target).SetValue(property, value);
     }
-    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded).
+    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded), and, when the opening page follows
+    // the part under the pointer (DefaultDeckPage.Hover), it opens on that part's page (HoverPartAt, MainWindow.Hover.cs).
     private void OpenAtPointer()
     {
+        // The line that opens into the capsule does that first; a click on the capsule opens the panel (MainWindow.Peek.cs).
+        if (!_expanded && LineOpensIsland && !_peek.Active) { BeginPeek(); return; }
         if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
+        _hoverPart = HoverPartUnderPointer();
+        HideHoverFrame();
         SetExpanded(true);
     }
     // With ClickToExpand on, a click on the collapsed surface opens the panel; the press must start on it, so a drag that ends
@@ -1130,7 +1176,7 @@ public partial class MainWindow : Window
     private void Island_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         bool pressed = _islandPressed; _islandPressed = false;
-        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed || !Settings.ClickToExpand) return;
+        if (!pressed || _expanded || _preview || _moveArmed || IsSuppressed || !Settings.ClickToExpand && !IslandFromLine) return;
         e.Handled = true;
         _hover.Stop(); _leave.Stop();
         OpenAtPointer();
@@ -1147,16 +1193,19 @@ public partial class MainWindow : Window
     internal void TrackPointer()
     {
         CheckMoveOvertaken();
-        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) return;
+        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) { HideHoverFrame(); return; }
         var cursor = WindowsHost.Cursor();
         // Move mode: the panel does not open (MainWindow.Move.cs).
-        if (_moveArmed) { TrackMove(cursor); return; }
+        if (_moveArmed) { HideHoverFrame(); PassAroundSurface(false); TrackMove(cursor); return; }
         // Mouse pass-through: hovering does nothing (MainWindow.ClickThrough.cs).
-        if (IgnorePointer()) return;
+        if (IgnorePointer()) { HideHoverFrame(); PassAroundSurface(false); return; }
         var area = CompactHoverScreenRect();
-        if (area.IsEmpty) return;
+        if (area.IsEmpty) { HideHoverFrame(); return; }
         // The surface's ends resize it (MainWindow.Resize.cs); pointing there does not open the panel.
         var grip = TrackGrips(cursor);
+        // Collapsed, clicks outside the area and the armed grip go to the window beneath (MainWindow.ClickThrough.cs); a press
+        // that took the mouse keeps the window as it is until released.
+        if (Mouse.Captured is null) PassAroundSurface(!_expanded && grip == ResizeEdges.None && !area.Contains(cursor));
         // An ordinary panel under another window is out of the pointer's reach (DeckSettings.AlwaysOnTop); asked only where
         // the pointer would otherwise count as inside.
         bool Covered() => !KeepsAbove && WindowsHost.CoveredAt(this, cursor);
@@ -1164,6 +1213,11 @@ public partial class MainWindow : Window
         double dx = Math.Max(0, Math.Max(area.Left - cursor.X, cursor.X - area.Right)), dy = Math.Max(0, Math.Max(area.Top - cursor.Y, cursor.Y - area.Bottom));
         // Whole 20 ms steps, so small movements far away do not reschedule the timer on every check.
         double wait = _expanded ? TrackNear : Math.Clamp(Math.Floor(Math.Sqrt(dx * dx + dy * dy) / ApproachSpeed / 20) * 20, TrackNear, TrackFar);
+        // The capsule of the line is left as quickly as the open panel is.
+        if (IslandFromLine) wait = TrackNear;
+        // Near the collapsed surface the frame around the part under the pointer follows it closely (MainWindow.Hover.cs). Only
+        // the surface's shadow counts as near, so this costs nothing elsewhere.
+        if (TrackHoverFrame(cursor, !_preview && !_expanded && Collapsed.Style != CompactStyle.Line && !IslandFromLine && grip == ResizeEdges.None && !_app.WindowDrags.Active, Covered)) wait = HoverFrameTrack;
         _pointerTrack.Interval = TimeSpan.FromMilliseconds(wait);
         if (_preview)
         {
@@ -1203,6 +1257,11 @@ public partial class MainWindow : Window
             if (_pointerInside) PointerChanged(false);
             return;
         }
+        // The capsule of the line holds while the pointer is on it, on the line's place or between them.
+        if (!inCompact && grip == ResizeEdges.None && PointerOnPeek(cursor) && !Covered()) inCompact = true;
+        // The line that has just turned back from the capsule stays quiet until the pointer has left it.
+        _peek.Observe(inCompact);
+        if (_peek.Resting) { _cursorInCompact = inCompact; return; }
         if (inCompact != _cursorInCompact) { _cursorInCompact = inCompact; PointerChanged(inCompact); }
         else if (!inCompact && _pointerInside) PointerChanged(false);
     }
@@ -1223,12 +1282,14 @@ public partial class MainWindow : Window
             _leave.Stop();
             if (_expanded && !_preview) _app.Notices?.DeckLeaving(this, false);
             if (_expanded || IsSuppressed) return;
-            _hover.Stop(); if (Settings.ClickToExpand) return;
+            // The capsule of the line opens the panel by a click only.
+            _hover.Stop(); if (IslandFromLine || Settings.ClickToExpand) return;
             _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
         {
             _hover.Stop();
+            if (IslandFromLine && !_expanded) { StartPeekLeave(); return; }
             if (_expanded && !_preview) WatchOutsidePress(true);
             if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) return;
             // A press outside closes the panel at once (MainWindow.OutsidePress.cs).
@@ -1243,6 +1304,8 @@ public partial class MainWindow : Window
     {
         if (IsHotkeyPinned || Resizing) { _leave.Stop(); return; }
         if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true || ShelfHolds) { _leave.Stop(); return; }
+        // The pointer has been away from the capsule of the line: it turns back into the line.
+        if (IslandFromLine && !_expanded) { _leave.Stop(); EndPeek(); return; }
         // Closing a calendar with either button must leave a path back to the results.
         // Keep checking until the cursor leaves that area; entering the island restores normal hover behavior.
         if (_popupReturnArea is { } area && area.Contains(screenPoint) && !_pressedOutside) return;

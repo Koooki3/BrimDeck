@@ -46,6 +46,8 @@ Choose it under "General > Core display":
 - Columns: always columns.
 - Dot matrix: always the matrix.
 
+Set **Cores per matrix row** to 0 for automatic layout. Auto favors a complete rectangle when the cells remain readable, and centers the last short column in tight spaces. Choose 1–64 to set a preferred row width. If a panel cannot fit that width, it temporarily uses automatic layout and keeps your saved preference. This option applies only to the dot matrix.
+
 The squares are as large as the room allows, on whole device pixels at any display scale, with a one-pixel gap where there is room and touching where there is not. The frequency line of a column has no equivalent in the matrix; point at a square to see it.
 
 ## Traffic
@@ -59,9 +61,15 @@ Choose the period under General › Traffic period:
 
 The traffic comes from Windows' own record, the one the Data usage page in Windows Settings shows, so it includes the time BrimDeck was not running and does not start over when it restarts. Wi-Fi, Ethernet and cellular networks are counted; a VPN or another virtual network is not counted again, as its traffic is already counted on the network it runs over. Windows updates its record a little later, so traffic that has just happened may be counted some time afterwards.
 
+## Used and free
+
+Memory and the drives show what is in use by default. Choose Free under General › Memory and drives, and the collapsed row and the expanded page show what is left instead: the figures, the dials and the bars all show how much remains. The color still follows the share in use, so little room left shows in the warning or critical color.
+
+Free memory matches Task Manager's "Available" and includes the system file cache; on the expanded page's bar the cache is the lighter part.
+
 ## Drives
 
-- Shows the space in use for each drive letter; when the page has no room for them all, the remaining letters share one line.
+- Shows the space in use for each drive letter (or the space free, see the section above); when the page has no room for them all, the remaining letters share one line.
 - Only internal drives are listed, not USB sticks, SD cards, external, network or optical drives.
 
 ## Temperatures

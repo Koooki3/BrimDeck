@@ -109,8 +109,9 @@ public sealed class LogReader
     }
 
     // ParseLine reads only lines with one of these keys.
-    // WorkBuddy's replies carry "rawUsage", usually with its own "usage" as well.
-    private static readonly byte[][] UsageKeys = ["\"token_count\""u8.ToArray(), "\"turn_context\""u8.ToArray(), "\"usage\""u8.ToArray(), "\"rawUsage\""u8.ToArray()];
+    // WorkBuddy's replies carry "rawUsage", usually with its own "usage" as well. Qoder names the model chosen for a request only on
+    // the prompt that starts it ("businessModelKey").
+    private static readonly byte[][] UsageKeys = ["\"token_count\""u8.ToArray(), "\"turn_context\""u8.ToArray(), "\"usage\""u8.ToArray(), "\"rawUsage\""u8.ToArray(), "\"businessModelKey\""u8.ToArray()];
     private static bool HasUsageKey(ReadOnlySpan<byte> span) => AppendedLines.Holds(span, UsageKeys);
 
     // Pi records disjoint token categories. Read only accounting metadata, never message content or auth files.
@@ -206,6 +207,33 @@ public sealed class LogReader
             { PriceModel = priced.Length == 0 ? null : string.Intern(priced) });
     }
 
+    // Qoder CLI and the Qoder desktop app (which runs the same engine) write sessions under projects in the Claude Code format, but the
+    // reply names only "auto" as its model: the model or tier chosen is the businessModelKey of the prompt that started the request
+    // ("efficient", "dfmodel"), kept in the file's state until the next prompt. A reply carries message.usage only once the user set
+    // QODER_EXPOSE_TOKEN_USAGE (Qoder CN: QODERCN_EXPOSE_TOKEN_USAGE) before starting Qoder; without it, nothing is written. Its
+    // categories are disjoint, as Claude's are. A reply split over several lines carries the usage on its last, keyed by the
+    // request (requestTokenAnchor.requestId) of its session.
+    private static void ParseQoder(JsonElement obj, string type, DateTimeOffset? time, CacheItem item, string prefix)
+    {
+        if (type == "user")
+        {
+            if (obj.Get("businessModelKey").Text() is { Length: > 0 } chosen) item.Model = string.Intern(chosen);
+            return;
+        }
+        if (type != "assistant" || time is null || time < item.Cutoff) return;
+        var message = obj.Get("message");
+        var usage = message.Get("usage");
+        if (usage.ValueKind != JsonValueKind.Object) return;
+        var request = obj.Get("requestTokenAnchor").Get("requestId").Text();
+        if (request.Length == 0) request = message.Get("id").Text();
+        if (request.Length == 0) request = $"{time:O}:{usage.GetRawText()}";
+        var creation = usage.Get("cache_creation_input_tokens").Count();
+        var hour = Math.Min(creation, usage.Get("cache_creation").Get("ephemeral_1h_input_tokens").Count());
+        var model = item.Model != "unknown" ? item.Model : message.Get("model").Text() is { Length: > 0 } named ? string.Intern(named) : "unknown";
+        Add(item, new(prefix + obj.Get("sessionId").Text() + ":" + request, time.Value, model, usage.Get("input_tokens").Count(),
+            usage.Get("cache_read_input_tokens").Count(), creation - hour, hour, usage.Get("output_tokens").Count()));
+    }
+
     // Claude writes one line per content block of a message, each with the message's usage so far: a repeat of the entry just added
     // replaces it when at least as complete, so the cache holds each message once. Repeats across files are merged in Read.
     private static void Add(CacheItem item, TokenEntry entry)
@@ -268,6 +296,10 @@ public sealed class LogReader
                     hash.GetHashAndReset(digest);
                 }
                 Add(item, new($"codex:{time:O}:{Convert.ToHexString(digest[..16])}", time.Value, item.Model, input - cached, cached, write, 0, output));
+            }
+            else if (id is ProviderId.Qoder or ProviderId.QoderCn)
+            {
+                ParseQoder(obj, type, time, item, id == ProviderId.QoderCn ? "qodercn:" : "qoder:");
             }
             else if (id == ProviderId.CodeAgent && type == "query-metrics")
             {
@@ -382,6 +414,31 @@ public static class QuotaParser
         if (root.Get("usagePercent").Number() is not { } percent) return null;
         return new("Grok Bot", Math.Clamp(percent, 0, 100), root.Get("nextResetTimestampUtc").Date());
     }
+    public static List<Quota> AntigravityCli(string? report)
+    {
+        var quotas = new List<Quota>();
+        if (string.IsNullOrWhiteSpace(report)) return quotas;
+        foreach (var line in report.Split('\n'))
+        {
+            var fields = line.Split('\t', StringSplitOptions.TrimEntries);
+            if (fields.Length != 4 || fields[0].Length == 0 || fields[1].Length == 0 || !fields[2].EndsWith('%')
+                || !double.TryParse(fields[2][..^1], System.Globalization.NumberStyles.AllowDecimalPoint,
+                    System.Globalization.CultureInfo.InvariantCulture, out var remaining) || !(remaining >= 0 && remaining <= 100)
+                || !DateTimeOffset.TryParse(fields[3], System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out var reset)) continue;
+            var group = fields[0] switch { "Gemini Models" => "Gemini", "Claude and GPT models" => "Claude", "Gemini 4 Argon" => "Argon", var name => name };
+            var (period, minutes) = fields[1].ToLowerInvariant() switch
+            {
+                var name when name.Contains("weekly") => ("每周", (int?)10080),
+                var name when name.Contains("five hour") => ("5 小时", 300),
+                var name when name.Contains("daily") => ("每日", 1440),
+                _ => (fields[1], null)
+            };
+            quotas.Add(new($"{group} · {period}", 100 - remaining, reset, minutes));
+        }
+        return quotas;
+    }
+
     public static List<Quota> Antigravity(JsonElement root)
     {
         var result = new List<Quota>();

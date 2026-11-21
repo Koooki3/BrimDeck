@@ -26,15 +26,18 @@ internal static class Program
             if (args is ["--only", "drawn"]) { DrawnAutomationTests.Run(Check); return Finish(); }
             if (args is ["--only", "paste"]) { PasteInputChecks.Run(Check); return Finish(); }
             if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return Finish(); }
+            if (args is ["--only", "maximize"]) { SettingsMaximizeChecks.Run(Check); return Finish(); }
             if (args is ["--only", "popup"]) { PopupGhostChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themecards"]) { ThemeCardChecks.Run(Check); return Finish(); }
             if (args is ["--only", "fonts"]) { FontFollowTests.Run(Check); return Finish(); }
             // "--only notices": the notice checks alone. They lay out panels and call Windows; none sends input or captures the screen.
             if (args is ["--only", "notices"]) { NoticeChecks(); return Finish(); }
+            if (args is ["--only", "inklabel"]) { InkLabelSettleTests.Run(Check); return Finish(); }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
             // battery or devices, and no promise about speed). Everything left out reads this machine's hardware, so its outcome
             // says something about the machine, not the code. Without the flag every check runs.
             if (args is ["--only", "rightdrag"]) { RightDragChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "droprelay"]) { DropRelayChecks.Run(Check); return Finish(); }
             bool hosted = args is ["--hosted"];
             Console.WriteLine($"Windows native smoke tests{(hosted ? " (hosted subset)" : "")}: {Environment.OSVersion.Version}");
             CheckWindowChrome();
@@ -49,9 +52,11 @@ internal static class Program
             try { NoticeBannerRegistryTests.Run(bannerRoot, Check); NoticeBannerKeeperTests.Run(System.IO.Path.Combine(bannerRoot, "keeper"), Check); }
             finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
             LayoutRetryTests.Run(Check);
+            InkLabelSettleTests.Run(Check);
             RightDragChecks.Run(Check);
             NoticePanelTests.Run(Check);
             NoticeRowBatchTests.Run(Check);
+            DropRelayChecks.Run(Check);
             DrawnAutomationTests.Run(Check);
             RingLetterChecks.Run(Check);
             SettingsFocusTests.Run(Check);
@@ -62,13 +67,14 @@ internal static class Program
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
             BrimDeck.MainWindow.CheckPageCapsuleStretch(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
-            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, frame rate, temperature, device battery and power readings, and the application identity the shell resolves (they read this machine or its shell).");
+            if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, maximized settings window, frame rate, temperature, device battery and power readings, and the application identity the shell resolves (they read this machine or its shell).");
             else
             {
                 CheckGpus();
                 var (bounds, work, scale) = WindowsHost.PrimaryScreen();
                 Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
                     && work.Width > 0 && work.Height > 0 && scale > 0);
+                SettingsMaximizeChecks.Run(Check);
                 AppIdentityChecks.Run(Check);
                 NoticeFocusChecks.Run(Check);
                 FrameRateChecks.Run(Check);

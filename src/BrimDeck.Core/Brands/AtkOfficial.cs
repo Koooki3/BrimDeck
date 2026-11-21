@@ -41,7 +41,10 @@ public static class AtkOfficial
 
     public static readonly (int Vendor, int Product)[] BytechReceivers =
         [(AtkVendor, 0x1242), (AtkVendor, 0x1244), (AtkVendor, 0x124B), (AtkVendor, 0x1255),
-         (VgnVendor, 0x2A03), (VgnVendor, 0x2A04), (VgnVendor, 0x2A0A), (VgnVendor, 0x2A06), (VgnVendor, 0x2A08)];
+         (VgnVendor, 0x2A03), (VgnVendor, 0x2A04), (VgnVendor, 0x2A0A), (VgnVendor, 0x2A06), (VgnVendor, 0x2A08),
+         // The same keyboards on their cables, VGN HUB's other "bykeyboard" entries on the same collection: V98Pro V4 200B
+         // and 200C, V98Pro V4 TIMI 201C, V87Pro V2 2015, V108Pro 2018.
+         (VgnVendor, 0x200B), (VgnVendor, 0x200C), (VgnVendor, 0x201C), (VgnVendor, 0x2015), (VgnVendor, 0x2018)];
     public static byte[] BytechRequest(byte reportId, byte seed)
     {
         var frame = BrandFamilies.Frame(64, reportId, 0x87, 0x00, 0x00, 0x01, 0x00, 0x00);
