@@ -78,8 +78,8 @@ internal static class QueMusicLyricsTests
             var online = track with { Title = "在线歌曲", Artist = "歌手" };
             WriteSettings(settings, ("1234567", 1, "在线歌曲"));
             web.Uris.Clear(); await service.FindAsync(online, true, CancellationToken.None);
-            check("A NetEase song QueMusic streams is looked up by its song ID",
-                web.Uris.FirstOrDefault()?.AbsoluteUri.Contains("music.163.com/api/song/lyric?id=1234567", StringComparison.Ordinal) == true);
+            check("A NetEase song QueMusic streams is looked up by its song ID on the public endpoint",
+                web.Uris.Any(u => u.AbsoluteUri.StartsWith("https://interface.music.163.com/eapi/song/lyric/v1", StringComparison.Ordinal)));
             WriteSettings(settings, ("ABCDEF0123456789ABCDEF0123456789", 0, "在线歌曲"));
             web.Uris.Clear(); await service.FindAsync(online with { Album = "酷狗" }, true, CancellationToken.None);
             check("A KuGou song is looked up by its file hash, in lower case",

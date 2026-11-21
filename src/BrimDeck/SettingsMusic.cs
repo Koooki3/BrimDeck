@@ -252,7 +252,10 @@ public sealed partial class SettingsWindow
             pageBars,
             MusicChoice(Loc.T("收起时律动条显示时机", "Collapsed equalizer shown"), S.EqualizerAlways, [(false, Loc.T("播放音乐时", "While music plays")), (true, Loc.T("始终显示", "Always"))],
                 v => Change(s => s.EqualizerAlways = v), help: Loc.T("在收起形态中打开律动条后生效。始终显示时，没有音乐播放也会显示，读取系统的全部声音。",
-                    "Applies once the equalizer is switched on in the collapsed content. When always shown, it also shows while no music plays, reading all system sound.")));
+                    "Applies once the equalizer is switched on in the collapsed content. When always shown, it also shows while no music plays, reading all system sound.")),
+            Toggle(Loc.T("模拟逐字高亮", "Simulate word highlighting"), S.MusicSimulatedKaraoke,
+                v => Change(s => s.MusicSimulatedKaraoke = v),
+                help: Loc.T("默认关闭。没有真实逐字时间时，按整行时间模拟扫字，可能与演唱不同步；同时适用于展开和收起状态。", "Off by default. Without word timings, estimate a sweep from line timings; it may not match the vocals. Applies when expanded and collapsed.")));
         SectionTitle(Loc.T("收起时", "When collapsed"));
         // The instrumental choice belongs to the lyric, so it shows only while the middle text is the lyric.
         var text = new List<FrameworkElement> { MusicChoice(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) },
