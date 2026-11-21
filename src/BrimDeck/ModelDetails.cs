@@ -516,11 +516,14 @@ public partial class MainWindow
     private FrameworkElement ModelTrendChart(IReadOnlyList<TokenEntry> entries, UsageDateRange range)
     {
         var days = UsageTrend.Days(entries, range, list => _app.Prices.Summarize(list));
-        long peakTokens = 0; decimal peakCost = 0;
-        foreach (var day in days) { if (day.Tokens > peakTokens) peakTokens = day.Tokens; if (day.Cost > peakCost) peakCost = day.Cost; }
+        var (peakTokens, peakCost, unpriced) = UsageTrend.Peak(days);
         // Peak figure changes with the toggle so Tokens vs Cost is obvious even when daily shapes look alike.
+        // A cost peak is only a confirmed amount when every record in the range could be priced.
+        string amount = UI.Amount(new CostSummary(peakCost, peakCost > 0 ? 1 : 0, 0, 0));
         string peak = _trendCost
-            ? Loc.T($"峰值 {UI.Amount(new CostSummary(peakCost, peakCost > 0 ? 1 : 0, 0, 0))}", $"Peak {UI.Amount(new CostSummary(peakCost, peakCost > 0 ? 1 : 0, 0, 0))}")
+            ? unpriced == 0 ? Loc.T($"峰值 {amount}", $"Peak {amount}")
+                : peakCost > 0 ? Loc.T($"已知峰值 {amount}", $"Known peak {amount}")
+                : Loc.T("峰值未知", "Peak unknown")
             : Loc.T($"峰值 {UI.Number(peakTokens)}", $"Peak {UI.Number(peakTokens)}");
         var head = new Grid { Margin = new Thickness(0, 2, 0, 4) };
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });

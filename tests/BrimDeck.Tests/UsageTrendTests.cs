@@ -50,5 +50,30 @@ internal static class UsageTrendTests
         check("Usage trend keeps unpriced counts so a day is not drawn as a confirmed zero",
             marked[0] is { Cost: 1.25m, Unpriced: 0 } && marked[1] is { Cost: 0, Unpriced: 2 } && marked[2] is { Cost: 0.80m, Unpriced: 1 }
             && marked[1].Tokens == 20);
+
+        var peakPriced = UsageTrend.Peak([new(today, 10, 1.25m), new(today.AddDays(1), 0, 0m)]);
+        check("Usage trend peak is the highest known cost when every record is priced",
+            peakPriced is { Tokens: 10, Cost: 1.25m, Unpriced: 0 });
+
+        var peakUnknown = UsageTrend.Peak([new(today, 20, 0m, 3), new(today.AddDays(1), 5, 0m, 1)]);
+        check("Usage trend peak is unknown when every record is unpriced",
+            peakUnknown is { Tokens: 20, Cost: 0m, Unpriced: 4 });
+
+        var peakKnown = UsageTrend.Peak([new(today, 10, 1.25m), new(today.AddDays(1), 30, 0.80m, 2)]);
+        check("Usage trend peak of mixed days is the highest known cost and still counts the unpriced records",
+            peakKnown is { Tokens: 30, Cost: 1.25m, Unpriced: 2 });
+
+        bool Fits(int days, double width)
+        {
+            var (gap, bar) = UsageTrend.Layout(days, width);
+            if (days == 0) return bar == 0;
+            double last = UsageTrend.GraphPad + (days - 1) * (bar + gap);
+            return bar > 0 && last + bar <= width - UsageTrend.GraphPad + 1e-9;
+        }
+        check("Usage trend layout keeps a year of days in view at 600 DIP", Fits(365, 600));
+        check("Usage trend layout keeps a year of days in view at 300 DIP", Fits(365, 300) && UsageTrend.Layout(365, 300).Bar < 1);
+        var month = UsageTrend.Layout(30, 600);
+        check("Usage trend layout keeps a 30-day range spaced at a typical width",
+            Fits(30, 600) && month.Bar >= 1 && month.Gap > 0);
     }
 }

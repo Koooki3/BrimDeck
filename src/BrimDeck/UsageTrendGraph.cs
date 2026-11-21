@@ -78,19 +78,8 @@ internal sealed class UsageTrendGraph : FrameworkElement
         return -1;
     }
 
-    private const double Pad = 2, LabelBand = 16;
-    // Shrink the gap, down to zero, so every day of a long range still fits at a 1px bar.
-    private (double Gap, double Bar) Layout()
-    {
-        int n = _days.Count;
-        if (n == 0 || ActualWidth <= 0) return (0, 0);
-        double available = Math.Max(0, ActualWidth - Pad * 2);
-        if (n == 1) return (0, Math.Max(1, available));
-        double gap = Math.Min(6, available / n * .18);
-        if (n + gap * (n - 1) > available)
-            gap = Math.Max(0, (available - n) / (n - 1));
-        return (gap, Math.Max(1, (available - gap * (n - 1)) / n));
-    }
+    private const double Pad = UsageTrend.GraphPad, LabelBand = 16;
+    private (double Gap, double Bar) Layout() => UsageTrend.Layout(_days.Count, ActualWidth);
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -115,7 +104,8 @@ internal sealed class UsageTrendGraph : FrameworkElement
             bool unknownCost = _cost && day.Unpriced > 0 && day.Cost == 0;
             double value = _cost ? (double)day.Cost : day.Tokens;
             double height = unknownCost ? 2 : Math.Max(value > 0 ? 2 : 0, chartHeight * (value / max));
-            var rect = new Rect(Math.Round(x), Math.Round(chartBottom - height), Math.Max(1, Math.Round(bar)), Math.Round(height));
+            // Exact bar edges keep a sub-pixel layout from clipping the last day when width is rounded up.
+            var rect = new Rect(x, Math.Round(chartBottom - height), Math.Max(0, bar), Math.Round(height));
             if (unknownCost) dc.PushOpacity(0.45);
             dc.DrawRoundedRectangle(i == _hot ? hot : fill, null, rect, 2, 2);
             if (unknownCost) dc.Pop();

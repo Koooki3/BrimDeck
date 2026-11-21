@@ -37,4 +37,38 @@ public static class UsageTrend
         }
         return result;
     }
+
+    // Tokens is the highest daily total; Cost is the highest known amount only. Unpriced is how many
+    // records in the range could not be priced, so a cost peak may be incomplete or unknown.
+    public static (long Tokens, decimal Cost, int Unpriced) Peak(IReadOnlyList<UsageTrendDay> days)
+    {
+        long tokens = 0;
+        decimal cost = 0;
+        int unpriced = 0;
+        foreach (var day in days)
+        {
+            if (day.Tokens > tokens) tokens = day.Tokens;
+            if (day.Cost > cost) cost = day.Cost;
+            unpriced += day.Unpriced;
+        }
+        return (tokens, cost, unpriced);
+    }
+
+    public const double GraphPad = 2;
+
+    // Gap shrinks first so a 1 DIP bar still fits; if even that overflows, bars go below 1 DIP so the last day stays in view.
+    public static (double Gap, double Bar) Layout(int days, double width)
+    {
+        if (days <= 0 || width <= 0) return (0, 0);
+        double available = Math.Max(0, width - GraphPad * 2);
+        if (days == 1) return (0, available);
+        double gap = Math.Min(6, available / days * .18);
+        double bar = (available - gap * (days - 1)) / days;
+        if (bar < 1)
+        {
+            gap = Math.Max(0, (available - days) / (days - 1));
+            bar = (available - gap * (days - 1)) / days;
+        }
+        return (gap, bar);
+    }
 }
