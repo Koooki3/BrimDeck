@@ -59,7 +59,8 @@ internal sealed class MediaSessions : IDisposable
     private readonly AudioLevelMeter _meter = new();
     private readonly IMediaPlayerConnection[] _connections;
     private readonly AppleMusicControls _appleMusic;
-    private readonly HttpClient _coverHttp = new() { Timeout = TimeSpan.FromSeconds(6) };
+    // Each attempt bounds itself (CoverAttempt); this only has to outlast one.
+    private readonly HttpClient _coverHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
     // NetEase's song/detail fills the artwork and artist a log or CDP may leave out, keyed by the id they already report.
     private readonly NeteaseSongDetailService _songDetails = new();
     private readonly Dictionary<Session, SystemSource> _sessions = new();
@@ -421,8 +422,12 @@ internal sealed class MediaSessions : IDisposable
                             // Another address for the same song (the player's resource URL, then the album's, or a detail that
                             // arrived later) is the same picture: downloading it again would make the cover arrive a beat late.
                             // A song change, or a failed earlier read, starts the download as before.
-                            if (bytesChanged || cache.CoverSong != coverSong || cache.Cover is null)
+                            bool sameCoverSong = cache.CoverSong == coverSong;
+                            if (bytesChanged || !sameCoverSong || cache.Cover is null)
                             {
+                                // The artwork already on screen stays while the new song's cover downloads, and the page fades
+                                // the new one in when it arrives; replacing it with an empty cover first left the panel blank
+                                // for as long as the download took.
                                 var shown = cache.Cover ?? cache.Previous;
                                 cache.Cover = DecodeCover(native.Cover ?? RecentCover(coverUrls));
                                 cache.Previous = null;
@@ -567,50 +572,26 @@ internal sealed class MediaSessions : IDisposable
 
     private async Task ReadCoverAsync(CoverCache cache, string key, IReadOnlyList<string> urls)
     {
-        // The outer token means "this read is obsolete" — a different song or disposal. A separate per-candidate
-        // timeout lets a slow or stalled first URL give up without cancelling the fallback candidates; a single
-        // shared token would leave every later URL already cancelled once the first one ran past six seconds.
+        // The outer token means "this read is obsolete" — a different song or disposal. A separate per-attempt
+        // timeout lets a slow or stalled read give up without cancelling the rest; a single shared token would
+        // leave the later reads already cancelled once the first one ran past its time.
         using var cancellation = new CancellationTokenSource();
         cache.CoverCancellation = cancellation;
+        bool stale() => _disposed || cache.CoverKey != key || cancellation.IsCancellationRequested;
         try
         {
             foreach (var url in urls)
             {
-                if (_disposed || cache.CoverKey != key || cancellation.IsCancellationRequested) return;
+                if (stale()) return;
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http")) continue;
-                // Netease originals reach 3000 px and more than the size limit below. Its image CDN returns
-                // the size DecodeCover keeps anyway when asked with its own resize parameter.
-                if (uri.Query.Length == 0 && uri.Host.EndsWith(".music.126.net", StringComparison.OrdinalIgnoreCase))
-                    uri = new Uri(uri.AbsoluteUri + $"?param={CoverPixels}y{CoverPixels}");
-                try
+                if (Resizable(uri))
                 {
-                    using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
-                    attempt.CancelAfter(TimeSpan.FromSeconds(6));
-                    var token = attempt.Token;
-                    using var response = await _coverHttp.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token);
-                    response.EnsureSuccessStatusCode();
-                    if (response.Content.Headers.ContentLength > 8_388_608) continue;
-                    await using var stream = await response.Content.ReadAsStreamAsync(token);
-                    using var buffer = new MemoryStream();
-                    var bytes = new byte[16_384];
-                    int length;
-                    while ((length = await stream.ReadAsync(bytes, token)) > 0)
-                    {
-                        if (buffer.Length + length > 8_388_608) break;
-                        buffer.Write(bytes, 0, length);
-                    }
-                    if (buffer.Length == 0 || buffer.Length > 8_388_608) continue;
-                    var downloaded = buffer.ToArray();
-                    var decoded = await Task.Run(() => DecodeCover(downloaded));
-                    if (_disposed || cache.CoverKey != key || cancellation.IsCancellationRequested) return;
-                    if (decoded is null) continue;
-                    // Cache only bytes that actually decode: a bad first URL would otherwise be remembered and,
-                    // on the next play of this song, win over a fallback that had decoded successfully.
-                    RememberCover(url, downloaded);
-                    cache.Cover = decoded; cache.Previous = null; Schedule();
-                    return;
+                    // NetEase's originals reach 3000 px and several megabytes (measured: 4 MB taking a minute on a slow
+                    // CDN node), which the attempt below gives up on. Its image CDN returns a resized copy for the
+                    // parameter below; one copy is asked for, since a second size would replace the first on screen.
+                    if (await ReadCoverSizeAsync(cache, key, ResizedCover(uri), CoverAttempt, cancellation.Token)) return;
                 }
-                catch { /* This candidate timed out or failed; try the next one. */ }
+                else if (await ReadCoverSizeAsync(cache, key, uri, CoverAttempt, cancellation.Token)) return;
             }
         }
         catch { /* A cover request cannot block playback state or controls. */ }
@@ -622,6 +603,43 @@ internal sealed class MediaSessions : IDisposable
             if (!_disposed && cache.CoverKey == key && cache.Cover is null) { cache.CoverFailed = true; cache.Previous = null; Schedule(); }
         }
     }
+    // One look for the picture, at the one size asked for. Only a copy that decodes is remembered, under the address it
+    // was requested with.
+    private async Task<bool> ReadCoverSizeAsync(CoverCache cache, string key, Uri uri, TimeSpan timeout, CancellationToken token)
+    {
+        try
+        {
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(token);
+            attempt.CancelAfter(timeout);
+            var local = attempt.Token;
+            using var response = await _coverHttp.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, local);
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength > 8_388_608) return false;
+            await using var stream = await response.Content.ReadAsStreamAsync(local);
+            using var buffer = new MemoryStream();
+            var bytes = new byte[16_384];
+            int length;
+            while ((length = await stream.ReadAsync(bytes, local)) > 0)
+            {
+                if (buffer.Length + length > 8_388_608) return false;
+                buffer.Write(bytes, 0, length);
+            }
+            if (buffer.Length == 0) return false;
+            var downloaded = buffer.ToArray();
+            var decoded = await Task.Run(() => DecodeCover(downloaded));
+            if (_disposed || cache.CoverKey != key || token.IsCancellationRequested || decoded is null) return false;
+            RememberCover(uri.AbsoluteUri, downloaded);
+            cache.Cover = decoded; cache.Previous = null; Schedule();
+            return true;
+        }
+        catch { return false; }
+    }
+    // NetEase's image CDN accepts its own resize parameter; the log and song/detail give the original address without one.
+    private static bool Resizable(Uri uri) =>
+        uri.Query.Length == 0 && uri.Host.EndsWith(".music.126.net", StringComparison.OrdinalIgnoreCase);
+    private static Uri ResizedCover(Uri uri) => new(uri.AbsoluteUri + $"?param={CoverPixels}y{CoverPixels}");
+    private static string? ResizedCoverUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && Resizable(uri) ? ResizedCover(uri).AbsoluteUri : null;
     private byte[]? RecentCover(string? url)
     {
         if (url is null) return null;
@@ -629,9 +647,11 @@ internal sealed class MediaSessions : IDisposable
             if (node.Value.Url == url) { _recentCovers.Remove(node); _recentCovers.AddFirst(node); return node.Value.Bytes; }
         return null;
     }
-    // A cover previously downloaded from any candidate can be reused at once.
+    // A cover previously downloaded from any candidate can be reused at once. A resized copy is asked for under the
+    // address it was cached with.
     private byte[]? RecentCover(IReadOnlyList<string> urls)
     {
+        foreach (var url in urls) if (ResizedCoverUrl(url) is { } resized && RecentCover(resized) is { } bytes) return bytes;
         foreach (var url in urls) if (RecentCover(url) is { } bytes) return bytes;
         return null;
     }
@@ -746,7 +766,11 @@ internal sealed class MediaSessions : IDisposable
         CanShuffle = snapshot.CanShuffle, CanRepeat = snapshot.CanRepeat, Shuffle = snapshot.Shuffle == true, Repeat = snapshot.Repeat ?? MediaRepeat.None,
         CanLike = snapshot.CanLike, Liked = snapshot.CanLike && snapshot.Liked
     };
-    private const int CoverPixels = 512;
+    // The largest cover the music page draws is about 360 DIP (MusicLayout covers the upper part), so at 2x scaling the
+    // panel needs some 720 pixels; 320 is what the CDN returns in well under a second while staying sharp at the common
+    // scales. Asking for the panel's exact size would only trade a sharper picture for a later one.
+    private const int CoverPixels = 320;
+    private static readonly TimeSpan CoverAttempt = TimeSpan.FromSeconds(6);
     internal static BitmapSource? DecodeCover(byte[]? bytes)
     {
         if (bytes is null) return null;
