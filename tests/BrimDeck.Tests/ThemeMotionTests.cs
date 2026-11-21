@@ -59,6 +59,21 @@ internal static class ThemeMotionTests
         var nightCopy = PanelThemes.Parse(PanelThemes.FillTemplate("copy", Palette("github-dark"), "github-dark", nightSource));
         check("Copying a theme keeps the night look's motion", nightCopy.Night?.Motion is { Hover: "reveal", HoverStrength: .2 }
             && PanelThemes.Build("c", nightCopy, night: true).Motion.Hover == HoverFx.Reveal);
+        // A custom theme's copy is based on dark, so its day motion must be written out, not inherited.
+        var daySource = PanelThemes.Parse("""{ "id": "own", "motion": { "hover": "lift", "hoverStrength": 0.2, "pace": 1.3, "color": "#336699", "secondary": "rim" } }""");
+        var dayStart = PanelThemes.Build("own", daySource);
+        var dayCopy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", dayStart, null, daySource)));
+        check("New from a custom theme keeps the day look's motion", dayCopy.Motion == dayStart.Motion && dayCopy.Motion.Hover == HoverFx.Lift);
+        var copyFolder = Directory.CreateTempSubdirectory("brimdeck-motion-copy").FullName;
+        try
+        {
+            var ownInfo = new PanelThemeInfo("own", PanelThemeKind.Custom, daySource, Path.Combine(copyFolder, "own.json"), null);
+            var draft = new PanelThemeDraft("own"); draft.SetColor(daySource, "accent", ThemeColor.Parse("#FF8800"));
+            var saved = PanelThemes.Parse(File.ReadAllText(PanelThemes.SaveDraftAsNew(copyFolder, ownInfo, draft)));
+            check("Saving a custom theme's draft as a new theme keeps the day look's motion", PanelThemes.Build("saved", saved).Motion == dayStart.Motion);
+        }
+        finally { Directory.Delete(copyFolder, true); }
+        check("A theme without motion is copied without a motion section", PanelThemes.Parse(PanelThemes.FillTemplate("plain", Palette("dark"), "dark")).Motion is null);
         string Problem(string json)
         {
             var folder = Directory.CreateTempSubdirectory("brimdeck-motion").FullName;
