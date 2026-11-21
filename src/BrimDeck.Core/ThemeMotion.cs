@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace BrimDeck.Core;
 
 // The motion a theme gives BrimDeck's own windows: slow ambient light on the island (a breathing rim, colors drifting
@@ -46,14 +49,32 @@ public static class MotionStyles
     public static ParticleFx Particles(string? value, ParticleFx fallback) => Parse(value, null, fallback);
     public static SpringTier Spring(string? value, SpringTier fallback) => Parse(value, null, fallback);
 
-    // A name only: numbers ("7") are not styles, whatever the enum would make of them.
-    private static T Parse<T>(string? value, Dictionary<string, T>? aliases, T fallback) where T : struct, Enum
+    // The style names a theme file may use for each kind, for the warning about one it does not know; null for a field that
+    // takes no style name. A blank value is no name at all and is never warned about (the base's is kept).
+    public static string[]? Names(string field) => field switch
     {
-        if (string.IsNullOrWhiteSpace(value)) return fallback;
+        "hover" => EnumNames<HoverFx>(), "press" => EnumNames<PressFx>(), "focus" => EnumNames<FocusFx>(),
+        "particles" => EnumNames<ParticleFx>(), "spring" => EnumNames<SpringTier>(), _ => null
+    };
+    public static bool Known(string field, string? value) => string.IsNullOrWhiteSpace(value) || field switch
+    {
+        "hover" => TryParse<HoverFx>(value, HoverAliases, out _), "press" => TryParse<PressFx>(value, PressAliases, out _),
+        "focus" => TryParse<FocusFx>(value, FocusAliases, out _), "particles" => TryParse<ParticleFx>(value, null, out _),
+        "spring" => TryParse<SpringTier>(value, null, out _), _ => true
+    };
+    private static string[] EnumNames<T>() where T : struct, Enum => [.. Enum.GetNames<T>().Select(name => name.ToLowerInvariant())];
+
+    private static T Parse<T>(string? value, Dictionary<string, T>? aliases, T fallback) where T : struct, Enum
+        => TryParse(value, aliases, out T style) ? style : fallback;
+    // A name only: numbers ("7") are not styles, whatever the enum would make of them.
+    private static bool TryParse<T>(string? value, Dictionary<string, T>? aliases, out T style) where T : struct, Enum
+    {
+        style = default;
+        if (string.IsNullOrWhiteSpace(value)) return false;
         value = value.Trim();
-        if (!char.IsLetter(value[0])) return fallback;
-        if (aliases is not null && aliases.TryGetValue(value, out var alias)) return alias;
-        return Enum.TryParse<T>(value, true, out var style) && Enum.IsDefined(style) ? style : fallback;
+        if (!char.IsLetter(value[0])) return false;
+        if (aliases is not null && aliases.TryGetValue(value, out style)) return true;
+        return Enum.TryParse(value, true, out style) && Enum.IsDefined(style);
     }
 }
 
@@ -406,7 +427,10 @@ public readonly record struct PressFrame(double Held, double Release, double Flo
     public static readonly PressFrame None = new(0, -1, -1, false, -1);
 }
 
-// The "motion" section of a theme file. Everything is optional and comes from the base theme when left out.
+// The "motion" section of a theme file. Everything is optional and comes from the base theme when left out. A value BrimDeck
+// cannot use (a word where a number goes, a style it does not know) is left out too and listed as a warning (PanelThemes.Warnings):
+// a motion value is never worth refusing the whole theme, its colors and its other looks included.
+[JsonConverter(typeof(PanelThemeMotionConverter))]
 public sealed class PanelThemeMotion
 {
     public PanelThemeAmbient? Ambient { get; set; }
@@ -436,6 +460,8 @@ public sealed class PanelThemeMotion
     public double? SliceMs { get; set; }
     public double? ScanMs { get; set; }
     public double? SplashMs { get; set; }
+    // The values read from the file and left out, each with why. Not written back.
+    [JsonIgnore] public List<string> Problems { get; } = [];
 }
 
 public sealed class PanelThemeAmbient
@@ -449,8 +475,149 @@ public sealed class PanelThemeAmbient
     public double? FlickerDepth { get; set; }
 }
 
+// Reads the motion section field by field: a field of the wrong type is left out with a problem rather than failing the file.
+// Names are matched without regard to case, as in the rest of the file; members it does not know are skipped.
+internal sealed class PanelThemeMotionConverter : JsonConverter<PanelThemeMotion>
+{
+    public override PanelThemeMotion Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var motion = new PanelThemeMotion();
+        var problems = motion.Problems;
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            string raw = Raw(ref reader);
+            problems.Add(Loc.T($"motion 应为对象，现在是 {raw}，已忽略", $"\"motion\" must be an object, not {raw}; it is ignored"));
+            return motion;
+        }
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            string name = reader.GetString() ?? "";
+            reader.Read();
+            switch (name.ToLowerInvariant())
+            {
+                case "ambient": motion.Ambient = Ambient(ref reader, problems); break;
+                case "hover": motion.Hover = Text(ref reader, "hover", problems); break;
+                case "hoverstrength": motion.HoverStrength = Number(ref reader, "hoverStrength", problems); break;
+                case "press": motion.Press = Text(ref reader, "press", problems); break;
+                case "pressstrength": motion.PressStrength = Number(ref reader, "pressStrength", problems); break;
+                case "trail": motion.Trail = Number(ref reader, "trail", problems); break;
+                case "particles": motion.Particles = Text(ref reader, "particles", problems); break;
+                case "focus": motion.Focus = Text(ref reader, "focus", problems); break;
+                case "pace": motion.Pace = Number(ref reader, "pace", problems); break;
+                case "steps": motion.Steps = Number(ref reader, "steps", problems); break;
+                case "color": motion.Color = Text(ref reader, "color", problems); break;
+                case "secondary": motion.Secondary = Text(ref reader, "secondary", problems); break;
+                case "highlight": motion.Highlight = Text(ref reader, "highlight", problems); break;
+                case "spring": motion.Spring = Text(ref reader, "spring", problems); break;
+                case "particlems": motion.ParticleMs = Number(ref reader, "particleMs", problems); break;
+                case "slicems": motion.SliceMs = Number(ref reader, "sliceMs", problems); break;
+                case "scanms": motion.ScanMs = Number(ref reader, "scanMs", problems); break;
+                case "splashms": motion.SplashMs = Number(ref reader, "splashMs", problems); break;
+                default: reader.Skip(); break;
+            }
+        }
+        return motion;
+    }
+
+    private static PanelThemeAmbient? Ambient(ref Utf8JsonReader reader, List<string> problems)
+    {
+        if (reader.TokenType == JsonTokenType.Null) return null;
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            problems.Add(Wrong("ambient", Raw(ref reader), Loc.T("对象", "an object")));
+            return null;
+        }
+        var ambient = new PanelThemeAmbient();
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            string name = reader.GetString() ?? "";
+            reader.Read();
+            switch (name.ToLowerInvariant())
+            {
+                case "breathe": ambient.Breathe = Number(ref reader, "ambient.breathe", problems); break;
+                case "breathedepth": ambient.BreatheDepth = Number(ref reader, "ambient.breatheDepth", problems); break;
+                case "drift": ambient.Drift = Number(ref reader, "ambient.drift", problems); break;
+                case "sweep": ambient.Sweep = Number(ref reader, "ambient.sweep", problems); break;
+                case "sweepopacity": ambient.SweepOpacity = Number(ref reader, "ambient.sweepOpacity", problems); break;
+                case "flicker": ambient.Flicker = Number(ref reader, "ambient.flicker", problems); break;
+                case "flickerdepth": ambient.FlickerDepth = Number(ref reader, "ambient.flickerDepth", problems); break;
+                default: reader.Skip(); break;
+            }
+        }
+        return ambient;
+    }
+
+    private static string? Text(ref Utf8JsonReader reader, string field, List<string> problems)
+    {
+        if (reader.TokenType == JsonTokenType.String) return reader.GetString();
+        if (reader.TokenType != JsonTokenType.Null) problems.Add(Wrong(field, Raw(ref reader), Loc.T("文本", "text")));
+        return null;
+    }
+
+    private static double? Number(ref Utf8JsonReader reader, string field, List<string> problems)
+    {
+        if (reader.TokenType == JsonTokenType.Number && reader.TryGetDouble(out double value)) return value;
+        if (reader.TokenType != JsonTokenType.Null) problems.Add(Wrong(field, Raw(ref reader), Loc.T("数字", "a number")));
+        return null;
+    }
+
+    private static string Wrong(string field, string raw, string kind)
+        => Loc.T($"动效项“{field}”的值 {raw} 不是{kind}，已忽略", $"The motion value \"{field}\" is {raw}, not {kind}; it is ignored");
+
+    // The value as written, shortened; reading it moves the reader to the value's end.
+    private static string Raw(ref Utf8JsonReader reader)
+    {
+        using var value = JsonDocument.ParseValue(ref reader);
+        string raw = value.RootElement.GetRawText();
+        return raw.Length > 40 ? raw[..40] + "…" : raw;
+    }
+
+    // Every member the reader knows, in the template's order; values left out stay out.
+    public override void Write(Utf8JsonWriter writer, PanelThemeMotion value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        if (value.Ambient is { } a)
+        {
+            writer.WriteStartObject("ambient");
+            Num("breathe", a.Breathe); Num("breatheDepth", a.BreatheDepth); Num("drift", a.Drift); Num("sweep", a.Sweep);
+            Num("sweepOpacity", a.SweepOpacity); Num("flicker", a.Flicker); Num("flickerDepth", a.FlickerDepth);
+            writer.WriteEndObject();
+        }
+        Str("hover", value.Hover); Num("hoverStrength", value.HoverStrength); Str("press", value.Press); Num("pressStrength", value.PressStrength);
+        Num("trail", value.Trail); Str("particles", value.Particles); Str("focus", value.Focus); Num("pace", value.Pace); Num("steps", value.Steps);
+        Str("spring", value.Spring); Num("particleMs", value.ParticleMs); Num("sliceMs", value.SliceMs); Num("scanMs", value.ScanMs); Num("splashMs", value.SplashMs);
+        Str("color", value.Color); Str("secondary", value.Secondary); Str("highlight", value.Highlight);
+        writer.WriteEndObject();
+
+        void Str(string name, string? text) { if (text is not null) writer.WriteString(name, text); }
+        void Num(string name, double? number) { if (number is { } n) writer.WriteNumber(name, n); }
+    }
+}
+
 public static partial class PanelThemes
 {
+    // What a usable file has wrong that is left out rather than refused, for the settings page: the motion values of each look
+    // (day, night and dusk), each falling back on its own to the base's (the night and dusk looks to the day's).
+    public static IReadOnlyList<string> Warnings(PanelThemeFile file)
+    {
+        var warnings = new List<string>();
+        void Look(PanelThemeFile? look, string prefix)
+        {
+            if (look?.Motion is not { } motion) return;
+            warnings.AddRange(motion.Problems.Select(problem => prefix + problem));
+            foreach (var (field, value) in new[] { ("hover", motion.Hover), ("press", motion.Press), ("focus", motion.Focus), ("particles", motion.Particles), ("spring", motion.Spring) })
+                if (!MotionStyles.Known(field, value))
+                {
+                    string names = string.Join(Loc.T("、", ", "), MotionStyles.Names(field) ?? []);
+                    warnings.Add(prefix + Loc.T($"未知的动效样式 {field}“{value}”（可用：{names}），已忽略", $"Unknown {field} style \"{value}\" (use {names}); it is ignored"));
+                }
+        }
+        Look(file, "");
+        Look(file.Night, Loc.T("夜间外观：", "Night look: "));
+        Look(file.Dusk, Loc.T("黄昏外观：", "Dusk look: "));
+        return warnings;
+    }
+
     // The base chain's motion sections, merged from the dark theme up and held to MotionSafety.
     private static ThemeMotion MotionValues(IEnumerable<PanelThemeFile> chain)
     {

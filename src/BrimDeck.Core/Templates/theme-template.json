@@ -126,7 +126,9 @@
   },
 
   // How the theme moves. Everything here follows Settings › Animations and Windows' "Animation effects": with either off, or in
-  // high contrast, nothing moves. Values outside their range are brought into it, so no theme can flash.
+  // high contrast, nothing moves. Values outside their range are brought into it, so no theme can flash. A value that cannot be
+  // used (a word where a number goes, a style BrimDeck does not know) is ignored, the base's is kept, and the settings page
+  // shows a warning; the rest of the theme still loads.
   "motion": {
     // Slow light on the island while it is on screen. Periods are seconds; 0 turns an effect off.
     "ambient": {

@@ -209,5 +209,52 @@ internal static class ThemeMotionTests
             check("Saving a custom theme's draft as a new theme keeps the day look's motion", PanelThemes.Build("saved", saved).Motion == dayStart.Motion);
         }
         finally { Directory.Delete(copyFolder, true); }
+
+        // A bad motion value is a warning on the settings page, never a file error (upstream review, PR #287): that field falls
+        // back (to the base's, or to the day look's for the night and dusk looks), and everything else in the file, the other
+        // looks' motion included, is used. Every field of this build's richer section is read on its own, the ambient ones too.
+        string Problem(string json)
+        {
+            var folder = Directory.CreateTempSubdirectory("brimdeck-motion").FullName;
+            try { File.WriteAllText(Path.Combine(folder, "t.json"), json); return PanelThemes.LoadFolder(folder).Single().Error ?? ""; }
+            finally { Directory.Delete(folder, true); }
+        }
+        static IReadOnlyList<string> Warnings(string json) => PanelThemes.Warnings(PanelThemes.Parse(json));
+        var githubDarkMotion = Palette("github-dark").Motion;
+        check("An unknown motion.hover name is a warning, not a file error, in the day and the night look",
+            Problem("""{ "id": "t", "motion": { "hover": "confetti" } }""") == "" && Warnings("""{ "id": "t", "motion": { "hover": "confetti" } }""").Single().Contains("confetti")
+            && Problem("""{ "id": "t", "night": { "motion": { "hover": "2" } } }""") == "" && Warnings("""{ "id": "t", "night": { "motion": { "hover": "2" } } }""").Single().Contains('2'));
+        check("Unknown press, focus, particles and spring names are warnings too, one each",
+            Warnings("""{ "motion": { "press": "boom", "focus": "halo", "particles": "confetti", "spring": "wobbly" } }""") is { Count: 4 } styleWarnings
+            && new[] { "boom", "halo", "confetti", "wobbly" }.All(name => styleWarnings.Any(w => w.Contains(name))));
+        check("Valid, earlier or blank style names are no problem and no warning", new[] { "reveal", "LIFT", "none", "spot", "", "  " }
+            .All(name => Problem("{ \"id\": \"t\", \"motion\": { \"hover\": \"" + name + "\" } }") == "" && Warnings("{ \"motion\": { \"hover\": \"" + name + "\" } }").Count == 0)
+            && Warnings("""{ "motion": { "press": "ripple", "focus": "neon", "particles": "bubble", "spring": "Jelly" } }""").Count == 0);
+        check("A motion value of the wrong type is a warning, and that field keeps its base's value",
+            Problem("""{ "id": "t", "motion": { "hover": "lift", "hoverStrength": "strong" } }""") == ""
+            && Custom("""{ "base": "github-dark", "motion": { "hover": "lift", "hoverStrength": "strong" } }""").Motion is { Hover: HoverFx.Lift } typed && typed.HoverStrength == githubDarkMotion.HoverStrength
+            && Warnings("""{ "motion": { "hover": "lift", "hoverStrength": "strong" } }""").Single().Contains("hoverStrength"));
+        const string AllWrong = """{ "base": "github-dark", "motion": { "hover": 2, "hoverStrength": "0.2", "pace": "fast", "color": 5, "secondary": true, "press": [], "pressStrength": "x", "trail": {}, "particles": 1, "focus": false, "steps": "4", "highlight": 3, "spring": 0, "particleMs": "1", "sliceMs": "1", "scanMs": "1", "splashMs": "1" } }""";
+        check("Every motion field of the wrong type is a warning of its own and keeps the base's value, a number written as text too",
+            Custom(AllWrong).Motion == githubDarkMotion && Warnings(AllWrong).Count == 17 && Problem(AllWrong.Replace("{ \"base\"", "{ \"id\": \"t\", \"base\"")) == "");
+        const string AmbientWrong = """{ "base": "cyberpunk-edgerunners", "motion": { "ambient": { "breathe": "slow", "sweep": 0 } } }""";
+        check("A wrong ambient value is a warning; the ambient values next to it still apply",
+            Custom(AmbientWrong).Motion.Ambient is { Breathe: 6.5, Sweep: 0, Drift: 11 } && Warnings(AmbientWrong).Single().Contains("ambient.breathe")
+            && Custom("""{ "base": "cyberpunk-edgerunners", "motion": { "ambient": 3, "hover": "underline" } }""").Motion is { Hover: HoverFx.Underline, Ambient.Breathe: 6.5 }
+            && Warnings("""{ "motion": { "ambient": 3 } }""").Count == 1);
+        check("A motion section that is not an object is a warning and no section",
+            Custom("""{ "base": "github-dark", "motion": "fast" }""").Motion == githubDarkMotion && Warnings("""{ "motion": [1] }""").Count == 1 && Problem("""{ "id": "t", "motion": 3 }""") == "");
+        const string NightWrong = """{ "id": "t", "motion": { "hover": "lift", "hoverStrength": 0.2 }, "night": { "motion": { "hover": "confetti", "hoverStrength": "strong", "pace": 1.4 } } }""";
+        var nightWrong = PanelThemes.Parse(NightWrong);
+        check("Only the night look's motion wrong: the day look's motion loads, and the night keeps the day's for the bad fields",
+            Problem(NightWrong) == "" && PanelThemes.Build("t", nightWrong).Motion is { Hover: HoverFx.Lift, HoverStrength: .2, Pace: 1 }
+            && PanelThemes.Build("t", nightWrong, night: true).Motion is { Hover: HoverFx.Lift, HoverStrength: .2, Pace: 1.4 }
+            && PanelThemes.Warnings(nightWrong) is { Count: 2 } nightWarnings && nightWarnings.All(w => w.StartsWith(Loc.T("夜间外观：", "Night look: "), StringComparison.Ordinal)));
+        check("A wrong value in the dusk look is a warning marked as the dusk look's",
+            PanelThemes.Warnings(PanelThemes.Parse("""{ "id": "t", "dusk": { "motion": { "pace": "slow" } } }""")).Single().StartsWith(Loc.T("黄昏外观：", "Dusk look: "), StringComparison.Ordinal));
+        var roundTrip = PanelThemes.Parse("""{ "motion": { "ambient": { "breathe": 8, "drift": "x" }, "hover": "lift", "hoverStrength": "x", "press": "sink", "steps": 3, "spring": "firm", "splashMs": 400, "highlight": "#123456" } }""");
+        var again = PanelThemes.Parse(System.Text.Json.JsonSerializer.Serialize(new { motion = roundTrip.Motion }));
+        check("The motion section is written back with every usable value and without the ignored ones",
+            again.Motion is { Hover: "lift", HoverStrength: null, Press: "sink", Steps: 3, Spring: "firm", SplashMs: 400, Highlight: "#123456", Ambient: { Breathe: 8, Drift: null } } && again.Motion.Problems.Count == 0);
     }
 }
