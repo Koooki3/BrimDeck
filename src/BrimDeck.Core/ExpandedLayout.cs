@@ -54,7 +54,6 @@ public sealed class ExpandedPlan
     public double Hole { get; init; }
     public double Width { get; init; }
     public double Height { get; init; }
-    public bool CpuCores { get; init; } = true;
     public ExpandedCardContent? CardContent { get; init; }
     public double CardsHeight { get; init; }
     public bool CardsTwoColumns { get; init; }
@@ -79,7 +78,7 @@ public sealed class ExpandedPlan
     public ExpandedDemand Demand(bool temperatures) => ExpandedMonitor.Demand(CardContent?.WatchDrives == true ? Shown.Append(ExpandedItem.Storage) : Shown, temperatures);
 
     // What makes two plans the same page, as far as building it goes.
-    public string Signature => string.Join("|", Kind, Steps, List, Downloads, Uploads, UploadFirst, CpuCores, CardsTwoColumns,
+    public string Signature => string.Join("|", Kind, Steps, List, Downloads, Uploads, UploadFirst, CardsTwoColumns,
         CardContent?.AwaitingDrives, CardContent?.WatchDrives, CardContent is { } custom ? string.Join(",", custom.Cards.Select(card => $"{card.Item}/{card.Letter}/{card.Wide}/{card.CompactMemoryBar}")) : "",
         string.Join(",", Parts.Select(part => part.Item + ":" + part.Form)));
 }
@@ -118,26 +117,26 @@ public static class ExpandedLayout
 
     // The plan for this size, keeping previous while the size is within Hysteresis of the step it shows.
     public static ExpandedPlan For(IEnumerable<ExpandedItem>? shown, double width, double height, ExpandedContent? content, FontMetrics? font, MonitorMain main, ExpandedPlan? previous,
-        bool cpuCores = true, ExpandedCardContent? cardContent = null)
+        ExpandedCardContent? cardContent = null)
     {
         var items = (shown ?? []).ToList();
         // The scrolling card section uses the actual viewport height, including while the panel is being resized.
         if (cardContent is not null)
-            return BuildPlan(items, width, height, content, font, main, cpuCores, cardContent, previous);
-        var next = For(items, width, height, content, font, main, cpuCores);
+            return BuildPlan(items, width, height, content, font, main, cardContent, previous);
+        var next = For(items, width, height, content, font, main);
         if (previous is null || next.Signature == previous.Signature) return next;
         foreach (double dw in new[] { 0, -Hysteresis, Hysteresis })
             foreach (double dh in new[] { 0, -Hysteresis, Hysteresis })
-                if (For(items, width + dw, height + dh, content, font, main, cpuCores).Signature == previous.Signature) return For(items, width + dw, height + dh, content, font, main, cpuCores);
+                if (For(items, width + dw, height + dh, content, font, main).Signature == previous.Signature) return For(items, width + dw, height + dh, content, font, main);
         return next;
     }
 
     public static ExpandedPlan For(IEnumerable<ExpandedItem>? shown, double width, double height, ExpandedContent? content = null, FontMetrics? font = null, MonitorMain main = MonitorMain.Cpu,
-        bool cpuCores = true, ExpandedCardContent? cardContent = null)
-        => BuildPlan(shown, width, height, content, font, main, cpuCores, cardContent, null);
+        ExpandedCardContent? cardContent = null)
+        => BuildPlan(shown, width, height, content, font, main, cardContent, null);
 
     private static ExpandedPlan BuildPlan(IEnumerable<ExpandedItem>? shown, double width, double height, ExpandedContent? content, FontMetrics? font, MonitorMain main,
-        bool cpuCores, ExpandedCardContent? cardContent, ExpandedPlan? previous)
+        ExpandedCardContent? cardContent, ExpandedPlan? previous)
     {
         var order = (shown ?? []).Where(item => Enum.IsDefined(item)).Distinct().ToList();
         font = (font ?? FontMetrics.Default).Fit(); content ??= new();
@@ -176,7 +175,7 @@ public static class ExpandedLayout
             return new ExpandedPlan
             {
                 Kind = order.Count == 0 ? ExpandedKind.Empty : ExpandedKind.Unavailable, Steps = basis, Scale = scale, Parts = [], Readings = default, List = ExpandedList.None,
-                ListBox = default, Dropped = order, Width = width, Height = height, Hole = height, CpuCores = cpuCores, CardContent = cardContent
+                ListBox = default, Dropped = order, Width = width, Height = height, Hole = height, CardContent = cardContent
             };
         }
 
@@ -202,13 +201,13 @@ public static class ExpandedLayout
             return new ExpandedPlan
             {
                 Kind = ExpandedKind.List, Steps = basis, Scale = scale, Parts = [], Readings = default, List = ExpandedList.Full, ListBox = Scaled(only, scale),
-                Dropped = [.. order.Where(item => item != ExpandedItem.Processes)], Width = width, Height = height, CpuCores = cpuCores, CardContent = cardContent
+                Dropped = [.. order.Where(item => item != ExpandedItem.Processes)], Width = width, Height = height, CardContent = cardContent
             };
         }
 
         double ln = Math.Ceiling(body * FontMetrics.DefaultLineFactor * k), rowS = Math.Ceiling(body * 1.5 * k);
         double headH = gauge ? Math.Ceiling(figure * 1.4 * k) : 0;
-        double minGraph = (gpu || cpu && cpuCores) ? MonitorLayout.MinimumGraph : 0;
+        double minGraph = gauge ? MonitorLayout.MinimumGraph : 0;
         double Margins(MetricsMode mode) => gauge ? (mode == MetricsMode.Line ? 10 : 16) : 0;
         double Rest(MetricsMode mode) => Rest2(mode, mem, net) + (cards ? ln : 0);
         double Gap(MetricsMode mode) => mode switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 };
@@ -421,7 +420,7 @@ public static class ExpandedLayout
         {
             Kind = ExpandedKind.Readings, Steps = steps, Scale = scale, Parts = parts, Readings = Scaled(new(0, 0, readingsW, readingsH), scale), List = list,
             ListBox = Scaled(listBox, scale), Dropped = dropped, Squeezed = squeezed, Hole = hole * scale, Width = width, Height = height,
-            CpuCores = cpuCores, CardContent = cardContent, CardsHeight = (cardBand?.Height ?? 0) * scale, CardsTwoColumns = twoColumns,
+            CardContent = cardContent, CardsHeight = (cardBand?.Height ?? 0) * scale, CardsTwoColumns = twoColumns,
             Downloads = down && netShown, Uploads = up && netShown,
             UploadFirst = down && up && netShown && order.IndexOf(ExpandedItem.Upload) < order.IndexOf(ExpandedItem.Download)
         };

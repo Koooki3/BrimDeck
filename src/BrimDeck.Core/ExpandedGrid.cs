@@ -1,12 +1,12 @@
 namespace BrimDeck.Core;
 
-// One reading in the expanded monitor's two-column grid. Storage readings are one tile per drive letter; all other readings
+// One reading in the expanded monitor's grid of four columns. Storage readings are one tile per drive letter; all other readings
 // have one tile each. Rows and columns describe occupied grid cells, not pixels.
 public sealed record ExpandedGridTile(ExpandedItem Item, string? Letter, int Column, int Row, int Columns, int Rows);
 
 public static class ExpandedGrid
 {
-    public const int ColumnCount = 2;
+    public const int ColumnCount = 4;
     // The grid is intentionally bounded so a damaged settings file cannot make the monitor allocate an unbounded number of rows.
     public const int MaxRows = 128;
 
@@ -65,9 +65,9 @@ public static class ExpandedGrid
             StringComparer.OrdinalIgnoreCase.Equals(a.Letter?.Trim(), b.Letter?.Trim()));
     }
 
-    // Seed a first grid view from the old reading table and optional card arrangement. A prior custom card layout keeps its
-    // order, widths and disconnected drive slots; new drives append in letter order. CPU/GPU charts start at two rows when the
-    // corresponding graph was visible in the old layout.
+    // Seed a first grid view from the old reading table and optional card arrangement, laid out as the page before the grid (see
+    // TryFindDefaultPosition). A prior custom card layout keeps its order, widths and disconnected drive slots; new drives append in
+    // letter order. The CPU and the GPU start two rows high, showing their graphs.
     public static List<ExpandedGridTile> Seed(DeckSettings settings, IEnumerable<string> driveLetters)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -79,14 +79,11 @@ public static class ExpandedGrid
             .Order(StringComparer.OrdinalIgnoreCase).ToList();
         var legacy = ExpandedCards.Normalize(settings.ExpandedCardOrder ?? []);
         var saved = settings.ExpandedCustomCards ? legacy : [];
-        var cpuMain = shown.Contains(ExpandedItem.Cpu);
-        bool GraphVisible(ExpandedItem item) => item switch
-        {
-            ExpandedItem.Cpu => settings.ExpandedCpuCores,
-            ExpandedItem.Gpu => !cpuMain || settings.MonitorMain == MonitorMain.Gpu,
-            _ => false
-        };
-        bool FullWidth(ExpandedItem item) => item is ExpandedItem.Power or ExpandedItem.Frames or ExpandedItem.Processes;
+        bool bothGauges = shown.Contains(ExpandedItem.Cpu) && shown.Contains(ExpandedItem.Gpu);
+        var main = settings.MonitorMain == MonitorMain.Gpu ? ExpandedItem.Gpu : ExpandedItem.Cpu;
+        // As the page before the grid: the process list down the right, the readings in the columns left of it.
+        bool sideList = shown.Contains(ExpandedItem.Processes);
+        int readingColumns = sideList ? ColumnCount - 1 : ColumnCount;
 
         var candidates = new Dictionary<(ExpandedItem Item, string? Letter), ExpandedGridTile>();
         var storageLetters = new List<string>();
@@ -150,25 +147,74 @@ public static class ExpandedGrid
             }
         }
 
-        var result = new List<ExpandedGridTile>();
-        int nextRow = 0, nextColumn = 0;
+        // The process list first, down the right for four rows. Each reading then takes the first place it fits, in reading order
+        // (filling a gap left beside an earlier one); one as wide as the readings' columns takes the whole width below the list.
+        var placed = new List<ExpandedGridTile>();
+        int listRows = 0;
+        if (sideList && candidates.TryGetValue((ExpandedItem.Processes, null), out var processes))
+        {
+            placed.Add(processes with { Column = ColumnCount - 1, Row = 0 });
+            listRows = processes.Rows;
+        }
         foreach (var key in order)
         {
-            var desired = candidates[key] with { Row = nextRow, Column = nextColumn };
-            if (!TryFindSeedPosition(desired, result, nextRow, nextColumn, out var position)) continue;
-            result.Add(position);
-            nextRow = position.Row;
-            nextColumn = position.Column + position.Columns;
-            if (nextColumn >= ColumnCount) { nextRow++; nextColumn = 0; }
+            if (sideList && key.Item == ExpandedItem.Processes) continue;
+            if (TryFindDefaultPosition(candidates[key], placed, readingColumns, listRows, out var position)) placed.Add(position);
         }
-        return result;
+        return [.. order.Select(key => placed.FirstOrDefault(tile => Key(tile) == key)).OfType<ExpandedGridTile>()];
 
         void Add(ExpandedItem item, string? letter, bool wide)
         {
-            var tile = new ExpandedGridTile(item, letter, 0, 0, FullWidth(item) || wide ? ColumnCount : 1,
-                item == ExpandedItem.Processes || GraphVisible(item) ? 2 : 1);
+            // The main gauge large and the other small beside it, as tall as it; memory two columns; the rates and the drives one
+            // each (a drive the old cards made wide, all the readings' columns); power and the frame rate the readings' whole width.
+            int columns = item switch
+            {
+                ExpandedItem.Cpu or ExpandedItem.Gpu => !bothGauges ? readingColumns : item == main ? readingColumns - 1 : 1,
+                ExpandedItem.Memory => 2,
+                ExpandedItem.Power or ExpandedItem.Frames => readingColumns,
+                ExpandedItem.Processes => sideList ? 1 : ColumnCount,
+                _ => wide ? readingColumns : 1
+            };
+            int rows = item switch
+            {
+                ExpandedItem.Processes => 4,
+                ExpandedItem.Cpu or ExpandedItem.Gpu => 2,
+                _ => 1
+            };
+            var tile = new ExpandedGridTile(item, letter, 0, 0, columns, rows);
             candidates.TryAdd(Key(tile), Constrain(tile));
         }
+    }
+
+    // The first place a tile fits, row by row: beside the process list (its first listRows rows) only in the readings' columns,
+    // below it in all of them, where a tile as wide as the readings' columns widens to the whole row.
+    private static bool TryFindDefaultPosition(ExpandedGridTile tile, IReadOnlyList<ExpandedGridTile> placed, int readingColumns, int listRows,
+        out ExpandedGridTile result)
+    {
+        for (int row = 0; row <= MaxRows - tile.Rows; row++)
+        {
+            bool beside = row < listRows;
+            int limit = beside ? readingColumns : ColumnCount;
+            int columns = !beside && tile.Columns >= readingColumns ? ColumnCount : Math.Min(tile.Columns, limit);
+            for (int column = 0; column + columns <= limit; column++)
+            {
+                var candidate = tile with { Row = row, Column = column, Columns = columns };
+                if (placed.All(other => !Overlaps(candidate, other))) { result = candidate; return true; }
+            }
+        }
+        result = tile;
+        return false;
+    }
+
+    // What the expanded page shows of a grid: only the columns and rows its tiles use, from the first used to the last, so a layout
+    // in two of the four columns fills the page's width. Gaps between tiles stay.
+    public static (List<ExpandedGridTile> Tiles, int Columns) Trim(IEnumerable<ExpandedGridTile> tiles)
+    {
+        ArgumentNullException.ThrowIfNull(tiles);
+        var list = tiles.ToList();
+        if (list.Count == 0) return ([], ColumnCount);
+        int left = list.Min(tile => tile.Column), right = list.Max(tile => tile.Column + tile.Columns), top = list.Min(tile => tile.Row);
+        return ([.. list.Select(tile => tile with { Column = tile.Column - left, Row = tile.Row - top })], right - left);
     }
 
     private static List<ExpandedGridTile> PlaceCore(IReadOnlyList<ExpandedGridTile> items)
@@ -190,11 +236,16 @@ public static class ExpandedGrid
             for (int row = tile.Row; row <= maxStart; row++) yield return row;
             for (int row = 0; row < tile.Row && row <= maxStart; row++) yield return row;
         }
+        // Its own column first, then the nearest ones either side.
         IEnumerable<int> Columns()
         {
-            if (tile.Columns == ColumnCount) { yield return 0; yield break; }
-            yield return tile.Column;
-            yield return 1 - tile.Column;
+            int last = ColumnCount - tile.Columns, own = Math.Clamp(tile.Column, 0, last);
+            yield return own;
+            for (int step = 1; step <= last; step++)
+            {
+                if (own - step >= 0) yield return own - step;
+                if (own + step <= last) yield return own + step;
+            }
         }
 
         foreach (int row in Rows())
@@ -207,32 +258,6 @@ public static class ExpandedGrid
                     return true;
                 }
             }
-        result = tile;
-        return false;
-    }
-
-    // Seed follows row-major reading order. A full-width tile that encounters a partly occupied row starts the next row; later
-    // items never backfill the space before that explicit break.
-    private static bool TryFindSeedPosition(ExpandedGridTile tile, IReadOnlyList<ExpandedGridTile> placed, int startRow, int startColumn,
-        out ExpandedGridTile result)
-    {
-        int maxStart = MaxRows - tile.Rows;
-        for (int row = startRow; row <= maxStart; row++)
-        {
-            int firstColumn = row == startRow ? startColumn : 0;
-            if (tile.Columns == ColumnCount)
-            {
-                if (firstColumn > 0) continue;
-                var candidate = tile with { Row = row, Column = 0 };
-                if (placed.All(other => !Overlaps(candidate, other))) { result = candidate; return true; }
-                continue;
-            }
-            for (int column = firstColumn; column < ColumnCount; column++)
-            {
-                var candidate = tile with { Row = row, Column = column };
-                if (placed.All(other => !Overlaps(candidate, other))) { result = candidate; return true; }
-            }
-        }
         result = tile;
         return false;
     }
@@ -260,12 +285,21 @@ public static class ExpandedGrid
         return true;
     }
 
-    private static int RowsFor(ExpandedItem item, int rows) => item switch
+    // How many rows a tile may take: only what shows more when taller can be taller. The gauges gain their graphs from two rows,
+    // memory puts its bar under its figure, the process list shows more rows; a rate, a drive, power and the frame rate are one line.
+    public static (int Min, int Max) RowRange(ExpandedItem item) => item switch
     {
-        ExpandedItem.Processes => Math.Clamp(rows, 2, 4),
-        ExpandedItem.Cpu or ExpandedItem.Gpu => Math.Clamp(rows, 1, 4),
-        _ => 1
+        ExpandedItem.Processes => (2, 4),
+        ExpandedItem.Cpu or ExpandedItem.Gpu => (1, 4),
+        ExpandedItem.Memory => (1, 2),
+        _ => (1, 1)
     };
+
+    private static int RowsFor(ExpandedItem item, int rows)
+    {
+        var (min, max) = RowRange(item);
+        return Math.Clamp(rows, min, max);
+    }
 
     private static string? NormalizeLetter(string? letter)
     {

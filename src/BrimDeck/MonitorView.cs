@@ -58,7 +58,7 @@ internal sealed partial class MonitorView : Grid
     // Only what the plan has a place for is built.
     private FigureGauge? _cpuGauge, _gpuGauge;
     private ColumnGraph? _cpuGraph, _gpuGraph;
-    private readonly BlockGauge? _gpuBlock;
+    private BlockGauge? _gpuBlock;
     private MemoryBlock? _memory;
     private readonly NetworkBlock? _network;
     private readonly StorageBlock? _storage;
@@ -106,7 +106,6 @@ internal sealed partial class MonitorView : Grid
         _main = cpuMain ? MonitorMain.Cpu : MonitorMain.Gpu;
         string swapToGpu = Loc.T("切换为以 GPU 为主", "Show the GPU large"), swapToCpu = Loc.T("切换为以 CPU 为主", "Show the CPU large");
         string cores = Loc.T("CPU 各核心占用", "CPU usage by core");
-        bool hasGraphs = hasGpu || hasCpu && plan.CpuCores;
         var readings = _readings;
         // The bands, each with the kind that decides its place and its height: the gauges' band takes what the others leave.
         var bands = new List<(ExpandedItem Kind, FrameworkElement Element)>();
@@ -115,8 +114,7 @@ internal sealed partial class MonitorView : Grid
         {
             var band = new Grid();
             band.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            if (hasGraphs) band.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
-            else band.Margin = new Thickness(0, 0, 0, layout.CompactMetrics ? 10 : 16);
+            band.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
             // The gauge shown small takes a fixed width at the right, the same for either: a block for the GPU, thin columns for the
             // processor. Its line is wider than the column under it, and wider still with a temperature after the figure.
             double mini = Math.Round(Math.Clamp(layout.Figure * 3.4, 54, 84));
@@ -142,7 +140,7 @@ internal sealed partial class MonitorView : Grid
 
             var graphs = new Grid { Margin = new Thickness(0, layout.CompactMetrics ? 4 : 6, 0, layout.CompactMetrics ? 6 : 10) };
             graphs.ColumnDefinitions.Add(new ColumnDefinition());
-            if (pair && plan.CpuCores)
+            if (pair)
             {
                 graphs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
                 graphs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(mini) });
@@ -151,18 +149,13 @@ internal sealed partial class MonitorView : Grid
             {
                 // Fill the main graph's width even on CPUs with few cores. The fill is the
                 // load, the tick the clock, and pointing at a core gives both.
-                if (plan.CpuCores)
-                {
-                    _cpuGraph = new ColumnGraph(double.PositiveInfinity, layout.Caption, labels: false, name: cores, display: coreDisplay, matrixColumns: matrixColumns);
-                    graphs.Children.Add(_cpuGraph);
-                }
+                _cpuGraph = new ColumnGraph(double.PositiveInfinity, layout.Caption, labels: false, name: cores, display: coreDisplay, matrixColumns: matrixColumns);
+                graphs.Children.Add(_cpuGraph);
                 if (pair)
                 {
                     _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu, layout.Caption);
                     _gpuBlock.Clicked += () => mainChanged(MonitorMain.Gpu);
-                    if (plan.CpuCores) SetColumn(_gpuBlock, 2);
-                    else { _gpuBlock.Width = mini; _gpuBlock.HorizontalAlignment = HorizontalAlignment.Right; }
-                    graphs.Children.Add(_gpuBlock);
+                    SetColumn(_gpuBlock, 2); graphs.Children.Add(_gpuBlock);
                 }
             }
             else
@@ -170,14 +163,14 @@ internal sealed partial class MonitorView : Grid
                 // The engines spread over the room the graph has, so a wide page leaves no gap between them and the processor's columns.
                 _gpuGraph = new ColumnGraph(EngineColumn, layout.Caption, !layout.CompactMetrics, gap: 6, name: Loc.T("GPU 各引擎占用", "GPU usage by engine"));
                 graphs.Children.Add(_gpuGraph);
-                if (pair && plan.CpuCores)
+                if (pair)
                 {
                     _cpuGraph = new ColumnGraph(6, layout.Caption, false, gap: 1.5, button: swapToCpu, name: cores, display: coreDisplay, matrixColumns: matrixColumns);
                     _cpuGraph.Clicked += () => mainChanged(MonitorMain.Cpu);
                     SetColumn(_cpuGraph, 2); graphs.Children.Add(_cpuGraph);
                 }
             }
-            if (hasGraphs) { SetRow(graphs, 1); band.Children.Add(graphs); }
+            SetRow(graphs, 1); band.Children.Add(graphs);
             bands.Add((ExpandedItem.Cpu, band));
         }
 
@@ -301,7 +294,7 @@ internal sealed partial class MonitorView : Grid
         double lineGap = layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 };
         for (int i = 0; i < bands.Count; i++)
         {
-            bool flex = bands[i].Kind == ExpandedItem.Cpu && hasGraphs;
+            bool flex = bands[i].Kind == ExpandedItem.Cpu;
             readings.RowDefinitions.Add(new RowDefinition { Height = flex ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
             // At the lines' distance from a band that is not the gauges' (whose own margin keeps the distance).
             if (i > 0 && bands[i - 1].Kind != ExpandedItem.Cpu)
@@ -311,7 +304,7 @@ internal sealed partial class MonitorView : Grid
             }
             SetRow(bands[i].Element, i); readings.Children.Add(bands[i].Element);
         }
-        if (!hasGraphs) readings.VerticalAlignment = _cardScroll is null ? VerticalAlignment.Center : VerticalAlignment.Top;
+        if (!hasCpu && !hasGpu) readings.VerticalAlignment = _cardScroll is null ? VerticalAlignment.Center : VerticalAlignment.Top;
 
         if (plan.List == ExpandedList.Full)
         {
@@ -478,7 +471,7 @@ internal sealed partial class MonitorView : Grid
             string detail = kind.Length > 0 && heatText.Length > 0 ? kind + " · " + heatText : kind + heatText;
             // The memory in use, in the large gauge's line after the temperature (the small one's room is kept for the temperature; its
             // block carries the memory), in its own level's color as in the collapsed row, not the temperature's.
-            var memoryShare = (_gridMode || !cpuMain) && !idle ? gpu.DedicatedFraction : null;
+            var memoryShare = (_gridMode ? _gpuBlock is null : !cpuMain) && !idle ? gpu.DedicatedFraction : null;
             string memoryText = memoryShare is { } m ? Loc.T("显存 ", "VRAM ") + MonitorFormat.Percent(m) + "%" : "";
             _gpuGauge.Set(idle ? null : gpu.Usage, idle ? "—" : MonitorFormat.Percent(gpu.Usage), idle ? "" : "%", detail, switchTo.Length > 0 ? tip + "\n" + switchTo : tip, motion,
                 heat is { } c ? Hot(Temperatures.OfGpu(c)) : null, memoryText, memoryShare is { } level ? Hot(ReadingLevels.OfShare(level)) : null);
@@ -497,7 +490,13 @@ internal sealed partial class MonitorView : Grid
         }
 
         // The main gauge carries the last minute's usage in the room after its figure.
-        if (!_gridMode && (cpuMain ? _cpuGauge : _gpuGauge) is { } large) large.Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
+        // In the grid a tile one row high carries it instead of its graph (GaugeTile).
+        if (_gridMode)
+        {
+            if (_cpuTrend && _cpuGauge is { } cpuTile) cpuTile.Trend = snapshot.CpuHistory;
+            if (_gpuTrend && _gpuGauge is { } gpuTile) gpuTile.Trend = snapshot.GpuHistory;
+        }
+        else if ((cpuMain ? _cpuGauge : _gpuGauge) is { } large) large.Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
         _memory?.Set(snapshot.Memory, motion);
         _network?.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
         _downloadCard?.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);

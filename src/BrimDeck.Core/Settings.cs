@@ -691,10 +691,10 @@ public sealed class DeckSettings
     // How the processor's cores are drawn, collapsed and expanded: columns, a dot matrix, or by the count and the room (Auto).
     public CoreDisplay CoreDisplay { get; set; } = CoreDisplay.Auto;
     public int CoreMatrixColumns { get; set; }
-    // Hides the individual CPU cores in the expanded page; the aggregate gauge and the collapsed readings are independent.
-    public bool ExpandedCpuCores { get; set; } = true;
-    // Null means this profile has never edited the two-column grid and should seed it from the older reading/card settings;
-    // an empty list is an explicit choice to show no grid tiles.
+    // Null means this profile has never edited the grid and should seed it from the older reading/card settings; an empty list is
+    // an explicit choice to show no grid tiles. Saved under its own name: the grid had two columns before it was ever released, and
+    // tiles saved then are not read as four-column ones.
+    [JsonPropertyName("ExpandedLayoutGrid")]
     public List<ExpandedGridTile>? ExpandedGridTiles { get; set; }
     public bool ExpandedCustomCards { get; set; }
     public List<ExpandedCard> ExpandedCardOrder { get; set; } = [];

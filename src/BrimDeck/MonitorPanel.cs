@@ -113,10 +113,9 @@ public partial class MainWindow
         if (!IsMonitorPage || _monitorView is null) return;
         if (Settings.ExpandedCustomCards)
         {
-            bool twoColumns = MonitorGridUsesTwoColumns(ContentCanvas.Width - 2 * _header.ContentSide);
-            var tiles = MonitorGridTilesForWidth(CurrentMonitorGridTiles(), twoColumns);
+            var (tiles, columns) = ExpandedGrid.Trim(CurrentMonitorGridTiles());
             var gridLayout = CurrentMonitorGridLayout();
-            if (MonitorGridKey(gridLayout, tiles, twoColumns) != _monitorKey)
+            if (MonitorGridKey(gridLayout, tiles, columns) != _monitorKey)
             {
                 // A seeded grid may gain volume tiles after storage discovery. Saved tiles stay put when a volume is absent.
                 RenderMonitor(); return;
@@ -160,7 +159,7 @@ public partial class MainWindow
         double height = ContentCanvas.Height;
         var shown = ExpandedMonitor.Shown(Settings.ExpandedReadings);
         return ExpandedLayout.For(shown, ContentCanvas.Width - 2 * _header.ContentSide, height - _header.Row - MonitorBottom(height),
-            new ExpandedContent(sensors.Drives, sensors.Power), null, Settings.MonitorMain, _monitorView is not null ? _monitorPlan : null, Settings.ExpandedCpuCores);
+            new ExpandedContent(sensors.Drives, sensors.Power), null, Settings.MonitorMain, _monitorView is not null ? _monitorPlan : null);
     }
     // What the open page reads: what its layout kept, before the first one is made what the table chooses.
     private ExpandedDemand PageDemand() => Settings.ExpandedCustomCards ? GridPageDemand()
@@ -231,10 +230,9 @@ public partial class MainWindow
         if (Settings.ExpandedCustomCards)
         {
             _monitorPlan = null;
-            RenderMonitorGrid(shown, width, fade);
+            RenderMonitorGrid(shown, fade);
             return;
         }
-        _monitorGridTwoColumns = null;
         // Worked out once for each render: a drag renders the page many times a second.
         var sensors = MonitorSensors();
         var layout = CurrentMonitorPlan(sensors);

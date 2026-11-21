@@ -182,6 +182,15 @@ internal sealed class Renderer(App app, string output, string language, string[]
             // The file transfer's settings, and the word beside the pointer while files are dragged out; for checking.
             if (scenes.Contains("transfer-settings")) { await DragHints(); await SettingsPage("transfer-settings", 14, tips: true); }
             // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
+            // The expanded monitor's grid editor on its settings page, the saved grid and the readings waiting above it; for checking.
+            if (scenes.Contains("monitor-grid"))
+            {
+                _settings.ExpandedCustomCards = true;
+                _settings.ExpandedGridTiles = [new(ExpandedItem.Cpu, null, 0, 0, 3, 2), new(ExpandedItem.Gpu, null, 3, 0, 1, 2), new(ExpandedItem.Memory, null, 0, 2, 1, 1),
+                    new(ExpandedItem.Download, null, 1, 2, 2, 1), new(ExpandedItem.Upload, null, 0, 3, 2, 2), new(ExpandedItem.Power, null, 0, 5, 4, 1), new(ExpandedItem.Processes, null, 2, 3, 2, 2)];
+                await SettingsPage("monitor-grid-settings", 9, 2600, tips: true);
+                await MonitorGrid();
+            }
             if (scenes.Contains("monitor-free")) { await MonitorFree(); await SettingsPage("monitor-free-settings", 9, 1100, tips: true); }
             // The backup section of the displays and profiles page, and the export and import windows in each state; for checking.
             if (scenes.Contains("config-backup")) { await ConfigBackupScene(); await SettingsPage("backup-settings", 16, 1500); }
@@ -744,6 +753,70 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Settle(); Feed();
         await Save("compact-monitor", scale);
         _settings.NotchMonitor = false; _settings.NotchMusic = true; Refresh();
+        Program.SetProperty(app, "Exiting", false);
+        _settings.Animations = true;
+        await Settle();
+    }
+
+    // The expanded page as a grid of four columns: CPU and memory half a row each, a GPU a whole row, an upload two rows high, two drives a quarter each;
+    // at 820 and at 480 the arrangement is the same, the tiles scaled with the page.
+    private async Task MonitorGrid()
+    {
+        const double scale = 2;
+        Program.SetProperty(app, "Exiting", true);
+        _settings.Animations = false;
+        var snapshot = MonitorSample();
+        // With the day's traffic, which the README's sample leaves out: a network tile shows it where its width has room after the curve.
+        snapshot = snapshot with { Network = snapshot.Network.OrDefault! with { DownTotalBytes = 14.0e9, UpTotalBytes = 4.54e9 } };
+        void Feed() => Program.Call(_deck, "MonitorUpdated", [typeof(MonitorSnapshot)], snapshot);
+        _settings.ExpandedGridTiles = [new(ExpandedItem.Cpu, null, 0, 0, 2, 1), new(ExpandedItem.Power, null, 2, 0, 2, 1), new(ExpandedItem.Gpu, null, 0, 1, 4, 1),
+            new(ExpandedItem.Upload, null, 0, 2, 2, 1), new(ExpandedItem.Download, null, 2, 2, 2, 1), new(ExpandedItem.Memory, null, 0, 3, 2, 2), new(ExpandedItem.Storage, "C:", 2, 3, 1, 1), new(ExpandedItem.Storage, "D:", 3, 3, 1, 1)];
+        foreach (var (width, height) in new[] { (820.0, 330.0), (480.0, 200.0) })
+        {
+            _settings.MonitorWidth = width; _settings.MonitorHeight = height;
+            SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+            _deck.SetExpanded(true, true);
+            await Settle(); Feed(); await Settle(); Feed();
+            await Save($"monitor-grid-{width:0}", scale);
+        }
+        // The default grid (never edited) at the usual size and at the smallest.
+        _settings.ExpandedGridTiles = null;
+        foreach (var (width, height) in new[] { (620.0, 220.0), (440.0, 140.0) })
+        {
+            _settings.MonitorWidth = width; _settings.MonitorHeight = height;
+            SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+            _deck.SetExpanded(true, true);
+            await Settle(); Feed(); await Settle(); Feed();
+            await Save($"monitor-grid-default-{width:0}", scale);
+        }
+        // The default grid with the GPU chosen as the large gauge: the CPU one column wide and two rows high shows its cores.
+        _settings.MonitorMain = MonitorMain.Gpu;
+        _settings.MonitorWidth = 760; _settings.MonitorHeight = 340;
+        SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+        _deck.SetExpanded(true, true);
+        await Settle(); Feed(); await Settle(); Feed();
+        await Save("monitor-grid-default-gpu-760", scale);
+        _settings.MonitorMain = MonitorMain.Cpu;
+        // Fixed rows: a CPU two rows high is twice a line of readings however tall the page, and the rows sit in its middle;
+        // download and upload a quarter of the page wide keep their curves. The default grid at the spacious size likewise.
+        _settings.ExpandedGridTiles = [new(ExpandedItem.Cpu, null, 0, 0, 2, 2), new(ExpandedItem.Gpu, null, 2, 0, 1, 1), new(ExpandedItem.Processes, null, 3, 0, 1, 4),
+            new(ExpandedItem.Memory, null, 0, 2, 2, 1), new(ExpandedItem.Download, null, 2, 2, 1, 1), new(ExpandedItem.Upload, null, 0, 3, 1, 1),
+            new(ExpandedItem.Storage, "C:", 1, 3, 1, 1), new(ExpandedItem.Storage, "D:", 2, 3, 1, 1), new(ExpandedItem.Frames, null, 0, 4, 4, 1), new(ExpandedItem.Power, null, 0, 5, 4, 1)];
+        foreach (var (width, height) in new[] { (700.0, 380.0), (440.0, 300.0) })
+        {
+            _settings.MonitorWidth = width; _settings.MonitorHeight = height;
+            SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+            _deck.SetExpanded(true, true);
+            await Settle(); Feed(); await Settle(); Feed();
+            await Save($"monitor-grid-rows-{width:0}", scale);
+        }
+        _settings.ExpandedGridTiles = null;
+        _settings.MonitorWidth = 860; _settings.MonitorHeight = 320;
+        SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+        _deck.SetExpanded(true, true);
+        await Settle(); Feed(); await Settle(); Feed();
+        await Save("monitor-grid-default-860", scale);
+        SelectPage(DeckPage.Usage);
         Program.SetProperty(app, "Exiting", false);
         _settings.Animations = true;
         await Settle();

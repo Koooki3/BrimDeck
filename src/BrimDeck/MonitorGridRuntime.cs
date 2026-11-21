@@ -7,10 +7,6 @@ namespace BrimDeck;
 
 public partial class MainWindow
 {
-    private const double MonitorGridTwoColumnWidth = 430;
-    private const double MonitorGridColumnHysteresis = 12;
-    private bool? _monitorGridTwoColumns;
-
     private List<ExpandedGridTile> CurrentMonitorGridTiles()
     {
         var letters = (_app.Monitor?.Latest?.Storage ?? []).SelectMany(drive => drive.Volumes)
@@ -37,49 +33,21 @@ public partial class MainWindow
         return MonitorLayout.For(width, height, processes: false);
     }
 
-    private bool MonitorGridUsesTwoColumns(double width)
-    {
-        bool twoColumns = _monitorGridTwoColumns switch
-        {
-            true => width >= MonitorGridTwoColumnWidth - MonitorGridColumnHysteresis,
-            false => width >= MonitorGridTwoColumnWidth + MonitorGridColumnHysteresis,
-            _ => width >= MonitorGridTwoColumnWidth
-        };
-        _monitorGridTwoColumns = twoColumns;
-        return twoColumns;
-    }
-
-    private static List<ExpandedGridTile> MonitorGridTilesForWidth(IReadOnlyList<ExpandedGridTile> saved, bool twoColumns)
-    {
-        if (twoColumns) return [.. saved];
-        // Keep the saved grid intact. On a narrow panel its tiles flow down in row-major order, with each saved height kept.
-        var flow = new List<ExpandedGridTile>(saved.Count);
-        int row = 0;
-        foreach (var tile in saved.OrderBy(tile => tile.Row).ThenBy(tile => tile.Column))
-        {
-            flow.Add(tile with { Column = 0, Row = row, Columns = 1 });
-            row += tile.Rows;
-        }
-        return flow;
-    }
-
-    private string MonitorGridKey(MonitorLayout layout, IReadOnlyList<ExpandedGridTile> tiles, bool twoColumns)
+    private string MonitorGridKey(MonitorLayout layout, IReadOnlyList<ExpandedGridTile> tiles, int columns)
     {
         string cells = string.Join(",", tiles.Select(tile => $"{tile.Item}/{tile.Letter}/{tile.Column}/{tile.Row}/{tile.Columns}/{tile.Rows}"));
-        bool compactMemoryBar = Settings.ExpandedCardOrder.FirstOrDefault(card => card.Item == ExpandedItem.Memory)?.CompactMemoryBar == true;
-        return string.Join("|", "grid", layout, twoColumns, cells, Settings.MonitorPalette,
+        return string.Join("|", "grid", layout, columns, cells, Settings.MonitorPalette,
             Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "", Loc.Language, Look.Generation,
             Settings.MonitorTemperatures, Native.BatteryProvider.SystemHasBattery, Settings.MonitorProcessView, Settings.MonitorShowFree,
-            Settings.CoreDisplay, Settings.CoreMatrixColumns, compactMemoryBar);
+            Settings.CoreDisplay, Settings.CoreMatrixColumns);
     }
 
-    private void RenderMonitorGrid(bool shown, double width, bool fade)
+    private void RenderMonitorGrid(bool shown, bool fade)
     {
-        var savedTiles = CurrentMonitorGridTiles();
-        bool twoColumns = MonitorGridUsesTwoColumns(width - 2 * _header.ContentSide);
-        var tiles = MonitorGridTilesForWidth(savedTiles, twoColumns);
+        // The page keeps the saved arrangement at every size: the grid only grows and shrinks with the page (MonitorView.Grid).
+        var (tiles, columns) = ExpandedGrid.Trim(CurrentMonitorGridTiles());
         var layout = CurrentMonitorGridLayout();
-        string key = MonitorGridKey(layout, tiles, twoColumns);
+        string key = MonitorGridKey(layout, tiles, columns);
         if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView)) return;
 
         _monitorKey = key;
@@ -88,10 +56,9 @@ public partial class MainWindow
         var old = shown ? _monitorView : null;
         old?.CloseCard();
         var message = tiles.Count == 0 ? MonitorGridEmptyMessage(layout) : null;
-        _monitorView = new MonitorView(tiles, twoColumns, layout, MonitorThemeColors.For(Settings, Look), Settings.MonitorMain, Settings.MonitorSort,
+        _monitorView = new MonitorView(tiles, columns, layout, MonitorThemeColors.For(Settings, Look), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
             Settings.MonitorTemperatures,
-            Settings.ExpandedCardOrder.FirstOrDefault(card => card.Item == ExpandedItem.Memory)?.CompactMemoryBar == true,
             PowerBlockFor(old is null && MonitorMotion && !Resizing), Settings.CoreDisplay, Settings.MonitorShowFree,
             Settings.CoreMatrixColumns, message);
         if (old is not null)
