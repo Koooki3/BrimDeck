@@ -29,9 +29,9 @@ internal static class CompactStylePreview
             Width = Width, Height = Height, Background = dark ? DarkDesktop : LightDesktop, IsHitTestVisible = false,
             Clip = new RectangleGeometry(new Rect(0, 0, Width, Height), 9, 9), UseLayoutRounding = false, SnapsToDevicePixels = false
         };
-        // Everything here is vector and drawn at the size it is shown, enlarged several times over. The settings window lays text
-        // out for the screen at its own size (TextFormattingMode.Display), which turns the tiny clock into blurred pixels once
-        // scaled; ideal layout keeps it sharp at any size.
+        // Everything here is vector and drawn at the size it is shown, enlarged several times over. Text laid out for the screen
+        // at its own size (TextFormattingMode.Display) turns the tiny clock into blurred pixels once scaled; ideal layout keeps
+        // it sharp at any size, whatever the window around it uses.
         TextOptions.SetTextFormattingMode(screen, TextFormattingMode.Ideal);
         TextOptions.SetTextRenderingMode(screen, TextRenderingMode.Grayscale);
         if (style == CompactStyle.Line)

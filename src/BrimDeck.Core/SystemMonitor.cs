@@ -24,12 +24,27 @@ public readonly struct Reading<T>
 // What Windows calls a core, from its efficiency class. A processor with one class has Unknown cores.
 public enum CoreTier { Performance, Efficiency, Unknown }
 
-// One logical processor. Group 0 holds the fastest kind of core, counting up to the slowest; Number is its position within
-// its group, from 1. Usage is the 0..1 busy share of the last interval.
-public sealed record CoreSample(int Id, int Group, CoreTier Tier, int Number, double Usage, Reading<double> FrequencyMhz, double? MaxFrequencyMhz)
+// One logical processor. Group 0 holds the fastest kind of core, counting up to the slowest; Number is its 1-based position
+// within its group (the physical core's for a named tier, the logical processor's for Unknown), and Thread is its 1-based
+// thread on that physical core when a named tier's core has more than one logical processor. Usage is the 0..1 busy share of
+// the last interval.
+public sealed record CoreSample(int Id, int Group, CoreTier Tier, int Number, double Usage, Reading<double> FrequencyMhz, double? MaxFrequencyMhz, int? Thread = null)
 {
     // 0..1 position of the current frequency within the core's range.
     public double? FrequencyFraction => FrequencyMhz.TryGet(out var mhz) && MaxFrequencyMhz is { } top && top > 0 ? Math.Clamp(mhz / top, 0, 1) : null;
+
+    public string Describe()
+    {
+        string kind = Tier switch
+        {
+            CoreTier.Performance => Loc.T("性能核", "Performance core"),
+            CoreTier.Efficiency => Loc.T("能效核", "Efficiency core"),
+            _ => Loc.T("逻辑处理器", "Logical processor")
+        };
+        string thread = Thread is { } t ? Loc.T($" · 线程 {t}", $" · thread {t}") : "";
+        string frequency = FrequencyMhz.TryGet(out var mhz) ? " · " + MonitorFormat.Gigahertz(mhz) + " GHz" : "";
+        return $"{kind} {Number}{thread} · {MonitorFormat.Percent(Usage)}%{frequency}";
+    }
 }
 
 // Where the processor's temperature comes from, the best first: its own sensors through the sensor service (enhanced sensors,
@@ -86,6 +101,11 @@ public sealed record MemorySample(ulong Total, ulong Used, ulong CommitUsed, ulo
     public const double ElevatedUsed = ReadingLevels.ElevatedShare, ElevatedCommit = .8, CriticalUsed = ReadingLevels.CriticalShare, CriticalCommit = .9;
     public double CachedFraction => Total > 0 ? Math.Clamp((double)Math.Min(Cached, Total - Math.Min(Used, Total)) / Total, 0, 1) : 0;
     public double UsedFraction => Total > 0 ? Math.Clamp((double)Used / Total, 0, 1) : 0;
+    // The memory available to apps, the file cache with it, as Task Manager's "available".
+    public ulong Free => Total - Math.Min(Used, Total);
+    public double FreeFraction => Total > 0 ? 1 - UsedFraction : 0;
+    // The share shown: in use, or free (DeckSettings.MonitorShowFree).
+    public double Shown(bool free) => free ? FreeFraction : UsedFraction;
     public double CommitFraction => CommitLimit > 0 ? Math.Clamp((double)CommitUsed / CommitLimit, 0, 1) : 0;
     public MemoryLevel Level => UsedFraction >= CriticalUsed || CommitFraction >= CriticalCommit ? MemoryLevel.Critical
         : UsedFraction >= ElevatedUsed || CommitFraction >= ElevatedCommit ? MemoryLevel.Elevated : MemoryLevel.Normal;

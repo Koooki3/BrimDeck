@@ -18,7 +18,7 @@ In the grid, the row, the column and on two lines, picture files show a thumbnai
 BrimDeck keeps the text and pictures you copy, newest first.
 
 - **Display**: text shows its first line, with the number of further lines at the end; a link shows its domain and path in two colors, code in a monospaced font, a color value with a swatch, and a picture as a thumbnail with its size.
-- **Click**: pastes the entry into the window you are working in.
+- **Click**: pastes the entry into the window you are working in. With "Click copies only" on under Settings › Clipboard, a click only copies the entry, which moves to the top, and you paste it yourself.
 - **Right-click**: Paste, Paste as plain text, Copy only, Details, Edit (text), Add to category, Add to favorites, Delete.
 - **Details**: the whole panel shows the entry in full, with the app it came from, the time, and its length or size; a link can be opened in the browser.
 - **Drag out**: drag the entry into another app.
@@ -52,7 +52,7 @@ The file transfer holds files you will need shortly. It keeps only where each fi
 - **Click**: pastes the file into the current window. It becomes an attachment in a chat window, and a copy in the current folder in File Explorer.
 - **Select several**: hold Ctrl or Shift and click to select several files, then paste, drag out or remove them together.
 - **Right-click**: Paste, Open, Show in folder, Copy path, Details, Add to category, Remove from the file transfer, Delete the original.
-- **Drag out**: drag a file to where you need it; a button in the column's title row drags out all files at once. Files are copied by default; with "Move" chosen under Settings › File transfer › Drag files out, files moved to a new place leave the list, while chat apps, browsers and other places that only take copies still get copies.
+- **Drag out**: drag a file to where you need it; a button in the column's title row drags out all files at once. By default the left button copies and the right button moves; Settings › File transfer › Drag files out swaps them. While you drag, a word beside the pointer says whether letting go there copies or moves.
 - A file whose original has been moved or deleted is marked "Missing".
 - The notch and capsule can show how many files the file transfer holds.
 
@@ -66,3 +66,13 @@ The file transfer holds files you will need shortly. It keeps only where each fi
 ## Where the data is stored
 
 The clipboard history, the file transfer's list and the categories are stored in `%LOCALAPPDATA%\BrimDeck\shelf.dat`, and copied pictures and formatting in `%LOCALAPPDATA%\BrimDeck\shelf\`. Both are not encrypted, used only on this PC and never uploaded. See [Data and privacy](privacy.md).
+
+### Left and right file drags
+
+- Copy: the original stays where it is, a copy goes to the new place, and the file stays in the file transfer.
+- Move: the original goes to the new place and leaves the file transfer.
+- Chat apps and browsers cannot take a move; files dragged there are always copied, and the word beside the pointer then says "Copy".
+
+Settings › File transfer › Drag files out has two choices: "Left copies, right moves" (the default) and "Left moves, right copies". A right drag does its action directly, without the shell's drop menu. A right click without dragging still opens the entry menu.
+
+The optional remove-after-copy/link setting defaults off. When enabled, a moving drag successfully accepted as Copy or Link by an external application removes its transfer entries without deleting the original files. Canceled or rejected drops, Explorer, internal drops and Ctrl-copy gestures retain entries. Success means the target reported accepting the drop, not that an attachment finished uploading. Other file managers reporting Copy are also subject to this option.

@@ -388,8 +388,8 @@ internal sealed class DevicesView : FrameworkElement
     private static bool Cut(string text, double size, string color, double width, double ppd)
         => MonitorDraw.Text(text, size, color, ppd).WidthIncludingTrailingWhitespace > Math.Max(1, width) + 0.5;
 
-    // The line under the name: the earbuds' parts, then charging, low or getting low, an estimate, or that the device reports no
-    // battery; otherwise where the reading comes from.
+    // The line under the name: the earbuds' parts, then charging, low or getting low, a level in steps or from the voltage, or
+    // that the device reports no battery; otherwise where the reading comes from.
     private static string Detail(DeviceBattery device, MemoryLevel level)
     {
         var parts = new List<string>();
@@ -398,7 +398,8 @@ internal sealed class DevicesView : FrameworkElement
         else if (device.Lowest is null) parts.Add(Loc.T("未报告电量", "No battery reported"));
         else if (level == MemoryLevel.Critical) parts.Add(Loc.T("电量低", "Battery low"));
         else if (level == MemoryLevel.Elevated) parts.Add(Loc.T("电量偏低", "Getting low"));
-        else if (device.Coarse) parts.Add(Loc.T("估算", "Estimated"));
+        else if (device.Accuracy == BatteryAccuracy.Steps) parts.Add(Loc.T("按电量档位", "Stepped level"));
+        else if (device.Accuracy == BatteryAccuracy.Voltage) parts.Add(Loc.T("按电压换算", "From voltage"));
         if (parts.Count == 0) parts.Add(Devices.SourceName(device.Source));
         return string.Join(" · ", parts);
     }

@@ -289,6 +289,7 @@ internal sealed class ColumnGraph : FrameworkElement
     private readonly double _maxColumn, _label, _gap;
     private readonly bool _labels, _button;
     private readonly CoreDisplay _display;
+    private readonly int _matrixColumns;
     // The dot matrix's cells: one frozen brush per color and brightness step, made on first use.
     private readonly Dictionary<(string Color, int Step), Brush> _cellBrushes = [];
     private MatrixGrid _grid;
@@ -306,9 +307,9 @@ internal sealed class ColumnGraph : FrameworkElement
 
     // name: what the graph shows, for screen readers ("CPU 各核心占用").
     // display: columns, or a dot matrix of the cores as chosen in the settings (CoreDisplay); only the processor's graph takes it.
-    public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null, string name = "", CoreDisplay display = CoreDisplay.Columns)
+    public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null, string name = "", CoreDisplay display = CoreDisplay.Columns, int matrixColumns = 0)
     {
-        _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null; _name = name; _action = button ?? ""; _display = display;
+        _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null; _name = name; _action = button ?? ""; _display = display; _matrixColumns = matrixColumns;
         ClipToBounds = true; SnapsToDevicePixels = true;
         if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); }
         else ToolTipService.SetPlacement(this, System.Windows.Controls.Primitives.PlacementMode.Mouse);
@@ -375,7 +376,7 @@ internal sealed class ColumnGraph : FrameworkElement
     private MatrixGrid Grid(double width, double height, double ppd)
     {
         var key = (_columns.Count, width, height, ppd);
-        if (_grid.Count != _columns.Count || key != _gridKey) { _grid = CoreMatrix.Fit(_columns.Count, width, height, ppd, MaxCell); _gridKey = key; }
+        if (_grid.Count != _columns.Count || key != _gridKey) { _grid = CoreMatrix.Fit(_columns.Count, width, height, ppd, MaxCell, preferredColumns: _matrixColumns); _gridKey = key; }
         return _grid;
     }
     // A few cores in a wide graph stay squares of a sensible size.
@@ -585,26 +586,27 @@ internal sealed class BlockGauge : FrameworkElement
 
 // Memory: the badge with its arc and the figure, then a bar of the memory in use and, lighter, the file cache, its color the
 // level; under it a thin line, the committed memory against its limit. The words and the other figures are in the tooltip.
-// Short of room (compact), the figure and the bar share one line.
+// Short of room (compact), the figure and the bar share one line. Showing what is free (DeckSettings.MonitorShowFree), the arc, the
+// figure and the bar show the memory available, the cache within it lighter; the color still follows the memory in use.
 internal sealed class MemoryBlock : FrameworkElement
 {
     // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
     private PanelLook Look => PanelLook.Of(this);
     private readonly MonitorColors _colors;
-    private readonly bool _compact;
+    private readonly bool _compact, _free;
     private readonly double _body, _caption;
     private Eased _used, _cached, _commit;
     private MemorySample? _memory;
 
-    public MemoryBlock(MonitorColors colors, bool compact, double body, double caption)
+    public MemoryBlock(MonitorColors colors, bool compact, double body, double caption, bool free = false)
     {
-        _colors = colors; _compact = compact; _body = body; _caption = caption;
+        _colors = colors; _compact = compact; _body = body; _caption = caption; _free = free;
         Height = compact ? Math.Ceiling(body * 1.7) : Math.Ceiling(body * 1.7 + 6 + 5 + 5 + 3);
     }
 
-    // For screen readers: "物理内存 63% · 正常", the memory in use as its value.
+    // For screen readers: "物理内存 63% · 正常", the memory in use (or free) as its value.
     protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.ProgressBar, () => DrawnPeer.FirstLine(ToolTip),
-        share: () => _memory?.UsedFraction);
+        share: () => _memory?.Shown(_free));
 
     public void Set(Reading<MemorySample> reading, bool motion)
     {
@@ -613,7 +615,9 @@ internal sealed class MemoryBlock : FrameworkElement
         {
             moving |= _used.Set(memory.UsedFraction, motion); moving |= _cached.Set(memory.CachedFraction, motion); moving |= _commit.Set(memory.CommitFraction, motion);
             _memory = memory;
-            ToolTip = Loc.T("物理内存 ", "Physical memory ") + MonitorFormat.Percent(memory.UsedFraction) + "% · " + Level(memory.Level) + "\n" + Loc.T("缓存 ", "Cached ") + MonitorFormat.Gigabytes(memory.Cached)
+            ToolTip = (_free ? Loc.T("物理内存剩余 ", "Physical memory free ") + MonitorFormat.Percent(memory.FreeFraction)
+                    : Loc.T("物理内存 ", "Physical memory ") + MonitorFormat.Percent(memory.UsedFraction)) + "% · " + Level(memory.Level)
+                + "\n" + Loc.T("缓存 ", "Cached ") + MonitorFormat.Gigabytes(memory.Cached)
                 + " GB\n" + Loc.T("已提交 ", "Committed ") + MonitorFormat.Gigabytes(memory.CommitUsed) + " / " + MonitorFormat.Gigabytes(memory.CommitLimit) + " GB" + Loc.T("（下方细线）", " (the thin line)");
         }
         else { _memory = null; ToolTip = Loc.T("暂无读数：", "No reading: ") + reading.Reason; }
@@ -630,9 +634,9 @@ internal sealed class MemoryBlock : FrameworkElement
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), now = Eased.Now, line = Math.Ceiling(_body * 1.7), badge = Math.Round(_body + 5);
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
         string color = _memory is null ? Look.Tertiary : _colors.Memory;
-        MonitorDraw.Dial(drawing, new Point(badge / 2, line / 2), badge, FigureGauge.DialRing(badge), FigureGauge.DialLetter(badge), _memory is null ? null : _used.At(now), color, "M", ppd, look: Look);
+        MonitorDraw.Dial(drawing, new Point(badge / 2, line / 2), badge, FigureGauge.DialRing(badge), FigureGauge.DialLetter(badge), _memory is null ? null : Shown(_used.At(now)), color, "M", ppd, look: Look);
         double x = badge + Math.Round(_body * .5), baseline = Math.Round(line / 2 + _body * .38);
-        var figure = MonitorDraw.Text(_memory is { } mem ? MonitorFormat.Gigabytes(mem.Used) : "—", _body + 1, Look.Primary, ppd, strong: true);
+        var figure = MonitorDraw.Text(_memory is { } mem ? MonitorFormat.Gigabytes(_free ? mem.Free : mem.Used) : "—", _body + 1, Look.Primary, ppd, strong: true);
         MonitorDraw.Baseline(drawing, figure, x, baseline); x += figure.WidthIncludingTrailingWhitespace;
         if (_memory is { } total)
         {
@@ -666,12 +670,23 @@ internal sealed class MemoryBlock : FrameworkElement
         if (share > 0) drawing.DrawRoundedRectangle(UI.Brush(Look.Secondary), null, new Rect(r.X, r.Y, Math.Max(2, r.Width * share), 2), 1, 1);
     }
 
-    // The memory in use, then the cache in the same color, lighter, then the free rest.
+    // The eased share in use as the dial shows it: in use, or free.
+    private double Shown(double used) => _free ? 1 - Math.Clamp(used, 0, 1) : used;
+
+    // The memory in use, then the cache in the same color, lighter, then the free rest. Showing what is free: the memory no app or
+    // cache holds, then the cache, lighter, which together are the memory available.
     private void Bar(DrawingContext drawing, Rect r, string color, double now)
     {
         double radius = r.Height / 2;
         drawing.DrawRoundedRectangle(UI.Brush(Look.Track), null, r, radius, radius);
         if (_memory is null) return;
+        if (_free)
+        {
+            double available = Shown(_used.At(now)) * r.Width, cache = Math.Min(available, Math.Clamp(_cached.At(now), 0, 1) * r.Width), open = available - cache;
+            if (cache > 1) drawing.DrawRoundedRectangle(UI.Brush(MonitorDraw.Faint(color, .38)), null, new Rect(r.X, r.Y, Math.Max(r.Height, available), r.Height), radius, radius);
+            if (open > 0) drawing.DrawRoundedRectangle(UI.Brush(color), null, new Rect(r.X, r.Y, Math.Max(r.Height, open), r.Height), radius, radius);
+            return;
+        }
         double used = Math.Clamp(_used.At(now), 0, 1) * r.Width, cached = Math.Clamp(_cached.At(now), 0, 1) * r.Width;
         if (cached > 1) drawing.DrawRoundedRectangle(UI.Brush(MonitorDraw.Faint(color, .38)), null, new Rect(r.X, r.Y, Math.Min(r.Width, used + cached), r.Height), radius, radius);
         if (used > 0) drawing.DrawRoundedRectangle(UI.Brush(color), null, new Rect(r.X, r.Y, Math.Max(r.Height, used), r.Height), radius, radius);
@@ -780,8 +795,8 @@ internal sealed class NetworkBlock : FrameworkElement
 }
 
 // The internal drives' volumes, an entry each (Storage.Rows) in lines tighter than the process list's rows (MonitorLayout.StorageRow),
-// filled left to right in one or two columns: a drive glyph, the volume's letter, its space in use
-// against its size, a bar of the space in use as memory's bar draws it, and, where its physical drive reports one, that drive's
+// filled left to right in one or two columns: a drive glyph, the volume's letter, its space in use (or free, DeckSettings.MonitorShowFree)
+// against its size, a bar of that space as memory's bar draws it, and, where its physical drive reports one, that drive's
 // temperature at the end in its level's color (volumes on one drive show the same). The parts line up from entry to entry; the
 // temperature takes room only while an entry has one, so no entry ends in a gap. With more volumes than places the last entry
 // holds the others ("+2"). The bars ease to each reading, and the entries fade in when the first reading arrives.
@@ -794,16 +809,17 @@ internal sealed class StorageBlock : FrameworkElement
     private readonly MonitorColors _colors;
     private readonly double _body, _caption, _row;
     private readonly int _columns, _room;
-    private readonly bool _temperatures;
+    private readonly bool _temperatures, _free;
     private IReadOnlyList<StorageRow> _rows = [];
     private Eased[] _used = [];
     private Eased _shown, _heat;
 
-    // lines and columns: the places the page keeps for the volumes; temperatures: whether entries carry temperatures.
-    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int columns, bool temperatures)
+    // lines and columns: the places the page keeps for the volumes; temperatures: whether entries carry temperatures; free: the
+    // entries show the space free in place of the space in use.
+    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int columns, bool temperatures, bool free = false)
     {
         _colors = colors; _body = body; _caption = caption; _row = row; _columns = Math.Max(1, columns);
-        _room = Math.Max(1, lines) * _columns; _temperatures = temperatures;
+        _room = Math.Max(1, lines) * _columns; _temperatures = temperatures; _free = free;
         Height = Math.Max(1, lines) * row;
         SnapsToDevicePixels = true;
     }
@@ -819,12 +835,14 @@ internal sealed class StorageBlock : FrameworkElement
             yield return new DrawnPart(i + " " + _rows[i].Label, Spoken(_rows[i]),
                 new Rect(i % _columns * (cell + ColumnGap), i / _columns * _row, Math.Max(0, cell), _row));
     }
-    // An entry as its line shows it: "C: · 246 / 300 GB · 44 °C".
-    private static string Spoken(StorageRow row)
+    // An entry as its line shows it: "C: · 246 / 300 GB · 44 °C", or "C: · 剩余 54 / 300 GB".
+    private string Spoken(StorageRow row)
     {
-        var (used, total, unit) = Storage.Sizes(row.Used, row.Total);
-        return $"{row.Label} · {used} / {total} {unit}" + (row.Celsius is { } celsius ? " · " + Temperatures.Detail(celsius) : "");
+        var (shown, total, unit) = Storage.Sizes(row.Shown(_free), row.Total);
+        return $"{row.Label} · {FreeWord}{shown} / {total} {unit}" + (row.Celsius is { } celsius ? " · " + Temperatures.Detail(celsius) : "");
     }
+    // Before the space free in the tooltip and for screen readers; the line itself shows the figures alone.
+    private string FreeWord => _free ? Loc.T("剩余 ", "free ") : "";
 
     public void Set(IReadOnlyList<StorageDrive> drives, bool motion)
     {
@@ -832,7 +850,7 @@ internal sealed class StorageBlock : FrameworkElement
         // New entries start from an empty bar, so a first reading grows into place as the page's other values do.
         if (rows.Count != _used.Length) _used = new Eased[rows.Count];
         bool moving = false;
-        for (int i = 0; i < rows.Count; i++) moving |= _used[i].Set(rows[i].UsedFraction, motion);
+        for (int i = 0; i < rows.Count; i++) moving |= _used[i].Set(rows[i].ShownFraction(_free), motion);
         if (rows.Count > 0) _rows = rows;
         moving |= _shown.Set(rows.Count > 0 ? 1 : 0, motion);
         moving |= _heat.Set(rows.Any(row => row.Celsius is not null) ? 1 : 0, motion);
@@ -849,18 +867,19 @@ internal sealed class StorageBlock : FrameworkElement
         return false;
     }
 
-    // "C: D: · YMTC YMSS2ED06D25MC · 212 / 477 GB · 44 °C", then each volume of a split drive on a line of its own.
-    private static string Describe(StorageDrive drive)
+    // "C: D: · YMTC YMSS2ED06D25MC · 212 / 477 GB · 44 °C", then each volume of a split drive on a line of its own. Showing what is
+    // free: "· 剩余 265 / 477 GB".
+    private string Describe(StorageDrive drive)
     {
-        var (used, total, unit) = Storage.Sizes(drive.Used, drive.Total);
-        string text = drive.Letters + (drive.Model.Length > 0 ? " · " + drive.Model : "") + $" · {used} / {total} {unit}";
+        var (shown, total, unit) = Storage.Sizes(_free ? drive.Total - Math.Min(drive.Used, drive.Total) : drive.Used, drive.Total);
+        string text = drive.Letters + (drive.Model.Length > 0 ? " · " + drive.Model : "") + $" · {FreeWord}{shown} / {total} {unit}";
         if (drive.Temperature is { } heat)
             text += " · " + Temperatures.Detail(heat.Celsius) + (heat.Warning is { } warning ? Loc.T($"（警告 {Temperatures.Format(warning)} °C）", $" (warning at {Temperatures.Format(warning)} °C)") : "");
         if (drive.Volumes.Count > 1)
             foreach (var volume in drive.Volumes)
             {
-                var (u, t, n) = Storage.Sizes(volume.Used, volume.Total);
-                text += $"\n    {volume.Letter}{(volume.Label.Length > 0 ? " " + volume.Label : "")} · {u} / {t} {n}";
+                var (u, t, n) = Storage.Sizes(_free ? volume.Total - volume.Used : volume.Used, volume.Total);
+                text += $"\n    {volume.Letter}{(volume.Label.Length > 0 ? " " + volume.Label : "")} · {FreeWord}{u} / {t} {n}";
             }
         return text;
     }
@@ -877,7 +896,7 @@ internal sealed class StorageBlock : FrameworkElement
         // The columns: the letters, the figures (as wide as the widest size can be), and the temperature, as wide as its widest.
         var texts = _rows.Select(row =>
         {
-            var (used, total, unit) = Storage.Sizes(row.Used, row.Total);
+            var (used, total, unit) = Storage.Sizes(row.Shown(_free), row.Total);
             return (Label: MonitorDraw.Text(row.Label, _body, Look.Secondary, ppd), Used: MonitorDraw.Text(used, _body + 1, Look.Primary, ppd, strong: true),
                 Size: MonitorDraw.Text($" / {total} {unit}", _caption, Look.Tertiary, ppd), Widest: MonitorDraw.Text(total, _body + 1, Look.Primary, ppd, strong: true));
         }).ToList();
@@ -908,12 +927,12 @@ internal sealed class StorageBlock : FrameworkElement
         if (opacity < .999) drawing.Pop();
     }
 
-    // The space in use, as memory's bar is drawn.
+    // The space in use (or free), as memory's bar is drawn.
     private void Bar(DrawingContext drawing, Rect r, StorageRow row, int index, double now)
     {
         double radius = r.Height / 2;
         drawing.DrawRoundedRectangle(UI.Brush(Look.Track), null, r, radius, radius);
-        double used = Math.Clamp(index < _used.Length ? _used[index].At(now) : row.UsedFraction, 0, 1) * r.Width;
+        double used = Math.Clamp(index < _used.Length ? _used[index].At(now) : row.ShownFraction(_free), 0, 1) * r.Width;
         if (used > .5) drawing.DrawRoundedRectangle(UI.Brush(_colors.Storage), null, new Rect(r.X, r.Y, Math.Max(r.Height, used), r.Height), radius, radius);
     }
 }

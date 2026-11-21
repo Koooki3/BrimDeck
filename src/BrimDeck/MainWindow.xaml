@@ -105,49 +105,53 @@
                 <Grid x:Name="ModelToolbar" Margin="10,0,96,0" Visibility="Collapsed" VerticalAlignment="Center"/>
                 <!-- The clipboard page's own header parts: the full-content view's back, title and arrows, and the open search box. -->
                 <Grid x:Name="ShelfToolbar" Visibility="Collapsed" VerticalAlignment="Stretch"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,20,0">
-                  <Button x:Name="MediaSourceButton" Style="{StaticResource PanelSourceButton}" Width="Auto" MaxWidth="150" Padding="8,0" Margin="0,0,2,0" Click="MediaSource_Click" Visibility="Collapsed">
-                    <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                      <Viewbox x:Name="MediaSourcePin" Width="10" Height="10" Margin="0,0,4,0" VerticalAlignment="Center" Visibility="Collapsed">
-                        <!-- Measured ink: the pin's center sat 1 DIP above the label and chevron. -->
-                        <Viewbox.RenderTransform><TranslateTransform Y="1"/></Viewbox.RenderTransform>
-                        <Canvas Width="16" Height="16">
-                          <Path Data="M9.6,1.6 L14.4,6.4 L12.2,7.3 L9.3,10.2 L9.7,12.8 L8.4,14.1 L1.9,7.6 L3.2,6.3 L5.8,6.7 L8.7,3.8 Z" StrokeThickness="1.5" StrokeLineJoin="Round"
-                                Fill="{Binding Foreground, ElementName=MediaSourceButton}" Stroke="{Binding Foreground, ElementName=MediaSourceButton}"/>
-                          <Path Data="M5.1,10.9 L1.6,14.4" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Stroke="{Binding Foreground, ElementName=MediaSourceButton}"/>
-                        </Canvas>
-                      </Viewbox>
-                      <TextBlock x:Name="MediaSourceLabel" Grid.Column="1" FontFamily="{DynamicResource FontPanel}" FontSize="12"
-                                 Foreground="{Binding Foreground, ElementName=MediaSourceButton}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                      <!-- The settings window's chevron: the icon font's small chevron, dropped 1 DIP to meet the label's glyphs. -->
-                      <TextBlock x:Name="MediaSourceChevron" Grid.Column="2" Text="&#xE96E;" FontFamily="{StaticResource FontIcon}" FontSize="12" Margin="5,1,0,-1"
-                                 Foreground="{Binding Foreground, ElementName=MediaSourceButton}" VerticalAlignment="Center" Visibility="Collapsed"/>
-                    </Grid>
-                  </Button>
-                  <Button x:Name="SyncButton" Style="{StaticResource PanelGlyphButton}" Margin="10,0,4,0" VerticalAlignment="Center" Click="Sync_Click">
-                    <Grid Width="24" Height="24">
-                    <!-- Countdown to the next automatic sync: a static ring filled once a second, 12 o'clock, counterclockwise. -->
-                    <Path x:Name="SyncTrack" Stroke="{DynamicResource PanelTrack}" StrokeThickness="1.2" Visibility="Collapsed">
-                      <Path.Data><EllipseGeometry Center="12,12" RadiusX="10" RadiusY="10"/></Path.Data>
-                    </Path>
-                    <Path x:Name="SyncProgress" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
-                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed"/>
-                    <Viewbox x:Name="SyncGlyph" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center"><Grid Width="24" Height="24">
-                      <Path x:Name="SyncArrows" Data="M 3,11 A 9,9 0 0 1 18.4,5.6 L 21,8 M 21,3 L 21,8 L 16,8 M 21,13 A 9,9 0 0 1 5.6,18.4 L 3,16 M 3,21 L 3,16 L 8,16"
-                            Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round">
-                        <Path.RenderTransform><RotateTransform x:Name="SyncRotation" CenterX="12" CenterY="12"/></Path.RenderTransform>
+                <!-- Give the gear its own column so a rounded media label width cannot shift it at fractional DPI. -->
+                <Grid x:Name="ToolbarActions" Margin="0,0,20,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button x:Name="MediaSourceButton" Style="{StaticResource PanelSourceButton}" Width="Auto" MaxWidth="150" Padding="8,0" Margin="0,0,2,0" Click="MediaSource_Click" Visibility="Collapsed">
+                      <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <Viewbox x:Name="MediaSourcePin" Width="10" Height="10" Margin="0,0,4,0" VerticalAlignment="Center" Visibility="Collapsed">
+                          <!-- Measured ink: the pin's center sat 1 DIP above the label and chevron. -->
+                          <Viewbox.RenderTransform><TranslateTransform Y="1"/></Viewbox.RenderTransform>
+                          <Canvas Width="16" Height="16">
+                            <Path Data="M9.6,1.6 L14.4,6.4 L12.2,7.3 L9.3,10.2 L9.7,12.8 L8.4,14.1 L1.9,7.6 L3.2,6.3 L5.8,6.7 L8.7,3.8 Z" StrokeThickness="1.5" StrokeLineJoin="Round"
+                                  Fill="{Binding Foreground, ElementName=MediaSourceButton}" Stroke="{Binding Foreground, ElementName=MediaSourceButton}"/>
+                            <Path Data="M5.1,10.9 L1.6,14.4" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Stroke="{Binding Foreground, ElementName=MediaSourceButton}"/>
+                          </Canvas>
+                        </Viewbox>
+                        <TextBlock x:Name="MediaSourceLabel" Grid.Column="1" FontFamily="{DynamicResource FontPanel}" FontSize="12"
+                                   Foreground="{Binding Foreground, ElementName=MediaSourceButton}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        <!-- The settings window's chevron: the icon font's small chevron, dropped 1 DIP to meet the label's glyphs. -->
+                        <TextBlock x:Name="MediaSourceChevron" Grid.Column="2" Text="&#xE96E;" FontFamily="{StaticResource FontIcon}" FontSize="12" Margin="5,1,0,-1"
+                                   Foreground="{Binding Foreground, ElementName=MediaSourceButton}" VerticalAlignment="Center" Visibility="Collapsed"/>
+                      </Grid>
+                    </Button>
+                    <Button x:Name="SyncButton" Style="{StaticResource PanelGlyphButton}" Margin="10,0,4,0" VerticalAlignment="Center" Click="Sync_Click">
+                      <Grid Width="24" Height="24">
+                      <!-- Countdown to the next automatic sync: a static ring filled once a second, 12 o'clock, counterclockwise. -->
+                      <Path x:Name="SyncTrack" Stroke="{DynamicResource PanelTrack}" StrokeThickness="1.2" Visibility="Collapsed">
+                        <Path.Data><EllipseGeometry Center="12,12" RadiusX="10" RadiusY="10"/></Path.Data>
                       </Path>
-                      <Path x:Name="SyncSlash" Data="M 4,4 L 20,20" Visibility="Collapsed" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                            StrokeThickness="1.9" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
-                    </Grid></Viewbox>
-                    </Grid>
-                  </Button>
-                  <Button x:Name="ShelfSearchButton" Style="{StaticResource PanelGlyphButton}" Margin="0,0,4,0" VerticalAlignment="Center" Click="ShelfSearch_Click" Visibility="Collapsed">
-                    <Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M 10.5,3.5 A 7,7 0 1 1 10.5,17.5 A 7,7 0 1 1 10.5,3.5 Z M 15.6,15.6 L 21,21" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas></Viewbox>
-                  </Button>
-                  <Button x:Name="SettingsButton" Style="{StaticResource PanelSettingsButton}" Content="&#xE713;" FontFamily="{StaticResource FontIconMdl2}" FontSize="16" Click="Settings_Click"/>
-                </StackPanel>
+                      <Path x:Name="SyncProgress" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
+                            StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed"/>
+                      <Viewbox x:Name="SyncGlyph" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center"><Grid Width="24" Height="24">
+                        <Path x:Name="SyncArrows" Data="M 3,11 A 9,9 0 0 1 18.4,5.6 L 21,8 M 21,3 L 21,8 L 16,8 M 21,13 A 9,9 0 0 1 5.6,18.4 L 3,16 M 3,21 L 3,16 L 8,16"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round">
+                          <Path.RenderTransform><RotateTransform x:Name="SyncRotation" CenterX="12" CenterY="12"/></Path.RenderTransform>
+                        </Path>
+                        <Path x:Name="SyncSlash" Data="M 4,4 L 20,20" Visibility="Collapsed" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="1.9" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                      </Grid></Viewbox>
+                      </Grid>
+                    </Button>
+                    <Button x:Name="ShelfSearchButton" Style="{StaticResource PanelGlyphButton}" Margin="0,0,4,0" VerticalAlignment="Center" Click="ShelfSearch_Click" Visibility="Collapsed">
+                      <Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M 10.5,3.5 A 7,7 0 1 1 10.5,17.5 A 7,7 0 1 1 10.5,3.5 Z M 15.6,15.6 L 21,21" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/></Canvas></Viewbox>
+                    </Button>
+                  </StackPanel>
+                  <Button x:Name="SettingsButton" Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource PanelSettingsButton}" Content="&#xE713;" FontFamily="{StaticResource FontIconMdl2}" FontSize="16" Click="Settings_Click"/>
+                </Grid>
               </Grid>
           </Grid>
         </Grid>

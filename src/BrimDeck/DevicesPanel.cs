@@ -12,7 +12,7 @@ public partial class MainWindow
     private DevicesView? _devicesView;
     private string _devicesKey = "";
     private DevicesLayout? _devicesLayout;
-    private bool _devicesShowing;
+    private bool _devicesShowing, _deviceStripShowing;
 
     private void InitializeDevices()
     {
@@ -62,20 +62,28 @@ public partial class MainWindow
             else _devicesView.Update(ShownDevices, DevicesSettled, motion: false);
             _app.Devices?.Refresh();
         }
+        bool wasStrip = _deviceStripShowing;
         _devicesShowing = page;
+        _deviceStripShowing = strip;
+        if (strip && !wasStrip && !_inRenderCompact) UpdateCompactDevices();
+    }
+
+    private void UpdateCompactDevices()
+    {
+        // The part joins with the first charge reported and leaves with the last; a device more or fewer changes its width: the
+        // row is built again for either. Otherwise the part takes the new readings in place.
+        var devices = StripDevices();
+        bool shows = devices.Devices.Any(device => device.Percent is not null);
+        if (_compactDevices is { } strip && shows && strip.Holds(devices)) strip.SetDevices(devices);
+        else if (shows || _compactDevices is not null) RenderCompact();
     }
 
     private void DevicesChanged()
     {
         if (!_expanded)
         {
-            if (!Settings.ShowsDevices(EffectiveStyle)) return;
-            // The part joins with the first charge reported and leaves with the last; a device more or fewer changes its width: the
-            // row is built again for either. Otherwise the part takes the new readings in place.
-            var devices = StripDevices();
-            bool shows = devices.Devices.Any(device => device.Percent is not null);
-            if (_compactDevices is { } strip && shows && strip.Holds(devices)) strip.SetDevices(devices);
-            else if (shows || _compactDevices is not null) RenderCompact();
+            if (!Settings.ShowsDevices(EffectiveStyle) || _alert is not null) return;
+            UpdateCompactDevices();
             return;
         }
         if (CurrentPage != DeckPage.Devices || _devicesView is null) return;
@@ -111,7 +119,7 @@ public partial class MainWindow
     private DevicesLayout CurrentDevicesLayout()
     {
         double height = ContentCanvas.Height;
-        return DevicesLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), ShownDevices.Count, _devicesView is not null ? _devicesLayout : null);
+        return DevicesLayout.For(ContentCanvas.Width - 2 * _header.ContentSide, height - _header.Row - MonitorBottom(height), ShownDevices.Count, _devicesView is not null ? _devicesLayout : null);
     }
     private string DevicesKey() => string.Join("|", CurrentDevicesLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "",
         Inks.Key, Loc.Language, Look.Generation, SystemParameters.HighContrast);
@@ -126,10 +134,8 @@ public partial class MainWindow
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
-        // The header keeps the usage page's controls, as the monitor page does, so the switch does not move between pages.
-        var header = PanelHeader.For(ToolbarFor(height), height < 170 ? 14 : 20);
-        ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
-        DevicesContent.Margin = new Thickness(_header.Side, 0, _header.Side, MonitorBottom(height));
+        ApplyPageHeader(PanelHeader.ForPanel(height));
+        DevicesContent.Margin = new Thickness(_header.ContentSide, 0, _header.ContentSide, MonitorBottom(height));
         var key = DevicesKey();
         // The same step: the page stays, and only shows the devices as they are now (a device switched off in the settings).
         if (_devicesView is not null && key == _devicesKey && DevicesContent.Children.Contains(_devicesView)) { _devicesView.Update(ShownDevices, DevicesSettled, Animates); return; }

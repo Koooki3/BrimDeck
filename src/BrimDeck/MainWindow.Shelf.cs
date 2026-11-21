@@ -38,6 +38,7 @@ public partial class MainWindow
     private DeckPage? _dropReturn;
     private DispatcherTimer? _dropLeave;
     private ContextMenu? _shelfMenu;
+    private PointerPressObserver? _shelfMenuPress;
     private TextBox? _searchBox, _editBox;
     private double _clipOffset, _fileOffset;
     private Rectangle? _fileFrame;
@@ -49,7 +50,10 @@ public partial class MainWindow
     // The details replace the page switch and the clock with their own header.
     internal bool ShelfHidesSwitch => _shelfDetail is not null;
     // The panel stays open while a menu of the page is open, while the user types in it, and while files are dragged over it.
-    internal bool ShelfHolds => _shelfMenu?.IsOpen == true || _shelfEdit is not null || _dropping || _draggingOut || _shareDrag is not null || _banding || _searchBox?.IsKeyboardFocusWithin == true;
+    // Typing needs the foreground. Window.IsActive is false when Deactivated runs, but WPF clears the keyboard focus only on
+    // WM_KILLFOCUS, which can come later: the search box still held it there and kept the panel open after a press elsewhere.
+    internal bool ShelfHolds => _shelfMenu?.IsOpen == true || _shelfEdit is not null || _dropping || _draggingOut || _shareDrag is not null || _banding
+        || IsActive && _searchBox?.IsKeyboardFocusWithin == true;
     private ShelfData ShelfData => _app.Shelf.Data;
 
     private void InitializeShelf()
@@ -180,8 +184,7 @@ public partial class MainWindow
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
         var layout = _shelfLayout = ShelfLayoutFor(width, height);
-        var header = PanelHeader.For(ToolbarFor(height), layout.Side);
-        ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
+        ApplyPageHeader(PanelHeader.For(PanelHeader.ToolbarFor(height), layout.Side));
         bool showingDetail = _shelfDetail is { } open && Find(open.Side, open.Id) is not null;
         // In the lowest panels the toolbar leaves 2 DIP under the page switch (PanelHeader); the page keeps 4 more below it. Stacked,
         // the cards reach out to CardSide from the panel's edges, so that the columns in them start where they do side by side.
@@ -986,38 +989,90 @@ public partial class MainWindow
     private void AttachFileDrag(FrameworkElement source, Func<List<TransferFile>> files)
     {
         Point? start = null;
-        source.PreviewMouseLeftButtonDown += (_, e) => start = e.GetPosition(source);
+        bool right = false, suppressMenu = false;
+        source.PreviewMouseLeftButtonDown += (_, e) => { if (_draggingOut) return; right = false; start = e.GetPosition(source); };
+        source.PreviewMouseRightButtonDown += (_, e) => { if (_draggingOut) return; right = true; suppressMenu = false; start = e.GetPosition(source); };
+        source.PreviewMouseRightButtonUp += (_, e) => { start = null; if (suppressMenu) { e.Handled = true; suppressMenu = false; } };
         source.PreviewMouseLeftButtonUp += (_, _) => start = null;
-        source.MouseLeave += (_, e) => { if (e.LeftButton != MouseButtonState.Pressed) start = null; };
+        source.MouseLeave += (_, e) => { if ((right ? e.RightButton : e.LeftButton) != MouseButtonState.Pressed) start = null; };
         source.PreviewMouseMove += (_, e) =>
         {
-            if (start is not { } from || e.LeftButton != MouseButtonState.Pressed) return;
+            if (_draggingOut || start is not { } from || (right ? e.RightButton : e.LeftButton) != MouseButtonState.Pressed) return;
             var now = e.GetPosition(source);
             if (Math.Abs(now.X - from.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(now.Y - from.Y) < SystemParameters.MinimumVerticalDragDistance) return;
             start = null;
             var list = files();
             if (list.Count == 0) return;
-            bool move = Settings.TransferDragOut == TransferDragOut.Move;
+            suppressMenu = right;
+            // The setting is what the left button does; the right button does the other.
+            bool move = (Settings.TransferDragOut == TransferDragOut.Move) != right;
             var data = ShelfService.FileData(list.Select(file => file.Path), move);
             data.SetData(ShelfFormat, ShelfSide.Files + "|" + string.Join(",", list.Select(file => file.Id)));
             if (source is Border row) row.Background = _picked.Count > 0 && list.Count > 1 ? PickedFill : row.Tag as Brush ?? Brushes.Transparent;
-            DragOut(source, data, move ? DragDropEffects.Copy | DragDropEffects.Move : DragDropEffects.Copy);
-            if (move) WatchMoved(list);
+            bool removeCopy = move && Settings.TransferRemoveAfterCopyDrop;
+            var allowed = move ? DragDropEffects.Copy | DragDropEffects.Move : DragDropEffects.Copy;
+            if (removeCopy) allowed |= DragDropEffects.Link;
+            var result = DragOut(source, data, allowed, right, move);
+            // Copy-configured gestures never consume transfer entries, even when
+            // the optional fallback for move-configured gestures is enabled.
+            if (move && removeCopy && (result is DragDropEffects.Copy or DragDropEffects.Link) && _externalFileDrop)
+                RemoveFiles(list);
+            else if (move) WatchMoved(list);
             e.Handled = true;
         };
     }
     // Dragged out of the panel, clipboard entries are copied; files are copied, or, when the drag is set to move, moved where the
-    // target takes moves (a chat window or a browser takes only copies).
-    private void DragOut(DependencyObject source, DataObject data, DragDropEffects allowed = DragDropEffects.Copy)
+    // target takes moves (a chat window or a browser takes only copies). Files carry a word beside the pointer that says which
+    // (DragHint); `moving` is what their drag is set to do.
+    private bool _externalFileDrop;
+    private DragDropEffects DragOut(DependencyObject source, DataObject data, DragDropEffects allowed = DragDropEffects.Copy, bool right = false, bool? moving = null)
     {
+        DragHint? hint = null;
+        GiveFeedbackEventHandler? feedback = null;
         _draggingOut = true;
-        try { DragDrop.DoDragDrop(source, data, allowed); }
+        // Finish the popup's input lifetime before injecting buttons or entering
+        // OLE. Popup.Closed may arrive later than IsOpen becoming false.
+        CloseMenu();
+        _externalFileDrop = false;
+        QueryContinueDragEventHandler dropping = (_, e) =>
+        {
+            if (!e.EscapePressed && (e.KeyStates & (DragDropKeyStates.LeftMouseButton | DragDropKeyStates.RightMouseButton | DragDropKeyStates.MiddleMouseButton)) == 0)
+                _externalFileDrop = FileDropTarget.IsExternalCopyTarget() && !PasteInput.KeyDown(0x11);
+        };
+        if (source is UIElement dragSource) dragSource.PreviewQueryContinueDrag += dropping;
+        try
+        {
+            using var gesture = right && source is UIElement element ? RightFileDrag.Begin(element) : null;
+            if (right && gesture is null) return DragDropEffects.None;
+            if (moving is { } move && source is UIElement hinted)
+            {
+                // Windows reports what the place under the pointer would do each time the pointer moves; the word follows it.
+                var word = hint = new DragHint(Look);
+                feedback = (_, e) => word.Say(DragWord(e.Effects, move));
+                hinted.GiveFeedback += feedback;
+                word.Say(DragWord(DragDropEffects.None, move));
+            }
+            return DragDrop.DoDragDrop(source, data, allowed);
+        }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or InvalidOperationException) { }
         finally
         {
+            if (feedback is not null) ((UIElement)source).GiveFeedback -= feedback;
+            hint?.Close();
+            if (source is UIElement dragSourceEnd) dragSourceEnd.PreviewQueryContinueDrag -= dropping;
             _draggingOut = false;
             if (_expanded && !_pointerInside) PointerChanged(false);
         }
+        return DragDropEffects.None;
+    }
+    // The word beside the pointer. Over BrimDeck itself, where the drag begins and letting go moves no file, it is what this drag
+    // is set to do; elsewhere what the place under the pointer says it will do, and nothing where it takes no files.
+    private static string? DragWord(DragDropEffects effects, bool move)
+    {
+        if (WindowsHost.OwnWindowAt(WindowsHost.Cursor())) effects = move ? DragDropEffects.Move : DragDropEffects.Copy;
+        return effects.HasFlag(DragDropEffects.Move) ? Loc.T("移动", "Move")
+            : effects.HasFlag(DragDropEffects.Copy) ? Loc.T("复制", "Copy")
+            : effects.HasFlag(DragDropEffects.Link) ? Loc.T("链接", "Link") : null;
     }
     // Files dragged out to be moved leave the list once they are gone from where they were. The drag's result does not tell: the
     // Explorer moves files itself and reports no move, and it may still be moving them after the drag ends (a large file to another
@@ -1060,7 +1115,7 @@ public partial class MainWindow
 
     // ---- Actions ----
     private void PasteClip(ClipEntry clip, bool plain = false)
-        => _app.Shelf.Paste(_app.Shelf.ClipData(clip, plain), done => Flash(clip.Id, done ? Loc.T("已粘贴", "Pasted") : Loc.T("已复制", "Copied")));
+        => _app.Shelf.Paste(_app.Shelf.ClipData(clip, plain), result => Flash(clip.Id, PasteWord(result)));
     // Copied again, the entry moves to the top as any new copy does, and the list shows it there.
     private void CopyClip(ClipEntry clip)
     {
@@ -1097,7 +1152,41 @@ public partial class MainWindow
     {
         var present = files.Where(file => ShelfFiles.Exists(file.Path)).ToList();
         if (present.Count == 0) return;
-        _app.Shelf.Paste(ShelfService.FileData(present.Select(file => file.Path)), done => { foreach (var file in present) Flash(file.Id, done ? Loc.T("已粘贴", "Pasted") : Loc.T("已复制", "Copied")); });
+        _app.Shelf.Paste(ShelfService.FileData(present.Select(file => file.Path)), result => { string word = PasteWord(result); foreach (var file in present) Flash(file.Id, word); });
+    }
+    // What the row says after a click: pasted, or copied with the paste left to the user. The window of a program run as
+    // administrator takes no paste from BrimDeck: the row says copied, and the reason, too long for a row's end, stands at the
+    // foot of the panel for a moment.
+    private string PasteWord(PasteResult result)
+    {
+        if (result == PasteResult.Pasted) return Loc.T("已粘贴", "Pasted");
+        if (result == PasteResult.Elevated)
+        {
+            ShowShelfNotice(Loc.T("已复制，目标窗口是管理员权限，请手动粘贴", "Copied. Target runs as administrator; paste manually"));
+            return Loc.T("已复制", "Copied");
+        }
+        return Loc.T("已复制，请手动粘贴", "Copied. Paste manually");
+    }
+    private Border? _shelfNotice;
+    private DispatcherTimer? _shelfNoticeTimer;
+    // A line at the foot of the panel, across its width, gone after three seconds: it holds what no row has room for.
+    private void ShowShelfNotice(string text)
+    {
+        if (_shelfNotice is null)
+        {
+            _shelfNotice = new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 6, 12, 6), BorderThickness = new Thickness(1), IsHitTestVisible = false,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(12, 0, 12, 10),
+                Child = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis } };
+            Grid.SetRow(_shelfNotice, 1); Panel.SetZIndex(_shelfNotice, 10);
+            ContentCanvas.Children.Add(_shelfNotice);
+            _shelfNoticeTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromSeconds(3) };
+            _shelfNoticeTimer.Tick += (_, _) => { _shelfNoticeTimer!.Stop(); _shelfNotice!.Visibility = Visibility.Collapsed; };
+        }
+        _shelfNotice.Background = UI.Brush(Look.Hex("popup")); _shelfNotice.BorderBrush = UI.Brush(Look.Hex("popupBorder"));
+        var line = (TextBlock)_shelfNotice.Child; line.Text = text; line.Foreground = UI.Brush(Look.Primary);
+        AutomationProperties.SetLiveSetting(_shelfNotice, AutomationLiveSetting.Polite); AutomationProperties.SetName(_shelfNotice, text);
+        _shelfNotice.Visibility = Visibility.Visible;
+        _shelfNoticeTimer!.Stop(); _shelfNoticeTimer.Start();
     }
     private void Flash(Guid id, string text)
     {
@@ -1126,6 +1215,8 @@ public partial class MainWindow
         row.Background = new SolidColorBrush(Color.FromArgb(51, accent.R, accent.G, accent.B));
         if (aux.Tag is RowEnd end)
         {
+            // A row too narrow for the whole of it (a tile, a narrow column) says only its first part: "已复制".
+            if (row.ActualWidth > 0 && TextWidth(text, end.Label.FontSize, FontWeights.Normal) > row.ActualWidth - 16) text = text.Split('，', '.')[0];
             end.Label.Tag ??= end.Label.Text;
             // On the tinted row the word keeps as far from the right edge as the entry does from the left (8 DIP: the row's right
             // padding is 4).

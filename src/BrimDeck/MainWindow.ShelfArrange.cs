@@ -340,7 +340,7 @@ public partial class MainWindow
         parts.Children.Add(icon); parts.Children.Add(number); parts.Children.Add(label);
         // The parts stand in the middle of what shows of the card behind: Peek at its outer side, less its own edge.
         var strip = new Border { Width = Math.Max(0, layout.Peek - 1), Padding = new Thickness(0, top, 0, bottom), Child = parts, IsHitTestVisible = false,
-            HorizontalAlignment = left ? HorizontalAlignment.Left : HorizontalAlignment.Right };
+            HorizontalAlignment = left || Settings.ShelfSameSideStack ? HorizontalAlignment.Left : HorizontalAlignment.Right };
         // The column keeps the width it has in front and stands against the card's left edge; a narrower card cuts it off.
         var body = new Border { Padding = new Thickness(layout.CardPad, 2, layout.CardPad, 4), Child = column, HorizontalAlignment = HorizontalAlignment.Left };
         // The card clips what it holds, and text under a clip is drawn in grayscale in this layered window (MainWindow.xaml:
@@ -350,7 +350,7 @@ public partial class MainWindow
         var card = new Border
         {
             CornerRadius = new CornerRadius(Look.Corner(8)), Background = fill, BorderBrush = rim, BorderThickness = new Thickness(1),
-            HorizontalAlignment = left ? HorizontalAlignment.Left : HorizontalAlignment.Right,
+            HorizontalAlignment = left || Settings.ShelfSameSideStack ? HorizontalAlignment.Left : HorizontalAlignment.Right,
             Child = new Grid { ClipToBounds = true, Children = { body, strip } }
         };
         AutomationProperties.SetName(strip, Loc.T($"切换到{full}", $"Switch to {full}"));
@@ -485,6 +485,9 @@ public partial class MainWindow
 
     // Puts the clickable area where the card in front calls for, gives the columns their size, shows on each strip what its height
     // has room for and, unless a change is under way, draws both cards as they stand with that card in front.
+    private Thickness DeckMargin(bool front, double peek) =>
+        new(Settings.ShelfSameSideStack && front ? peek : 0, front ? 0 : ShelfDeck.Inset, 0, front ? 0 : ShelfDeck.Inset);
+
     private void PlaceDeck()
     {
         if (_deck is not { } deck) return;
@@ -512,11 +515,11 @@ public partial class MainWindow
             card.Fill.BeginAnimation(SolidColorBrush.ColorProperty, null); card.Rim.BeginAnimation(SolidColorBrush.ColorProperty, null);
             card.Body.BeginAnimation(UIElement.OpacityProperty, null); card.Edge.BeginAnimation(UIElement.OpacityProperty, null);
             card.Root.Width = card.Side == ShelfSide.Clipboard ? clipWidth : fileWidth;
-            card.Root.Margin = new Thickness(0, front ? 0 : ShelfDeck.Inset, 0, front ? 0 : ShelfDeck.Inset);
+            card.Root.Margin = DeckMargin(front, layout.Peek);
             card.Fill.Color = front ? deck.CardFill : deck.Rest; card.Rim.Color = front ? deck.CardRim : deck.RestRim;
             card.Body.Opacity = front ? 1 : 0; card.Edge.Opacity = front ? 0 : 1;
         }
-        bool right = deck.Front == ShelfSide.Clipboard;
+        bool right = !Settings.ShelfSameSideStack && deck.Front == ShelfSide.Clipboard;
         deck.Hit.HorizontalAlignment = right ? HorizontalAlignment.Right : HorizontalAlignment.Left;
         deck.Hit.Margin = new Thickness(right ? 0 : -layout.CardSide, -layout.CardTop, right ? -layout.CardSide : 0, -layout.CardBottom);
         AutomationProperties.SetName(deck.Hit, AutomationProperties.GetName(deck.Behind.Edge));
@@ -546,7 +549,7 @@ public partial class MainWindow
                 if (deck.Hit.IsMouseOver) ShowStrip(deck, deck.Behind, true);
             };
             card.Root.BeginAnimation(FrameworkElement.WidthProperty, width);
-            card.Root.BeginAnimation(FrameworkElement.MarginProperty, new ThicknessAnimation(new Thickness(0, ahead ? 0 : ShelfDeck.Inset, 0, ahead ? 0 : ShelfDeck.Inset), swap) { EasingFunction = DeckEase });
+            card.Root.BeginAnimation(FrameworkElement.MarginProperty, new ThicknessAnimation(DeckMargin(ahead, _shelfLayout.Peek), swap) { EasingFunction = DeckEase });
             Tone(card.Fill, ahead ? deck.CardFill : deck.Rest, ShelfDeck.ToneSeconds * 1000); Tone(card.Rim, ahead ? deck.CardRim : deck.RestRim, ShelfDeck.ToneSeconds * 1000);
             Tone(card.Ink, deck.Ink, 120); Tone(card.Faint, deck.Faint, 120);
             card.Body.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(ahead ? 1 : 0, fade) { EasingFunction = DeckFade });

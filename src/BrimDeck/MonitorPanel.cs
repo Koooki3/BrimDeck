@@ -142,7 +142,7 @@ public partial class MainWindow
     private ExpandedPlan CurrentMonitorPlan((int Drives, bool Small, int Power) sensors)
     {
         double height = ContentCanvas.Height;
-        return ExpandedLayout.For(ExpandedMonitor.Shown(Settings.ExpandedReadings), ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height),
+        return ExpandedLayout.For(ExpandedMonitor.Shown(Settings.ExpandedReadings), ContentCanvas.Width - 2 * _header.ContentSide, height - _header.Row - MonitorBottom(height),
             new ExpandedContent(sensors.Drives, sensors.Power), null, Settings.MonitorMain, _monitorView is not null ? _monitorPlan : null);
     }
     // What the open page reads: what its layout kept, before the first one is made what the table chooses.
@@ -155,7 +155,7 @@ public partial class MainWindow
     // that room change: when the volumes are first counted, a sensor turns out to have none or first shows, or a volume comes or
     // goes past the room.
     private string MonitorKey(ExpandedPlan plan, bool small) => string.Join("|", plan.Signature, Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "",
-        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, Look.Generation, Settings.MonitorTemperatures, small, Native.BatteryProvider.SystemHasBattery, Settings.CoreDisplay);
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, Look.Generation, Settings.MonitorTemperatures, small, Native.BatteryProvider.SystemHasBattery, Settings.CoreDisplay, Settings.MonitorShowFree, Settings.CoreMatrixColumns);
     // What the shown page was built for: its volumes' places, the small gauge's room and the lines for power and the battery.
     private (int Lines, int Columns, bool Small, int Power) _monitorSensors;
     private static (int Lines, int Columns, bool Small, int Power) BuiltSensors(ExpandedPlan plan, bool small)
@@ -205,11 +205,8 @@ public partial class MainWindow
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
-        // The header keeps the usage page's controls, as the music page does, so the switch does not move between pages. Fitting
-        // the usage page for them is kept until its size, data or settings change: a drag resizes this page many times a second.
-        var header = PanelHeader.For(ToolbarFor(height), height < 170 ? 14 : 20);
-        ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
-        MonitorContent.Margin = new Thickness(_header.Side, 0, _header.Side, MonitorBottom(height));
+        ApplyPageHeader(PanelHeader.ForPanel(height));
+        MonitorContent.Margin = new Thickness(_header.ContentSide, 0, _header.ContentSide, MonitorBottom(height));
         Motion.Enabled = MonitorMotion;
         // Worked out once for each render: a drag renders the page many times a second.
         var sensors = MonitorSensors();
@@ -224,7 +221,7 @@ public partial class MainWindow
         old?.CloseCard();
         _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings, Look), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
-            Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor(old is null && MonitorMotion && !Resizing), MonitorMessage(layout), Settings.CoreDisplay);
+            Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor(old is null && MonitorMotion && !Resizing), MonitorMessage(layout), Settings.CoreDisplay, Settings.MonitorShowFree, Settings.CoreMatrixColumns);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         // The new page may show the power line where the old one did not, or the other way round: what is read follows
         // (UpdateMonitorDemand, which asks for the extras as well). And the frame rate's line: the frame rate is read only while a
@@ -237,17 +234,6 @@ public partial class MainWindow
             // A new main gauge, asked for on the page, arrives with a short fade instead of a cut.
             if (fade && MonitorMotion) _monitorView.BeginAnimation(OpacityProperty, Soft.Fade(.15, 1, Soft.Short));
         }
-    }
-
-    private (double Width, double Height, IReadOnlyList<ProviderSnapshot> Snapshots, DeckSettings Settings, PanelHeader Header)? _usageHeader;
-    private PanelHeader CachedUsageHeader()
-    {
-        double width = _usageWidth, height = UsagePageHeight;
-        if (_usageHeader is { } known && known.Width == width && known.Height == height && ReferenceEquals(known.Snapshots, Snapshots) && ReferenceEquals(known.Settings, Settings))
-            return known.Header;
-        var header = UsageHeader(width, height);
-        _usageHeader = (width, height, Snapshots, Settings, header);
-        return header;
     }
 
     // The sort and the main gauge are the same for every panel and are kept with the settings. A new main gauge rebuilds the page,

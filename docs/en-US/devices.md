@@ -1,6 +1,6 @@
 # Supported devices
 
-The device batteries page shows the battery of the connected wireless mice, keyboards, headsets, controllers and pens; the notch and capsule can show them too. The settings are under Settings › Display and devices.
+The device batteries page shows the battery of the connected wireless mice, keyboards, headsets, controllers, pens and phones; the notch and capsule can show them too. The settings are under Settings › Display and devices.
 
 BrimDeck only reads batteries: it never pairs, disconnects or changes any device or Windows setting, needs no administrator rights and installs no driver. Devices are read only while the device batteries page is open, the notch or capsule shows device batteries, or Settings › Display and devices is open.
 
@@ -9,6 +9,7 @@ BrimDeck only reads batteries: it never pairs, disconnects or changes any device
 | Connection | How it is read | Notes |
 | --- | --- | --- |
 | Bluetooth | The battery Windows itself reads, as Windows Settings › Bluetooth & devices shows it; a Bluetooth LE device's own battery service is read as well | Only connected devices are listed |
+| Phone | The Start card Phone Link saves on this PC, for the level and the charging state; the card is taken as it stands for 30 minutes, then only while Phone Link is running, and Bluetooth stands in once it is 2 hours old or the card reports the phone away | The card is only read, never fetched online through Phone Link; a phone is listed only with a level |
 | AirPods, Beats | The Bluetooth advertisement the earbuds send while out of the case or with its lid open | Each bud and the case |
 | 2.4 GHz receiver or cable | Each brand's own protocol | See the brands below |
 | Game controllers | Windows' game controller interface, and some brands' own protocols | See the brands below |
@@ -25,7 +26,7 @@ HID devices that carry the standard battery report are shown too.
 | --- | --- |
 | Logitech, MCHOSE, ATK, Endgame Gear, VAXEE, Rapoo, Keychron, Finalmouse | Whole brand |
 | Razer, ASUS ROG, SteelSeries, Corsair, HyperX | Known wireless models |
-| VXE, VGN, Pulsar, LAMZU, G-Wolves, WLmouse, Ninjutso, LINGBAO, NZXT, HECATE, Dareu, Inphic, AJAZZ, Attack Shark, DELUX, Glorious, Darmoshark, EWEADN, AULA, Thunderobot ML903, Scyrox, Cougar, Redragon, Hitscan, iRocks, Vancer, Incott, Ryunix, JD Jingzao JZM5, RIDLAG, Motospeed X6 | Known models |
+| VXE, VGN, Pulsar, LAMZU, G-Wolves, WLmouse, Ninjutso, LINGBAO, NZXT, HECATE, Dareu, Inphic, AJAZZ, Attack Shark, DELUX, Glorious, Darmoshark, EWEADN, AULA, Thunderobot ML903, Metaphyuni Metapanda P1, Scyrox, Cougar, Redragon, Hitscan, iRocks, Vancer, Incott, Ryunix, JD Jingzao JZM5, RIDLAG, Motospeed X6, GravaStar (Mercury series, S1 Pro and R1 included) | Known models |
 
 **Keyboards**
 
@@ -33,14 +34,14 @@ HID devices that carry the standard battery report are shown too.
 | --- | --- |
 | Logitech (through its receivers or cable) | Whole brand |
 | Razer, ASUS ROG | Known wireless models |
-| MCHOSE (K87S, G87 V2, K99 V3, G75 V2, G98 V3 and K87 V3 included), AULA (F87, F87 Pro, F99, F99 Pro, F75 and F108 Pro included), LINGBAO K98, KZZI (K75, I75, I98 and Z75 included), VGN (V108, V98 Pro V3, V87 V2, N75 V2, N87 and Neon75 included), ATK (Z87 Pro, S87, S99, TV88, TV99, TV108, V100, A87 Pro, A98 Pro, A87 Ultra and YOGO 75 included), CHERRY PIXIU75, Corsair (K65 PLUS, K57), Alienware Pro, URX Core75, Lofree Flow Lite84, MonsGeek, Akko, Epomaker (some TH series models and the G84 PRO included), AJAZZ AK870, CAROTMAS Mars68, GANSS, EWEADN X87, Teevolution, RK R98Pro V2, and other brands' receivers on the same platform as MonsGeek's | Known models |
+| MCHOSE (K87S, G87 V2, K99 V3, G75 V2, G98 V3 and K87 V3 included), AULA (F87, F87 Pro, F99, F99 Pro, F75 and F108 Pro included), LINGBAO K98, KZZI (K75, I75, I98 and Z75 included), VGN (V108, V98 Pro V3, V87 V2 and N75 V2 over their cable and 2.4 GHz, V98Pro V4, V87Pro V2, V108Pro, N87 and Neon75 included), VXE V87pro, GravaStar (Mercury K98 Pro, K1 series and V75 Ultra included), WOBKEY (Rainy75 V2, Rainy98), ATK (Z87 Pro, S87, S99, TV88, TV99, TV108, V100, A87 Pro, A98 Pro, A87 Ultra and YOGO 75 included), CHERRY PIXIU75, Corsair (K65 PLUS, K57), Alienware Pro, URX Core75, Lofree Flow Lite84, MonsGeek, Akko, Epomaker (some TH series models and the G84 PRO included), AJAZZ AK870, CAROTMAS Mars68, GANSS, EWEADN X87, Teevolution, RK R98Pro V2, other brands' receivers on the same platform as MonsGeek's, and other brands' keyboards on the same platform as GravaStar K1's | Known models |
 
 **Headsets**
 
 | Brand | Coverage |
 | --- | --- |
 | Jabra, FIFINE, XIBERIA | Whole brand |
-| Logitech (G PRO X 2 included), SteelSeries (GameBuds X included), HyperX, Corsair (Virtuoso, HS80 and Void series included), Razer, Sony INZONE and PULSE Explore, ASUS ROG, ASTRO A50, Audeze Maxwell, Skullcandy PLYR, AKG N9, MCHOSE (V9 PRO and G9 PRO included), AULA (G9, A9), JBL Quantum 910, PULSE 3D, ATK (N9 Pro, N9 Ultra, N9 V2 series), Lenovo, DARKRIM, Edifier Halo Space | Known models |
+| Logitech (G PRO X 2 included), SteelSeries (GameBuds X included), HyperX, Corsair (Virtuoso, HS80 and Void series included), Razer, Sony INZONE and PULSE Explore, ASUS ROG, ASTRO A50, Audeze Maxwell, Skullcandy PLYR, AKG N9, MCHOSE (V9 PRO and G9 PRO included), AULA (G9, A9), JBL Quantum 910, PULSE 3D, ATK (N9 Pro, N9 Ultra, N9 V2 series), Lenovo, DARKRIM, Edifier Halo Space, ZhuAudio (ZG4, ZG3) | Known models |
 
 **Controllers**
 

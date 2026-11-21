@@ -127,14 +127,14 @@ static class BrandsMoreTests
             return r;
         }
         check("Sony PULSE: both buds in use (levels DD) read 87 % in steps; one bud in the case reads the other (DF/AD the right 87, DF/5F the left 100); closed in the case (link 0) asleep",
-            SonyPulse.Wireless(B0(0x00, 0xDD, 0xFF, 1)) == new BatteryRead(87, Coarse: true)
-            && SonyPulse.Wireless(B0(0x00, 0xDF, 0xAD, 1)) == new BatteryRead(87, Coarse: true)
-            && SonyPulse.Wireless(B0(0x00, 0xDF, 0x5F, 1)) == new BatteryRead(100, Coarse: true)
+            SonyPulse.Wireless(B0(0x00, 0xDD, 0xFF, 1)) == new BatteryRead(87, Accuracy: BatteryAccuracy.Steps)
+            && SonyPulse.Wireless(B0(0x00, 0xDF, 0xAD, 1)) == new BatteryRead(87, Accuracy: BatteryAccuracy.Steps)
+            && SonyPulse.Wireless(B0(0x00, 0xDF, 0x5F, 1)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps)
             && SonyPulse.Wireless(B0(0x00, 0xDE, 0x0F, 0)) == new BatteryRead(null, Asleep: true)
-            && SonyPulse.Wireless(B0(0x00, 0x3D, 0xFF, 1)) == new BatteryRead(20, Coarse: true));
+            && SonyPulse.Wireless(B0(0x00, 0x3D, 0xFF, 1)) == new BatteryRead(20, Accuracy: BatteryAccuracy.Steps));
         check("Sony PULSE: on USB, the buds in the case (0F/1F the left full; BF/3F the right at 73 % charging), none in the case asleep",
-            SonyPulse.Usb(B0(0x01, 0x0F, 0x1F, 0)) == new BatteryRead(100, Coarse: true)
-            && SonyPulse.Usb(B0(0x01, 0xBF, 0x3F, 0)) == new BatteryRead(73, Charging: true, Coarse: true)
+            SonyPulse.Usb(B0(0x01, 0x0F, 0x1F, 0)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Steps)
+            && SonyPulse.Usb(B0(0x01, 0xBF, 0x3F, 0)) == new BatteryRead(73, Charging: true, Accuracy: BatteryAccuracy.Steps)
             && SonyPulse.Usb(B0(0x01, 0xBF, 0x0F, 0)) == new BatteryRead(null, Asleep: true));
         var elite = B0(0x00, 0xDD, 0xFF, 1); elite[29] = 0x12;
         var other = B0(0x00, 0xDD, 0xFF, 1); other[1] = 0x51;
@@ -169,13 +169,23 @@ static class BrandsMoreTests
     private static void BlackShark(Action<string, bool> check)
     {
         var dongle = Shape(0x1532, 0x057A, 0xFF14, 1, 5, outputIds: [0x02], name: "BlackShark V3 HID");
-        check("Razer BlackShark V3: the dongle's 0xFF14 usage 1 collection on interface 5, as measured; not its 0xFF13 or consumer collections, nor Razer's other headsets; nothing Razer's mouse reader knows",
+        var proDongle = Shape(0x1532, 0x0577, 0xFF14, 1, 5, outputIds: [0x02], name: "BlackShark V3 Pro HID");
+        var proCable = Shape(0x1532, 0x0576, 0xFF14, 1, 5, outputIds: [0x02], name: "BlackShark V3 Pro USB HID");
+        var cable = Shape(0x1532, 0x0579, 0xFF14, 1, 5, outputIds: [0x02], name: "BlackShark V3 USB HID");
+        check("Razer BlackShark V3: the V3 and V3 Pro dongles and cables on 0xFF14 usage 1 interface 5; not 0xFF13 or consumer collections, nor Razer's mouse reader",
             Names(dongle, "Razer BlackShark V3").SequenceEqual(["blackshark-v3.battery"])
+            && Names(cable, "Razer BlackShark V3").SequenceEqual(["blackshark-v3.battery"])
+            && Names(proDongle, "Razer BlackShark V3").SequenceEqual(["blackshark-v3.battery"])
+            && Names(proCable, "Razer BlackShark V3").SequenceEqual(["blackshark-v3.battery"])
+            && BrandFamilies.Find(proDongle)!.Value.Family.DisplayName(proDongle) == "Razer BlackShark V3 Pro"
+            && BrandFamilies.Find(proCable)!.Value.Family.DisplayName(proCable) == "Razer BlackShark V3 Pro"
+            && BrandFamilies.Find(dongle)!.Value.Family.DisplayName(dongle) == "Razer BlackShark V3"
             && Untaken(Shape(0x1532, 0x057A, 0xFF13, 1, 5, outputIds: [0x02]), "Razer BlackShark V3") && BrandFamilies.Find(Shape(0x1532, 0x057A, 0xFF13, 1, 5, 62, 62, outputIds: [0x06])) is null
             && Untaken(Shape(0x1532, 0x057A, 0x14FF, 1, 5, outputIds: [0x02]), "Razer BlackShark V3")
             && Untaken(Shape(0x1532, 0x057A, 0x000C, 1, 5, outputIds: [0x02]), "Razer BlackShark V3")
             && Untaken(Shape(0x1532, 0x056C, 0xFF14, 1, 5, outputIds: [0x02]), "Razer BlackShark V3")
-            && BrimDeck.Core.Razer.Find(0x057A) is null);
+            && Untaken(proDongle, "Razer Headset")
+            && new[] { 0x057A, 0x0579, 0x0577, 0x0576 }.All(pid => BrimDeck.Core.Razer.Find(pid) is null));
         var way = Way(dongle);
         check("Razer BlackShark V3: Synapse's frames as captured (wake 02 then 2A, the charging query, then the battery query, each with its XOR), one try, at most once in five minutes",
             way.Before.Count == 3 && way.Before[0].SequenceEqual(Frame("02 00 60 00 00 00 04 00 00 00 02", 0x64))

@@ -25,22 +25,38 @@ namespace BrimDeck.Core;
 //   03 <command>, remote mode 01 80 07 50 41 0E 08 02 E1 01 / 00; the answer 01 80 .. 50 49 ..., the command at 13, 01 (an
 //   answer) or 02 (a notice) at 14, the length at 15, the level at 16 (HaloBattery's barracuda.py, MIT, from a capture of
 //   Synapse on the headset on Windows: the page as is). A switched-off headset does not answer.
-// - Kraken V4 (056C), usage page 0xFF14 usage 1: report 02, 02 00 60 00 00 00 04 00 00 80 <command> with the XOR of bytes 0
-//   to 61 at 62; the answer 02 02 60 ... 80 80 <command> 01 01 <value>, its XOR of bytes 1 to 61 at 62 (a notice, 02 0A 60
-//   ..., is none). The receiver answers one frame at a time, so only the level (0x21) is asked. vigil-watt's
-//   RazerKrakenCodec.cs (MIT; measured on Windows by its contributor, the page as is: 02 02 60 00 00 00 05 00 80 80 21 01 01
-//   3F .. 79, 63 %).
+// - Kraken V4 (056C), BlackShark V2 HyperSpeed (0565 rx / 056E cable), Kraken V4 Pro (0568 hub / 0567 cable), and
+//   Kraken Kitty V3 Pro (0588 rx / 0587 cable): MediaTek Report 02 protocol, 02 00 60 00 00 00 04 00 00 <domain> <cmd> with
+//   XOR checksum at 62 (domain 0x80 receiver/dongle, 0x00 USB cable; answer 02 02 <60..> .. 80 <domain|80> <cmd> <01|02>
+//   <len> <value>). Kraken V4 (056C) answers one frame at a time so only level (0x21) is asked on 0xFF14; V2 HyperSpeed,
+//   V4 Pro and Kitty V3 Pro also ask charging (0x2A). V4 Pro and Kitty V3 Pro expose Report 02 on 0xFF00 or 0xFF14.
+// - BlackShark V3 X HyperSpeed (057D PC rx, 0A5B Xbox rx): Feature Report 0x07 (07 00 03 ... 02 07 80 00 ... CRC at 62,
+//   XOR of bytes 3..60); answer gives level 1..100 at [10] (verified on 0A5B at 92 %).
 // Not taken: the Barracuda X 2022 (0552) speaks Airoha RACE behind an app-mode switch with no documented undo and gives only a
 // voltage; 0536, which HaloBattery lists for PA after a report (its issue #256, still open) without an answer from it. The
-// BlackShark V3 (057A), read at most every five minutes, is RazerBlackSharkV3.
+// BlackShark V3 / V3 Pro (057A, 0579, 0577, 0576), read at most every five minutes, are in RazerBlackSharkV3.
 [BrandFamilies]
 public static class RazerHeadsets
 {
     public const int Vendor = 0x1532;
     public static readonly int[] Status2020 = [0x0528, 0x051C];
     public static readonly int[] Pa = [0x0555, 0x0556, 0x0583];
+    public static readonly int[] V3x = [0x057D, 0x0A5B];
     public const int BarracudaPro = 0x053A, KrakenV4 = 0x056C;
     private const byte Battery = 0x21;
+
+    public sealed record MtkModel(int Product, string Name, byte Domain, bool BothPages, bool AskCharging);
+    public static readonly MtkModel[] MtkModels =
+    [
+        new(KrakenV4, "Razer Kraken V4", 0x80, BothPages: false, AskCharging: false),
+        new(0x0565, "Razer BlackShark V2 HyperSpeed", 0x80, BothPages: false, AskCharging: true),
+        new(0x056E, "Razer BlackShark V2 HyperSpeed", 0x00, BothPages: false, AskCharging: true),
+        new(0x0568, "Razer Kraken V4 Pro", 0x80, BothPages: true, AskCharging: true),
+        new(0x0567, "Razer Kraken V4 Pro", 0x00, BothPages: true, AskCharging: true),
+        new(0x0588, "Razer Kraken Kitty V3 Pro", 0x80, BothPages: true, AskCharging: true),
+        new(0x0587, "Razer Kraken Kitty V3 Pro", 0x00, BothPages: true, AskCharging: true),
+    ];
+    private static MtkModel? FindMtk(int product) => Array.Find(MtkModels, model => model.Product == product);
 
     // ----- BlackShark V2 Pro 2020 and Nari: feature report 0xFF -----
     public static byte[] StatusRequest() => BrandFamilies.Frame(64, 0xFF, 0x0A, 0x00, 0xFD, 0x04, 0x12, 0xF1, 0x02, 0x05);
@@ -52,7 +68,7 @@ public static class RazerHeadsets
         int millivolts = r[12] << 8 | r[13];
         if (millivolts == 0) return new(null, Asleep: true);
         if (r[11] == 0x09) return new(null, Charging: true);
-        return r[14] is > 0 and <= 100 ? new(r[14], Coarse: true) : null;
+        return r[14] is > 0 and <= 100 ? new(r[14], Accuracy: BatteryAccuracy.Steps) : null;
     }
     // The receiver's stale copy: no new answer from the headset.
     public static bool StatusStale(byte[] r) => r.Length >= 15 && r.AsSpan(0, StalePrefix.Length).SequenceEqual(StalePrefix);
@@ -85,22 +101,43 @@ public static class RazerHeadsets
     public static bool? BarracudaCharging(byte[] r)
         => r.Length >= 17 && r[0] == 0x01 && r[3] == 0x50 && r[4] == 0x49 && r[13] == Charge && r[14] is 0x01 or 0x02 && r[15] is > 0 and <= 32 ? r[16] != 0 : null;
 
-    // ----- Kraken V4: report 02 with an XOR -----
-    public static byte[] KrakenQuery(byte command)
+    // ----- MediaTek Report 02 (Kraken V4 / V4 Pro / Kitty V3 Pro / BlackShark V2 HyperSpeed) & Feature 07 (BlackShark V3 X) -----
+    private static byte Xor(byte[] frame, int from, int toInclusive)
     {
-        var frame = BrandFamilies.Frame(64, 0x02, 0x00, 0x60, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x80, command);
         byte xor = 0;
-        for (int i = 0; i < 62; i++) xor ^= frame[i];
-        frame[62] = xor;
+        for (int i = from; i <= toInclusive; i++) xor ^= frame[i];
+        return xor;
+    }
+
+    public static byte[] MtkQuery(byte command, byte domain = 0x80)
+    {
+        var frame = BrandFamilies.Frame(64, 0x02, 0x00, 0x60, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, domain, command);
+        frame[62] = Xor(frame, 0, 61);
         return frame;
     }
-    public static BatteryRead? KrakenBattery(byte[] r)
+    private static bool MtkCheck(byte[] r, byte command, byte domain)
     {
-        if (r.Length != 64 || r[0] != 0x02 || r[1] != 0x02 || r[2] != 0x60 || r[10] != Battery || r[11] != 0x01 || r[12] != 0x01) return null;
-        byte xor = 0;
-        for (int i = 1; i < 62; i++) xor ^= r[i];
-        return xor == r[62] && r[13] is > 0 and <= 100 ? new(r[13]) : null;
+        if (r.Length != 64 || r[0] != 0x02 || r[1] != 0x02 || (r[2] & 0xE0) != 0x60 || r[8] != 0x80
+            || (r[9] != domain && !(domain == 0x00 && r[9] == 0x80))
+            || r[10] != command || r[11] is not (0x01 or 0x02) || r[12] is < 1 or > 48) return false;
+        byte xor1To61 = Xor(r, 1, 61);
+        return xor1To61 == r[62] || (byte)(xor1To61 ^ r[0]) == r[62];
     }
+    public static BatteryRead? MtkBattery(byte[] r, byte domain = 0x80) => MtkCheck(r, Battery, domain) && r[13] is > 0 and <= 100 ? new(r[13]) : null;
+    public static bool? MtkCharging(byte[] r, byte domain = 0x80) => MtkCheck(r, Charge, domain) ? r[13] != 0 : null;
+    public static byte[] KrakenQuery(byte command) => MtkQuery(command, 0x80);
+    public static BatteryRead? KrakenBattery(byte[] r) => MtkBattery(r, 0x80);
+
+    public static byte[] V3xRequest()
+    {
+        var frame = BrandFamilies.Frame(64, 0x07, 0x00, 0x03, 0x00, 0x00, 0x00, 0x02, 0x07, 0x80, 0x00);
+        frame[62] = Xor(frame, 3, 60);
+        return frame;
+    }
+    public static BatteryRead? V3xBattery(byte[] r)
+        => r.Length >= 63 && r[0] == 0x07 && r[6] == 0x02 && r[7] == 0x07 && r[8] == 0x80
+            && r[10] is > 0 and <= 100 && Xor(r, 3, 60) == r[62]
+            ? new(r[10]) : null;
 
     private static bool Takes(HidShape s)
     {
@@ -109,7 +146,10 @@ public static class RazerHeadsets
             return (s.Product == 0x0528 ? s.UsagePage == 0xFF00 : HeadsetPages.Is(s, 0xFF00)) && s.Usage == 0x0001 && s.FeatureLength >= 64;
         if (Pa.Contains(s.Product)) return s.UsagePage is 0xFF00 or 0xFF14 && s.Usage == 0x0001 && s.OutputLength >= 64 && s.InputLength >= 64;
         if (s.Product == BarracudaPro) return s.UsagePage == 0xFF00 && s.Usage == 0x0000 && s.OutputLength >= 64 && s.InputLength >= 64;
-        if (s.Product == KrakenV4) return s.UsagePage == 0xFF14 && s.Usage == 0x0001 && s.OutputLength >= 64 && s.InputLength >= 64;
+        if (FindMtk(s.Product) is { } mtk)
+            return (mtk.BothPages ? s.UsagePage is 0xFF00 or 0xFF14 : s.UsagePage == 0xFF14)
+                && s.Usage == 0x0001 && s.OutputLength >= 64 && s.InputLength >= 64;
+        if (V3x.Contains(s.Product)) return UsagePages.Vendor(s.UsagePage) && s.FeatureLength >= 64;
         return false;
     }
 
@@ -123,13 +163,25 @@ public static class RazerHeadsets
         if (s.Product == BarracudaPro)
             return [new BrandWay("razer-headset.barracuda", WayTransport.Output, BarracudaQuery(Battery), BarracudaBattery)
                 { Before = [BarracudaRemote(true)], After = [BarracudaRemote(false)], GapMs = 50, TimeoutMs = 900, Then = BarracudaQuery(Charge), Charging = BarracudaCharging }];
-        if (s.Product == KrakenV4)
-            return [new BrandWay("razer-headset.kraken", WayTransport.Output, KrakenQuery(Battery), KrakenBattery) { TimeoutMs = 1000 }];
+        if (FindMtk(s.Product) is { } mtk)
+            return [new BrandWay("razer-headset.kraken", WayTransport.Output, MtkQuery(Battery, mtk.Domain), r => MtkBattery(r, mtk.Domain))
+                {
+                    TimeoutMs = 1000,
+                    Then = mtk.AskCharging ? MtkQuery(Charge, mtk.Domain) : null,
+                    Charging = mtk.AskCharging ? r => MtkCharging(r, mtk.Domain) : null,
+                }];
+        if (V3x.Contains(s.Product))
+            return [new BrandWay("razer-headset.v3x", WayTransport.Feature, V3xRequest(), V3xBattery) { GapMs = 50, Attempts = 2, FeatureLength = 64 }];
         return [];
     }
 
     public static IEnumerable<BrandFamily> Families =>
     [
-        new("Razer Headset", Takes, Ways) { Kind = _ => DeviceKind.Headphones, Prefix = "razer-headset" },
+        new("Razer Headset", Takes, Ways)
+        {
+            Kind = _ => DeviceKind.Headphones,
+            Prefix = "razer-headset",
+            DisplayName = s => FindMtk(s.Product)?.Name ?? (V3x.Contains(s.Product) ? "Razer BlackShark V3 X HyperSpeed" : null),
+        },
     ];
 }

@@ -10,7 +10,7 @@ static class OfficialPriceTests
         var folder = Path.Combine(root, "official-prices"); Directory.CreateDirectory(folder);
         static TokenPrices Price(int n) => new(n * 1e-6m, n * 5e-6m, n * 1e-7m, null, null);
         static string Json(TokenPrices p) => $$"""{"prompt":"{{p.Input}}","completion":"{{p.Output}}","input_cache_read":"{{p.CacheRead}}"}""";
-        var catalog = new List<(string Id, int Price)> { ("z-ai/glm-5.3", 1), ("x-ai/grok-4.7", 2), ("deepseek/deepseek-v4-pro", 3), ("google/gemini-4-argon", 1) };
+        var catalog = new List<(string Id, int Price)> { ("z-ai/glm-5.3", 1), ("x-ai/grok-4.7", 2), ("deepseek/deepseek-v3.2", 3), ("google/gemini-4-argon", 1) };
         for (int i = 0; i < 20; i++) catalog.Add(($"acme/model-{i}", 1));
         string catalogJson = "{\"data\":[" + string.Join(",", catalog.Select(x => $$"""{"id":"{{x.Id}}","pricing":{{Json(Price(x.Price))}}}""")) + "]}";
         static string Endpoint(string tag, int price) => $$"""{"provider_name":"x","tag":"{{tag}}","pricing":{{Json(Price(price))}}}""";
@@ -20,7 +20,7 @@ static class OfficialPriceTests
             ["z-ai/glm-5.3"] = Endpoints(Endpoint("wafer/us", 1), Endpoint("mistral/zdr", 4), Endpoint("alibaba", 6), Endpoint("z-ai/fp8", 5)),
             ["x-ai/grok-4.7"] = Endpoints(Endpoint("xai/zdr", 9), Endpoint("xai", 6), Endpoint("xai/priority", 12)),
             ["google/gemini-4-argon"] = Endpoints(Endpoint("google-ai-studio/flex", 1), Endpoint("google-vertex/global", 8), Endpoint("google-ai-studio", 7)),
-            ["deepseek/deepseek-v4-pro"] = Endpoints(Endpoint("streamlake/fp8", 2), Endpoint("azure/us", 4)),
+            ["deepseek/deepseek-v3.2"] = Endpoints(Endpoint("streamlake/fp8", 2), Endpoint("azure/us", 4)),
         };
         var now = DateTimeOffset.Parse("2026-10-26T12:00:00Z");
         bool fail = false; var asked = new List<string>();
@@ -42,16 +42,16 @@ static class OfficialPriceTests
             check("The first refresh asks only for the models Kimi Code always needs", asked.Order().SequenceEqual(Pricing.OfficialModels.Order()));
             check("Before a model's own price is read, its records take the catalog price",
                 pricing.Estimate(Record("glm-5.3")) == Cost(Price(1)) && pricing.Estimate(Record("grok-4.7")) == Cost(Price(2)) &&
-                pricing.Estimate(Record("gemini-4-argon")) == Cost(Price(1)) && pricing.Estimate(Record("deepseek-v4-pro")) == Cost(Price(3)));
+                pricing.Estimate(Record("gemini-4-argon")) == Cost(Price(1)) && pricing.Estimate(Record("deepseek-v3.2")) == Cost(Price(3)));
             check("A record with a recorded cost never asks for a price", pricing.Estimate(Record("acme/model-0") with { ReportedCostUsd = 0.5m }) == 0.5m);
             asked.Clear();
             await pricing.RefreshAsync();
             check("The next refresh asks for the maker's price of each model records were priced with, without the catalog again",
-                asked.Order().SequenceEqual(new[] { "deepseek/deepseek-v4-pro", "google/gemini-4-argon", "x-ai/grok-4.7", "z-ai/glm-5.3" }));
+                asked.Order().SequenceEqual(new[] { "deepseek/deepseek-v3.2", "google/gemini-4-argon", "x-ai/grok-4.7", "z-ai/glm-5.3" }));
             check("GLM-5.3 takes Z.AI's price, not the cheapest host's or another host's", pricing.Estimate(Record("glm-5.3")) == Cost(Price(5)));
             check("A maker whose endpoints use another slug is still found, without its zero-retention or priority tiers",
                 pricing.Estimate(Record("grok-4.7")) == Cost(Price(6)) && pricing.Estimate(Record("gemini-4-argon")) == Cost(Price(7)));
-            check("A model without its maker's endpoint keeps the catalog price", pricing.Estimate(Record("deepseek-v4-pro")) == Cost(Price(3)));
+            check("A model without its maker's endpoint keeps the catalog price", pricing.Estimate(Record("deepseek-v3.2")) == Cost(Price(3)));
             check("The price list shows the official prices", pricing.Models.Single(m => m.Model == "z-ai/glm-5.3").Prices == Price(5));
             asked.Clear();
             await pricing.RefreshAsync();
@@ -89,7 +89,7 @@ static class OfficialPriceTests
 
         check("Endpoints whose tag names another maker or a non-quantization variant are left out",
             Pricing.ParseOfficial(System.Text.Json.JsonDocument.Parse(endpoints["x-ai/grok-4.7"]).RootElement, "x-ai/grok-4.7").Select(m => m.Prices).SequenceEqual([Price(6)]) &&
-            Pricing.ParseOfficial(System.Text.Json.JsonDocument.Parse(endpoints["deepseek/deepseek-v4-pro"]).RootElement, "deepseek/deepseek-v4-pro").Count == 0 &&
+            Pricing.ParseOfficial(System.Text.Json.JsonDocument.Parse(endpoints["deepseek/deepseek-v3.2"]).RootElement, "deepseek/deepseek-v3.2").Count == 0 &&
             Pricing.ParseOfficial(System.Text.Json.JsonDocument.Parse(endpoints["x-ai/grok-4.7"]).RootElement, "grok-4.7").Count == 0);
     }
 

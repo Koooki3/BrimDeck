@@ -97,6 +97,8 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // Space between the rings and the lyric, only while both have room.
     public double Between { get; init; }
     public double RingThickness { get; init; } = 2;
+    // Drawing scale follows the final diameter, including the nested rings' readability floor.
+    public double RingScale { get; init; } = 1;
     // Fade beside rotating rings and at the lyric's edges.
     public double RingEdge { get; init; } = 3;
     public double TextEdge { get; init; } = 6;
@@ -176,21 +178,22 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // The middle text's room when it follows its length (DeckSettings.MusicLyricAutoWidth for the lyric, MusicTitleAutoWidth for
     // the title), at scale 1. It is never shorter than FollowSlotMin, so a short line or the pause between lines does not shrink
-    // the surface to a sliver, and never longer than FollowSlotMax; longer text scrolls in it. FollowScreenShare is the largest
-    // share of the screen (the work area for the capsule) a surface may take because of the text; content that needs more
-    // without it keeps its own width.
-    public const double FollowSlotMin = 48, FollowSlotMax = 400, FollowScreenShare = .5;
+    // the surface to a sliver. The room itself has no longest: only the screen ends it (FollowWidth's limit), and text longer
+    // than the room the screen leaves scrolls in it. (It stopped at 400 DIP and at half the screen until 1.3.1: a surface
+    // already wider than that for its other parts kept the fixed slot, and a long line scrolled far from the screen's ends.)
+    public const double FollowSlotMin = 48;
     // The room for text textWidth DIPs wide (its drawn width), at this scale, in whole DIPs: one DIP is added so rounding never
     // makes fitting text scroll.
     public static double FollowSlot(double textWidth, double scale)
     {
         double s = SafeScale(scale), wanted = double.IsFinite(textWidth) && textWidth > 0 ? Math.Ceiling(textWidth - 1e-9) + 1 : 0;
-        return Math.Clamp(wanted, Whole(FollowSlotMin * s), Whole(FollowSlotMax * s));
+        return Math.Max(wanted, Whole(FollowSlotMin * s));
     }
     // The content width an auto-width surface takes with the middle text following its length: natural, the width with the
-    // text's room (NaturalWidth with FollowSlot); steady, the width with the fixed slot (TextSlot); limit, the content width that
-    // keeps the surface within FollowScreenShare of the screen. Text that would pass the limit stops there, unless the content
-    // needs more with the fixed slot, whose width it then keeps; a non-finite limit leaves the natural width.
+    // text's room (NaturalWidth with FollowSlot); steady, the width with the fixed slot (TextSlot); limit, the content width of
+    // the widest surface the style may be on its monitor (the screen for the notch, the work area for the capsule). Text that
+    // would pass the limit stops there, unless the content needs more with the fixed slot, whose width it then keeps; a
+    // non-finite limit leaves the natural width.
     public static double FollowWidth(double natural, double steady, double limit)
     {
         if (!double.IsFinite(limit) || natural <= limit) return natural;
@@ -225,7 +228,13 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // A ring's size in the row: its diameter at scale 1 (ring: QuotaRing.Diameter) at this scale, in whole DIPs.
     public static double RingSizeFor(double scale) => RingSizeFor(QuotaRing.Nested, scale);
-    public static double RingSizeFor(double ring, double scale) => Math.Max(1, Whole((double.IsFinite(ring) && ring > 0 ? ring : QuotaRing.Nested) * SafeScale(scale)));
+    public static double RingSizeFor(double ring, double scale)
+    {
+        double diameter = double.IsFinite(ring) && ring > 0 ? ring : QuotaRing.Nested;
+        // Nested rings match the system dials, with a smaller floor that leaves breathing room in a 24 DIP island.
+        return diameter == QuotaRing.Nested ? Math.Max(QuotaRing.NestedMinimum, Whole(16 * SafeScale(scale)))
+            : Math.Max(1, Whole(diameter * SafeScale(scale)));
+    }
 
     // The width the rings and the lyric's fixed slot take without cutting or rotating the rings.
     private static double RingsAndText(double s, int rings, bool text, double size, double textSlot = 0)
@@ -300,14 +309,16 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         textWidth = Math.Max(0, textWidth); ringWidth = Math.Max(0, ringWidth);
         // Whole rings inside the region, for reference; the region itself is not rounded to them.
         int visible = Math.Clamp((int)Math.Floor((ringWidth + gap) / (size + gap) + 1e-9), 0, rings);
+        double ringScale = ring == QuotaRing.Nested || !double.IsFinite(ring) || ring <= 0 ? size / QuotaRing.Nested : s;
         return new(middle, size, gap, visible, ringWidth, textWidth, rings > 0 && ringWidth >= size && ringWidth < all - 1e-9)
         {
-            Scale = s, ContentWidth = width, RowHeight = Math.Max(1, Whole(24 * s)),
+            Scale = s, ContentWidth = width, RowHeight = Math.Max(size, Math.Max(1, Whole(24 * s))),
             CoverWidth = coverRegion, CoverSize = cover, CoverRadius = Whole(4 * s),
             EqualizerWidth = eqRegion, EqualizerSize = eqW, EqualizerHeight = eqH, EqualizerBar = bar,
             ClockWidth = clockRegion, ClockFace = face, ClockAlone = clockAlone,
             MonitorWidth = monitorRegion, MonitorAlone = monitorAlone,
-            Between = used, RingThickness = Math.Max(.5, Half(2 * s)), RingEdge = Whole(3 * s), TextEdge = Whole(6 * s),
+            Between = used, RingScale = ringScale,
+            RingThickness = Math.Max(.5, Half(2 * ringScale)), RingEdge = Whole(3 * s), TextEdge = Whole(6 * s),
             TextFont = Math.Max(1, Half(11.5 * s)), TextHeight = Math.Max(1, Whole(22 * s)), TextScrolls = text && textWidth >= minimum
         };
     }

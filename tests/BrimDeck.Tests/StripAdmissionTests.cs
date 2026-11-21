@@ -151,6 +151,8 @@ static class StripAdmissionTests
         var snapshot = Drives();
         check("Letters: each volume's own share and level", CompactSources.Share("D:", snapshot) is { Share: .9, Level: MemoryLevel.Elevated }
             && CompactSources.Share("C:", snapshot) is { Share: .4 } && CompactSources.Share("F:", snapshot) is null && CompactSources.Share("C:", null) is null);
+        check("Letters: the space free keeps the level of the space in use", CompactSources.Share("D:", snapshot, free: true) is { Share: var left, Level: MemoryLevel.Elevated }
+            && Math.Abs(left - .1) < 1e-9 && CompactSources.Share("F:", snapshot, free: true) is null);
         check("Letters: the temperature of the drive holding the volume", CompactSources.Heat("D:", snapshot) is { Celsius: 41 } && CompactSources.Heat("E:", snapshot) is null);
         var states = States(Found, Found, Found, Found);
         check("Letters: a letter not found and a hard disk's temperature are missing once the drives are read",

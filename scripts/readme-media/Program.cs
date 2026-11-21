@@ -57,6 +57,7 @@ internal static class Program
     internal static void SetField(object target, string name, object? value) => target.GetType().GetField(name, Any)!.SetValue(target, value);
     internal static object? Call(object target, string name, Type[] types, params object?[] args)
         => (target.GetType().GetMethod(name, Any, types) ?? throw new MissingMethodException(target.GetType().Name, name)).Invoke(target, args);
+    internal static object? GetProperty(object target, string name) => target.GetType().GetProperty(name, Any)!.GetValue(target);
     internal static void SetProperty(object target, string name, object? value) => target.GetType().GetProperty(name, Any)!.SetValue(target, value);
 }
 
@@ -163,6 +164,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (scenes.Contains("settings")) await SettingsPage("settings", 3);
             // The music page at its presets and at the ends of its size range; for checking layout changes, not for the README.
             if (scenes.Contains("music-sizes")) await MusicSizes();
+            // The stacked layout centred without the cover: a title that fits and one that does not, beside few and many bars.
+            if (scenes.Contains("music-centred")) await MusicCentred();
             // The clipboard page side by side and stacked, at three sizes, and the stacked cards trading places; for checking, not for the README.
             if (scenes.Contains("shelf-settings-stacked")) { _settings.ShelfArrangement = ShelfArrangement.Stacked; await SettingsPage("shelf-layout-settings-stacked", 17); }
             if (scenes.Contains("shelf-layout")) { await ShelfLayouts(); await SettingsPage("shelf-layout-settings", 17); }
@@ -170,6 +173,16 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (scenes.Contains("shelf-views")) await ShelfViews();
             // What the pictures do not show, measured: see ShelfMeasures.
             if (scenes.Contains("shelf-measures")) await ShelfMeasures();
+            // The clipboard sync page and its connecting windows in each state; for checking, not for the README.
+            if (scenes.Contains("clipboard-sync")) await ClipboardSyncScene(folder);
+            // The line at the foot of the clipboard page that says why a click only copied, at the smallest panel and a usual one.
+            if (scenes.Contains("shelf-notice")) await ShelfNotice();
+            // The file transfer's settings, and the word beside the pointer while files are dragged out; for checking.
+            if (scenes.Contains("transfer-settings")) { await DragHints(); await SettingsPage("transfer-settings", 14, tips: true); }
+            // Memory and the drives showing what is in use and what is free, expanded and collapsed, and the option; for checking.
+            if (scenes.Contains("monitor-free")) { await MonitorFree(); await SettingsPage("monitor-free-settings", 9, 1100, tips: true); }
+            // The backup section of the displays and profiles page, and the export and import windows in each state; for checking.
+            if (scenes.Contains("config-backup")) { await ConfigBackupScene(); await SettingsPage("backup-settings", 16, 1500); }
         }
         finally { Directory.Delete(folder, true); }
     }
@@ -726,6 +739,46 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Settle();
     }
 
+    // As Monitor(), once with memory and the drives showing what is in use and once what is free: the page with room for the drives,
+    // the page so low that memory and the network share a line, and the notch with every reading.
+    private async Task MonitorFree()
+    {
+        const double scale = 2;
+        Program.SetProperty(app, "Exiting", true);
+        _settings.Animations = false;
+        var snapshot = MonitorSample();
+        void Feed() => Program.Call(_deck, "MonitorUpdated", [typeof(MonitorSnapshot)], snapshot);
+        var readings = _settings.CompactReadings;
+        _settings.CompactReadings = CompactMonitor.Readings(CompactMonitorMode.Custom, CompactMonitorItems.Memory | CompactMonitorItems.Storage);
+        _settings.CompactReadings.Single(r => r.Item == CompactMonitorItems.Storage).Sources = ["C:", "D:"];
+        foreach (bool free in new[] { false, true })
+        {
+            string name = free ? "free" : "used";
+            _settings.MonitorShowFree = free;
+            foreach (var (width, height) in new[] { (760.0, 330.0), (560.0, 170.0) })
+            {
+                _settings.MonitorWidth = width; _settings.MonitorHeight = height;
+                SelectPage(DeckPage.Usage); SelectPage(DeckPage.Monitor);
+                _deck.SetExpanded(true, true);
+                await Settle(); Feed();
+                await Save($"monitor-{name}-{height:0}", scale);
+            }
+            SelectPage(DeckPage.Usage);
+            _settings.NotchMonitor = true; _settings.NotchMusic = false;
+            _deck.SetExpanded(false, true); Refresh();
+            // The drives join the row once their first figures have come (StripAdmission): fed, built again, fed.
+            await Settle(); Feed(); Refresh();
+            await Settle(); Feed();
+            await Save($"compact-monitor-{name}", scale);
+            _settings.NotchMonitor = false; _settings.NotchMusic = true; Refresh();
+        }
+        _settings.MonitorShowFree = false;
+        _settings.CompactReadings = readings;
+        Program.SetProperty(app, "Exiting", false);
+        _settings.Animations = true;
+        await Settle();
+    }
+
     // The devices page, and the notch with the devices' rings and the file transfer's count. App.Exiting keeps the panel's demand
     // from reaching the devices object.
     private async Task DevicesScene()
@@ -914,8 +967,126 @@ internal sealed class Renderer(App app, string output, string language, string[]
         SelectPage(DeckPage.Usage);
     }
 
+    private async Task MusicCentred()
+    {
+        var update = new[] { typeof(MediaTrack), typeof(IReadOnlyList<MediaTrack>), typeof(BitmapSource), typeof(bool) };
+        const string longTitle = "Lift Me Up (From Black Panther: Wakanda Forever - Music From and Inspired By) 一段很长的标题";
+        void Play(string name, string title)
+        {
+            var track = _track with { Id = "demo:centred-" + name, Title = title };
+            Program.Call(_deck, "ApplyMediaUpdate", update, track, new List<MediaTrack> { track }, _cover, false);
+        }
+        async Task Sizes(string name, params (double Width, double Height)[] sizes)
+        {
+            foreach (var (width, height) in sizes)
+            {
+                _settings.MusicWidth = width; _settings.MusicHeight = height; Refresh();
+                await Save($"{name}-{width}x{height}", 1.5);
+            }
+        }
+        // Each picture is of the page at rest, not part of the way into the one before.
+        _settings.Animations = false;
+        SelectPage(DeckPage.Music);
+        _deck.SetExpanded(true, true);
+        // Centred without the cover: the title keeps clear of the bars and as far from the left.
+        _settings.MusicPageCover = false; _settings.MusicLyricsLayout = MusicLyricsLayout.Stacked; _settings.MusicLyricsAlign = MusicLyricsAlign.Center;
+        foreach (var (name, title) in new[] { ("short", _track.Title), ("long", longTitle) })
+        {
+            Play(name, title);
+            foreach (int bars in new[] { 3, 5, 20 })
+            {
+                _settings.MusicEqualizerBars = bars;
+                await Sizes($"music-centred-{name}-{bars}bars", (440, 140), (440, 200), (760, 300), (1200, 400));
+            }
+        }
+        // The same title as it scrolls: moved along by hand, with the fade at both ends.
+        _settings.MusicEqualizerBars = 20; _settings.MusicWidth = 650; _settings.MusicHeight = 290; Refresh();
+        await Settle(); Scrolled(); await Save("music-centred-long-20bars-scrolled-650x290", 1.5);
+        _settings.MusicEqualizerBars = 5;
+        // The lyrics switched off: the titles at the middle of the upper part, with the cover and without it.
+        _settings.LyricsEnabled = false;
+        foreach (var (name, title) in new[] { ("short", _track.Title), ("long", longTitle) })
+        {
+            Play(name, title);
+            _settings.MusicPageCover = true; _settings.MusicLyricsAlign = MusicLyricsAlign.Left;
+            await Sizes($"music-nolyrics-cover-{name}", (440, 140), (440, 200), (650, 290), (1200, 400));
+            _settings.MusicPageCover = false;
+            await Sizes($"music-nolyrics-left-{name}", (440, 140), (650, 290));
+            _settings.MusicLyricsAlign = MusicLyricsAlign.Center;
+            await Sizes($"music-nolyrics-centre-{name}", (440, 140), (650, 290));
+            _settings.MusicLyricsLayout = MusicLyricsLayout.Columns; _settings.MusicPageCover = true;
+            await Sizes($"music-nolyrics-columns-cover-{name}", (440, 200), (650, 290), (1200, 400));
+            _settings.MusicLyricsLayout = MusicLyricsLayout.Stacked;
+        }
+        _settings.MusicLyricsLayout = MusicLyricsLayout.Columns; _settings.MusicPageCover = true; _settings.MusicWidth = 650; _settings.MusicHeight = 290; Refresh();
+        await Settle(); Scrolled(); await Save("music-nolyrics-columns-cover-long-scrolled-650x290", 1.5);
+        // The two layouts with the cover and the lyrics, for the cards' diagrams.
+        _settings.LyricsEnabled = true; Play("short", _track.Title);
+        await Sizes("music-columns-cover", (440, 200), (650, 290), (760, 300), (1200, 400));
+        // The equalizer at the top right of the column layout, at its longest, and without the cover.
+        _settings.MusicEqualizerBars = 20;
+        await Sizes("music-columns-cover-20bars", (440, 140), (440, 200), (650, 290));
+        _settings.MusicPageCover = false;
+        await Sizes("music-columns-nocover-20bars", (440, 140), (440, 200), (650, 290));
+        Play("long", longTitle); _settings.LyricsEnabled = false; _settings.MusicPageCover = true;
+        await Sizes("music-nolyrics-columns-cover-long-20bars", (440, 140), (440, 200));
+        _settings.MusicLyricsLayout = MusicLyricsLayout.Stacked;
+        await Sizes("music-nolyrics-stacked-cover-long-20bars", (440, 140), (650, 290));
+        _settings.LyricsEnabled = true; _settings.MusicEqualizerBars = 5; Play("short", _track.Title);
+        _settings.MusicLyricsLayout = MusicLyricsLayout.Stacked;
+        await Sizes("music-stacked-cover", (440, 200), (650, 290), (760, 300), (1200, 400));
+        // The settings' "展开时" with each pair of the cover and the lyrics.
+        foreach (var (cover, lyrics) in new[] { (true, true), (false, true), (true, false), (false, false) })
+        {
+            _settings.MusicPageCover = cover; _settings.LyricsEnabled = lyrics;
+            await SettingsPage($"music-settings-cover{(cover ? 1 : 0)}-lyrics{(lyrics ? 1 : 0)}", 5, 1500);
+        }
+        Program.Call(_deck, "ApplyMediaUpdate", update, _track, new List<MediaTrack> { _track, _other }, _cover, false);
+        _settings.MusicPageCover = true; _settings.LyricsEnabled = true; _settings.MusicLyricsAlign = MusicLyricsAlign.Left; _settings.MusicEqualizerBars = CompactMusicLayout.DefaultBars;
+        _settings.Animations = true; _settings.MusicWidth = 440; _settings.MusicHeight = 200; Refresh();
+        SelectPage(DeckPage.Usage);
+    }
+
+    // Puts the open page's title where it stands part of the way through its scroll: nothing animates in this window.
+    private void Scrolled()
+    {
+        if (Program.Field(_deck, "_musicTitle") is not FrameworkElement title) return;
+        double width = (double)Program.Field(title, "_fadeWidth")!;
+        if (width <= 0) { Console.WriteLine("the title does not overhang"); return; }
+        double edge = Math.Min(.5, (double)Program.GetProperty(title, "EdgeWidth")! / width);
+        ((TranslateTransform)Program.Field(title, "_shift")!).X = -60; ((TranslateTransform)Program.Field(title, "_unshift")!).X = 60;
+        foreach (var stop in new[] { "_left", "_tailLeft" }) ((GradientStop)Program.Field(title, stop)!).Offset = edge;
+    }
+
     // The settings window is built without being shown: its content is taken out, laid out at the default size and
     // captured with the window's resources.
+    private async Task ShelfNotice()
+    {
+        _settings.Animations = false;
+        SelectPage(DeckPage.Clipboard);
+        _deck.SetExpanded(true, true);
+        var result = Type.GetType("BrimDeck.PasteResult, BrimDeck")!;
+        foreach (var (width, height) in new (double, double)[] { (440, 140), (620, 220) })
+        {
+            _settings.ClipboardWidth = width; _settings.ClipboardHeight = height; Refresh();
+            _settings.ShelfArrangement = ShelfArrangement.Split;
+            Program.Call(_deck, "RenderShelf", [typeof(bool)], false);
+            await Settle();
+            var rows = (System.Collections.IDictionary)Program.Field(_deck, "_shelfRows")!;
+            var first = rows.Keys.Cast<Guid>().First();
+            foreach (string kind in new[] { "Elevated", "Copied" })
+            {
+                string word = (string)Program.Call(_deck, "PasteWord", [result], Enum.Parse(result, kind))!;
+                Program.Call(_deck, "Flash", [typeof(Guid), typeof(string)], first, word);
+                await Save($"shelf-notice-{kind.ToLowerInvariant()}-{width}x{height}", 2);
+                if (Program.Field(_deck, "_shelfNotice") is UIElement notice) notice.Visibility = Visibility.Collapsed;
+                Program.Call(_deck, "FlashEnded", [typeof(object), typeof(EventArgs)], null, EventArgs.Empty);
+            }
+        }
+        SelectPage(DeckPage.Usage);
+        _deck.SetExpanded(false, true);
+    }
+
     private async Task ShelfLayouts()
     {
         const double scale = 2;
@@ -1265,7 +1436,262 @@ internal sealed class Renderer(App app, string output, string language, string[]
         _deck.SetExpanded(false, true);
     }
 
-    private async Task SettingsPage(string name, int page, double height = 640)
+    // The sync page not connected and connected, then the content of each connecting window. Nothing is connected: the service
+    // is made on this run's empty folder and never applied, and the names it would read from WeType are set here.
+    private async Task ClipboardSyncScene(string folder)
+    {
+        var service = Activator.CreateInstance(Type.GetType("BrimDeck.ClipboardSyncService, BrimDeck")!, Program.Any, null, [app, folder], null)!;
+        Program.SetProperty(app, "ClipboardSync", service);
+        // A worker listed as running keeps the page from asking WeType for the names.
+        var workers = (System.Collections.IDictionary)Program.Field(service, "_workers")!;
+        workers[false] = new CancellationTokenSource();
+        var accounts = Program.GetProperty(service, "Accounts")!;
+        Program.SetProperty(accounts, "DeviceName", _english ? "BrimDeck STUDIO-PC" : "BrimDeck 书房电脑");
+        // As SettingsPage, without closing the window: closing saves the settings, which this run has none to save.
+        async Task Page(string name, double height)
+        {
+            const double scale = 1.5, width = 960;
+            _settings.Theme = SettingsTheme.Dark;
+            var page = new SettingsWindow(app);
+            page.ShowPage(18);
+            var root = page.RootVisual;
+            var resources = page.Resources;
+            page.Content = null;
+            root.Resources = resources;
+            TextOptions.SetTextFormattingMode(root, TextFormattingMode.Ideal);
+            root.Measure(new Size(width, height)); root.Arrange(new Rect(0, 0, width, height));
+            await Settle();
+            root.UpdateLayout();
+            var bitmap = new RenderTargetBitmap((int)(width * scale), (int)(height * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            bitmap.Render(root); bitmap.Freeze();
+            Write(bitmap, Path.Combine(output, name + ".png"));
+            Console.WriteLine(name);
+        }
+        await Page("sync-page-empty", 560);
+
+        var statuses = (System.Collections.IDictionary)Program.Field(service, "_status")!;
+        var levels = Type.GetType("BrimDeck.SyncLevel, BrimDeck")!;
+        object Status(string text, string level) => Activator.CreateInstance(statuses.GetType().GetGenericArguments()[1], text, Enum.Parse(levels, level))!;
+        Program.SetProperty(accounts, "Lan", new BrimDeck.Core.ClipboardSync.LanClipboardPeer("192.168.1.20", 50000, new byte[32], new byte[32], null) { DeviceName = "BrimDeck LAPTOP-7QK2M4" });
+        var wetype = (BrimDeck.Core.ClipboardSync.WeTypeIdentity)Program.GetProperty(accounts, "WeType")!;
+        wetype.Paired = true; wetype.DisplayName = _english ? "Study desktop" : "书房的台式机";
+        wetype.PeerNames = ["iPhone 15 Pro", "DESKTOP-OFFICE-WORKSTATION-2026", _english ? "Living room tablet" : "客厅平板"];
+        Program.SetProperty(accounts, "Doubao", new BrimDeck.Core.ClipboardSync.DoubaoIdentity { DeviceId = "1", Cookies = { ["sessionid"] = "x" } });
+        Program.SetProperty(service, "DoubaoCapability", new BrimDeck.Core.ClipboardSync.DoubaoDeviceState(2, true));
+        _settings.LanClipboardSync = _settings.WeTypeClipboardSync = _settings.DoubaoClipboardSync = true;
+        Program.SetProperty(service, "LanStatus", _english ? "Connected" : "已连接");
+        Program.SetProperty(service, "LanLevel", Enum.Parse(levels, "Active"));
+        statuses[false] = Status(_english ? "Image received · 14:02:31" : "已接收图片 · 14:02:31", "Active");
+        statuses[true] = Status(_english ? "Sync is turned off for this device" : "此设备的互传开关未开启", "Attention");
+        await Page("sync-page-connected", 700);
+        _settings.WeTypeClipboardSync = false;
+        Program.SetProperty(service, "DoubaoCapability", new BrimDeck.Core.ClipboardSync.DoubaoDeviceState(1, true));
+        statuses[true] = Status(_english ? "Connection lost. Retrying…" : "连接中断，正在重试…", "Attention");
+        Program.SetProperty(service, "LanStatus", _english ? "Waiting for the other PC…" : "正在等待另一台电脑…");
+        Program.SetProperty(service, "LanLevel", Enum.Parse(levels, "Idle"));
+        await Page("sync-page-paused", 700);
+
+        _settings.Theme = SettingsTheme.Dark;
+        var window = new SettingsWindow(app);
+        window.ShowPage(18);
+        object View(string name) => Program.Call(window, name, [])!;
+        T Part<T>(object view, string name) => (T)view.GetType().GetProperty(name)!.GetValue(view)!;
+        void Say(object status, string text, bool error = false) => Program.Call(window, "SetSyncStatus", [typeof(System.Windows.Controls.TextBlock), typeof(string), typeof(bool)], status, text, error);
+        void Code(object box, string text) => box.GetType().GetProperty("Text")!.SetValue(box, text);
+        async Task Dialog(string name, string title, params FrameworkElement[] parts)
+        {
+            var body = new System.Windows.Controls.StackPanel();
+            foreach (var part in parts) body.Children.Add(part);
+            var frame = (FrameworkElement)Program.Call(window, "SyncDialogFrame", [typeof(string), typeof(System.Windows.Controls.StackPanel), typeof(Action)], title, body, (Action)(() => { }))!;
+            const double scale = 1.5, width = 420;
+            var host = new System.Windows.Controls.Border { Child = frame, Resources = window.Resources, Width = width };
+            System.Windows.Documents.TextElement.SetFontFamily(host, window.FontFamily);
+            TextOptions.SetTextFormattingMode(host, TextFormattingMode.Ideal);
+            host.Measure(new Size(width, double.PositiveInfinity)); host.Arrange(new Rect(host.DesiredSize));
+            await Settle();
+            host.UpdateLayout();
+            var bitmap = new RenderTargetBitmap((int)(width * scale), (int)Math.Ceiling(host.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            bitmap.Render(host); bitmap.Freeze();
+            Write(bitmap, Path.Combine(output, name + ".png"));
+            Console.WriteLine(name + " " + host.ActualHeight.ToString("0"));
+            host.Child = null;
+        }
+        FrameworkElement Modes(bool second)
+        {
+            var modes = (FrameworkElement)Program.Call(window, "SyncModes", [typeof(string), typeof(string), typeof(Action<bool>)],
+                _english ? "Enter a code" : "输入匹配码", _english ? "Show this device's code" : "显示本机匹配码", (Action<bool>)(_ => { }))!;
+            if (second) foreach (var option in Descendants<System.Windows.Controls.RadioButton>(modes).Skip(1)) option.IsChecked = true;
+            return modes;
+        }
+        FrameworkElement Footnote() => (FrameworkElement)Program.Call(window, "WeTypeFootnote", [])!;
+        string wetypeTitle = _english ? "Link WeType" : "关联微信输入法";
+
+        var enter = View("WeTypeEnterView");
+        await Dialog("sync-wetype-enter", wetypeTitle, Modes(false), Part<FrameworkElement>(enter, "Root"), Footnote());
+        enter = View("WeTypeEnterView");
+        Code(Part<object>(enter, "Code"), "4071");
+        Say(Part<object>(enter, "Status"), _english ? "The code is wrong or has expired." : "匹配码不正确或已过期。", true);
+        await Dialog("sync-wetype-enter-error", wetypeTitle, Modes(false), Part<FrameworkElement>(enter, "Root"), Footnote());
+        var show = View("WeTypeShowView");
+        Code(Part<object>(show, "Code"), "407193");
+        Say(Part<object>(show, "Status"), _english ? "Valid for 42 s" : "42 秒内有效");
+        await Dialog("sync-wetype-show", wetypeTitle, Modes(true), Part<FrameworkElement>(show, "Root"), Footnote());
+        show = View("WeTypeShowView");
+        Code(Part<object>(show, "Code"), "407193");
+        Say(Part<object>(show, "Status"), _english ? "“DESKTOP-OFFICE-WORKSTATION-2026” asks to link" : "“DESKTOP-OFFICE-WORKSTATION-2026”请求关联");
+        var allow = Part<System.Windows.Controls.Button>(show, "Action"); allow.Content = _english ? "Allow" : "允许"; allow.Visibility = Visibility.Visible;
+        await Dialog("sync-wetype-allow", wetypeTitle, Modes(true), Part<FrameworkElement>(show, "Root"), Footnote());
+
+        object?[] login = [null, null];
+        var doubao = (FrameworkElement)window.GetType().GetMethod("DoubaoLoginView", Program.Any)!.Invoke(window, login)!;
+        Say(login[0]!, _english ? "Waiting for you to sign in…" : "正在等待登录…");
+        await Dialog("sync-doubao-waiting", _english ? "Sign in to Doubao" : "登录豆包", doubao);
+        doubao = (FrameworkElement)window.GetType().GetMethod("DoubaoLoginView", Program.Any)!.Invoke(window, login)!;
+        Say(login[0]!, _english ? "The sign-in window was closed." : "登录窗口已关闭。", true);
+        ((UIElement)login[1]!).Visibility = Visibility.Visible;
+        await Dialog("sync-doubao-retry", _english ? "Sign in to Doubao" : "登录豆包", doubao);
+
+        var advanced = Program.Call(window, "DoubaoAdvanced", [])!;
+        var listed = Part<System.Windows.Controls.StackPanel>(advanced, "List"); listed.Visibility = Visibility.Visible;
+        Program.Call(window, "ShowDoubaoDevices", [typeof(System.Windows.Controls.StackPanel), typeof(IReadOnlyList<BrimDeck.Core.ClipboardSync.DoubaoDevice>)], listed,
+            (IReadOnlyList<BrimDeck.Core.ClipboardSync.DoubaoDevice>)[new("1", "DESKTOP-BFFEHMI", false), new("2", "BrimDeck DESKTOP-G72GT45-OFFICE-WORKSTATION-2026-LONG-NAME", false),
+                new("3", "Oppo Find X9 Pro", false), new("4", "MacBook Air (15-inch, M5)", false)]);
+        await Dialog("sync-doubao-advanced", _english ? "Doubao IME" : "豆包输入法", Part<FrameworkElement>(advanced, "Root"));
+
+        string lanTitle = _english ? "Pair another PC" : "配对另一台电脑";
+        var lan = View("LanPairView");
+        Code(Part<object>(lan, "Own"), "582046");
+        await Dialog("sync-lan", lanTitle, Part<FrameworkElement>(lan, "Root"));
+        lan = View("LanPairView");
+        Code(Part<object>(lan, "Own"), "582046"); Code(Part<object>(lan, "Entry"), "913");
+        Say(Part<object>(lan, "Status"), _english ? "The other PC was not found. Make sure it has this window open and both PCs are on the same network."
+            : "没有找到另一台电脑。确认它也打开了这个窗口，并且两台电脑在同一网络。", true);
+        await Dialog("sync-lan-not-found", lanTitle, Part<FrameworkElement>(lan, "Root"));
+        lan = View("LanPairView");
+        Code(Part<object>(lan, "Entry"), "913377");
+        var note = Part<System.Windows.Controls.TextBlock>(lan, "OwnNote"); note.Text = _english ? "This PC is not on a local network" : "本机没有连接到局域网"; note.Visibility = Visibility.Visible;
+        Say(Part<object>(lan, "Status"), _english ? "Several PCs were found. Choose the one to pair:" : "找到多台电脑，选择要配对的一台：");
+        var devices = Part<System.Windows.Controls.StackPanel>(lan, "Devices"); devices.Visibility = Visibility.Visible;
+        foreach (string device in new[] { "BrimDeck LAPTOP-7QK2M4 · 192.168.1.20", "BrimDeck DESKTOP-OFFICE-WORKSTATION-2026 · 192.168.1.131" })
+            devices.Children.Add(new System.Windows.Controls.Button { Content = device, Style = (Style)window.FindResource("SettingsOutlineButton"),
+                HorizontalContentAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) });
+        await Dialog("sync-lan-choose", lanTitle, Part<FrameworkElement>(lan, "Root"));
+    }
+
+    // The export and import windows (SettingsBackup.cs), each state drawn from invented data: what the PC has to export, a file with
+    // displays this PC lacks, files that cannot be imported, and what is left to do after an import.
+    private async Task ConfigBackupScene()
+    {
+        _settings.Theme = SettingsTheme.Dark;
+        var window = new SettingsWindow(app);
+        T Part<T>(object view, string name) => (T)view.GetType().GetProperty(name)!.GetValue(view)!;
+        object Call(string name, Type[] types, params object?[] args) => Program.Call(window, name, types, args)!;
+        void Say(object status, string text, bool error = true) => window.GetType().GetMethod("SetBackupStatus", Program.Any)!.Invoke(null, [status, text]);
+        string Short(string name) => (string)window.GetType().GetMethod("ShortName", Program.Any)!.Invoke(null, [name])!;
+        async Task Dialog(string name, string title, FrameworkElement content, double width)
+        {
+            var body = new System.Windows.Controls.StackPanel();
+            body.Children.Add(content);
+            var frame = (FrameworkElement)Call("SyncDialogFrame", [typeof(string), typeof(System.Windows.Controls.StackPanel), typeof(Action)], title, body, (Action)(() => { }));
+            const double scale = 1.5;
+            var host = new System.Windows.Controls.Border { Child = frame, Resources = window.Resources, Width = width };
+            System.Windows.Documents.TextElement.SetFontFamily(host, window.FontFamily);
+            TextOptions.SetTextFormattingMode(host, TextFormattingMode.Ideal);
+            host.Measure(new Size(width, double.PositiveInfinity)); host.Arrange(new Rect(host.DesiredSize));
+            await Settle();
+            host.UpdateLayout();
+            var bitmap = new RenderTargetBitmap((int)(width * scale), (int)Math.Ceiling(host.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            bitmap.Render(host); bitmap.Freeze();
+            Write(bitmap, Path.Combine(output, name + ".png"));
+            Console.WriteLine(name + " " + host.ActualHeight.ToString("0"));
+            host.Child = null;
+        }
+        string exportTitle = _english ? "Export settings" : "导出配置", importTitle = _english ? "Import settings" : "导入配置";
+
+        object Export(int themes, int prices, int keys, bool scripts) => Call("BackupExportView", [typeof(int), typeof(int), typeof(int), typeof(bool)], themes, prices, keys, scripts);
+        await Dialog("backup-export", exportTitle, Part<FrameworkElement>(Export(3, 5, 4, true), "Root"), 420);
+        var keyed = Export(3, 5, 4, true);
+        Part<System.Windows.Controls.CheckBox>(keyed, "Keys").IsChecked = true;
+        await Dialog("backup-export-keys", exportTitle, Part<FrameworkElement>(keyed, "Root"), 420);
+        await Dialog("backup-export-settings-only", exportTitle, Part<FrameworkElement>(Export(0, 0, 0, false), "Root"), 420);
+        var failed = Export(0, 1, 1, false);
+        Say(Part<object>(failed, "Status"), _english ? "The file could not be written there. Try another folder." : "无法写入这个位置，请换一个文件夹再试。", true);
+        await Dialog("backup-export-error", exportTitle, Part<FrameworkElement>(failed, "Root"), 420);
+        var exported = (FrameworkElement)Call("BackupExportedView", [typeof(string), typeof(Action)],
+            _english ? @"D:\Users\Study\Documents\BrimDeck backups\BrimDeck-settings-2026-11-17-with-keys.brimbackup" : @"D:\Users\书房\Documents\BrimDeck 备份\BrimDeck-配置-2026-11-17-含密钥.brimbackup", null);
+        await Dialog("backup-exported", exportTitle, exported, 420);
+
+        // A file from another PC: three profiles, two rules, seven sources; two of its three displays are not here.
+        var imported = new DeckSettings();
+        imported.Normalize();
+        var main = imported.CurrentProfile;
+        imported.Profiles.Add(Profiles.Duplicate(imported, main, _english ? "Work" : "工作"));
+        imported.Profiles.Add(Profiles.Duplicate(imported, main, _english ? "Games" : "游戏"));
+        imported.DisplayMonitors = [new(@"\\?\DISPLAY#DEL40B6#OLD-A", "DELL U2720Q"), new(@"\\?\DISPLAY#BOE0A1C#OLD-B", _english ? "Built-in display" : "内置显示器"),
+            new(@"\\?\DISPLAY#SAM7179#OLD-C", "Samsung Odyssey OLED G9 G95SC 49-inch Super Ultra-Wide")];
+        imported.Display = DisplayPlacement.Chosen;
+        imported.ProfileRules = [new ProfileRule { Name = "Code" }, new ProfileRule { Name = "Photoshop" }];
+        imported.Apps = [.. new[] { ProviderId.Claude, ProviderId.Codex, ProviderId.Cursor, ProviderId.DeepSeek, ProviderId.OpenRouter, ProviderId.Kimi, ProviderId.Custom }
+            .Select(id => new AppEntry { QuotaSource = id })];
+        var theme = System.Text.Encoding.UTF8.GetBytes("{}");
+        var themes = new Dictionary<string, byte[]> { ["dusk.json"] = theme, ["sea.json"] = theme, ["night/theme.json"] = theme };
+        var prices = Enumerable.Range(1, 5).Select(i => new ModelPrice($"acme/model-{i}", new TokenPrices(0, 0, null, null, null), [])).ToList();
+        var keys = imported.Apps.Skip(3).Take(4).ToDictionary(a => a.InstanceId, _ => "sk");
+        var manifest = new BackupManifest { Version = "1.3.2", Exported = new DateTimeOffset(2026, 11, 17, 21, 30, 0, TimeSpan.FromHours(8)), Computer = "DESKTOP-STUDY-7QK2M4" };
+        var full = new BackupPackage(manifest, imported, themes, prices, keys, null);
+        var here = new List<BackupDisplay> { new(@"\\?\DISPLAY#DEL40B6#NEW-1", _english ? "DELL U2720Q (2560×1440) · primary" : "DELL U2720Q (2560×1440) · 主显示器"),
+            new(@"\\?\DISPLAY#GSM5B09#NEW-2", "LG ULTRAFINE (2560×1440)"), new(@"\\?\DISPLAY#SAM0F9A#NEW-3", Short("Samsung Odyssey OLED G9 G95SC 49-inch") + " (5120×1440)") };
+        var missing = ConfigBackup.DisplaysToMatch(imported, here.Select(d => d.Id));
+        var guesses = ConfigBackup.GuessDisplays(missing, [new(@"\\?\DISPLAY#DEL40B6#NEW-1", "DELL U2720Q"), new(@"\\?\DISPLAY#GSM5B09#NEW-2", "LG ULTRAFINE")], []);
+        object Import(string file, BackupPackage package, IReadOnlyList<BackupDisplay> lacking, IReadOnlyList<string?> starts) => Call("BackupImportView",
+            [typeof(string), typeof(BackupPackage), typeof(IReadOnlyList<BackupDisplay>), typeof(IReadOnlyList<BackupDisplay>), typeof(IReadOnlyList<string?>)], file, package, lacking, here, starts);
+        string fileName = ConfigBackup.FileName(new DateTime(2026, 11, 17), true);
+        await Dialog("backup-import-displays", importTitle, Part<FrameworkElement>(Import(fileName, full, missing, guesses), "Root"), 460);
+        var one = new List<BackupDisplay> { missing[1] };
+        await Dialog("backup-import-one-display", importTitle, Part<FrameworkElement>(Import(fileName, full with { Themes = new Dictionary<string, byte[]>(), Prices = [] }, one, [null]), "Root"), 460);
+        var plain = new BackupPackage(manifest, imported, new Dictionary<string, byte[]>(), [], new Dictionary<Guid, string>(), null);
+        await Dialog("backup-import-plain", importTitle, Part<FrameworkElement>(Import(ConfigBackup.FileName(new DateTime(2026, 11, 17), false), plain, [], []), "Root"), 460);
+        var before = full with { Manifest = new BackupManifest { Version = "1.3.2", Exported = manifest.Exported, Computer = "DESKTOP-STUDY-7QK2M4", BeforeImport = true } };
+        await Dialog("backup-import-before-import", importTitle, Part<FrameworkElement>(Import(ConfigBackup.BackupName(new DateTime(2026, 11, 17, 21, 30, 0)), before, [], []), "Root"), 460);
+        var stuck = Import(fileName, plain, [], []);
+        Say(Part<object>(stuck, "Status"), _english ? "The current settings could not be backed up in the data folder, so nothing was imported. Check the data folder's permissions."
+            : "无法在数据文件夹中备份当前配置，没有导入。请检查数据文件夹的权限。", true);
+        await Dialog("backup-import-error", importTitle, Part<FrameworkElement>(stuck, "Root"), 460);
+
+        string Problem(Exception ex) => (string)window.GetType().GetMethod("BackupProblemText", Program.Any)!.Invoke(null, [ex])!;
+        FrameworkElement ProblemView(string file, string message)
+        {
+            var view = Call("BackupProblemView", [typeof(string), typeof(string)], file, message);
+            return (FrameworkElement)view.GetType().GetField("Item1")!.GetValue(view)!;
+        }
+        await Dialog("backup-problem-damaged", importTitle, ProblemView("notes.zip", Problem(new BackupException(BackupProblem.NotBackup, null))), 460);
+        await Dialog("backup-problem-newer", importTitle, ProblemView(fileName, Problem(new BackupException(BackupProblem.Newer, "1.4.0"))), 460);
+        await Dialog("backup-problem-unreadable", importTitle, ProblemView(fileName, Problem(new IOException())), 460);
+
+        string backupPath = Path.Combine(@"C:\Users\me\AppData\Local\BrimDeck\backups", ConfigBackup.BackupName(new DateTime(2026, 11, 17, 21, 42, 5)));
+        var notes = ConfigBackup.Notes(["Samsung Odyssey OLED G9 G95SC 49-inch Super Ultra-Wide"],
+            ["Logitech G Pro X Superlight 2", "AirPods Pro", _english ? "Xbox Wireless Controller" : "Xbox 无线控制器"],
+            ["WorkBuddy", _english ? "Xiaomi MiMo Desktop subscription" : "Xiaomi MiMo 桌面订阅"],
+            ["DeepSeek", "OpenRouter", _english ? "Office gateway" : "公司网关"], [_english ? "WeType" : "微信输入法", _english ? "Local network" : "局域网"]);
+        notes.Insert(0, ConfigBackup.ThemesNotWritten);
+        Task Done(string name, IReadOnlyList<ImportNote> list) => Dialog(name, _english ? "Import complete" : "导入完成",
+            (FrameworkElement)Call("BackupDoneView", [typeof(string), typeof(IReadOnlyList<ImportNote>), typeof(Action)], backupPath, list, null), 460);
+        await Done("backup-done-notes", notes);
+        await Done("backup-done-some", ConfigBackup.Notes([], [], [], ["DeepSeek"], []));
+        await Done("backup-done-clean", []);
+        try { window.Close(); } catch (ArgumentOutOfRangeException) { }
+    }
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+        {
+            if (child is T match) yield return match;
+            foreach (var deeper in Descendants<T>(child)) yield return deeper;
+        }
+    }
+
+    private async Task SettingsPage(string name, int page, double height = 640, bool tips = false)
     {
         const double scale = 1.5, width = 960;
         _settings.Theme = SettingsTheme.Dark;
@@ -1283,7 +1709,38 @@ internal sealed class Renderer(App app, string output, string language, string[]
         bitmap.Render(root); bitmap.Freeze();
         Write(bitmap, Path.Combine(output, name + ".png"));
         Console.WriteLine(name);
-        window.Close();
+        if (tips) HelpTips(root, name);
+        // Closing saves the settings into the profile in use; the invented settings hold none, and nothing here is to be saved.
+        try { window.Close(); } catch (ArgumentOutOfRangeException) { }
+    }
+
+    // The descriptions behind a page's info marks, each as its tooltip lays it out (the font, the width its text is given, the
+    // line height), without opening one: where a line breaks shows only there. Outside the window a tooltip takes the panel's
+    // colors, not the settings'; its layout is the same.
+    private void HelpTips(DependencyObject root, string name)
+    {
+        const double scale = 3;
+        var marks = new List<FrameworkElement>();
+        void Walk(DependencyObject parent)
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is FrameworkElement { ToolTip: System.Windows.Controls.ToolTip { Content: System.Windows.Controls.TextBlock } } mark) marks.Add(mark);
+                Walk(child);
+            }
+        }
+        Walk(root);
+        for (int i = 0; i < marks.Count; i++)
+        {
+            var tip = (System.Windows.Controls.ToolTip)marks[i].ToolTip;
+            tip.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            tip.Arrange(new Rect(tip.DesiredSize)); tip.UpdateLayout();
+            if (tip.ActualWidth < 1 || tip.ActualHeight < 1) continue;
+            var picture = new RenderTargetBitmap((int)Math.Ceiling(tip.ActualWidth * scale), (int)Math.Ceiling(tip.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            picture.Render(tip); picture.Freeze();
+            Write(picture, Path.Combine(output, $"{name}-tip-{i + 1}.png"));
+        }
     }
 
     private object Point(object? element)
@@ -1362,6 +1819,48 @@ internal sealed class Renderer(App app, string output, string language, string[]
         Equalizer(equalizer);
         Write(Capture(scale), Path.Combine(output, name + ".png"));
         Console.WriteLine(name);
+    }
+
+    // The word that follows the pointer while files are dragged out (DragHint), each word it can say in the window itself. A
+    // window comes out no smaller than Windows lets one be, which a picture of the frame alone does not show: the window is opened
+    // fully transparent for the moment its layout takes, and the picture shows all of it, outlined, with the frame as it lies in it.
+    // The sizes are written out as well.
+    private async Task DragHints()
+    {
+        var look = Type.GetType("BrimDeck.PanelTheme, BrimDeck")!.GetProperty("Main", Program.Any)!.GetValue(null);
+        var type = Type.GetType("BrimDeck.DragHint, BrimDeck")!;
+        const double scale = 3, gap = 16;
+        var shots = new List<(BitmapSource Picture, Size Window)>();
+        foreach (var word in new[] { Loc.T("复制", "Copy"), Loc.T("移动", "Move"), Loc.T("链接", "Link") })
+        {
+            var window = (Window)Activator.CreateInstance(type, Program.Any, null, [look], null)!;
+            window.Opacity = 0;
+            type.GetMethod("Say", Program.Any)!.Invoke(window, [word]);
+            await Settle();
+            var frame = (FrameworkElement)window.Content;
+            var picture = new RenderTargetBitmap((int)Math.Ceiling(window.ActualWidth * scale), (int)Math.Ceiling(window.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            picture.Render(frame); picture.Freeze();
+            shots.Add((picture, new Size(window.ActualWidth, window.ActualHeight)));
+            Console.WriteLine($"drag-hint {word}: window {window.ActualWidth:0.#} x {window.ActualHeight:0.#}, frame {frame.ActualWidth:0.#} x {frame.ActualHeight:0.#}");
+            window.Close();
+        }
+        double width = shots.Sum(shot => shot.Window.Width + gap) + gap, height = shots.Max(shot => shot.Window.Height) + 2 * gap;
+        var sheet = new DrawingVisual();
+        using (var context = sheet.RenderOpen())
+        {
+            context.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x6A, 0x70, 0x7A)), null, new Rect(0, 0, width, height));
+            double x = gap;
+            foreach (var (picture, size) in shots)
+            {
+                var box = new Rect(x, gap, size.Width, size.Height);
+                context.DrawRectangle(null, new Pen(new SolidColorBrush(Color.FromArgb(90, 255, 255, 255)), 1) { DashStyle = DashStyles.Dash }, box);
+                context.DrawImage(picture, box);
+                x += size.Width + gap;
+            }
+        }
+        var bitmap = new RenderTargetBitmap((int)(width * scale), (int)(height * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+        bitmap.Render(sheet); bitmap.Freeze();
+        Write(bitmap, Path.Combine(output, "drag-hint.png"));
     }
 
     private static void Write(BitmapSource image, string path)

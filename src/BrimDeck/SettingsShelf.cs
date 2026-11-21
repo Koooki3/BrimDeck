@@ -51,6 +51,9 @@ public partial class SettingsWindow
             value => { Change(s => s.ClipboardKeepFor = value); ShowPage(_page); }, enabled: S.ClipboardKeepHistory, width: 216,
             help: Loc.T("从最后一次复制起计算。", "Counted from the last copy."));
         Group(record, _excludedHost = new Border { Child = ExcludedAppsContent() }, keep, length);
+        Group(Toggle(Loc.T("单击只复制，不粘贴", "Click copies only"), S.ClipboardClickCopyOnly, value => Change(s => s.ClipboardClickCopyOnly = value),
+            help: Loc.T("开启后，单击一条记录只复制，不粘贴到当前窗口。右键菜单仍可粘贴。",
+                "On, clicking an entry only copies it, without pasting it into the current window. Its right-click menu can still paste.")));
         SectionTitle(Loc.T("分类", "Categories"), help: () => Loc.T("一条内容可以放进多个分类。关闭“一直保留”的分类，其中的内容与普通历史一样清除。单击筛选按钮设置自动放入的规则。拖动调整顺序。",
             "An entry can be in several categories. What is in a category with Keep off is cleared with the rest of the history. The filter button sets what goes in by itself. Drag to reorder."));
         CategoryList(ShelfSide.Clipboard);
@@ -118,11 +121,16 @@ public partial class SettingsWindow
     private void TransferSettings()
     {
         WatchShelf();
+        // One choice for both buttons: the right button always does what the left does not.
         Group(MusicChoice(Loc.T("拖出文件", "Drag files out"), S.TransferDragOut,
-            [(TransferDragOut.Copy, Loc.T("复制", "Copy")), (TransferDragOut.Move, Loc.T("移动", "Move"))],
-            value => Change(s => s.TransferDragOut = value), width: 216,
-            help: Loc.T("选择“移动”时，文件移到新位置后从列表中移除。聊天软件、浏览器等只接受复制的地方仍会复制。",
-                "With Move, files moved to a new place leave the list. Chat apps, browsers and other places that only take copies still get copies.")));
+                [(TransferDragOut.Copy, Loc.T("左键复制，右键移动", "Left copies, right moves")), (TransferDragOut.Move, Loc.T("左键移动，右键复制", "Left moves, right copies"))],
+                value => Change(s => s.TransferDragOut = value), width: Loc.IsEnglish ? 344 : 292,
+                // The last Chinese sentence is two characters wider than the description's width and would leave them alone on a
+                // line, so it breaks at its comma.
+                help: Loc.T("复制：原文件不动，复制一份到新位置，中转站里同样保留。\n移动：原文件移到新位置，并从中转站里移除。\n聊天软件、浏览器不支持移动，\n拖到这些地方时一律按复制处理。",
+                    "Copy: the original stays where it is, a copy goes to the new place, and the file stays in the file transfer.\nMove: the original goes to the new place and leaves the file transfer.\nChat apps and browsers cannot take a move; files dragged there are always copied.")),
+            Toggle(Loc.T("移动到不支持移动的目标后，从中转站移除", "Remove from transfer after a move to a copy-only target"),
+                S.TransferRemoveAfterCopyDrop, value => Change(s => s.TransferRemoveAfterCopyDrop = value)));
         SectionTitle(Loc.T("分类", "Categories"), help: () => Loc.T("一个文件可以放进多个分类。单击筛选按钮设置自动放入的规则。拖动调整顺序。原文件不受影响。",
             "A file can be in several categories. The filter button sets what goes in by itself. Drag to reorder. The original files are not touched."));
         CategoryList(ShelfSide.Files);

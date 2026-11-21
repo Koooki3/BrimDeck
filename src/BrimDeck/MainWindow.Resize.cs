@@ -94,6 +94,9 @@ public partial class MainWindow
         return new DipRect(origin.X, origin.Y, Island.ActualWidth, Island.ActualHeight);
     }
 
+    // Anchor the side handles to the shared toolbar, independently of each page's body row.
+    private double GripHeaderHeight => _header.Height * _scale;
+
     // Brings the layer up to date with the island; cheap when nothing changed.
     private void UpdateGrips()
     {
@@ -104,7 +107,7 @@ public partial class MainWindow
         var form = PanelResizable && !PanelIgnoresPointer ? ResizeGripLayer.Form.Panel
             : CompactResizable && !ClickThrough && Settings.GripDoubleClick != GripDoubleClick.Off || Resizing && _resizeCompact ? ResizeGripLayer.Form.Compact : ResizeGripLayer.Form.None;
         if (Resizing && !_resizeCompact) form = ResizeGripLayer.Form.Panel;
-        _grips.Show(form, IslandBox(), _header.Row * _scale, PanelRadius, EffectiveStyle == CompactStyle.Line);
+        _grips.Show(form, IslandBox(), GripHeaderHeight, PanelRadius, EffectiveStyle == CompactStyle.Line);
         if (form == ResizeGripLayer.Form.None && _hoverEdge != ResizeEdges.None && !Dragging) SetHoverEdge(ResizeEdges.None);
     }
 
@@ -120,7 +123,7 @@ public partial class MainWindow
         var r = _grips.Rect;
         // The distance to the nearest grip: zero on one, growing inside the panel; nothing above the header.
         double near = 0;
-        if (point.Y >= r.Y + _header.Row * _scale && point.X >= r.X - ResizeGrips.PanelOuter && point.X <= r.Right + ResizeGrips.PanelOuter && point.Y <= r.Bottom + ResizeGrips.PanelOuter)
+        if (point.Y >= r.Y + GripHeaderHeight && point.X >= r.X - ResizeGrips.PanelOuter && point.X <= r.Right + ResizeGrips.PanelOuter && point.Y <= r.Bottom + ResizeGrips.PanelOuter)
         {
             double distance = Math.Max(0, Math.Min(Math.Min(point.X - r.X, r.Right - point.X), r.Bottom - point.Y) - ResizeGrips.PanelInner);
             near = 1 - Math.Clamp(distance / HintReach, 0, 1);
@@ -136,7 +139,7 @@ public partial class MainWindow
         if (!PanelResizable || PresentationSource.FromVisual(Stage) is null) return false;
         var area = ResizeGrips.PanelArea(IslandBox());
         var point = Stage.PointFromScreen(screen);
-        return point.X >= area.X - GripSlack && point.X <= area.Right + GripSlack && point.Y >= area.Y + _header.Row * _scale && point.Y <= area.Bottom + GripSlack;
+        return point.X >= area.X - GripSlack && point.X <= area.Right + GripSlack && point.Y >= area.Y + GripHeaderHeight && point.Y <= area.Bottom + GripSlack;
     }
 
     private void SetHoverEdge(ResizeEdges edge)
@@ -312,7 +315,6 @@ public partial class MainWindow
         _resizeChanged = true;
         DeckPages.SetSize(Settings, _resizePage, width, height);
         _pageWidth = width;
-        if (_resizePage == DeckPage.Usage) _usageWidth = width;
         SetExpanded(true, instant: true);
         // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
         // layout step and stretch in between, so they follow too; the model details and the media page are built again whole,

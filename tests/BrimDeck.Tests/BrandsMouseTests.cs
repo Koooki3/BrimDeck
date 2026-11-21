@@ -30,6 +30,7 @@ static class BrandsMouseTests
         Eweadn(check);
         Aula(check);
         Thunderobot(check);
+        Metapanda(check);
         HyperX(check);
         Finalmouse(check);
         Incott(check);
@@ -215,9 +216,10 @@ static class BrandsMouseTests
 
     private static void Thunderobot(Action<string, bool> check)
     {
-        check("Thunderobot: the ML903 receiver's 0xFFA0 / 2 collection takes the device-info read; another collection or product is not asked",
+        check("Thunderobot: the ML903 receiver's 0xFFA0 / 2 collection takes the device-info read; another collection is not asked, nor one that declares no output report A0",
             Named(Shape(0x369B, 0x0234, 0xFFA0, 0x02, input: 64, output: 64, outputIds: [0xA0]), "Thunderobot", "thunderobot.info")
-            && Untaken(Shape(0x369B, 0x0234, 0xFFA0, 0x01, input: 64, output: 64, outputIds: [0xA0])) && Untaken(Shape(0x369B, 0x0235, 0xFFA0, 0x02, input: 64, output: 64)));
+            && Untaken(Shape(0x369B, 0x0234, 0xFFA0, 0x01, input: 64, output: 64, outputIds: [0xA0])) && Untaken(Shape(0x369B, 0x0234, 0xFFA0, 0x02, input: 24, output: 64, outputIds: [0xA0]))
+            && BrandFamilies.Find(Shape(0x369B, 0x0234, 0xFFA0, 0x02, input: 64, output: 64, outputIds: [0x0B])) is { Family.Brand: "Thunderobot", Ways.Count: 0 });
         var measured = Pad(64, Hex("A1 02 04 01 11 02 11 E3 01 9B 36 02 13 31 32 33 34 35 36 02 25 23 02 26 01"));
         var tail = (byte[])measured.Clone(); tail[40] = 0x01;
         check("Thunderobot: A0 02; vigil-watt's measured answer reads 35 %; an unknown tag, a byte after the fields, a second level and the request are none",
@@ -225,6 +227,55 @@ static class BrandsMouseTests
             && ThunderobotMice.Battery(Pad(64, Hex("A1 02 99 01 02 25 23"))) is null && ThunderobotMice.Battery(tail) is null
             && ThunderobotMice.Battery(Pad(64, Hex("A1 02 25 23 02 25 24"))) is null && ThunderobotMice.Battery(Pad(64, 0xA0, 0x02)) is null
             && ThunderobotMice.Battery(Pad(64, Hex("A1 02 26 01"))) is null);
+    }
+
+    private static void Metapanda(Action<string, bool> check)
+    {
+        var p1 = Shape(0x369B, 0x00B3, 0xFFA0, 0x02, input: 64, output: 64, outputIds: [0xA0]);
+        var other = Shape(0x369B, 0x0235, 0xFFA0, 0x02, input: 64, output: 64, outputIds: [0xA0]);
+        check("Metapanda: the P1 receiver's 0xFFA0 / 2 collection takes the status read under its own name; another usage is not asked, and the ML903 keeps its read",
+            Named(p1, "Metapanda", "metapanda.status") && Named(Shape(0x369B, 0x00B3, 0xA0FF, 0x0200, input: 64, output: 64, outputIds: [0xA0]), "Metapanda", "metapanda.status")
+            && BrandFamilies.Find(p1)!.Value.Family is { Prefix: "nearlink" } p1Family && p1Family.DisplayName(p1) == "Metapanda NearLink Mouse"
+            && Untaken(Shape(0x369B, 0x00B3, 0xFFA0, 0x01, input: 64, output: 64, outputIds: [0xA0])) && Untaken(Shape(0x369B, 0x00B3, 0xFFB1, 0x02, input: 13, output: 13))
+            && Named(Shape(0x369B, 0x0234, 0xFFA0, 0x02, input: 64, output: 64, outputIds: [0xA0]), "Thunderobot", "thunderobot.info")
+            && BrandFamilies.Find(Shape(0x369B, 0x00B3, 0xFFA0, 0x02, input: 64, output: 64, outputIds: [0x0B])) is { Family.Brand: "Metapanda", Ways.Count: 0 }
+            && Untaken(Shape(0x369B, 0x00B3, 0xFFA0, 0x02, input: 8, output: 64, outputIds: [0xA0])) && p1Family.Kind(p1) == DeviceKind.Mouse);
+        check("Metapanda: another 369B product is asked the status read once, then the ML903's, only on a 0xFFA0 / 2 collection that declares output report A0, under its product string and no kind of its own",
+            Named(other, "NearLink receiver", "metapanda.status", "thunderobot.info") && Way(other, "metapanda.status").Attempts == 1 && Way(p1, "metapanda.status").Attempts == 2
+            && BrandFamilies.Find(other)!.Value.Family is { Prefix: "nearlink" } otherFamily && otherFamily.DisplayName(other) is null && otherFamily.Kind(other) is null
+            && Untaken(Shape(0x369B, 0x0235, 0xFFA0, 0x02, input: 64, output: 64, outputIds: [0x0B])) && Untaken(Shape(0x369B, 0x0235, 0xFFA0, 0x01, input: 64, output: 64, outputIds: [0xA0]))
+            && Untaken(Shape(0x369B, 0x0235, 0xFF00, 0x02, input: 64, output: 64, outputIds: [0xA0])) && Untaken(Shape(0x369B, 0x0235, 0xFFA0, 0x02, input: 16, output: 64, outputIds: [0xA0]))
+            && Untaken(Shape(0x369C, 0x00B3, 0xFFA0, 0x02, input: 64, output: 64, outputIds: [0xA0])));
+        var measured = Pad(64, Hex("A1 50 01 03 0D 02 04 25 1F 44 03 03 02 06 04 00 01 1B"));
+        byte[] With(byte level) { var frame = (byte[])measured.Clone(); frame[8] = level; return frame; }
+        var off = Pad(64, 0xA1, 0x50);
+        var stray = Pad(64, 0xA1, 0x50); stray[40] = 0x01;
+        check("Metapanda: A0 50; #305's measured answer reads 31 %, 20 at 8 reads 32 %, 188 is charging without a level and 189 full, the fields in another order read the same",
+            MetapandaMice.Request().SequenceEqual(new byte[] { 0xA0, 0x50 }) && MetapandaMice.Status(measured) == new BatteryRead(31)
+            && MetapandaMice.Status(With(0x20)) == new BatteryRead(32) && MetapandaMice.Status(With(188)) == new BatteryRead(null, Charging: true)
+            && MetapandaMice.Status(With(189)) == new BatteryRead(100) && MetapandaMice.StatusOrAsleep(measured) == new BatteryRead(31)
+            && MetapandaMice.StatusOrAsleep(With(188)) == new BatteryRead(null, Charging: true) && MetapandaMice.StatusOrAsleep(With(189)) == new BatteryRead(100)
+            && MetapandaMice.Status(Pad(64, Hex("A1 50 01 03 0D 03 02 06 04 00 01 1B 02 04 25 1F 44 03"))) == new BatteryRead(31));
+        check("Metapanda: A1 50 and zeros is the P1 asleep and no answer from another product; 0 %, 101 %, 187 and 190 are none",
+            MetapandaMice.StatusOrAsleep(off) == new BatteryRead(null, Asleep: true) && MetapandaMice.Status(off) is null
+            && Way(p1, "metapanda.status").Parse(off) == new BatteryRead(null, Asleep: true) && Way(other, "metapanda.status").Parse(off) is null
+            && Way(other, "metapanda.status").Parse(measured) == new BatteryRead(31)
+            && MetapandaMice.Status(With(0)) is null && MetapandaMice.Status(With(101)) is null && MetapandaMice.Status(With(187)) is null && MetapandaMice.Status(With(190)) is null);
+        check("Metapanda: the request read back, the ML903's answer, a length the fields do not walk to or that runs past the report, a field that does not start with 25, two level fields and none are no reading",
+            MetapandaMice.StatusOrAsleep(Pad(64, 0xA0, 0x50)) is null
+            && MetapandaMice.StatusOrAsleep(Pad(64, Hex("A1 02 04 01 11 02 11 E3 01 9B 36 02 13 31 32 33 34 35 36 02 25 23 02 26 01"))) is null
+            && MetapandaMice.Status(Pad(64, Hex("A1 50 01 03 0C 02 04 25 1F 44 03 03 02 06 04 00 01 1B"))) is null
+            && MetapandaMice.Status(Hex("A1 50 01 03 0D 02 04 25 1F 44 03 03 02 06 04 00 01")) is null
+            && MetapandaMice.Status(Pad(64, Hex("A1 50 01 03 0D 02 04 44 03 25 1F 03 02 06 04 00 01 1B"))) is null
+            && MetapandaMice.Status(Pad(64, Hex("A1 50 01 02 08 02 02 25 1F 02 02 25 20"))) is null
+            && MetapandaMice.Status(Pad(64, Hex("A1 50 01 02 07 03 02 06 04 00 01 1B"))) is null
+            && MetapandaMice.Status(Pad(64, Hex("A1 51 01 03 0D 02 04 25 1F 44 03 03 02 06 04 00 01 1B"))) is null
+            && ThunderobotMice.Battery(measured) is null);
+        check("Metapanda: zeros with a stray byte after them are neither asleep nor a reading; a level field of one byte, a length of 0 before fields, and a report under 9 bytes or empty are none",
+            MetapandaMice.StatusOrAsleep(stray) is null && MetapandaMice.Status(Pad(64, Hex("A1 50 01 01 03 02 01 25"))) is null
+            && MetapandaMice.StatusOrAsleep(Pad(64, Hex("A1 50 01 03 00 02 04 25 1F 44 03"))) is null
+            && MetapandaMice.StatusOrAsleep(Hex("A1 50 01 01 03 02 01 25")) is null && MetapandaMice.StatusOrAsleep(Hex("A1 50 00 00")) is null
+            && MetapandaMice.StatusOrAsleep([]) is null && MetapandaMice.Status([]) is null);
     }
 
     private static void HyperX(Action<string, bool> check)
@@ -274,8 +325,8 @@ static class BrandsMouseTests
             FinalmouseMice.Percent(4400) == 100 && FinalmouseMice.Percent(4380) == 100 && FinalmouseMice.Percent(3880) == 50 && FinalmouseMice.Percent(3810) == 38
             && FinalmouseMice.Percent(2900) == 0 && FinalmouseMice.Percent(0) is null && FinalmouseMice.Percent(0xFFFF) is null);
         check("Finalmouse: HaloBattery's measured answers 0x1064 (78 %) and 0x10B4 (88 %) read coarse; status 80 % reads; FF, 0 V, another command and report 4 are none",
-            FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x64, 0x10)) == new BatteryRead(78, Coarse: true)
-            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x85, 0x02, 0xB4, 0x10)) == new BatteryRead(88, Coarse: true)
+            FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x64, 0x10)) == new BatteryRead(78, Accuracy: BatteryAccuracy.Voltage)
+            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x85, 0x02, 0xB4, 0x10)) == new BatteryRead(88, Accuracy: BatteryAccuracy.Voltage)
             && FinalmouseMice.Status(Pad(64, 0x05, 0x05, 0x26, 0x03, 0x50, 0x2C, 0x10)) == new BatteryRead(80)
             && FinalmouseMice.Status(Pad(64, 0x05, 0x05, 0x26, 0x03, 0xFF, 0x00, 0x00)) is null && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x00, 0x00)) is null
             && FinalmouseMice.Voltage(Pad(64, 0x05, 0x03, 0x12, 0x01, 0x01)) is null && FinalmouseMice.Voltage(Pad(64, 0x04, 0x02, 0x85, 0x00)) is null
@@ -283,7 +334,7 @@ static class BrandsMouseTests
         check("Finalmouse: a frame whose length does not match its payload, and millivolts outside 2500 to 4600 (4700, 2400), are none",
             FinalmouseMice.Voltage(Pad(64, 0x05, 0x05, 0x05, 0x02, 0x64, 0x10)) is null && FinalmouseMice.Status(Pad(64, 0x05, 0x04, 0x26, 0x03, 0x50, 0x2C, 0x10)) is null
             && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x5C, 0x12)) is null && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0x60, 0x09)) is null
-            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0xF8, 0x11)) == new BatteryRead(100, Coarse: true));
+            && FinalmouseMice.Voltage(Pad(64, 0x05, 0x04, 0x05, 0x02, 0xF8, 0x11)) == new BatteryRead(100, Accuracy: BatteryAccuracy.Voltage));
     }
 
     private static void Incott(Action<string, bool> check)

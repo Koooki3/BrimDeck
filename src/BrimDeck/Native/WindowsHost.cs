@@ -48,11 +48,14 @@ public sealed class WindowsHost : IDisposable
     // detected for, and a change of either is a change: two apps can read as the same context with different app rules.
     // backgroundWindows says whether a full-screen window behind the foreground one counts; off, only the foreground is read.
     // alwaysOnTop says whether the panel is a topmost overlay; off, it is an ordinary window (see WatchDesktop).
+    // occupiedArea gives the place a window must overlap for the Occupied context; null while that rule is not in use.
     public WindowsHost(Func<IntPtr> monitor, Func<IntPtr> window, Func<Rect?> island, Func<bool>? forceTopmost = null,
-        Func<bool>? backgroundWindows = null, Func<bool>? alwaysOnTop = null)
+        Func<bool>? backgroundWindows = null, Func<bool>? alwaysOnTop = null, Func<Rect?>? occupiedArea = null,
+        Func<bool>? interactingWithCapturePanel = null)
     {
         _monitor = monitor; _window = window; _island = island; _forceTopmost = forceTopmost; _backgroundWindows = backgroundWindows;
-        _alwaysOnTop = alwaysOnTop;
+        _alwaysOnTop = alwaysOnTop; _occupiedArea = occupiedArea;
+        _interactingWithCapturePanel = interactingWithCapturePanel;
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
         DisplayPower.Changed += DisplayChanged;
@@ -100,6 +103,9 @@ public sealed class WindowsHost : IDisposable
     public bool MirrorsTopmost => _forceTopmost?.Invoke() == true && CanMirror?.Invoke() != false;
     private readonly Func<bool>? _backgroundWindows;
     private readonly Func<bool>? _alwaysOnTop;
+    private readonly Func<Rect?>? _occupiedArea;
+    private readonly Func<bool>? _interactingWithCapturePanel;
+    private (IntPtr Window, uint Pid) _previousForeground;
     // The strip the island actually draws in, in screen physical pixels, as of the last layout; null before the first.
     private readonly Func<Rect?> _island;
     private string _raisedName = "", _raisedPath = "";
@@ -114,8 +120,10 @@ public sealed class WindowsHost : IDisposable
     }
     private void Poll()
     {
+        var taken = _taken;
         var context = DetectNow();
-        var change = ScreenPolicy.WhatChanged(context, _resolvedName, _resolvedPath, Current, _raisedName, _raisedPath);
+        _taken = null;
+        var change = ScreenPolicy.WhatChanged(context, _resolvedName, _resolvedPath, Current, _raisedName, _raisedPath, taken);
         if (change == ScreenPolicy.ForegroundChange.None) { WatchOrder(_window()); return; }
         var previous = (_raisedName, _raisedPath, _raisedKind);
         Current = context; _raisedName = _resolvedName; _raisedPath = _resolvedPath; _raisedKind = _backgroundKind;
@@ -400,8 +408,12 @@ public sealed class WindowsHost : IDisposable
         // foreground app the detection has just read.
         (_resolvedName, _resolvedPath) = context == ScreenContext.BackgroundFullscreen
             ? (_backgroundName, _backgroundPath) : (_appName, _appPath);
+        _taken = context;
         return context;
     }
+    // The context last handed out by DetectNow outside a poll, which the panel then goes by; the next poll compares with it
+    // (ScreenPolicy.WhatChanged) and clears it.
+    private ScreenContext? _taken;
     public static IntPtr PrimaryMonitor() => MonitorFromPoint(new POINT(), 1);
     public static (Rect Bounds, Rect Work, double Scale) PrimaryScreen() => Screen(PrimaryMonitor());
     // Null when the handle no longer names a connected monitor.
@@ -469,23 +481,48 @@ public sealed class WindowsHost : IDisposable
     }
     public static Point Cursor()
     { GetCursorPos(out var point); return new Point(point.X, point.Y); }
+    // Clicking a capturable overlay can leave Windows with no foreground window, or with the overlay itself
+    // in front. While the pointer is on that open panel, keep evaluating the window the user was working in.
+    internal IntPtr ForegroundForRules(IntPtr foreground)
+    {
+        if (foreground != IntPtr.Zero && foreground != _window())
+        {
+            GetWindowThreadProcessId(foreground, out var pid);
+            _previousForeground = (foreground, pid);
+            return foreground;
+        }
+        var (previous, previousPid) = _previousForeground;
+        if (previousPid != 0 && _interactingWithCapturePanel?.Invoke() == true && IsWindowVisible(previous) && !IsIconic(previous))
+        {
+            GetWindowThreadProcessId(previous, out var pid);
+            if (pid == previousPid && (DwmGetWindowAttribute(previous, 14, out int cloaked, sizeof(int)) != 0 || cloaked == 0))
+                return previous;
+        }
+        _previousForeground = default;
+        return foreground;
+    }
+
     // Only a foreground window on the given monitor counts; each panel follows the windows on its own monitor.
     private ScreenContext Detect(IntPtr monitor)
     {
         var foreground = GetForegroundWindow();
         // The panel holding the keyboard is in front: nothing has changed, and the background app read last time is kept.
         if (foreground != IntPtr.Zero && foreground == KeyboardPanel && IsWindowVisible(foreground) && !IsIconic(foreground)) return Current;
+        foreground = ForegroundForRules(foreground);
         _backgroundName = ""; _backgroundPath = ""; _backgroundKind = ScreenContext.Desktop;
         // Nothing but the desktop: a full-screen window elsewhere on this monitor still owns the screen, so the answer is
-        // BackgroundFullscreen rather than Desktop. Looked up once, only where it can matter, and only while the settings ask
-        // for windows behind the foreground one to count.
+        // BackgroundFullscreen rather than Desktop, and a window behind that overlaps the panel's place makes it Occupied.
+        // Looked up once, only where it can matter, and only while the settings ask for windows behind the foreground one to count.
         ScreenContext? background = null;
+        var area = _occupiedArea?.Invoke();
         ScreenContext Desktop()
         {
             if (background is null)
             {
-                var filled = _backgroundWindows?.Invoke() == false ? IntPtr.Zero : BackgroundFilled(monitor, foreground);
-                background = filled == IntPtr.Zero ? ScreenContext.Desktop : ScreenContext.BackgroundFullscreen;
+                bool behind = _backgroundWindows?.Invoke() != false;
+                var filled = behind ? BackgroundFilled(monitor, foreground) : IntPtr.Zero;
+                background = filled != IntPtr.Zero ? ScreenContext.BackgroundFullscreen
+                    : behind && area is { } place && AnyOccupies(place) ? ScreenContext.Occupied : ScreenContext.Desktop;
                 if (filled != IntPtr.Zero)
                 {
                     // The rules answer for the app that fills the screen, so its identity and the way it fills the screen
@@ -512,7 +549,31 @@ public sealed class WindowsHost : IDisposable
         bool caption = (style & 0x00C00000) != 0;
         bool covers = rect.Left <= info.Monitor.Left + 2 && rect.Top <= info.Monitor.Top + 2 && rect.Right >= info.Monitor.Right - 2 && rect.Bottom >= info.Monitor.Bottom - 2;
         var context = ScreenPolicy.Classify(false, covers, caption, IsZoomed(foreground));
-        return context == ScreenContext.Desktop ? Desktop() : context;
+        if (context != ScreenContext.Desktop) return context;
+        return area is { } own && Occupies(foreground, own) ? ScreenContext.Occupied : Desktop();
+    }
+    // Whether a window overlaps the place of the collapsed panel (in screen physical pixels). Windows that let the mouse
+    // through and tool windows are passed over: overlays and floating palettes are not where the user works.
+    private static bool Occupies(IntPtr window, Rect area)
+    {
+        if ((GetWindowLongPtr(window, -20).ToInt64() & 0xA0) != 0) return false; // WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW
+        if (DwmGetWindowAttribute(window, 9, out RECT r, Marshal.SizeOf<RECT>()) != 0 && !GetWindowRect(window, out r)) return false;
+        return r.Right > r.Left && r.Bottom > r.Top
+            && r.Left < area.Right && r.Right > area.Left && r.Top < area.Bottom && r.Bottom > area.Top;
+    }
+    // Whether any shown window of another app, in front or behind, overlaps that place. The desktop, the taskbars, minimised
+    // windows and the ones the window manager keeps cloaked are passed over.
+    private static bool AnyOccupies(Rect area)
+    {
+        for (var window = GetTopWindow(IntPtr.Zero); window != IntPtr.Zero; window = GetWindow(window, 2)) // GW_HWNDNEXT
+        {
+            if (!IsWindowVisible(window) || IsIconic(window) || !Occupies(window, area)) continue;
+            if (DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue;
+            GetWindowThreadProcessId(window, out var pid);
+            if (pid == Environment.ProcessId || IsShell(window)) continue;
+            return true;
+        }
+        return false;
     }
     // A window on this monitor that fills the screen — maximised, or full screen without a frame (browser F11, a
     // borderless game). It counts even while another app holds the foreground: the island is a topmost strip, so the

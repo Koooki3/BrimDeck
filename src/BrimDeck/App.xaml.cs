@@ -43,6 +43,7 @@ public partial class App : Application
     internal LyricsService Lyrics { get; private set; } = null!;
     // The clipboard history and the file transfer, shared by every panel (ShelfService).
     internal ShelfService Shelf { get; private set; } = null!;
+    internal ClipboardSyncService ClipboardSync { get; private set; } = null!;
     // A window being dragged by its title bar or edge; the panels do not open on it (see MainWindow.TrackPointer).
     internal WindowDrags WindowDrags { get; private set; } = null!;
     private readonly HashSet<MainWindow> _presentingMedia = [], _presentingSystemAudio = [];
@@ -127,32 +128,52 @@ public partial class App : Application
         Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
         Usage = new UsageService(new DesktopSources(MiMo), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
+        // A source read in the background (Qoder) that ended after its round asks for another round to show it; the first reading
+        // of a source always does, a later one only while the panel syncs by itself.
+        Usage.BackgroundReadFinished += first => Dispatcher.BeginInvoke(() =>
+        {
+            if (Exiting || Deck is not { } deck) return;
+            _ = first ? deck.RefreshAsync() : deck.RefreshAutomaticallyAsync(queueIfBusy: true);
+        });
         LastSeen = new UsageLastSeen(Path.Combine(folder, UsageLastSeen.FileName));
         WindowDrags = new WindowDrags();
         Shelf = new ShelfService(folder, Dispatcher); Shelf.Apply(Settings);
+        ClipboardSync = new ClipboardSyncService(this, folder); ClipboardSync.Apply();
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
-        Deck.Show();
-        InitializeHotkeys();
-        _dataKey = DataKey();
-        ApplyProfileRules();
-        StartBackgroundUpdates();
+        // From here each step is on its own (Step): the app keeps running after an error at the start, and one step failing
+        // used to skip every later one, which left a panel with no tray icon, no saving and no answer to a second start.
+        Step(Deck.Show);
+        Step(InitializeHotkeys);
+        Step(() => _dataKey = DataKey());
+        Step(ApplyProfileRules);
+        Step(StartBackgroundUpdates);
         // Only for a user who has the monitor page with its power line: the rest never open it.
-        if (Settings.MonitorPage && Settings.ShowsExpanded(ExpandedItem.Power)) PowerWarm.Start(Dispatcher);
-        WarmSettingsWriter();
-        ApplyMemoryMode();
-        DisplayPower.Install(Dispatcher);
-        DisplayPower.Changed += UpdateDeviceDemand;
+        Step(() => { if (Settings.MonitorPage && Settings.ShowsExpanded(ExpandedItem.Power)) PowerWarm.Start(Dispatcher); });
+        Step(WarmSettingsWriter);
+        Step(ApplyMemoryMode);
+        Step(() => { DisplayPower.Install(Dispatcher); DisplayPower.Changed += UpdateDeviceDemand; });
         _save.Tick += (_, _) => FlushSettings();
-        ApplyTray();
-        _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
-        _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(ShowFromRelaunch), null, Timeout.Infinite, false);
+        Step(ApplyTray);
+        Step(() =>
+        {
+            _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
+            _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(ShowFromRelaunch), null, Timeout.Infinite, false);
+        });
         if (e.Args.Contains("--settings")) OpenSettings();
         // An update that kept this version says why on the About page.
         else if (Updates.RestartFailed) OpenUpdateSettings();
     }
     // A resident app must not vanish without a trace. Unhandled errors are appended to crash.log in the data folder;
     // errors on the UI thread are logged and the app keeps running, and unobserved task errors are only logged.
+    // Runs one step of a start (OnStartup, a panel's Loaded) so that its failure is recorded like any other error and what
+    // follows it still runs.
+    internal void Step(Action step)
+    {
+        try { step(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _recordCrash?.Invoke(ex); }
+    }
+    private Action<object>? _recordCrash;
     private void RecordCrashes()
     {
         var log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "crash.log");
@@ -167,6 +188,7 @@ public partial class App : Application
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
+        _recordCrash = Write;
         DispatcherUnhandledException += (_, args) => { Write(args.Exception); args.Handled = !Exiting; };
         AppDomain.CurrentDomain.UnhandledException += (_, args) => Write(args.ExceptionObject);
         TaskScheduler.UnobservedTaskException += (_, args) => { Write(args.Exception); args.SetObserved(); };
@@ -274,6 +296,7 @@ public partial class App : Application
         AssignDisplays();
         // What is read for the panels depends on every panel's profile, so it follows the displays.
         Shelf.Apply(ShelfSettings());
+        ClipboardSync.Apply();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
         UpdateMonitorExtras();
         ApplyToDecks(styles);
@@ -483,7 +506,17 @@ public partial class App : Application
     // The settings' devices page lists what is connected, so it reads the devices while it is open.
     private bool _deviceSettings;
     internal void WatchDevicesForSettings(bool open) { _deviceSettings = open; UpdateDeviceDemand(); }
-    private void DeviceBatteriesChanged() => DevicesChanged?.Invoke();
+    private void DeviceBatteriesChanged()
+    {
+        if (Devices is { } devices && Settings.DeviceChoices.Count > 0 && DeviceLists.Adopt(devices.All, Settings.DeviceChoices) is { } adopted)
+        {
+            Settings.DeviceChoices = adopted;
+            _profileSettings.Clear();
+            DeviceReadSwitches.Use(Settings.DeviceChoices);
+            QueueSave();
+        }
+        DevicesChanged?.Invoke();
+    }
     // Temperatures and drives are read for an open page with them on; also for a collapsed row showing them: the processor's and
     // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
     // it shows those. The processor's and the adapter's temperatures also while the row is only hidden for now, as long as the sampler
@@ -613,6 +646,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); _trim?.Stop(); _release?.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        ClipboardSync?.Dispose();
         if (Shelf is not null) { Shelf.Exit(); Shelf.Dispose(); }
         Media?.Dispose(); _restingMedia?.Dispose(); Monitor?.Dispose(); SensorGuard.Finish(); Devices?.Dispose(); DeviceReadStore.Finish(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }

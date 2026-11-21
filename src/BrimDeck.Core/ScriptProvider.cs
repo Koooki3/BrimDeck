@@ -25,6 +25,8 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
     public DateTimeOffset? RetryAt { get; private set; }
     public IReadOnlyList<string> Logs => _logs.ToArray();
     public int? FailureStatus => _statuses.FirstOrDefault(code => code >= 400) is > 0 and var value ? value : null;
+    // Whether a request was answered with success: a failure after that lies in what the answer says, not in reaching the service.
+    public bool Answered => _statuses.Any(code => code is >= 200 and < 300);
     public string Redact(string text)
     {
         var hidden = Loc.T("[密钥已隐藏]", "[key hidden]");

@@ -23,6 +23,6 @@ public static class XInputBattery
         if (type == Disconnected) return null;
         if (type == Wired) return new(null, Charging: true);
         if (type == Unknown || level > 3) return new(null);
-        return new(level switch { 0 => 10, 1 => 40, 2 => 70, _ => 100 }, Coarse: true);
+        return new(level switch { 0 => 10, 1 => 40, 2 => 70, _ => 100 }, Accuracy: BatteryAccuracy.Steps);
     }
 }

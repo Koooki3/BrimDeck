@@ -43,10 +43,14 @@ namespace BrimDeck.Core;
 //   cable rule, the 3554:FA09 frames), vigil-watt (MIT: Rapoo's collection, the 3554:FA09 model codes), Klegus/mchose-macos
 //   and NaoCoding/ShowMeTheConnection (MIT), G-Helper (GPL, facts only) and wzk112/MchoseHub (no license, ids only).
 
-// One battery reading from a protocol: the percentage (null: the device answered without one), whether it charges, whether
-// the level is coarse (a voltage, or a few steps), and whether the mouse is asleep / not answering (Asleep): the last percent
-// still stands; never invent 0 % for that case.
-public readonly record struct BatteryRead(int? Percent, bool Charging = false, bool Coarse = false, bool Asleep = false);
+// How a percentage was come by: the device's own figure (Exact), a level the device reports in a few steps (Steps), or the
+// battery's voltage put through a discharge curve (Voltage).
+public enum BatteryAccuracy { Exact, Steps, Voltage }
+
+// One battery reading from a protocol: the percentage (null: the device answered without one), whether it charges, how the
+// level was come by, and whether the mouse is asleep / not answering (Asleep): the last percent still stands; never invent
+// 0 % for that case.
+public readonly record struct BatteryRead(int? Percent, bool Charging = false, BatteryAccuracy Accuracy = BatteryAccuracy.Exact, bool Asleep = false);
 
 // Windows reports some vendor pages with their two bytes swapped (a descriptor's 0xFF00 read back as 0x00FF), so a page a
 // source gives without saying it was read on Windows is taken in either order. Vendor: any vendor-defined page (0xFF00 and
@@ -100,7 +104,7 @@ public static class Hidpp
                 percent = (int)Math.Round(lowPercent + (highPercent - lowPercent) * (millivolts - low) / (double)(high - low));
                 break;
             }
-        return new(percent, r[6] == 0x03, Coarse: true);
+        return new(percent, r[6] == 0x03, Accuracy: BatteryAccuracy.Voltage);
     }
 
     // A receiver (Unifying, Bolt, Lightspeed, Nano) holds devices 1 to 6; a device on a cable or its own dongle is 0xFF.
@@ -152,14 +156,14 @@ public static class Hidpp
         int soc = status[0], bits = status[1], state = status[2];
         bool steps = capabilities is { Length: > 1 } && (capabilities[1] & 0x02) == 0;
         if (steps) soc = (bits & 8) != 0 ? 100 : (bits & 4) != 0 ? 50 : (bits & 2) != 0 ? 20 : 5;
-        return new(Devices.Clamp(soc), state is >= 1 and <= 3, steps);
+        return new(Devices.Clamp(soc), state is >= 1 and <= 3, steps ? BatteryAccuracy.Steps : BatteryAccuracy.Exact);
     }
 
     // 0x1000 function 0: the level (0 is no reading), and the status, 1 to 4 charging; 3 full.
     public static BatteryRead Status(byte[] reply) => new(reply[2] == 3 ? 100 : reply[0] > 0 ? Devices.Clamp(reply[0]) : null, reply[2] is >= 1 and <= 4);
 
     // 0x1001 function 0: millivolts big endian, and bit 7 of the flags for external power.
-    public static BatteryRead Voltage(byte[] reply) => new(VoltageToPercent((reply[0] << 8) | reply[1]), (reply[2] & 0x80) != 0, Coarse: true);
+    public static BatteryRead Voltage(byte[] reply) => new(VoltageToPercent((reply[0] << 8) | reply[1]), (reply[2] & 0x80) != 0, Accuracy: BatteryAccuracy.Voltage);
 
     // 0x1F20 (the G headsets) function 0: millivolts big endian and flags, as Solaar reads them: bit 0x01 the measurement is
     // valid (without it the headset is off, which is no reading, not an empty battery), 0x02 charging, 0x07 full. The level
@@ -169,7 +173,7 @@ public static class Hidpp
     {
         int millivolts = (reply[0] << 8) | reply[1], flags = reply[2];
         if ((flags & 0x01) == 0) return null;
-        return new(flags == 0x07 ? 100 : VoltageToPercent(millivolts), (flags & 0x02) != 0, Coarse: true);
+        return new(flags == 0x07 ? 100 : VoltageToPercent(millivolts), (flags & 0x02) != 0, Accuracy: BatteryAccuracy.Voltage);
     }
 
     // HID++ 1.0 register 0x0D (battery mileage): the percentage, and the top two bits of byte 2, 1 charging and 2 full.
@@ -197,7 +201,7 @@ public static class Hidpp
     public static BatteryRead Level(byte[] reply)
     {
         int percent = reply[0] switch { 1 => 5, 2 => 10, 3 => 20, 4 => 35, 5 => 50, 6 => 75, 7 => 100, _ => 0 };
-        return new(reply[1] is 0x22 or 0x26 ? 100 : percent > 0 ? percent : null, reply[1] is 0x21 or 0x22 or 0x24 or 0x25 or 0x26, Coarse: true);
+        return new(reply[1] is 0x22 or 0x26 ? 100 : percent > 0 ? percent : null, reply[1] is 0x21 or 0x22 or 0x24 or 0x25 or 0x26, Accuracy: BatteryAccuracy.Steps);
     }
 
     // 0x0005 function 2: the kind of device.
@@ -231,7 +235,8 @@ public static class Razer
         if (bytes.Length != ReportLength || Checksum(bytes) != bytes[88] || bytes[6] != command.Class || bytes[7] != command.Id) return null;
         return (bytes[0], bytes[9]);
     }
-    public static int Percent(byte raw) => (raw * 100 + 127) / 255;
+    // Scaled as Razer's own web configurator (synapse.razer.com) does: Math.floor(raw / 255 * 100).
+    public static int Percent(byte raw) => raw * 100 / 255;
 
     // The catalog: the transaction id each model answers to, the interface to use, how long to wait between the request and the
     // reply (microseconds), and whether it reports charging. Values from razer-battery-report's catalog (derived from openrazer).
@@ -327,6 +332,13 @@ public static class Dongles
         ([0x03, 0x00, 0x00, 0x00, 0x01, 0x44], "KZZI K75 Lite"),
         // KZZI's web driver's model table (its donglePassword values; names only).
         ([0x03, 0x00, 0x00, 0x00, 0x03, 0xF3], "KZZI I98"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0x68], "KZZI I75"), ([0x03, 0x00, 0x00, 0x00, 0x03, 0xBB], "KZZI Z75"),
+        // LEOBOG's ONE driver 2.0 (leobog.com) and LANGTU's F99/T99 driver ("LANGTU L18"): each model's Psd, the receiver
+        // 3554:FA09 beside it (names only; LEOBOG's wired-only Hi98, 01 22, left out).
+        ([0x03, 0x00, 0x00, 0x00, 0x00, 0xA2], "LEOBOG Hi75"), ([0x03, 0x00, 0x00, 0x00, 0x00, 0x9B], "LEOBOG Hi75 RGB"),
+        ([0x03, 0x00, 0x00, 0x00, 0x00, 0xA3], "LEOBOG Hi75C Pro"), ([0x03, 0x00, 0x00, 0x00, 0x00, 0x65], "LEOBOG A75"),
+        ([0x03, 0x00, 0x00, 0x00, 0x03, 0x3C], "LEOBOG A98"), ([0x03, 0x00, 0x00, 0x00, 0x00, 0xCA], "LEOBOG Hi8"),
+        ([0x03, 0x00, 0x00, 0x00, 0x01, 0x3F], "LEOBOG Hi8SE"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0x8D], "LEOBOG Hi86"),
+        ([0x03, 0x00, 0x00, 0x00, 0x01, 0x21], "LEOBOG Hi98"), ([0x03, 0x00, 0x00, 0x00, 0x01, 0xAD], "LANGTU L18"),
     ];
     private static bool AulaChecked(byte[] r)
     {
@@ -426,7 +438,7 @@ public static class Dongles
     // VAXEE's 3057 ids too and asks this same feature report on 0xFF05 (bbb.pulsar.gg). Not measured by us.
     public static readonly int[] PulsarVaxeeProducts = [0x9604, 0x5602, 0x9605];
     public static byte[] VaxeeRequest(int length) { var frame = new byte[Math.Max(5, length)]; frame[0] = 0x0E; frame[1] = 0xA5; frame[2] = 0x0B; frame[3] = 0x01; frame[4] = 0x01; return frame; }
-    public static BatteryRead? VaxeeBattery(byte[] reply) => reply.Length >= 6 && reply[0] == 0x0E && reply[5] <= 20 ? new(reply[5] * 5, Coarse: true) : null;
+    public static BatteryRead? VaxeeBattery(byte[] reply) => reply.Length >= 6 && reply[0] == 0x0E && reply[5] <= 20 ? new(reply[5] * 5, Accuracy: BatteryAccuracy.Steps) : null;
 
     // Nordic's own receivers (VID 0x1915, usage page 0xFFA0, feature 0x05, 32 bytes): 05 15 00 00 01, then the reply read back
     // ~90 ms later: the percentage at 9, charging at 10, full at 11, the mouse online at 12. 0x1915 is the chip maker's id, which
@@ -549,6 +561,10 @@ public static class Dongles
         (0x3554, 0xF545), (0x3554, 0xF566), (0x3554, 0xF546), (0x3554, 0xFB26), (0x3554, 0xFB23), (0x3554, 0xFB25), (0x260D, 0x1108),
         (0x260D, 0x1114), (0x260D, 0x1115), (0x260D, 0x1135), (0x260D, 0x1156), (0x260D, 0x1163), (0x260D, 0x1219), (0x260D, 0x1227),
         (0x260D, 0x1238), (0x260D, 0x1246), (0x260D, 0x1257), (0x260D, 0x1258), (0x260D, 0x1261), (0x260D, 0x1288), (0x260D, 0x1333),
+        // GravaStar (重力星球): GS HUB (support.gravastar.com) opens its Mercury mice on 0xFF02 / 2 with report 8 and this frame,
+        // and sends M1, M2, X, X Air and X Pro to Compx's Control HUB (controlhub.top/gravastar), whose cfg.json lists receivers
+        // F54B, F575, F548, F577 and cables F576, F549 (F577 is the one GS HUB names no model for; the X Air's, unconfirmed).
+        (0x3554, 0xF54B), (0x3554, 0xF575), (0x3554, 0xF548), (0x3554, 0xF577), (0x3554, 0xF576), (0x3554, 0xF549),
     ];
     private static readonly HashSet<(int, int)> CompxOfficialSet = [.. CompxOfficial];
     public static bool IsCompxOfficial(int vendor, int product) => CompxOfficialSet.Contains((vendor, product));
@@ -560,6 +576,14 @@ public static class Dongles
     // The keyboards among them (the Teevolution Terra Pro's receiver); the rest are mice.
     // F809, Attack Shark's and DELUX's keyboard receiver, is one too.
     public static DeviceKind CompxKind(int vendor, int product) => (vendor, product) is (0x3554, 0xF523) or (0x3554, 0xF809) ? DeviceKind.Keyboard : DeviceKind.Mouse;
+    // The name a Compx device shows when its receiver gives no product string: Attack Shark's pairs by the brand (FB43 and FB44
+    // the R11 Ultra's, as damien1141's attack-shark-r11_ultra-linux lists them), the rest "Compx".
+    public static string CompxName(int vendor, int product) => (vendor, product) switch
+    {
+        (0x3554, 0xFB43 or 0xFB44) => "ATTACK SHARK R11 Ultra",
+        (0x3554, 0xF50E or 0xF516) => "ATTACK SHARK",
+        _ => "Compx",
+    };
     public static bool CompxFramedCollection(int usagePage, int usage, int inputLength, int outputLength)
         => usagePage == 0xFF02 && usage == 0x0002 && inputLength == 17 && outputLength == 17;
     // A reply counts only when its checksum holds and it answers command 0x04: the receivers push 0x03 frames of their own on
@@ -632,6 +656,22 @@ public static class Dongles
         {
             new(WlmouseVendor, 0xA880, "WLmouse Beast X Max", false), new(WlmouseVendor, 0xA887, "WLmouse Beast X", false),
             new(WlmouseVendor, 0xA868, "WLmouse Beast X Mini Pro", false),
+            // WLmouse 1K shared receivers and 8K/wired models (gm.wlmouse.gg/Config/env-models.json; bootloader 0xB8xx IDs excluded).
+            new(WlmouseVendor, 0xA882, "WLmouse", false, BrandOnly: true),
+            new(0x373E, 0x0065, "WLmouse", false, BrandOnly: true),
+            new(WlmouseVendor, 0xA863, "WLmouse Huan", false), new(WlmouseVendor, 0xA864, "WLmouse Huan", true, Receiver: 0xA863),
+            new(WlmouseVendor, 0xA859, "WLmouse Huan M", true, Receiver: 0xA863),
+            new(WlmouseVendor, 0xA866, "WLmouse Beast Miao", false), new(WlmouseVendor, 0xA867, "WLmouse Beast Miao", true, Receiver: 0xA866),
+            new(WlmouseVendor, 0xA869, "WLmouse Beast X Mini Pro", true, Receiver: 0xA868),
+            new(WlmouseVendor, 0xA870, "WLmouse Beast X Pro", false), new(WlmouseVendor, 0xA871, "WLmouse Beast X Pro", true, Receiver: 0xA870),
+            new(WlmouseVendor, 0xA872, "WLmouse Strider", false), new(WlmouseVendor, 0xA873, "WLmouse Strider", true, Receiver: 0xA872),
+            new(WlmouseVendor, 0xA874, "WLmouse Ying", false), new(WlmouseVendor, 0xA875, "WLmouse Ying", true, Receiver: 0xA874),
+            new(WlmouseVendor, 0xA878, "WLmouse Sword X", false), new(WlmouseVendor, 0xA879, "WLmouse Sword X", true, Receiver: 0xA878),
+            new(WlmouseVendor, 0xA881, "WLmouse Beast X Max", true, Receiver: 0xA880),
+            new(WlmouseVendor, 0xA883, "WLmouse Beast X", false), new(WlmouseVendor, 0xA884, "WLmouse Beast X", true, Receiver: 0xA883),
+            new(WlmouseVendor, 0xA885, "WLmouse Beast X Mini", false), new(WlmouseVendor, 0xA886, "WLmouse Beast X Mini", true, Receiver: 0xA885),
+            new(WlmouseVendor, 0xA860, "WLmouse Beast G", false), new(WlmouseVendor, 0xA861, "WLmouse Beast G", true, Receiver: 0xA860),
+            new(WlmouseVendor, 0xA856, "WLmouse Beast X V2", false), new(WlmouseVendor, 0xA857, "WLmouse Beast X V2", true, Receiver: 0xA856),
             new(0x373E, 0x001E, "LAMZU Maya X", false, Interface: 2), new(0x373E, 0x001C, "LAMZU Maya X", true, Interface: 2, Receiver: 0x001E),
             new(0x37B0, 0x0010, "LAMZU Inca", false, Interface: 2), new(0x37B0, 0x0009, "LAMZU Inca", true, Interface: 2, Receiver: 0x0010),
             new(0x2023, 0xF013, "MCHOSE A5 Pro Max", false, Clamp: true), new(0x2023, 0xF015, "MCHOSE A5 Pro Max", false, Clamp: true),
@@ -676,9 +716,15 @@ public static class Dongles
         }
         return models;
     }
-    public static F83Model? F83Find(int vendor, int product) => F83Models.FirstOrDefault(model => model.Vendor == vendor && model.Product == product);
-    public static bool F83Collection(F83Model model, int iface, int usagePage, int featureLength)
+    public static F83Model? F83Find(int vendor, int product) => F83Models.FirstOrDefault(model => model.Vendor == vendor && model.Product == product)
+        ?? (vendor == WlmouseVendor && product is >= 0xA800 and <= 0xA8FF ? new(WlmouseVendor, product, "WLmouse", false, BrandOnly: true) : null);
+    public static bool IsWlmouseF83(F83Model model) => model.Vendor == WlmouseVendor || (model.Vendor == 0x373E && model.Product == 0x0065);
+    public static bool F83Collection(F83Model model, int iface, int usagePage, int featureLength, string productName = "")
         => model.Vendor == GwolvesVendor ? featureLength == 65
+        // Reject WLmouse's 512-byte LCD feature collection (featureLength == 513) and DFU/Boot modes.
+        : IsWlmouseF83(model)
+            ? usagePage == 0xFFFF && featureLength == 65
+              && !productName.Contains("DFU", StringComparison.OrdinalIgnoreCase) && !productName.Contains("Boot", StringComparison.OrdinalIgnoreCase)
         : usagePage == 0xFFFF && featureLength >= 65 && (model.Interface < 0 || iface == model.Interface);
 
     // The request as a feature report: report id 0, then the 64 bytes.
@@ -704,9 +750,19 @@ public static class Dongles
             if (marker == 0xA2 && (model.Strict || model.Exchange == F83Exchange.Old)) return new(null, Asleep: true);
             if (marker == 0xA2 && model.Clamp) continue;
             int charging = model.Exchange == F83Exchange.Old ? reply[at + 4] : reply[at + 6], level = model.Exchange == F83Exchange.Old ? reply[at + 5] : reply[at + 7];
+            if (marker == 0xA2 && level == 0 && charging == 0) continue;
             if (level > 100 && !model.Clamp) return null;
             return new(Math.Min(level, 100), charging != 0);
         }
+        return null;
+    }
+
+    // WLmouse mice/receivers also push periodic 03 00 <percent> <charging> input reports; used read-only when 0x83 fails.
+    public static BatteryRead? WlmouseHeartbeat(byte[] reply)
+    {
+        foreach (int at in new[] { 0, 1 })
+            if (reply.Length >= at + 4 && reply[at] == 0x03 && reply[at + 1] == 0x00 && reply[at + 2] is > 0 and <= 100 && reply[at + 3] <= 1)
+                return new(reply[at + 2], reply[at + 3] != 0);
         return null;
     }
 
@@ -787,7 +843,7 @@ public static class Dongles
     // outputIds, featureIds: the report ids the collection declares; null where they are not known (Find, which only decides
     // whether the collection is MCHOSE's to read), and then the shape alone decides.
     public static IReadOnlyList<MchoseRead> MchoseReads(int product, string name, int usagePage, int usage, int featureLength, int outputLength,
-        IReadOnlySet<byte>? outputIds = null, IReadOnlySet<byte>? featureIds = null)
+        IReadOnlySet<byte>? outputIds = null, IReadOnlySet<byte>? featureIds = null, IReadOnlySet<byte>? inputIds = null)
     {
         // The keyboards whose read the web driver gives get that read alone: their other vendor collections are for firmware
         // updates (the cables' 0xFF00) or unknown, and are sent nothing. The G98 V3 and K87 V3 keep the status read they were
@@ -805,10 +861,16 @@ public static class Dongles
             _ => []
         };
         bool Output(byte id) => outputIds is null || outputIds.Contains(id);
+        // Report 0x55 listed as an input report alone, no output report listed: the MCHOSE V9 PRO's C-Media receiver is listed so
+        // and still takes 55 65 01 as output (BrandWay.Undeclared); M HUB's other headsets may be too. Not measured on them. Only
+        // the headsets' reads (Audio, and Status on a product known to be audio): mice and keyboards keep to the listed report.
+        bool unlisted55 = outputIds is { Count: 0 } && inputIds is not null && inputIds.Contains(0x55);
+        bool audio = MchoseKind(product, name) is DeviceKind.Headphones or DeviceKind.Earbuds or DeviceKind.Speaker;
         return [.. order.Where(read => read switch
         {
             MchoseRead.Realtek => usagePage == 0xFF01 && featureLength >= 21 && (featureIds is null || featureIds.Contains(0x11) || featureIds.Contains(0x12)),
-            MchoseRead.Status or MchoseRead.Audio => usagePage >= 0xFF00 && outputLength >= 64 && Output(0x55),
+            MchoseRead.Audio => usagePage >= 0xFF00 && outputLength >= 64 && (Output(0x55) || unlisted55),
+            MchoseRead.Status => usagePage >= 0xFF00 && outputLength >= 64 && (Output(0x55) || unlisted55 && audio),
             MchoseRead.Frame4D => usagePage is 0xFF01 or 0xFF0B && usage != 0x0010 && Output(0x4D),
             MchoseRead.Gmouse => usagePage == 0xFF01 && usage == 0x0010 && outputLength >= 65 && Output(0x00),
             MchoseRead.Config => MchoseConfigProducts.Contains(product) && usagePage == 0x0001 && usage == 0x0000 && outputLength >= 65 && Output(0x00),
@@ -1003,15 +1065,24 @@ public static class Dongles
             ? new(reply[8], kind == StatusBlock.Cherry ? (reply[9] & 0x01) != 0 : reply[9] == 1) : null;
 
     // Rapoo's first generation (VT3 PRO: 24AE:1231 its receiver, 4431 on its cable), after mousectl's rapoo_vt3pro driver
-    // (MIT; measured on a 1231 receiver): output report 0xBA, 32 bytes [link (A5 the receiver, FF the cable), AA (the battery
-    // query; A4 and A5 there read and write the mouse's memory, never sent here), length 0, address 0 (4 bytes)], answered
-    // through the input report 0xBA got back: [status, state (1 discharging, 2 charging), percent]. The status reads busy (02)
-    // once the receiver has taken the request and 01 with the answer; a 01 before any busy is still the last answer. A
-    // block answer has 0 where the state goes, so a stale one is told apart. Not tried by us on a mouse.
+    // (MIT; measured on a 1231 receiver): output report 0xBA [link (A5 the receiver, FF the cable), AA (the battery query; A4
+    // and A5 there read and write the mouse's memory, never sent here), length 0, address 0 (4 bytes)], zeros to the report's
+    // length, answered through the input report 0xBA got back: [status, state (1 discharging, 2 charging), percent]. The
+    // status reads busy (02) once the receiver has taken the request and 01 with the answer; a 01 before any busy is still the
+    // last answer. A block answer has 0 where the state goes, so a stale one is told apart. Not tried by us on a mouse.
     public const int RapooVendor = 0x24AE;
     public static readonly int[] RapooGen1Products = [0x1231, 0x4431];
     public const byte RapooGen1Report = 0xBA;
-    public static byte[] RapooGen1Request(bool cable) { var frame = new byte[33]; frame[0] = RapooGen1Report; frame[1] = (byte)(cable ? 0xFF : 0xA5); frame[2] = 0xAA; return frame; }
+    public static byte[] RapooGen1Request(bool cable) { var frame = new byte[8]; frame[0] = RapooGen1Report; frame[1] = (byte)(cable ? 0xFF : 0xA5); frame[2] = 0xAA; return frame; }
+    // The same query on the rest of the brand, as one rule rather than a list of models: any other product of Rapoo's vendor id
+    // on a vendor collection that declares output report 0xBA (where the ids are not known, usage 0x0E), long enough for the
+    // request. Not the first generation (above) and not the products only listened to (Pushes). MouseDock reads its office
+    // receivers this way (186C, 1870 to 1876: usage page 0xFF00, usage 0x0E, 32-byte reports). Measured on a 1870 receiver:
+    // the input report is given once per request, the answer (01 01 2C, 44 %) when got 50 ms to 1 s after it, busy when got
+    // within about 30 ms, and every later get fails until the request is sent again.
+    public static bool RapooQueryCollection(int product, int usagePage, int usage, int outputLength, IReadOnlySet<byte>? outputIds)
+        => !RapooGen1Products.Contains(product) && !Pushes.RapooProducts.Contains(product) && !Pushes.RapooKeyboards.Contains(product)
+        && UsagePages.Vendor(usagePage) && outputLength >= 8 && (outputIds is null ? usage == 0x000E : outputIds.Contains(RapooGen1Report));
     // The status of an input report got back: true OK, false busy, null another report.
     public static bool? RapooGen1Status(byte[] reply)
     {
@@ -1039,20 +1110,72 @@ public static class Dongles
         Pair(0x1E71, 0x2101, 0x2129);
         foreach (var (receiver, cable) in Asus.Pairs) Pair(Asus.Vendor, receiver, cable);
         foreach (var (receiver, cable) in SteelSeriesMice.Pairs) Pair(Headsets.SteelSeries, receiver, cable);
+        foreach (var cable in F83Models.Where(model => model.Vendor == WlmouseVendor && model.Cable))
+        {
+            Pair(WlmouseVendor, 0xA882, cable.Product);
+            twins.Add((Devices.Hardware(0x373E, 0x0065), Devices.Hardware(WlmouseVendor, cable.Product)));
+        }
+        Pair(WlmouseVendor, 0xA887, 0xA884);
         return [.. twins.Distinct()];
     }
-    // A dongle and the same headset on its cable that both answer while both are plugged in: the dongle's entry is left out
-    // whenever the cable read the headset, asleep or not (the Audeze Maxwell's dongles and its cable, which HaloBattery's
-    // audeze.py merges the same way, the cable winning).
-    public static readonly (string Receiver, string Cable)[] CableWins =
-    [
-        (Devices.Hardware(AirohaRace.Audeze, AirohaRace.Maxwell), Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellCable)),
-        (Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellXbox), Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellCable)),
-    ];
+    // A dongle and the same headset/device on its cable that both answer while both are plugged in: the dongle's entry is left
+    // out whenever the cable read it, asleep or not (Audeze Maxwell, WOBKEY/PMO, Razer headsets, NuPhy and WLmouse).
+    public static readonly (string Receiver, string Cable)[] CableWins = BuildCableWins();
+    private static (string, string)[] BuildCableWins()
+    {
+        var pairs = new List<(string, string)>
+        {
+            (Devices.Hardware(AirohaRace.Audeze, AirohaRace.Maxwell), Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellCable)),
+            (Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellXbox), Devices.Hardware(AirohaRace.Audeze, AirohaRace.MaxwellCable)),
+            (Devices.Hardware(WobRainy.Vendor, WobRainy.Receiver), Devices.Hardware(WobRainy.Vendor, WobRainy.Cable)),
+            (Devices.Hardware(WobRainy.Vendor, 0x3091), Devices.Hardware(WobRainy.Vendor, 0x3098)),
+            (Devices.Hardware(WobRainy.Vendor, WobRainy.RdrReceiver), Devices.Hardware(WobRainy.Vendor, 0x3004)),
+            (Devices.Hardware(WobRainy.Vendor, WobRainy.RdrReceiver), Devices.Hardware(WobRainy.Vendor, 0x3009)),
+            (Devices.Hardware(WobRainy.Vendor, WobRainy.RdrReceiver), Devices.Hardware(WobRainy.Vendor, 0x3025)),
+            (Devices.Hardware(RazerBlackSharkV3.Vendor, RazerBlackSharkV3.Dongle), Devices.Hardware(RazerBlackSharkV3.Vendor, RazerBlackSharkV3.Cable)),
+            (Devices.Hardware(RazerBlackSharkV3.Vendor, RazerBlackSharkV3.ProDongle), Devices.Hardware(RazerBlackSharkV3.Vendor, RazerBlackSharkV3.ProCable)),
+            (Devices.Hardware(RazerHeadsets.Vendor, 0x0565), Devices.Hardware(RazerHeadsets.Vendor, 0x056E)),
+            (Devices.Hardware(RazerHeadsets.Vendor, 0x0568), Devices.Hardware(RazerHeadsets.Vendor, 0x0567)),
+            (Devices.Hardware(RazerHeadsets.Vendor, 0x0588), Devices.Hardware(RazerHeadsets.Vendor, 0x0587)),
+            (Devices.Hardware(NuPhy.Vendor, 0x8F01), Devices.Hardware(NuPhy.Vendor, 0xA011)),
+        };
+        foreach (var product in NuPhy.KnownNames.Keys)
+            if (product is >= 0x1026 and <= 0x10FF)
+                pairs.Add((Devices.Hardware(NuPhy.Vendor, NuPhy.U1Dongle), Devices.Hardware(NuPhy.Vendor, product)));
+        foreach (var cable in F83Models.Where(model => model.Vendor == WlmouseVendor && model.Cable))
+        {
+            pairs.Add((Devices.Hardware(WlmouseVendor, 0xA882), Devices.Hardware(WlmouseVendor, cable.Product)));
+            pairs.Add((Devices.Hardware(0x373E, 0x0065), Devices.Hardware(WlmouseVendor, cable.Product)));
+            if (cable.Receiver >= 0) pairs.Add((Devices.Hardware(WlmouseVendor, cable.Receiver), Devices.Hardware(WlmouseVendor, cable.Product)));
+        }
+        pairs.Add((Devices.Hardware(WlmouseVendor, 0xA887), Devices.Hardware(WlmouseVendor, 0xA884)));
+        return [.. pairs.Distinct()];
+    }
+    private static bool TryParseHardware(string hardware, out int vendor, out int product)
+    {
+        vendor = 0; product = 0;
+        return hardware.Length == 9 && hardware[4] == ':'
+            && int.TryParse(hardware.AsSpan(0, 4), System.Globalization.NumberStyles.HexNumber, null, out vendor)
+            && int.TryParse(hardware.AsSpan(5, 4), System.Globalization.NumberStyles.HexNumber, null, out product);
+    }
     public static bool Shadowed(DeviceBattery device, IEnumerable<DeviceBattery> devices)
-        => device.Hardware is { } hardware
-        && (device.Asleep && Twins.Any(twin => twin.Receiver == hardware && devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware == twin.Cable))
-            || CableWins.Any(twin => twin.Receiver == hardware && devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware == twin.Cable)));
+    {
+        if (device.Hardware is not { } hardware) return false;
+        if (device.Asleep && Twins.Any(twin => twin.Receiver == hardware && devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware == twin.Cable)))
+            return true;
+        if (CableWins.Any(twin => twin.Receiver == hardware && devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware == twin.Cable)))
+            return true;
+        if (hardware == Devices.Hardware(WlmouseVendor, 0xA882) || hardware == Devices.Hardware(0x373E, 0x0065))
+            return devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware is { } h
+                && TryParseHardware(h, out int v, out int p) && v == WlmouseVendor && p is >= 0xA800 and <= 0xA8FF
+                && (other.Charging || F83Models.Any(m => m.Vendor == WlmouseVendor && m.Product == p && m.Cable))
+                && !F83Models.Any(m => m.Vendor == WlmouseVendor && m.Product == p && !m.Cable));
+        if (hardware == Devices.Hardware(NuPhy.Vendor, NuPhy.U1Dongle))
+            return devices.Any(other => !other.Asleep && other.Percent is not null && other.Hardware is { } h
+                && TryParseHardware(h, out int v, out int p) && v == NuPhy.Vendor
+                && p is (>= 0x1026 and <= 0x10FF) or 0xA011 && !NuPhy.IsExcluded(p));
+        return false;
+    }
 
     // Inphic IN9 (248A:5B2E cable, 5B2F receiver; on 2.4 GHz vendor 0x249A, whose product is not fixed; feature 0x0C, 33
     // bytes): [0x0C, 0x01, command, 0, sequence, payload...]; 0xF0 the handshake (payload 01 01 FF), 0x20 the battery, the two
@@ -1198,7 +1321,7 @@ public static class Dongles
     public enum Protocol
     {
         BitMouse, Compx, Vgn, Endgame, Vaxee, Inphic, Mchose, Ajazz, CompxFramed, F83, Nordic, MchoseRealtek, Gmouse, Lingbao, Nzxt, Cherry, Hecate,
-        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial
+        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial, RapooQuery
     }
 
     // The Compx receivers atkctl documents (the ATK A9 Ultra), by vendor, product and usage page.
@@ -1225,7 +1348,7 @@ public static class Dongles
         if (IsCompxFramed(vendor, product)) return CompxFramedCollection(usagePage, usage, inputLength, outputLength) ? Protocol.CompxFramed : null;
         if (IsCompxOfficial(vendor, product) && CompxFramedCollection(usagePage, usage, inputLength, outputLength)) return Protocol.CompxFramed;
         if (F83Find(vendor, product) is { } f83)
-            return F83Collection(f83, iface, usagePage, featureLength) ? Protocol.F83
+            return F83Collection(f83, iface, usagePage, featureLength, productName) ? Protocol.F83
                 : CompxBesideF83.Contains((vendor, product)) && CompxFramedCollection(usagePage, usage, inputLength, outputLength) ? Protocol.CompxFramed : null;
         if (Gmouse.Contains((vendor, product)) || GmouseNamed(vendor, product, productName) || (vendor, product) == N87Cable)
             return usagePage == 0xFF01 && usage == 0x0010
@@ -1248,6 +1371,7 @@ public static class Dongles
         if (Asus.Find(vendor, product) is { } asus) return Asus.Collection(asus, iface, collection, usagePage, outputLength) ? Protocol.Asus : null;
         if (SteelSeriesMice.Find(vendor, product) is { } mouse) return SteelSeriesMice.Collection(mouse, iface, usagePage, outputLength) ? Protocol.SteelSeries : null;
         if (vendor == RapooVendor && RapooGen1Products.Contains(product)) return usagePage >= 0xFF00 && outputLength >= 33 ? Protocol.RapooGen1 : null;
+        if (vendor == RapooVendor && RapooQueryCollection(product, usagePage, usage, outputLength, outputIds)) return Protocol.RapooQuery;
         if (vendor == AtkVendor && usagePage == 0xFF05) return Protocol.BitMouse;
         // ATK's N9 Pro and N9 Ultra: their consumer collection (the one ATK HUB lists them by) only finds the device; nothing is
         // sent to it, the battery being read on the device's serial port (AtkHeadsets.SerialRequest).
@@ -1357,7 +1481,7 @@ public static class Asus
         }
         return model.Family switch
         {
-            Family.Mouse when model.Steps => raw <= 4 ? new BatteryRead(raw * 25, r[10] != 0, Coarse: true) : Refused,
+            Family.Mouse when model.Steps => raw <= 4 ? new BatteryRead(raw * 25, r[10] != 0, Accuracy: BatteryAccuracy.Steps) : Refused,
             Family.Mouse => raw <= 100 ? new BatteryRead(raw, r[10] != 0) : Refused,
             Family.Keyboard => raw <= 100 ? new BatteryRead(raw, r[9] == 1) : Refused,
             _ => raw <= 100 ? new BatteryRead(raw) : Refused
@@ -1462,7 +1586,7 @@ public static class SteelSeriesMice
         int value = r[m + 1] & 0x7F;
         if (value == 0) return new(null, Asleep: true);
         bool charging = (r[m + 1] & 0x80) != 0;
-        return value > 21 ? new(Math.Min(value, 100), charging) : new((value - 1) * 5, charging, Coarse: true);
+        return value > 21 ? new(Math.Min(value, 100), charging) : new((value - 1) * 5, charging, Accuracy: BatteryAccuracy.Steps);
     }
 }
 
@@ -1471,8 +1595,15 @@ public static class SteelSeriesMice
 // collections open all the time (Native/PushEvents.cs) and each report is applied to the device's last state (Apply): a report
 // that carries only the charging state or the link keeps the level that came before.
 // - Beken receivers (Attack Shark 1D57:FA60 and the X6's FA62, interface 2, usage page 0x000A): 03 <device id> 40 <state>
-//   <percent>, about every 2 s; the device id names the mouse, the X6 (0x85) counts 1 to 10; state 02, 03 or 80 is charging
-//   on its dock (incconutwo's and misaka310's mouse-battery-tray; misaka310 verified the frame on an X1).
+//   <level>, about every 2 s (the V6 sends 41 for 40: 03 24 41 01 64, krisgfx9's Wireless-Device-Battery-Monitor #260; the
+//   vendor's web driver takes both); state 02, 03 or 80 is charging on its dock (incconutwo's and misaka310's
+//   mouse-battery-tray; misaka310 verified the frame on an X1). The device id names the mouse as the vendor's web driver's
+//   model table lists it (store.mouseNum, which JSjuan/LinShark's protocol.py copies; GPL, facts only: the ids and names).
+//   0x10 is the R1 there, but X3s send it too (measured here: 03 10 40 01 09 from an X3 its own X3 driver shows at 90 %;
+//   OpenMouse mouse-protocol #297), so it is named for both. The level of 0x10 and of the X6 (0x85) counts 1 to 10 (the R1
+//   at 90 % in HaloBattery #69; OpenMouse reads both in tenths); the others measured send a percent (X1, X11, the X3 Max
+//   0x4E in HaloBattery #228, the V3 Pro 0xE5, the V6), and the rest are taken as a percent too. The table's other brands
+//   on the same receiver (Inphic, DELUX) are named for theirs.
 // - DELUX M900 Pro (1D57:FA65, usage page 0x000A): 03 30 40 <state> <percent>, 03 charging, 02 full; Inphic ZHEN on the same
 //   receiver id (usage page 0xFF00 usage 1): 03 76 41 <state> <percent>, 03 charging. As vigil-watt documents both.
 // - Rapoo's second generation (24AE, usage page 0xFF00 usage 2, input report 0x07 of 19 bytes, every ~3 s while the mouse
@@ -1530,9 +1661,16 @@ public static class Pushes
 
     private static readonly Dictionary<int, string> BekenNames = new()
     {
-        [0xB1] = "ATTACK SHARK X1", [0x55] = "ATTACK SHARK X11", [0x10] = "ATTACK SHARK R1", [0x85] = "ATTACK SHARK X6", [0x4D] = "ATTACK SHARK X3",
-        [0xBE] = "ATTACK SHARK X11 Pro", [0x07] = "ATTACK SHARK X11 SE",
+        [0x01] = "ATTACK SHARK X3 Pro", [0x02] = "ATTACK SHARK X8 SE", [0x04] = "ATTACK SHARK G3", [0x06] = "ATTACK SHARK X8 Plus",
+        [0x07] = "ATTACK SHARK X11 SE", [0x08] = "ATTACK SHARK X8 Pro", [0x0E] = "ATTACK SHARK G3 Pro", [0x10] = "ATTACK SHARK X3 / R1",
+        [0x24] = "ATTACK SHARK V6", [0x4D] = "ATTACK SHARK X3", [0x4E] = "ATTACK SHARK X3 Max", [0x55] = "ATTACK SHARK X11",
+        [0x85] = "ATTACK SHARK X6", [0xB1] = "ATTACK SHARK X1", [0xBE] = "ATTACK SHARK X11 Pro", [0xE5] = "ATTACK SHARK V3 Pro",
+        [0xEA] = "ATTACK SHARK V3",
+        [0x30] = "DELUX M900 Pro", [0x41] = "Inphic IN6", [0x42] = "Inphic IN9", [0x90] = "Inphic IN9 Ultra", [0x92] = "Inphic IN6 SE",
+        [0x93] = "Inphic IN10", [0x99] = "Inphic INX",
     };
+    // The device ids whose level counts 1 to 10.
+    private static readonly HashSet<int> BekenTenths = [0x10, 0x85];
 
     // A report applied to the device's last state (null before anything was heard): the new state, or null when the report says
     // nothing about the battery. Asleep: the device says it is off, or its radio link is down; its level stands.
@@ -1540,9 +1678,10 @@ public static class Pushes
     {
         switch (kind)
         {
-            case Kind.Beken when r.Length >= 5 && r[0] == 0x03 && r[2] == 0x40:
-                int level = r[1] == 0x85 && r[4] is > 0 and <= 10 ? r[4] * 10 : r[4];
-                return level <= 100 ? new(level, r[3] is 0x02 or 0x03 or 0x80, Coarse: r[1] == 0x85) : null;
+            case Kind.Beken when r.Length >= 5 && r[0] == 0x03 && r[2] is 0x40 or 0x41:
+                bool tenths = BekenTenths.Contains(r[1]) && r[4] is > 0 and <= 10;
+                int level = tenths ? r[4] * 10 : r[4];
+                return level <= 100 ? new(level, r[3] is 0x02 or 0x03 or 0x80, Accuracy: tenths ? BatteryAccuracy.Steps : BatteryAccuracy.Exact) : null;
             case Kind.Delux when r.Length >= 5 && r[0] == 0x03 && r[1] == 0x30 && r[2] == 0x40 && r[4] <= 100:
                 return new(r[3] == 0x02 ? 100 : r[4], r[3] == 0x03);
             case Kind.InphicZhen when r.Length >= 5 && r[0] == 0x03 && r[1] == 0x76 && r[2] == 0x41 && r[4] <= 100:
@@ -1565,8 +1704,8 @@ public static class Pushes
                 return last is { } heard ? heard with { Asleep = r[1] == 0 } : null;
             case Kind.Pulse3D when r.Length >= 5 && r[0] == 0xB0:
                 if ((r[4] & 0x08) == 0) return (last ?? new(null)) with { Charging = false, Asleep = true };
-                if (r[3] == 0x80) return (last ?? new(null, Coarse: true)) with { Charging = true, Asleep = false };
-                return r[3] <= 100 ? new(r[3], Coarse: true) : null;
+                if (r[3] == 0x80) return (last ?? new(null, Accuracy: BatteryAccuracy.Steps)) with { Charging = true, Asleep = false };
+                return r[3] <= 100 ? new(r[3], Accuracy: BatteryAccuracy.Steps) : null;
             case Kind.CloudFlight2 when r.Length >= 4 && r[0] == 0xFB && r[1] == 0x13 && r[2] == 0x00 && r[3] <= 100:
                 return (last ?? new(null)) with { Percent = r[3], Asleep = false };
             case Kind.CloudFlight2 when r.Length >= 3 && r[0] == 0xFB && r[1] == 0x09 && r[2] is 0 or 1:
@@ -1783,13 +1922,13 @@ public static class Headsets
         Kind.Arctis7 when r.Length >= 3 && r[0] == 0x06 && r[2] <= 100 => new(r[2]),
         Kind.Arctis9 when r.Length >= 5 && r[3] is >= 0x64 and <= 0x9A => new(Devices.Clamp((int)Math.Round((r[3] - 0x64) * 100.0 / (0x9A - 0x64))), r[4] == 0x01),
         Kind.Nova7Percent when r.Length >= 4 && r[3] != 0 && r[2] <= 100 => new(r[2], r[3] is 0x01 or 0x02),
-        Kind.Nova7Steps when r.Length >= 4 && r[3] != 0 && r[2] <= 4 => new(r[2] * 25, r[3] is 0x01 or 0x02, Coarse: true),
-        Kind.NovaPro when r.Length >= 16 && r[0] == 0x06 && r[15] != 0x01 && r[6] <= 8 => new((int)Math.Round(r[6] * 12.5), r[15] == 0x02, Coarse: true),
+        Kind.Nova7Steps when r.Length >= 4 && r[3] != 0 && r[2] <= 4 => new(r[2] * 25, r[3] is 0x01 or 0x02, Accuracy: BatteryAccuracy.Steps),
+        Kind.NovaPro when r.Length >= 16 && r[0] == 0x06 && r[15] != 0x01 && r[6] <= 8 => new((int)Math.Round(r[6] * 12.5), r[15] == 0x02, Accuracy: BatteryAccuracy.Steps),
         Kind.CloudAlpha when r.Length >= 4 && r[0] == 0x21 && r[1] == 0xBB && r[2] == 0x0B && r[3] <= 100 => new(r[3]),
         Kind.CloudII when r.Length >= 8 && r[0] == 0x06 && r[1] == 0xFF && r[2] == 0xBB && r[3] == 0x02 && r[7] <= 100 => new(r[7]),
         // Millivolts; above 4107 the headset is on its cable. The level is a line between 3648 and 3975 mV.
         Kind.CloudFlight when r.Length >= 5 && r[0] == 0x21 && r[1] == 0xFF && r[2] == 0x05 && ((r[3] << 8) | r[4]) is var mv && mv > 3000
-            => new(mv > 4107 ? null : Devices.Clamp((int)Math.Round((mv - 3648) * 100.0 / (3975 - 3648))), mv > 4107, Coarse: true),
+            => new(mv > 4107 ? null : Devices.Clamp((int)Math.Round((mv - 3648) * 100.0 / (3975 - 3648))), mv > 4107, Accuracy: BatteryAccuracy.Voltage),
         // 66 89 (or its response id 0D): the percent at 4, unless 2 and 3 are both 0 (no reading yet).
         Kind.CloudIII when r.Length >= 5 && r[0] == 0x66 && r[1] is 0x89 or 0x0D && (r[2] != 0 || r[3] != 0) && r[4] <= 100 => new(r[4]),
         // 0C .. .. .. .. 06 <percent> (0xFF: no value), or the headset's own notice 0D with 1 at 4 and the percent at 5.
@@ -1920,7 +2059,7 @@ public static class AppleAdvert
 
     // A single-unit model's one level, and charging (bit 0x01); null for earbuds, another advertisement, or no reading.
     public static BatteryRead? Single(byte[] data)
-        => IsProximity(data) && IsSingle(data) && Level(data[6] & 0x0F) is { } level ? new(level, (data[7] & 0x10) != 0, Coarse: true) : null;
+        => IsProximity(data) && IsSingle(data) && Level(data[6] & 0x0F) is { } level ? new(level, (data[7] & 0x10) != 0, Accuracy: BatteryAccuracy.Steps) : null;
 
     // The parts' levels: left, right and the case; empty for a single-unit model (Single), null when this is not a proximity
     // pairing advertisement.

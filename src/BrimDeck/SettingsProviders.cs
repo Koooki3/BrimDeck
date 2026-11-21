@@ -103,6 +103,7 @@ public sealed partial class SettingsWindow
         var detail = new StackPanel { Margin = new Thickness(0, 0, 0, 12) }; Grid.SetIsSharedSizeScope(detail, true);
         Grid.SetRow(detail, 1); Grid.SetColumnSpan(detail, 9);
         if (SourceDetails(entry) is { } source) { source.Margin = new Thickness(0); detail.Children.Add(source); }
+        if (entry.UsageSource is ProviderId.Qoder or ProviderId.QoderCn) detail.Children.Add(QoderTokenDetails(entry.UsageSource));
         detail.Children.Add(RingDetails(entry));
         detail.Children.Add(OffPeakDetails(entry));
         bool open = _expandedSource == entry.InstanceId;
@@ -238,6 +239,7 @@ public sealed partial class SettingsWindow
         if (ProviderCatalog.HasOnlineSwitch(entry.QuotaSource)) return OnlineQuotaDetails(entry);
         if (entry.QuotaSource == ProviderId.MiMo) return MiMoAccountDetails();
         if (entry.QuotaSource is ProviderId.WorkBuddy or ProviderId.WorkBuddyAi) return WorkBuddyDetails(entry);
+        if (entry.QuotaSource is ProviderId.Qianwen or ProviderId.QwenCloud) return QianwenDetails(entry);
         if (ProviderCatalog.IsBuiltIn(entry.QuotaSource)) return null;
         var grid = AppColumns();
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };

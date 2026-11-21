@@ -358,13 +358,20 @@ public partial class MainWindow
                 var (hex, rgb, hsl) = Shelf.ColorForms(c);
                 foreach (var (name, value) in new[] { ("HEX", hex), ("RGB", rgb), ("HSL", hsl) })
                 {
-                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2), Cursor = Cursors.Hand, Background = Brushes.Transparent, ToolTip = Loc.T("单击粘贴这种写法", "Click to paste this form") };
+                    bool copyOnly = Settings.ClipboardClickCopyOnly;
+                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2), Cursor = Cursors.Hand, Background = Brushes.Transparent,
+                        ToolTip = copyOnly ? Loc.T("单击复制这种写法", "Click to copy this form") : Loc.T("单击粘贴这种写法", "Click to paste this form") };
                     row.Children.Add(new TextBlock { Text = name, Width = 40, FontFamily = UI.PanelFont, FontSize = layout.Aux, Foreground = UI.Brush(Look.Tertiary), VerticalAlignment = VerticalAlignment.Center });
                     var text = new TextBlock { Text = value, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = size - 1, Foreground = UI.Brush(Look.Primary), VerticalAlignment = VerticalAlignment.Center };
                     row.Children.Add(text);
                     row.MouseEnter += (_, _) => text.Foreground = UI.Brush(Look.Accent);
                     row.MouseLeave += (_, _) => text.Foreground = UI.Brush(Look.Primary);
-                    row.MouseLeftButtonUp += (_, e) => { e.Handled = true; _app.Shelf.Paste(ShelfService.TextData(value), done => text.Text = value + (done ? Loc.T("  已粘贴", "  pasted") : Loc.T("  已复制", "  copied"))); };
+                    row.MouseLeftButtonUp += (_, e) =>
+                    {
+                        e.Handled = true;
+                        if (!copyOnly) _app.Shelf.Paste(ShelfService.TextData(value), result => text.Text = value + "  " + PasteWord(result));
+                        else if (_app.Shelf.Put(ShelfService.TextData(value))) text.Text = value + "  " + Loc.T("已复制", "Copied");
+                    };
                     forms.Children.Add(row);
                 }
                 panel.Children.Add(forms);
@@ -586,7 +593,12 @@ public partial class MainWindow
         Width = 16, Height = 16, LayoutTransform = new ScaleTransform(.875, .875), Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center
     };
     private Separator Separator() => new() { Style = (Style)FindResource("ShelfMenuSeparator") };
-    private void CloseMenu() { if (_shelfMenu is { IsOpen: true } menu) menu.IsOpen = false; }
+    private void CloseMenu()
+    {
+        _shelfMenuPress?.Dispose();
+        _shelfMenuPress = null;
+        if (_shelfMenu is { IsOpen: true } menu) menu.IsOpen = false;
+    }
     // The menu's frame keeps 12 DIP around it for its shadow (ShelfResources.xaml); the offsets take that back.
     private void OpenMenu(ContextMenu menu, FrameworkElement target, bool atPointer = false)
     {
@@ -600,9 +612,11 @@ public partial class MainWindow
         // The panel does not take the foreground, so a press in another app goes to that app and the menu never learns of it:
         // the menu would stay open, and hold the panel open with it. A press outside this app's windows closes it.
         var press = new PointerPressObserver(Dispatcher, point => { if (menu.IsOpen && !WindowsHost.OwnWindowAt(point)) menu.IsOpen = false; });
+        _shelfMenuPress = press;
         menu.Closed += (_, _) =>
         {
             press.Dispose();
+            if (ReferenceEquals(_shelfMenuPress, press)) _shelfMenuPress = null;
             if (ReferenceEquals(_shelfMenu, menu)) _shelfMenu = null;
             Dispatcher.BeginInvoke(() => { if (_expanded && !_pointerInside && !ShelfHolds) PointerChanged(false); });
         };

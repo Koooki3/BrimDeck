@@ -68,13 +68,35 @@ static class SystemMonitorTests
         check("Monitor memory level normal", memory.Level == MemoryLevel.Normal && memory.UsedFraction == .5);
         check("Monitor memory level elevated by use or commit", (memory with { Used = 85 }).Level == MemoryLevel.Elevated && (memory with { CommitUsed = 82 }).Level == MemoryLevel.Elevated);
         check("Monitor memory level critical", (memory with { Used = 95 }).Level == MemoryLevel.Critical && (memory with { CommitUsed = 95 }).Level == MemoryLevel.Critical);
-        check("Monitor memory without a total reads zero shares", new MemorySample(0, 0, 0, 0) is { UsedFraction: 0, CommitFraction: 0 });
+        check("Monitor memory without a total reads zero shares", new MemorySample(0, 0, 0, 0) is { UsedFraction: 0, CommitFraction: 0, FreeFraction: 0, Free: 0 });
+        check("Monitor memory free is what is not in use, shown when chosen", new MemorySample(100, 70, 0, 0) is { Free: 30 } free
+            && Math.Abs(free.FreeFraction - .3) < 1e-9 && Math.Abs(free.Shown(true) - .3) < 1e-9 && free.Shown(false) == .7);
+        var row = new StorageRow("C:", 400, 300, null, MemoryLevel.Normal, [], false);
+        check("Monitor drive entry shows its space in use or free", row.Shown(false) == 300 && row.Shown(true) == 100
+            && row.ShownFraction(false) == .75 && row.ShownFraction(true) == .25 && new StorageRow("C:", 0, 0, null, MemoryLevel.Normal, [], false).ShownFraction(true) == 0);
         var core = new CoreSample(0, 0, CoreTier.Performance, 1, .5, 2000d, 4000);
         check("Monitor frequency fraction", core.FrequencyFraction == .5 && (core with { FrequencyMhz = Reading<double>.Unavailable("x") }).FrequencyFraction is null
             && (core with { MaxFrequencyMhz = 0 }).FrequencyFraction is null && (core with { FrequencyMhz = 9000d }).FrequencyFraction == 1);
         var cpu = new CpuSample([core, core with { Id = 1, Group = 1, Usage = .1 }, core with { Id = 2, Group = 1, Usage = .3 }], 3000d);
         check("Monitor CPU usage is the cores' mean", Math.Abs(cpu.Usage - .3) < 1e-9 && cpu.GroupCount == 2 && cpu.Groups.Select(g => g.Count).SequenceEqual([1, 2]));
         check("Monitor CPU without cores", new CpuSample([], 0d) is { Usage: 0, GroupCount: 0, Groups.Count: 0 });
+        string previousLanguage = Loc.Language;
+        try
+        {
+            var perfThread = new CoreSample(0, 0, CoreTier.Performance, 1, .47, 3410d, 4700, Thread: 2);
+            var effCore = new CoreSample(12, 1, CoreTier.Efficiency, 3, .18, Reading<double>.Unavailable("x"), null);
+            var logicalCore = new CoreSample(3, 0, CoreTier.Unknown, 4, .25, Reading<double>.Unavailable("x"), null);
+            Loc.Use(Loc.Chinese);
+            bool zh = perfThread.Describe() == "性能核 1 · 线程 2 · 47% · 3.41 GHz"
+                && effCore.Describe() == "能效核 3 · 18%"
+                && logicalCore.Describe() == "逻辑处理器 4 · 25%";
+            Loc.Use(Loc.English);
+            bool en = perfThread.Describe() == "Performance core 1 · thread 2 · 47% · 3.41 GHz"
+                && effCore.Describe() == "Efficiency core 3 · 18%"
+                && logicalCore.Describe() == "Logical processor 4 · 25%";
+            check("Monitor core tooltips distinguish cores and threads", zh && en);
+        }
+        finally { Loc.Use(previousLanguage); }
     }
 
     private static void Folding(Action<string, bool> check)
@@ -225,9 +247,9 @@ static class SystemMonitorTests
         var withRings = CompactMusicLayout.Calculate(300, 1, false, 2, false, 0, 120);
         check("Compact row: readings after the rings, with a gap", withRings is { MonitorAlone: false, MonitorWidth: 128 } && withRings.MiddleWidth == 172);
         var tight = CompactMusicLayout.Calculate(100, 1, false, 2, true, 0, 400);
-        // The readings keep half of the middle; one ring and the shortest lyric (38 DIP) stay in any case.
+        // The readings keep half of the middle; one 16 DIP ring and the shortest lyric (34 DIP) stay in any case.
         check("Compact row: one ring and the shortest lyric stay", tight.MonitorWidth == 50 && tight.MiddleWidth == 50
-            && CompactMusicLayout.Calculate(40, 1, false, 2, true, 0, 400) is { MonitorWidth: 2, MiddleWidth: 38 });
+            && CompactMusicLayout.Calculate(40, 1, false, 2, true, 0, 400) is { MonitorWidth: 6, MiddleWidth: 34 });
         check("Compact row: no readings, no region", CompactMusicLayout.Calculate(300, 1, true, 2, true, 40).MonitorWidth == 0);
         bool steady = true;
         for (double width = 60; width < 400; width++)
