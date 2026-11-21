@@ -154,6 +154,8 @@ public sealed partial class SettingsWindow
             var open = ActionButton(Path.GetFileName(path) + " ↗", () => OpenThemeFile(path)); open.Style = (Style)FindResource("SettingsLink"); open.ToolTip = path;
             rows.Add(Row(Loc.T("文件", "File"), open));
         }
+        // Values the file has wrong that are left out rather than refusing the theme (a hover style it does not know, say).
+        foreach (var warning in PanelThemes.Warnings(theme.File)) rows.Add(Row(Loc.T("警告", "Warning"), Wrapped(warning, true)));
         // The colors moved to stay readable, counted here and listed once opened; with unsaved changes, those of the theme as
         // it would be saved.
         rows.AddRange(ReadabilityRows(PanelTheme.PaletteOf(theme).Adjustments));

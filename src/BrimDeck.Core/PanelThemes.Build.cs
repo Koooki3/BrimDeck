@@ -102,7 +102,7 @@ public static partial class PanelThemes
         // A theme's own picker colors are offered as the panel draws them, like the ones derived from its palette.
         var swatches = file.Swatches?.Select(value => ThemeColor.TryParse(value, out var color) ? color.Over(surface).EnsureContrast(graphic) : (ThemeColor?)null)
             .OfType<ThemeColor>().Take(12).ToList();
-        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps) { Look = look };
+        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps) { Look = look, Motion = MotionValues(chain) };
     }
 
     // A texture's lightest and darkest squares (PanelTheme.Texture draws them in the primary text color and in black, at most the

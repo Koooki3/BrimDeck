@@ -226,7 +226,8 @@ internal sealed class PanelLook
     }
 
     // Everything a palette draws, by value: a file theme is built anew for every reading, so an edit shows as a new signature.
-    private static string Signature(PanelThemeInfo theme, PanelPalette palette)
+    // Internal for the checks that an edit of each part is seen (ThemeLookChecks).
+    internal static string Signature(PanelThemeInfo theme, PanelPalette palette)
     {
         var e = palette.Effects;
         var clock = palette.Clock;
@@ -234,8 +235,10 @@ internal sealed class PanelLook
             string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}") + DecorKey(e.Decor),
             $"{clock?.Style}/{clock?.Color}/{clock?.Custom}/{string.Join(",", clock?.Gradient ?? [])}",
             string.Join(",", ClockColors.Swatches.Select(palette.ClockPreset)), string.Join(";", palette.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops))),
-            string.Join(",", palette.Swatches));
+            string.Join(",", palette.Swatches), MotionKey(palette.Motion));
     }
+    // The hover mark: a file that changes only its motion section is a new look too.
+    private static string MotionKey(ThemeMotion m) => FormattableString.Invariant($"{m.Hover}/{m.HoverStrength}/{m.Pace}/{m.Color}/{m.Secondary}");
     private static string DecorKey(PanelDecor? decor) => decor is null ? "" : FormattableString.Invariant(
         $"/{decor.Horizon?.At}/{decor.Horizon?.Sea}/{decor.Horizon?.Line}/{decor.Caustics}/{decor.Palm}");
     private static Dictionary<string, string> Hexes(PanelPalette palette) => palette.Colors.ToDictionary(pair => pair.Key, pair => pair.Value.ToString());

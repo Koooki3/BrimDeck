@@ -93,6 +93,8 @@ try
     SurfaceTransparencyTests.Run(Check);
     ExpandSnapTests.Run(Check);
     MotionReviewTests.Run(Check);
+    ThemeMotionTests.Run(Check);
+    InteractionFxTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);
     MusicTitleMarqueeTests.Run(Check);

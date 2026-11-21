@@ -54,6 +54,9 @@ public static partial class PanelThemes
         if (start.Clock is { } clock) text = FillClock(text, start, clock);
         // A theme with its own picker colors writes them out; the template has the line commented out.
         if (start.HasOwnSwatches) text = Regex.Replace(text, @"// ""swatches"": \[[^\]]*\]", "\"swatches\": " + ColorList(start.Swatches));
+        // The motion, when it is not what the new file's base gives anyway (a custom theme's copy is based on dark).
+        string written = baseId is { Length: > 0 } && IsBuiltIn(baseId) ? baseId : Dark;
+        if (start.Motion != Resolve(BuiltIn(written)!).Motion) text = Regex.Replace(text, @"// ""motion"": \{[^}]*\}", MotionJson(start.Motion));
         var effects = start.Effects;
         text = Regex.Replace(text, @"""surfaceGradient"": \[\]", "\"surfaceGradient\": " + ColorList(effects.SurfaceGradient));
         text = Regex.Replace(text, @"""rimGradient"": \[\]", "\"rimGradient\": " + ColorList(effects.RimGradient));
@@ -73,7 +76,7 @@ public static partial class PanelThemes
     {
         static string? Layer(PanelThemeFile look)
         {
-            var layer = new PanelThemeFile { Colors = look.Colors, Apps = look.Apps, Effects = look.Effects, Clock = look.Clock };
+            var layer = new PanelThemeFile { Colors = look.Colors, Apps = look.Apps, Effects = look.Effects, Clock = look.Clock, Motion = look.Motion };
             if (JsonSerializer.SerializeToNode(layer, Json) is not JsonObject json) return null;
             // Only what the layer sets: no format, empty strings (an id, a name, an unset clock style) or names made for display.
             json.Remove("formatVersion");
@@ -104,6 +107,10 @@ public static partial class PanelThemes
         int end = text.LastIndexOf('}');
         return end < 0 ? text : text[..end].TrimEnd() + ",\n  " + string.Join(",\n  ", members) + "\n}\n";
     }
+
+    // On one line, where the template has it commented out.
+    private static string MotionJson(ThemeMotion m) => FormattableString.Invariant(
+        $"\"motion\": {{ \"hover\": {Quote(m.Hover.ToString().ToLowerInvariant())}, \"hoverStrength\": {m.HoverStrength:R}, \"pace\": {m.Pace:R}, \"color\": {Quote(m.Color)}, \"secondary\": {Quote(m.Secondary)} }}");
 
     private static string DecorJson(PanelDecor decor)
     {

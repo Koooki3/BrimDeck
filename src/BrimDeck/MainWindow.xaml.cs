@@ -164,6 +164,7 @@ public partial class MainWindow : Window
         InitializeScale();
         InitializeShadow();
         InitializeThemeFade();
+        InitializeMotion();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
@@ -388,6 +389,7 @@ public partial class MainWindow : Window
         var shapeBefore = Collapsed; double dipBefore = _pixelsPerDip;
         ApplyLanguage();
         ApplyTheme();
+        _fx?.Check();
         ApplySurface();
         // A panel holding the keyboard stays one that can be active, whatever the setting (PanelKeyboard).
         WindowsHost.SetCapturable(this, Settings.WindowCapture || PanelKeys.Holding);
@@ -814,6 +816,7 @@ public partial class MainWindow : Window
     // details, a panel the expand hotkey showed while the panels are hidden hides again, and the collapsed title scrolls its laps anew.
     private void PanelClosed()
     {
+        _fx?.Release();
         _app.UpdateCollectionLatency();
         WatchOutsidePress(false);
         ResetShelf();
@@ -840,6 +843,7 @@ public partial class MainWindow : Window
         // host's own state, as a new screen context closes the panel without passing here.
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
+        UpdateMotion();
         // The smooth memory mode holds off full collections while a panel is open (App.UpdateCollectionLatency).
         if (expanded && !wasExpanded) _app.UpdateCollectionLatency();
         _escapeDismissal?.SetEnabled(HoldsEscape);
