@@ -53,21 +53,19 @@ public partial class App
     private void PollClickThroughObserve()
     {
         if (_observeVk == 0 || Exiting) return;
-        // Panel dismiss / move mode already reserved Escape via RegisterHotKey; do not also treat it as pass-through.
-        if (Decks.Any(deck => deck.ReservesEscape))
-        {
-            if (_observeDown && !PasteInput.KeyDown(_observeVk)) _observeDown = false;
-            return;
-        }
         bool down = PasteInput.KeyDown(_observeVk);
         if (down == _observeDown) return;
         _observeDown = down;
         if (down)
         {
+            // Panel dismiss / move mode already reserved Escape via RegisterHotKey; do not also treat Escape as pass-through.
+            // CapsLock and other observed keys still start hold pass-through while a panel is open.
+            if (_observeVk == KeyInterop.VirtualKeyFromKey(Key.Escape) && Decks.Any(deck => deck.ReservesEscape))
+                return;
             if (Settings.ClickThroughHold) BeginHoldPassThrough();
             else ToggleClickThrough();
         }
-        else if (Settings.ClickThroughHold) EndHoldPassThrough();
+        else EndHoldPassThrough();
     }
 
     private void BeginHoldPassThrough()
