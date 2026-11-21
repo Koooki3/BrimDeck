@@ -164,6 +164,7 @@ public partial class MainWindow : Window
         InitializeScale();
         InitializeShadow();
         InitializeThemeFade();
+        InitializeMotion();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
@@ -389,6 +390,7 @@ public partial class MainWindow : Window
         var shapeBefore = Collapsed; double dipBefore = _pixelsPerDip;
         ApplyLanguage();
         ApplyTheme();
+        _fx?.Check();
         ApplySurface();
         UpdateGlassTheme();
         // A panel holding the keyboard stays one that can be active, whatever the setting (PanelKeyboard).
@@ -817,6 +819,7 @@ public partial class MainWindow : Window
     // details, a panel the expand hotkey showed while the panels are hidden hides again, and the collapsed title scrolls its laps anew.
     private void PanelClosed()
     {
+        _fx?.Release();
         _app.UpdateCollectionLatency();
         WatchOutsidePress(false);
         ResetShelf();
@@ -843,6 +846,7 @@ public partial class MainWindow : Window
         // host's own state, as a new screen context closes the panel without passing here.
         if (expanded != _host.Open) _host.Front(expanded);
         _expanded = expanded;
+        UpdateMotion();
         // The smooth memory mode holds off full collections while a panel is open (App.UpdateCollectionLatency).
         if (expanded && !wasExpanded) _app.UpdateCollectionLatency();
         _escapeDismissal?.SetEnabled(HoldsEscape);
@@ -1073,10 +1077,13 @@ public partial class MainWindow : Window
         target.BeginAnimation(property, null);
         ((DependencyObject)target).SetValue(property, value);
     }
-    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded).
+    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded), and it opens on the page the part
+    // under the pointer stands for (CompactPageAt), so a pointer over the readings opens the system monitor and one over the
+    // devices opens their page. No part under it, or the mapping turned off in the settings: the page it would have opened on.
     private void OpenAtPointer()
     {
         if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
+        _hoverPage = !Settings.HoverPage || PresentationSource.FromVisual(Stage) is null ? null : CompactPageAt(Stage.PointFromScreen(WindowsHost.Cursor()));
         SetExpanded(true);
     }
     // With ClickToExpand on, a click on the collapsed surface opens the panel; the press must start on it, so a drag that ends

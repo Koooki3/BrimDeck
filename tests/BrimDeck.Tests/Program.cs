@@ -27,6 +27,7 @@ try
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
+    await NeteaseSongDetailsTests.Run(Check);
     await AppleMusicLyricsTests.Run(root, Check);
     await QueMusicLyricsTests.Run(root, Check);
     await KugouTests.Run(Check);
@@ -106,6 +107,8 @@ try
         && PanelThemes.Find(PanelThemes.GlassAuto, false, []).Id == PanelThemes.GlassLight);
     ExpandSnapTests.Run(Check);
     MotionReviewTests.Run(Check);
+    ThemeMotionTests.Run(Check);
+    InteractionFxTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);
     MusicTitleMarqueeTests.Run(Check);

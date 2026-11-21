@@ -53,6 +53,41 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
         finally { try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { } }
     }
 
+    public async Task<string?> ReadAntigravityCliAsync(CancellationToken cancellation)
+    {
+        var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "agy", "bin");
+        var folders = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Prepend(installed);
+        var cli = folders.Select(folder => folder.Trim().Trim('"')).Where(Path.IsPathFullyQualified)
+            .Select(folder => Path.Combine(folder, "agy.exe")).FirstOrDefault(File.Exists);
+        if (cli is null) return null;
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        using var process = new Process { StartInfo = new ProcessStartInfo(cli, "-p /usage")
+        {
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetTempPath(),
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+        } };
+        // The CLI updater can open its own console during an otherwise hidden quota poll.
+        process.StartInfo.Environment["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
+        try
+        {
+            if (!process.Start()) return null;
+            process.StandardInput.Close();
+            var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var errors = process.StandardError.BaseStream.CopyToAsync(Stream.Null, timeout.Token);
+            await Task.WhenAll(output, errors, process.WaitForExitAsync(timeout.Token)).ConfigureAwait(false);
+            return process.ExitCode == 0 ? await output : null;
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested) { return null; }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception) { return null; }
+        finally
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        }
+    }
+
     public string? UnprotectUserData(string base64)
     {
         byte[]? plain = null;
