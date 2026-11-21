@@ -1103,12 +1103,15 @@ public partial class MainWindow : Window
         target.BeginAnimation(property, null);
         ((DependencyObject)target).SetValue(property, value);
     }
-    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded).
+    // Opened by hovering or by a click: the panel may centre on the pointer (see SetExpanded), and it opens on the page the part
+    // under the pointer stands for (CompactPageAt), so a pointer over the readings opens the system monitor and one over the
+    // devices opens their page. No part under it, or the mapping turned off in the settings: the page it would have opened on.
     private void OpenAtPointer()
     {
         // The line that opens into the capsule does that first; a click on the capsule opens the panel (MainWindow.Peek.cs).
         if (!_expanded && LineOpensIsland && !_peek.Active) { BeginPeek(); return; }
         if (Settings.ExpandAtPointer && PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
+        _hoverPage = !Settings.HoverPage || PresentationSource.FromVisual(Stage) is null ? null : CompactPageAt(Stage.PointFromScreen(WindowsHost.Cursor()));
         SetExpanded(true);
     }
     // With ClickToExpand on, a click on the collapsed surface opens the panel; the press must start on it, so a drag that ends
