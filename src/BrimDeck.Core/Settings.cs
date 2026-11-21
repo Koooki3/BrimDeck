@@ -12,8 +12,7 @@ public enum ScreenEdge { Top, Bottom, Left, Right }
 // What the notch or the line hangs from on its edge where a taskbar is: the screen's edge, over the taskbar, or the taskbar's inner
 // edge. Without a taskbar on that edge the two are the same line. See DeckSettings.Dock.
 public enum EdgeAnchor { Screen, Taskbar }
-// Peek: the indicator that shows a readout of the system readings beside it while the pointer is on it (WindowPeek). Appended, so saved numbers keep their meaning.
-public enum WindowBehavior { Normal, Line, Hide, Peek }
+public enum WindowBehavior { Normal, Line, Hide }
 // BackgroundFullscreen: a full-screen window on the panel's monitor that is not the foreground window.
 // Occupied: a window that neither is maximized nor fills the screen overlaps the place of the collapsed panel.
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive, BackgroundFullscreen, Occupied }
@@ -886,7 +885,8 @@ public sealed class DeckSettings
     // Media is detected for the expanded music page, the chosen style's music or equalizer, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
     [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || ShowsEqualizer(Style) || MusicIndicatorProgress
-        && (Style == CompactStyle.Line || Maximized.IsIndicator() || Borderless.IsIndicator() || Exclusive.IsIndicator() || Occupied.IsIndicator());
+        && (Style == CompactStyle.Line || Maximized == WindowBehavior.Line || Borderless == WindowBehavior.Line || Exclusive == WindowBehavior.Line
+            || Occupied == WindowBehavior.Line);
     // The switched-on applications. Their quotas are read for the AI usage page or for the rings of the chosen compact
     // style; the two are shown independently, so either one keeps the data current.
     [JsonIgnore] public IReadOnlyList<AppEntry> ConfiguredApps => Apps.Where(app => app.Enabled).Take(AppPresets.MaximumShownApps).ToList();

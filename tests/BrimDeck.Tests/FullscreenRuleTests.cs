@@ -137,51 +137,6 @@ internal static class FullscreenRuleTests
         check("A background window its app's rule says nothing about takes the global rule",
             browser.Behavior(ScreenContext.BackgroundFullscreen, "firefox", "", ScreenContext.Maximized) == WindowBehavior.Line
             && browser.Behavior(ScreenContext.BackgroundFullscreen, "chrome", "", ScreenContext.Borderless) == WindowBehavior.Hide);
-
-        // The indicator that peeks: a behavior of its own, saved as a number that older ones do not use, and a rule can choose it.
-        check("The new behavior is appended: the saved numbers of the others keep their meaning",
-            (int)WindowBehavior.Normal == 0 && (int)WindowBehavior.Line == 1 && (int)WindowBehavior.Hide == 2 && (int)WindowBehavior.Peek == 3);
-        check("The window rules list every behavior once, the peeking indicator after the plain one",
-            WindowBehaviors.All.Count == Enum.GetValues<WindowBehavior>().Length && WindowBehaviors.All.Distinct().Count() == WindowBehaviors.All.Count
-            && WindowBehaviors.All.ToList().IndexOf(WindowBehavior.Peek) == WindowBehaviors.All.ToList().IndexOf(WindowBehavior.Line) + 1);
-        check("Only the line and the peeking line are indicators",
-            WindowBehavior.Line.IsIndicator() && WindowBehavior.Peek.IsIndicator() && !WindowBehavior.Normal.IsIndicator() && !WindowBehavior.Hide.IsIndicator());
-        var peeking = JsonSerializer.Deserialize<DeckSettings>("""{"Maximized":3,"Borderless":1,"FullscreenRules":[{"Name":"Sahhpire","Maximized":3,"Exclusive":3}]}""")!;
-        peeking.Normalize();
-        check("The peeking behavior is saved and read back, globally and in an app's rule",
-            peeking.Maximized == WindowBehavior.Peek && peeking.Borderless == WindowBehavior.Line
-            && peeking.FullscreenRules is [{ Maximized: WindowBehavior.Peek, Borderless: null, Exclusive: WindowBehavior.Peek }]
-            && peeking.Behavior(ScreenContext.Maximized, "Sahhpire") == WindowBehavior.Peek && peeking.Behavior(ScreenContext.Maximized, "Other") == WindowBehavior.Peek);
-        var roundTrip = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(peeking))!;
-        check("The peeking behavior survives a save", roundTrip.Maximized == WindowBehavior.Peek && roundTrip.FullscreenRules[0].Exclusive == WindowBehavior.Peek);
-        var unknown = JsonSerializer.Deserialize<DeckSettings>("""{"Maximized":9,"FullscreenRules":[{"Name":"X","Maximized":9}]}""")!;
-        unknown.Normalize();
-        check("A number no build knows falls back to the default or to Follow",
-            unknown.Maximized == WindowBehavior.Line && unknown.FullscreenRules[0].Maximized is null);
-        check("The defaults are unchanged",
-            new DeckSettings() is { Maximized: WindowBehavior.Line, Borderless: WindowBehavior.Hide, Exclusive: WindowBehavior.Hide });
-        check("Media is wanted for the indicator's progress under the peeking rule as under the plain one",
-            new DeckSettings { MusicIndicatorProgress = true, MusicPage = false, Maximized = WindowBehavior.Peek }.MediaWanted
-            == new DeckSettings { MusicIndicatorProgress = true, MusicPage = false, Maximized = WindowBehavior.Line }.MediaWanted);
-
-        // The peek's state: begins once, ends once, and rests until the pointer has left the line.
-        var peek = new WindowPeek();
-        check("A line at rest begins a peek", !peek.Active && peek.Begin() && peek.Active);
-        check("A peek does not begin twice", !peek.Begin());
-        check("A peek ends once and the line then rests", peek.End() && !peek.Active && peek.Resting && !peek.End());
-        peek.Observe(true);
-        check("A resting line does not peek again while the pointer is on it", peek.Resting && !peek.Begin());
-        peek.Observe(false);
-        check("A resting line wakes when the pointer has left it, and peeks again", !peek.Resting && peek.Begin());
-        peek.Observe(false);
-        check("Observing the pointer does nothing to a peek that is showing", peek.Active && !peek.Resting);
-        var opened = new WindowPeek();
-        opened.Begin();
-        check("A panel closed from the peeking row ends the peek at once and the line rests, once",
-            opened.PanelClosed() && !opened.Active && opened.Resting && !opened.PanelClosed() && !opened.Begin());
-        peek.End(); peek.Reset();
-        check("A rule that is no longer the peeking one clears the state", !peek.Active && !peek.Resting && peek.Begin());
-
         // A window over the panel's place: off by default, the global choice everywhere, the app rules say nothing about it.
         check("A window over the panel keeps the style by default", new DeckSettings().Behavior(ScreenContext.Occupied, "Any", "") == WindowBehavior.Normal);
         var occupied = new DeckSettings

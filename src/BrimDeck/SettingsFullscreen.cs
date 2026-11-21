@@ -199,12 +199,15 @@ public sealed partial class SettingsWindow
         return add;
     }
 
-    // One context's pick: the label, then a five-way segment — Follow and the four behaviours the global rules offer.
+    // One context's pick: the label, then a four-way segment — Follow and the three behaviours the global rules offer.
     private FrameworkElement RulePick(string app, string title, WindowBehavior? selected, Action<WindowBehavior?> changed)
     {
-        var options = new UniformGrid { Columns = 5, Width = 520 };
-        foreach (var choice in new (WindowBehavior? Value, string Label)[] { (null, Loc.T("跟随全局", "Follow")) }
-            .Concat(WindowBehaviors.All.Select(behavior => (Value: (WindowBehavior?)behavior, Label: BehaviorName(behavior)))))
+        var options = new UniformGrid { Columns = 4, Width = 428 };
+        foreach (var choice in new (WindowBehavior? Value, string Label)[]
+        {
+            (null, Loc.T("跟随全局", "Follow")), (WindowBehavior.Normal, BehaviorName(WindowBehavior.Normal)),
+            (WindowBehavior.Line, BehaviorName(WindowBehavior.Line)), (WindowBehavior.Hide, BehaviorName(WindowBehavior.Hide))
+        })
         {
             var option = new RadioButton { Content = choice.Label, Style = (Style)FindResource("SettingsSegment"), GroupName = "Rule" + app + title, IsChecked = selected == choice.Value };
             AutomationProperties.SetName(option, app + " · " + title + " · " + choice.Label);

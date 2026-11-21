@@ -30,7 +30,7 @@ public partial class MainWindow
         // Plugging in or unplugging changes what the power reading can come from (battery discharge on battery only): asked again then.
         Microsoft.Win32.PowerModeChangedEventHandler powerChanged = (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.StatusChange) Dispatcher.BeginInvoke(UpdateMonitorDemand); };
         Microsoft.Win32.SystemEvents.PowerModeChanged += powerChanged;
-        Closed += (_, _) => { _app.MonitorUpdated -= MonitorUpdated; Microsoft.Win32.SystemEvents.PowerModeChanged -= powerChanged; _app.PresentMonitor(this, false, false); _peekBubble?.Dismiss(false); };
+        Closed += (_, _) => { _app.MonitorUpdated -= MonitorUpdated; Microsoft.Win32.SystemEvents.PowerModeChanged -= powerChanged; _app.PresentMonitor(this, false, false); };
     }
 
     // Asked whenever the panel opens, closes, changes page or is hidden, and whenever the collapsed row is built.
@@ -45,9 +45,8 @@ public partial class MainWindow
         // chosen readings all wait for their first figures shows nothing, yet must be read for them (StripAwaits). A row only
         // hidden for now (the panel open, or a notice in its place, which leaves no row built: RenderCompact) keeps its
         // temperatures read while the sampler runs (App.UpdateMonitorExtras).
-        bool peekReads = _peekBubble is not null && StripNeedsSystem && IsVisible && !IsSuppressed && !ScreenOff;
-        bool heldStrip = peekReads || (Strips.Any(reading => reading.NeedsSystem) || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !ScreenOff && EffectiveStyle != CompactStyle.Line;
-        bool strip = peekReads || heldStrip && !_expanded && _alert is null && (Strips.Any(reading => reading.Showing(Eased.Now) && reading.NeedsSystem) || StripAwaits());
+        bool heldStrip = (Strips.Any(reading => reading.NeedsSystem) || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !ScreenOff && EffectiveStyle != CompactStyle.Line;
+        bool strip = heldStrip && !_expanded && _alert is null && (Strips.Any(reading => reading.Showing(Eased.Now) && reading.NeedsSystem) || StripAwaits());
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -97,7 +96,6 @@ public partial class MainWindow
     {
         // Worked out on every reading, open or not, so a row built when the panel collapses already has what arrived meanwhile.
         bool admitted = AdmitStrip(snapshot);
-        UpdatePeekBubble(snapshot);
         if (!_expanded)
         {
             // The drives, a temperature, a drive letter or the battery got its first figure: the row is built again with it, and it comes
