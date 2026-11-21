@@ -107,6 +107,18 @@ public partial class MainWindow
             UpdateCompactStrips(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off); return;
         }
         if (!IsMonitorPage || _monitorView is null) return;
+        if (Settings.ExpandedCustomCards)
+        {
+            bool twoColumns = MonitorGridUsesTwoColumns(ContentCanvas.Width - 2 * _header.ContentSide);
+            var tiles = MonitorGridTilesForWidth(CurrentMonitorGridTiles(), twoColumns);
+            var gridLayout = CurrentMonitorGridLayout();
+            if (MonitorGridKey(gridLayout, tiles, twoColumns) != _monitorKey)
+            {
+                // A seeded grid may gain volume tiles after storage discovery. Saved tiles stay put when a volume is absent.
+                RenderMonitor(); return;
+            }
+            _monitorView.Update(snapshot, MonitorMotion); return;
+        }
         // The sensors and the layout step are worked out once for each reading; the key and what the page was built for follow from them.
         var sensors = MonitorSensors();
         var layout = CurrentMonitorPlan(sensors);
@@ -143,22 +155,13 @@ public partial class MainWindow
     {
         double height = ContentCanvas.Height;
         var shown = ExpandedMonitor.Shown(Settings.ExpandedReadings);
-        ExpandedCardContent? cards = null;
-        if (Settings.ExpandedCustomCards)
-        {
-            bool storage = shown.Contains(ExpandedItem.Storage);
-            var monitor = _app.Monitor;
-            var letters = storage ? (monitor?.Latest?.Storage ?? []).SelectMany(drive => drive.Volumes).Select(volume => volume.Letter).ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
-            var visible = ExpandedCards.Resolve(Settings.ExpandedCardOrder, shown, letters)
-                .Where(card => shown.Contains(card.Item) && (card.Letter is null || letters.Contains(card.Letter))).ToList();
-            bool waiting = storage && letters.Count == 0 && (monitor?.StorageState is null or SensorState.Unknown || monitor?.StorageCount > 0);
-            cards = new(visible, waiting, storage);
-        }
         return ExpandedLayout.For(shown, ContentCanvas.Width - 2 * _header.ContentSide, height - _header.Row - MonitorBottom(height),
-            new ExpandedContent(sensors.Drives, sensors.Power), null, Settings.MonitorMain, _monitorView is not null ? _monitorPlan : null, Settings.ExpandedCpuCores, cards);
+            new ExpandedContent(sensors.Drives, sensors.Power), null, Settings.MonitorMain, _monitorView is not null ? _monitorPlan : null, Settings.ExpandedCpuCores);
     }
     // What the open page reads: what its layout kept, before the first one is made what the table chooses.
-    private ExpandedDemand PageDemand() => (_monitorPlan is { } plan ? plan.Demand(Settings.MonitorTemperatures) : ExpandedMonitor.Demand(ExpandedMonitor.Shown(Settings.ExpandedReadings), Settings.MonitorTemperatures));
+    private ExpandedDemand PageDemand() => Settings.ExpandedCustomCards ? GridPageDemand()
+        : _monitorPlan is { } plan ? plan.Demand(Settings.MonitorTemperatures)
+        : ExpandedMonitor.Demand(ExpandedMonitor.Shown(Settings.ExpandedReadings), Settings.MonitorTemperatures);
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
     // The sort is not part of it: a new sort reorders the list in place. The page keeps places for the volumes (as many as were
@@ -220,11 +223,18 @@ public partial class MainWindow
         ApplyPageHeader(PanelHeader.ForPanel(height));
         MonitorContent.Margin = new Thickness(_header.ContentSide, 0, _header.ContentSide, MonitorBottom(height));
         Motion.Enabled = MonitorMotion;
+        bool fade = _monitorFade; _monitorFade = false;
+        if (Settings.ExpandedCustomCards)
+        {
+            _monitorPlan = null;
+            RenderMonitorGrid(shown, width, fade);
+            return;
+        }
+        _monitorGridTwoColumns = null;
         // Worked out once for each render: a drag renders the page many times a second.
         var sensors = MonitorSensors();
         var layout = CurrentMonitorPlan(sensors);
         var key = MonitorKey(layout, sensors.Small);
-        bool fade = _monitorFade; _monitorFade = false;
         if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView))
         {
             _monitorPlan = layout;

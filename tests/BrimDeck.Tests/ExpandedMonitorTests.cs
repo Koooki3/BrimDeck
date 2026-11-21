@@ -18,6 +18,7 @@ internal static class ExpandedMonitorTests
 
     internal static void Run(Action<string, bool> check)
     {
+        ExpandedGridTests.Run(check);
         Table(check);
         Network(check);
         SettingsFile(check);

@@ -48,7 +48,7 @@ internal static class MonitorThemeColors
 // adapter's engines), the other gauge small beside it (a click on either swaps them), memory and network below, and the
 // busiest apps beside or under the readings. Every part draws itself; Update hands each its new reading. With more than one
 // graphics adapter the large GPU gauge names the shown adapter's kind and a click on it shows the next adapter.
-internal sealed class MonitorView : Grid
+internal sealed partial class MonitorView : Grid
 {
     // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
     private PanelLook Look => PanelLook.Of(this);
@@ -56,24 +56,24 @@ internal sealed class MonitorView : Grid
     private readonly MonitorColors _colors;
     private readonly MonitorMain _main;
     // Only what the plan has a place for is built.
-    private readonly FigureGauge? _cpuGauge, _gpuGauge;
-    private readonly ColumnGraph? _cpuGraph, _gpuGraph;
+    private FigureGauge? _cpuGauge, _gpuGauge;
+    private ColumnGraph? _cpuGraph, _gpuGraph;
     private readonly BlockGauge? _gpuBlock;
-    private readonly MemoryBlock? _memory;
+    private MemoryBlock? _memory;
     private readonly NetworkBlock? _network;
     private readonly StorageBlock? _storage;
     private readonly List<(string Letter, StorageBlock Block)> _driveCards = [];
-    private readonly NetworkBlock? _downloadCard, _uploadCard;
+    private NetworkBlock? _downloadCard, _uploadCard;
     private readonly ScrollViewer? _cardScroll;
     private readonly IReadOnlyList<ExpandedCard> _cards = [];
     private (ExpandedCard Card, double WithinRow)? _pendingCardScroll;
-    private readonly PowerBlock? _power;
-    private readonly FramesBlock? _frames;
+    private PowerBlock? _power;
+    private FramesBlock? _frames;
     private readonly bool _temperatures;
     private readonly Grid _readings = new();
     // How far the readings stop above the page's foot, so their last line ends level with the list's last row (AlignFoot).
     private readonly FootAlignment _foot = new();
-    private readonly ProcessListView? _list;
+    private ProcessListView? _list;
     private readonly Canvas _overlay = new() { IsHitTestVisible = false };
     private ProcessCard? _card;
     private ProcessList? _processes;
@@ -447,7 +447,7 @@ internal sealed class MonitorView : Grid
                 + (temperature.Length > 0 ? "\n" + TemperatureLine(cpu, temperature) : ""),
                 motion, heat is { } c ? Hot(Temperatures.OfCpu(c)) : null);
             int groups = Math.Max(1, cpu.GroupCount);
-            _cpuGraph?.Set(cpu.Cores.Select(core => new GraphColumn(core.Usage, cpuMain ? core.FrequencyFraction : null, _colors.Core(core.Group, groups), core.Group, core.Describe(), Hot: _colors.Level(ReadingLevels.OfShare(core.Usage), _colors.Core(core.Group, groups)))).ToList(), motion);
+            _cpuGraph?.Set(cpu.Cores.Select(core => new GraphColumn(core.Usage, cpuMain || _gridMode ? core.FrequencyFraction : null, _colors.Core(core.Group, groups), core.Group, core.Describe(), Hot: _colors.Level(ReadingLevels.OfShare(core.Usage), _colors.Core(core.Group, groups)))).ToList(), motion);
         }
         else { _cpuGauge.Set(null, "—", "", "", Loc.T("暂无读数：", "No reading: ") + snapshot.Cpu.Reason, motion); _cpuGraph?.Set([], motion); }
 
@@ -458,7 +458,7 @@ internal sealed class MonitorView : Grid
                 ? Loc.T("显存 ", "VRAM ") + MonitorFormat.Gigabytes(used) + (gpu.DedicatedTotal is { } total ? " / " + MonitorFormat.GigabytesCompact(total) : "") + " GB" : "";
             // With more than one adapter each is named with its kind, and the large gauge says which kind it shows.
             bool several = snapshot.Gpus.Count > 1;
-            _nextGpu = several && !cpuMain ? GpuChoice.Next(snapshot.Gpus, gpu) : null;
+            _nextGpu = several && (!cpuMain || _gridMode) ? GpuChoice.Next(snapshot.Gpus, gpu) : null;
             double? heat = _temperatures ? gpu.Temperature : null;
             string temperature = heat is { } celsius ? Temperatures.Format(celsius) + " °C" : "";
             // An adapter without engine readings at the moment (NoReadings) shows a dash and says so; it can still be switched from.
@@ -469,16 +469,16 @@ internal sealed class MonitorView : Grid
                 + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "")
                 + (temperature.Length > 0 ? " · " + temperature + (gpu.TemperatureFrom is { } from ? Loc.T($"（{from} 的温度）", $" ({from}'s temperature)") : "") : "");
             string switchTo = _nextGpu is { } next ? Loc.T("点击切换到 ", "Click to show ") + GpuChoice.Describe(next.Name, next.Kind) : "";
-            if (!cpuMain) _gpuGauge.Button = switchTo.Length > 0 ? Loc.T("切换显卡", "Switch GPU") : null;
+            if (!cpuMain || _gridMode) _gpuGauge.Button = switchTo.Length > 0 ? Loc.T("切换显卡", "Switch GPU") : null;
             // The adapter's name and its memory are in the tooltip and in the block's line, not spelled out beside the figure. After the
             // figure: the adapter's kind where there is more than one ("独显"), and its temperature, "独显 · 48 °C"; a temperature read
             // from another adapter (this one has no sensor) carries that adapter's kind instead.
-            string kind = several && !cpuMain ? GpuChoice.KindName(gpu.Kind) : "";
+            string kind = several && (!cpuMain || _gridMode) ? GpuChoice.KindName(gpu.Kind) : "";
             string heatText = temperature.Length > 0 && gpu.TemperatureKind is { } from2 ? from2 + " " + temperature : temperature;
             string detail = kind.Length > 0 && heatText.Length > 0 ? kind + " · " + heatText : kind + heatText;
             // The memory in use, in the large gauge's line after the temperature (the small one's room is kept for the temperature; its
             // block carries the memory), in its own level's color as in the collapsed row, not the temperature's.
-            var memoryShare = !cpuMain && !idle ? gpu.DedicatedFraction : null;
+            var memoryShare = (_gridMode || !cpuMain) && !idle ? gpu.DedicatedFraction : null;
             string memoryText = memoryShare is { } m ? Loc.T("显存 ", "VRAM ") + MonitorFormat.Percent(m) + "%" : "";
             _gpuGauge.Set(idle ? null : gpu.Usage, idle ? "—" : MonitorFormat.Percent(gpu.Usage), idle ? "" : "%", detail, switchTo.Length > 0 ? tip + "\n" + switchTo : tip, motion,
                 heat is { } c ? Hot(Temperatures.OfGpu(c)) : null, memoryText, memoryShare is { } level ? Hot(ReadingLevels.OfShare(level)) : null);
@@ -497,14 +497,18 @@ internal sealed class MonitorView : Grid
         }
 
         // The main gauge carries the last minute's usage in the room after its figure.
-        if ((cpuMain ? _cpuGauge : _gpuGauge) is { } large) large.Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
+        if (!_gridMode && (cpuMain ? _cpuGauge : _gpuGauge) is { } large) large.Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
         _memory?.Set(snapshot.Memory, motion);
         _network?.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
         _downloadCard?.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
         _uploadCard?.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
         _storage?.Set(snapshot.Storage, motion);
         foreach (var (letter, block) in _driveCards)
-            block.Set(Storage.Find(snapshot.Storage, letter) is { } found ? [found.Drive with { Volumes = [found.Volume] }] : [], motion);
+        {
+            var found = Storage.Find(snapshot.Storage, letter);
+            block.Set(found is { } volume ? [volume.Drive with { Volumes = [volume.Volume] }] : [], motion);
+            SetGridDrivePresence(letter, found is not null);
+        }
         _power?.Set(snapshot, motion);
         _frames?.Set(snapshot);
         _list?.Set(snapshot.Processes, _cores, motion);
