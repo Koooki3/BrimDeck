@@ -21,6 +21,11 @@ internal static class Feedback
         "Fade", typeof(bool), typeof(Feedback), new PropertyMetadata(false, FadeChanged));
     public static bool GetFade(DependencyObject element) => (bool)element.GetValue(FadeProperty);
     public static void SetFade(DependencyObject element, bool value) => element.SetValue(FadeProperty, value);
+    // A control built in code that changes its own look when the pointer comes onto it (a MouseEnter handler), which neither its
+    // style nor its template says: it shows its own hover, so a theme's hover mark (InteractionFx, HoverOwners) leaves it alone.
+    public static readonly DependencyProperty OwnHoverProperty = DependencyProperty.RegisterAttached("OwnHover", typeof(bool), typeof(Feedback));
+    public static bool GetOwnHover(DependencyObject element) => (bool)element.GetValue(OwnHoverProperty);
+    public static void SetOwnHover(DependencyObject element, bool value) => element.SetValue(OwnHoverProperty, value);
 
     private static readonly MouseButtonEventHandler ButtonHandler = (sender, e) => { Source(sender, e); Update(sender); };
     // Whether the pointer came onto the button by touch or a pen (motion-review F4).

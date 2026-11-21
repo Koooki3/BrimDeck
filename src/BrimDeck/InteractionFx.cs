@@ -9,8 +9,8 @@ namespace BrimDeck;
 
 // The theme's answer to the pointer on the open panel (ThemeMotion): a mark on the control the pointer hovers, drawn on the
 // control's visible shape (FxMark), never around its layout box and never following the pointer, on one layer above the
-// content that takes no input. A theme without a motion section (the default dark and light) draws nothing, and the controls
-// keep their own hover looks, as do controls that fade their own feedback (Feedback.Fade, which must not wear two marks).
+// content that takes no input. The mark is off unless a theme turns it on (no built-in theme does), and a control that already
+// shows its own hover never wears a mark over it (HoverOwners): only a control that shows nothing of its own is marked.
 // With animations off (BrimDeck's or Windows'), or in high contrast, nothing is drawn.
 internal static class InteractionFx
 {
@@ -279,7 +279,7 @@ internal sealed partial class FxSurface : FrameworkElement
     // ----- Targets -----
 
     // Something that can be clicked: a button of any kind, a list or combo box item or a tab. Scroll bars, sliders, text fields
-    // and whole surfaces are not; neither is a disabled control, nor one that fades its own feedback (Feedback.Fade).
+    // and whole surfaces are not; neither is a disabled control, nor one that shows its own hover (HoverOwners.DrawsOwn).
     private FrameworkElement? TargetOf(DependencyObject? source)
     {
         if (source is null) return null;
@@ -291,7 +291,7 @@ internal sealed partial class FxSurface : FrameworkElement
             if (node is IslandBorder) break;
             if (found is null && node is ButtonBase or ListBoxItem or ComboBox or TabItem) found = (FrameworkElement)node;
         }
-        if (found is not null && (!found.IsEnabled || !found.IsVisible || Feedback.GetFade(found))) found = null;
+        if (found is not null && (!found.IsEnabled || !found.IsVisible || HoverOwners.DrawsOwn(found))) found = null;
         _lastSource = source; _lastTarget = found;
         return found;
     }
