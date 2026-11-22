@@ -295,6 +295,51 @@ internal static class GlassChecks
                 kReady && kFellBack && Idle(() => k.Applied.Backend == GlassSurface.Backend.Graph) && k.Applied.Material == refusedFrame && !k.Waking);
             k.Hide();
             GlassEffect.Inject = null;
+
+            // V4 F03: the graph refused, the stepped fallback still follows the clarity: at 0, 50 and 100 it shows (and reports)
+            // the clarity's tint opacity and saturation, not the defaults, so the slider's ends keep their meaning after the
+            // glass degrades; each weight within its step of what was asked.
+            GlassEffect.Renew();
+            GlassEffect.CanTryGraph(compositor);
+            GlassEffect.RefuseGraph();
+            var faithful = new List<string>();
+            bool follows = true;
+            double stepWorst = 0, graphWorst = 0;
+            (double R, double G, double B)[] backdrops = [(1, 1, 1), (0, 0, 0), (.5, .5, .5), (.78, .27, .04), (.1, .4, .9), (.95, .9, .2)];
+            foreach (int clarity in new[] { 0, 50, 100 })
+            {
+                double u = clarity / 100d;
+                foreach (double palette in new[] { 0d, 1d, .5 })
+                {
+                    var wanted = new GlassSurface.Material(.41, .23, palette, GlassClarityPolicy.Tint(u), GlassClarityPolicy.Saturation(u));
+                    var surface = Open(wanted, out _);
+                    bool degradedTo = Settle(surface, GlassSurface.Backend.Fallback);
+                    var got = surface.Applied.Material;
+                    bool near = degradedTo && Math.Abs(got.Tint - wanted.Tint) <= .005 + 1e-9 && Math.Abs(got.Saturation - wanted.Saturation) <= .025 + 1e-9
+                        && got.DarkVeil >= wanted.DarkVeil && got.DarkVeil - wanted.DarkVeil < .05 && got.LightVeil >= wanted.LightVeil
+                        && got.LightVeil - wanted.LightVeil < .05 && Math.Abs(got.Palette - wanted.Palette) <= 1 / 24d + 1e-9;
+                    // What the fallback draws (its stepped look's matrix) against the graph's recipe: the same for the stepped
+                    // weights it reports (the turn's middle mixes the two looks' greys, close), and within the steps of the asked.
+                    var matrix = GlassRecipe.Matrix(GlassEffect.StepLook(wanted.DarkVeil, wanted.LightVeil, wanted.Palette, wanted.Tint, wanted.Saturation));
+                    foreach (var backdrop in backdrops)
+                    {
+                        var drawn = GlassRecipe.Apply(matrix, backdrop);
+                        var reported = GlassRecipe.Shown(backdrop, got.DarkVeil, got.LightVeil, got.Palette, got.Tint, got.Saturation);
+                        var graph = GlassRecipe.Shown(backdrop, wanted.DarkVeil, wanted.LightVeil, wanted.Palette, wanted.Tint, wanted.Saturation);
+                        static double Gap((double R, double G, double B) a, (double R, double G, double B) b)
+                            => Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B)));
+                        double step = Gap(drawn, reported);
+                        if (palette is 0 or 1 ? step > 1e-4 : step > .03) near = false;
+                        stepWorst = Math.Max(stepWorst, palette is 0 or 1 ? step : 0);
+                        graphWorst = Math.Max(graphWorst, Gap(drawn, graph));
+                    }
+                    follows &= near;
+                    faithful.Add(FormattableString.Invariant($"{clarity}/{palette:0.0}: tint {got.Tint:0.00} sat {got.Saturation:0.00}"));
+                    surface.Hide();
+                }
+            }
+            check(FormattableString.Invariant($"The graph refused, the stepped fallback keeps the clarity's tint and saturation at 0, 50 and 100 and draws the graph's recipe for its steps ({string.Join("; ", faithful)}; step gap {stepWorst:0.00000}, to the asked {graphWorst:0.000})"),
+                follows && graphWorst <= .06);
         }
         finally
         {

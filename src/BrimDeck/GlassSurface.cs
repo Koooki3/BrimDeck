@@ -35,8 +35,8 @@ internal sealed class GlassSurface : IDisposable
     // What draws the glass: the persistent graph, the stepped fallback, an opaque ground (while the graph loads, or where
     // neither effect can be used), or nothing (no compositor).
     internal enum Backend { None, Opaque, Fallback, Graph }
-    // The material as the backend draws it, for the readability guard: the request on the graph, the stepped weights on the
-    // fallback, and on the opaque ground the thickest veils (a grey backdrop under a full veil shows the look's own colour,
+    // The material as the backend draws it, for the readability guard: the request on the graph, the stepped weights (all five)
+    // on the fallback, and on the opaque ground the thickest veils (a grey backdrop under a full veil shows the look's own colour,
     // which is what the ground is painted).
     internal readonly record struct AppliedMaterial(Backend Backend, Material Material);
 
@@ -136,7 +136,7 @@ internal sealed class GlassSurface : IDisposable
 
     private bool Fallback(Compositor compositor, SpriteVisual sprite, Material material, bool compile)
     {
-        var look = GlassEffect.StepLook(material.DarkVeil, material.LightVeil, material.Palette);
+        var look = GlassEffect.StepLook(material.DarkVeil, material.LightVeil, material.Palette, material.Tint, material.Saturation);
         if (_fallback is null || _fallbackLook != look)
         {
             if (compile && GlassEffect.FallbackAvailable(compositor) && GlassEffect.Acrylic(compositor, look) is { } brush)
@@ -146,8 +146,9 @@ internal sealed class GlassSurface : IDisposable
                 GlassEffect.Release(previous);
                 _fallback = brush;
                 _fallbackLook = look;
-                var (dark, light, palette) = GlassEffect.StepMaterial(material.DarkVeil, material.LightVeil, material.Palette);
-                _fallbackShown = new(dark, light, palette);
+                var (dark, light, palette, tint, saturation) = GlassEffect.StepMaterial(material.DarkVeil, material.LightVeil, material.Palette,
+                    material.Tint, material.Saturation);
+                _fallbackShown = new(dark, light, palette, tint, saturation);
             }
         }
         // The new step is not to be had now (loading, refused, a graph loading): the step shown stays, reported as it is, and the
