@@ -236,6 +236,28 @@ internal static class GlassChecks
             // No compositor means no glass: a hidden or disposed surface does not report a backend.
             f.Hide();
             check("A hidden surface presents nothing and reports no backend", !f.Present(asked, out var none) && none.Backend == GlassSurface.Backend.None);
+
+            // Every new factory loads, but each first frame on it is refused (a device that keeps changing): a load is no
+            // success, so the streak still runs out after GraphTries and the graph degrades instead of recompiling for ever.
+            GlassEffect.Renew();
+            int frames = 0;
+            GlassEffect.Inject = step =>
+            {
+                if (step == "Present") { frames++; throw new COMException("frame refused", unchecked((int)0x8899000C)); }
+            };
+            var g = Open(asked, out _);
+            for (int cycle = 0; cycle < 8; cycle++)
+            {
+                // The factory made for this try loads (real time; the injected clock waits), then the backoff passes.
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                while (GlassEffect.GraphState == GlassBackendState.Loading && watch.ElapsedMilliseconds < 2000) { Pump(); g.Poll(); }
+                clock += 2000;
+                Present(g, asked);
+            }
+            check($"A graph whose every first frame is refused degrades after {GlassEffect.GraphTries} tries although each factory loads ({frames} frames tried, {GlassEffect.GraphState})",
+                frames == GlassEffect.GraphTries && GlassEffect.GraphState == GlassBackendState.Degraded && g.Applied.Backend == GlassSurface.Backend.Fallback && Drawn(g));
+            g.Hide();
+            GlassEffect.Inject = null;
         }
         finally
         {

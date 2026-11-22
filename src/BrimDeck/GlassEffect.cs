@@ -135,9 +135,9 @@ internal static class GlassEffect
             brush.SetSourceParameter("backdrop", backdrop);
             Own(brush, factory);
             var status = Status(factory);
-            if (status == CompositionEffectFactoryLoadStatus.Success) Succeeded();
-            else if (status == CompositionEffectFactoryLoadStatus.Pending) GraphState = GlassBackendState.Loading;
-            else throw new NotSupportedException($"the glass graph did not load: {status}");
+            // A factory that loaded is no success yet: the streak ends only once a brush of it has presented (Succeeded).
+            if (status == CompositionEffectFactoryLoadStatus.Pending) GraphState = GlassBackendState.Loading;
+            else if (status != CompositionEffectFactoryLoadStatus.Success) throw new NotSupportedException($"the glass graph did not load: {status}");
             return brush;
         }
         catch (Exception error) when (Expected(error))
@@ -185,7 +185,7 @@ internal static class GlassEffect
         catch (Exception error) when (Expected(error)) { return CompositionEffectFactoryLoadStatus.Other; }
     }
 
-    // A graph brush drew (its factory loaded, its weights were taken): the failure streak starts again.
+    // A graph brush presented (its factory loaded and its first weights were taken): the failure streak starts again.
     public static void Succeeded()
     {
         _graphFailures = 0;

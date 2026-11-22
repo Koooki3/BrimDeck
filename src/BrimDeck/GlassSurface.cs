@@ -94,7 +94,7 @@ internal sealed class GlassSurface : IDisposable
             if (!_graphReady)
             {
                 var status = GlassEffect.StatusOf(graph);
-                if (status == CompositionEffectFactoryLoadStatus.Success) { _graphReady = true; GlassEffect.Succeeded(); }
+                if (status == CompositionEffectFactoryLoadStatus.Success) _graphReady = true;
                 else if (status != CompositionEffectFactoryLoadStatus.Pending || GlassEffect.Clock() - _graphSince >= LoadingLimitMs)
                     DropGraph(compositor, material, permanent: status != CompositionEffectFactoryLoadStatus.Pending);
                 else SchedulePoll();
@@ -104,7 +104,8 @@ internal sealed class GlassSurface : IDisposable
                 try
                 {
                     GlassEffect.Present(graph, material.DarkVeil, material.LightVeil, material.Palette, material.Tint, material.Saturation);
-                    if (!ReferenceEquals(sprite.Brush, graph)) sprite.Brush = graph;
+                    // Only a brush that presented has worked: a load alone ends no backoff.
+                    if (!ReferenceEquals(sprite.Brush, graph)) { sprite.Brush = graph; GlassEffect.Succeeded(); }
                     ReleaseFallback();
                     return _applied = new(Backend.Graph, material);
                 }
