@@ -258,6 +258,43 @@ internal static class GlassChecks
                 frames == GlassEffect.GraphTries && GlassEffect.GraphState == GlassBackendState.Degraded && g.Applied.Backend == GlassSurface.Backend.Fallback && Drawn(g));
             g.Hide();
             GlassEffect.Inject = null;
+
+            // No frame asks any more (an animation ended): what the surface still waits for shows by its own timer, and the
+            // timer stops once it has. The injected clock follows real time meanwhile.
+            bool Idle(Func<bool> done)
+            {
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                long from = clock;
+                while (!done() && watch.ElapsedMilliseconds < 3000) { Pump(); clock = from + watch.ElapsedMilliseconds; }
+                return done();
+            }
+            // A fallback step asked for by the last frame, still loading: the step shown stays meanwhile, then the one asked.
+            GlassEffect.Renew();
+            GlassEffect.CanTryGraph(compositor);
+            GlassEffect.RefuseGraph();
+            var h = Open(asked, out var hShown);
+            var unloaded = new GlassSurface.Material(.62, .07, .58);
+            var unloadedStep = GlassEffect.StepMaterial(unloaded.DarkVeil, unloaded.LightVeil, unloaded.Palette);
+            bool keptStep = h.Present(unloaded, out var kept) && kept.Backend == GlassSurface.Backend.Fallback && kept.Material == steppedMaterial;
+            check($"A fallback step that loads after the last frame is shown without another frame ({h.Applied.Material})",
+                hShown.Backend == GlassSurface.Backend.Fallback && keptStep
+                && Idle(() => h.Applied.Material == new GlassSurface.Material(unloadedStep.DarkVeil, unloadedStep.LightVeil, unloadedStep.Palette))
+                && !h.Waking);
+            h.Hide();
+            // The graph backing off under a fallback: tried again when the backoff has passed, without another frame.
+            GlassEffect.Renew();
+            var k = Open(asked, out _);
+            bool kReady = Settle(k, GlassSurface.Backend.Graph);
+            bool kArmed = true;
+            GlassEffect.Inject = step =>
+            {
+                if (step == "Present" && kArmed) { kArmed = false; throw new COMException("frame refused", unchecked((int)0x8899000C)); }
+            };
+            bool kFellBack = k.Present(refusedFrame, out var kShown) && kShown.Backend == GlassSurface.Backend.Fallback;
+            check($"A graph backing off under a fallback comes back after the backoff without another frame ({k.Applied.Backend}, {GlassEffect.GraphState})",
+                kReady && kFellBack && Idle(() => k.Applied.Backend == GlassSurface.Backend.Graph) && k.Applied.Material == refusedFrame && !k.Waking);
+            k.Hide();
+            GlassEffect.Inject = null;
         }
         finally
         {

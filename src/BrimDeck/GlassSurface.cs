@@ -51,11 +51,18 @@ internal sealed class GlassSurface : IDisposable
     private CompositionColorBrush? _ground;
     private DispatcherTimer? _poll;
     private int _polls;
+    // The fallback step asked for that is not shown yet (loading, or its device backing off) and the reads it had; the graph's
+    // next try (GlassEffect.RetryAt) the timer was set for and how often.
+    private GlassRecipe.Look? _pendingLook;
+    private int _stepPolls, _retryWakes;
+    private long _wokenFor;
     private bool _visible, _disposed;
     internal bool Visible => _visible;
     internal AppliedMaterial Applied => _visible ? _applied : default;
     // Diagnostics and tests: the brush the glass draws with now.
     internal CompositionBrush? Brush => _sprite?.Brush;
+    // Diagnostics and tests: whether the surface's own timer will look again (something it waits for is pending).
+    internal bool Waking => _poll is { IsEnabled: true };
 
     // How long a loading graph may stay Pending (a factory loads while the UI thread pumps, about 70 ms here), and when the
     // surface looks again without a frame asking: four reads, the last past the limit.
@@ -88,6 +95,7 @@ internal sealed class GlassSurface : IDisposable
             _graphReady = false;
             _graphSince = GlassEffect.Clock();
             _polls = 0;
+            StopPoll();
         }
         if (_graph is { } graph)
         {
@@ -97,7 +105,6 @@ internal sealed class GlassSurface : IDisposable
                 if (status == CompositionEffectFactoryLoadStatus.Success) _graphReady = true;
                 else if (status != CompositionEffectFactoryLoadStatus.Pending || GlassEffect.Clock() - _graphSince >= LoadingLimitMs)
                     DropGraph(compositor, material, permanent: status != CompositionEffectFactoryLoadStatus.Pending);
-                else SchedulePoll();
             }
             if (_graphReady)
             {
@@ -117,11 +124,14 @@ internal sealed class GlassSurface : IDisposable
         }
         // A safe ground while the graph loads, backs off or is refused: the stepped fallback (only compiled while no graph is
         // loading), else an opaque colour.
-        if (Fallback(compositor, sprite, material, compile: _graph is null)) return _applied;
-        sprite.Brush = Ground(compositor, material);
-        // The fallback's step may still be loading too: looked at again with the same few reads.
-        SchedulePoll();
-        return _applied = new(Backend.Opaque, new(1, 1, material.Palette));
+        if (!Fallback(compositor, sprite, material, compile: _graph is null))
+        {
+            sprite.Brush = Ground(compositor, material);
+            _applied = new(Backend.Opaque, new(1, 1, material.Palette));
+        }
+        // What is not shown yet (a loading graph or step, the graph's next try) is looked at again without a frame asking.
+        Wake(compositor);
+        return _applied;
     }
 
     private bool Fallback(Compositor compositor, SpriteVisual sprite, Material material, bool compile)
@@ -139,9 +149,17 @@ internal sealed class GlassSurface : IDisposable
                 var (dark, light, palette) = GlassEffect.StepMaterial(material.DarkVeil, material.LightVeil, material.Palette);
                 _fallbackShown = new(dark, light, palette);
             }
-            // The new step is not to be had now (loading, refused, a graph loading): the step shown stays, reported as it is.
-            if (_fallback is null) return false;
         }
+        // The new step is not to be had now (loading, refused, a graph loading): the step shown stays, reported as it is, and the
+        // step asked for is looked at again (Wake).
+        GlassRecipe.Look? pending = _fallbackLook == look ? null : look;
+        if (pending != _pendingLook)
+        {
+            _pendingLook = pending;
+            _stepPolls = 0;
+            if (pending is not null && _graph is null) StopPoll();
+        }
+        if (_fallback is null) return false;
         if (!ReferenceEquals(sprite.Brush, _fallback)) sprite.Brush = _fallback;
         _applied = new(Backend.Fallback, _fallbackShown);
         return true;
@@ -177,30 +195,49 @@ internal sealed class GlassSurface : IDisposable
         GlassEffect.Release(_fallback);
         _fallback = null;
         _fallbackLook = null;
+        _pendingLook = null;
     }
 
-    // A loading graph (or fallback step) is looked at again a few times without a frame asking; a graph past LoadingLimitMs
-    // counts as a failure.
-    private void SchedulePoll()
+    // What the surface waits for is looked at again without a frame asking (an animation's last frame may ask for what is not
+    // to be had yet): a loading graph a few times (PollMs; past LoadingLimitMs it counts as a failure), a fallback step not yet
+    // loaded the same few times, and the graph's next try once its backoff has passed (GlassEffect bounds the tries). Nothing
+    // pending (shown, or refused for good), hidden or disposed: no timer.
+    private void Wake(Compositor compositor)
     {
-        if (_polls >= PollMs.Length || _poll is { IsEnabled: true }) return;
+        if (_poll is { IsEnabled: true }) return;
+        int? due = null;
+        if (_graph is not null)
+        {
+            if (!_graphReady && _polls < PollMs.Length) due = PollMs[_polls++];
+        }
+        else
+        {
+            long now = GlassEffect.Clock(), retryAt = GlassEffect.RetryAt;
+            if (retryAt != _wokenFor) { _wokenFor = retryAt; _retryWakes = 0; }
+            int? step = _pendingLook is not null && _stepPolls < PollMs.Length && GlassEffect.FallbackAvailable(compositor) ? PollMs[_stepPolls] : null;
+            // A timer may tick a little early: a few wakes for each backoff, the first just after it ends.
+            int? retry = GlassEffect.GraphAvailable && retryAt > now && _retryWakes < 3 ? (int)Math.Min(retryAt - now + 16, 60_000) : null;
+            if (step is { } s && (retry is not { } r || s <= r)) { _stepPolls++; due = s; }
+            else if (retry is { } wait) { _retryWakes++; due = wait; }
+        }
+        if (due is not { } ms) return;
         if (_poll is null)
         {
             _poll = new DispatcherTimer(DispatcherPriority.Background);
             _poll.Tick += PollTick;
         }
-        _poll.Interval = TimeSpan.FromMilliseconds(PollMs[_polls++]);
+        _poll.Interval = TimeSpan.FromMilliseconds(ms);
         _poll.Start();
     }
 
     private void StopPoll() => _poll?.Stop();
     private void PollTick(object? sender, EventArgs e) { StopPoll(); Poll(); }
 
-    // Looks at a loading graph or fallback again (the timer, or a test with its own clock).
+    // Looks again at what the surface waits for (the timer, or a test with its own clock).
     internal void Poll()
     {
         if (_disposed || !_visible || _sprite is null || _requested is not { } material) return;
-        if (_applied.Backend != Backend.Opaque && (_graph is null || _graphReady)) return;
+        if (_applied.Backend == Backend.Graph && _graphReady) return;
         try { Apply(material); }
         catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException) { Dispose(); }
     }

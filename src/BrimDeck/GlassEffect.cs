@@ -80,6 +80,8 @@ internal static class GlassEffect
     internal static GlassBackendState GraphState { get; private set; }
     // Whether the persistent graph can be used now (false once Composition refused it for this generation).
     public static bool GraphAvailable => !_graphRefused;
+    // When the graph may be tried again after a transient failure (a surface showing a fallback wakes for it).
+    internal static long RetryAt => _retryAt;
 
     // The display, a resume or the capabilities changed: what was refused may work now, and the failure streak starts again.
     // Safe from any thread; the UI thread takes it up at its next request.
