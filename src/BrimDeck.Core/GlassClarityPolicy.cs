@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace BrimDeck.Core;
 
 // Liquid glass's clarity (the user's 0..100, stored as DeckSettings.GlassTransparency) turned into one material target (review
@@ -20,7 +22,8 @@ public static class GlassClarityPolicy
     public readonly record struct Anchor(double Clarity, double Veil, double Tint, double Saturation);
     public readonly record struct Target(double Veil, double Tint, double Saturation, double ReadWeight);
 
-    public static readonly Anchor[] Anchors =
+    // Read-only (an array's elements could be rewritten by any caller, behind the curves built from them).
+    public static readonly ImmutableArray<Anchor> Anchors =
     [
         new(0, .82, .36, 1.05),
         new(25, .55, .27, 1.18),

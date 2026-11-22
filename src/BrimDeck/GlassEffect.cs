@@ -308,12 +308,15 @@ internal static class GlassEffect
         }
     }
 
-    // The fallback's look for the graph's weights, in .05 opacity steps and twelfths of a turn.
-    public static GlassRecipe.Look StepLook(double darkVeil, double lightVeil, double palette)
+    // The fallback's look for the graph's weights, in .05 opacity steps and twelfths of a turn, with the clarity's tint opacity
+    // and saturation (V4 F03: the same five numbers the graph takes, so the slider keeps its meaning when the glass degrades) in
+    // .01 and .05 steps. The cache holds the looks by all five (AcrylicFactories, bounded by FallbackLimit).
+    public static GlassRecipe.Look StepLook(double darkVeil, double lightVeil, double palette,
+        double tint = GlassRecipe.DefaultTint, double saturation = GlassRecipe.DefaultSaturation)
     {
-        var (darkStep, lightStep, share) = StepMaterial(darkVeil, lightVeil, palette);
-        var dark = GlassRecipe.Dark with { LuminosityOpacity = darkStep };
-        var light = GlassRecipe.Light with { LuminosityOpacity = lightStep };
+        var (darkStep, lightStep, share, tintStep, saturationStep) = StepMaterial(darkVeil, lightVeil, palette, tint, saturation);
+        var dark = GlassRecipe.For(true, tintStep, saturationStep) with { LuminosityOpacity = darkStep };
+        var light = GlassRecipe.For(false, tintStep, saturationStep) with { LuminosityOpacity = lightStep };
         if (share <= 0) return dark;
         if (share >= 1) return light;
         double veil = dark.LuminosityOpacity + (light.LuminosityOpacity - dark.LuminosityOpacity) * share;
@@ -322,11 +325,15 @@ internal static class GlassEffect
         return dark with { LuminosityOpacity = veil, Luminosity = neutral, TintR = neutral, TintG = neutral, TintB = neutral };
     }
 
-    // The weights the fallback's stepped look stands for: each veil up to the next .05, the share to the nearest twelfth.
-    public static (double DarkVeil, double LightVeil, double Palette) StepMaterial(double darkVeil, double lightVeil, double palette)
+    // The weights the fallback's stepped look stands for: each veil up to the next .05, the share to the nearest twelfth, the
+    // tint opacity to the nearest .01 and the saturation to the nearest .05 (the defaults fall on their steps).
+    public static (double DarkVeil, double LightVeil, double Palette, double Tint, double Saturation) StepMaterial(double darkVeil, double lightVeil,
+        double palette, double tint = GlassRecipe.DefaultTint, double saturation = GlassRecipe.DefaultSaturation)
     {
         static double Step(double veil) => Math.Ceiling(Math.Clamp(veil, 0, GlassRecipe.LuminosityMost) * 20 - 1e-9) / 20;
-        return (Step(darkVeil), Step(lightVeil), Math.Round(Math.Clamp(palette, 0, 1) * 12) / 12);
+        double k = double.IsFinite(tint) ? Math.Clamp(tint, 0, 1) : GlassRecipe.DefaultTint;
+        double s = double.IsFinite(saturation) ? Math.Clamp(saturation, 0, 2) : GlassRecipe.DefaultSaturation;
+        return (Step(darkVeil), Step(lightVeil), Math.Round(Math.Clamp(palette, 0, 1) * 12) / 12, Math.Round(k * 100) / 100, Math.Round(s * 20) / 20);
     }
 
     // Lets a glass window's brush go, with the backdrop brush inside it; its factory goes too once retired and unused.

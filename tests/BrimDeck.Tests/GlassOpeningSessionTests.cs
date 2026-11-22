@@ -12,6 +12,8 @@ internal static class GlassOpeningSessionTests
         public readonly GlassOpeningSession Session = new();
         public nint Monitor = 1;
         public double Dpi = 1.25;
+        // The area the opening covers now, on the screen (the panel moved on its display: another area).
+        public (int X, int Y, int Width, int Height) Area = (0, 0, 100, 100);
 
         public readonly List<(GlassOpeningSession.Ticket Ticket, TaskCompletionSource<bool> Read)> Running = [];
         public readonly List<long> AppliedEpochs = [];
@@ -21,11 +23,11 @@ internal static class GlassOpeningSessionTests
 
         public async void Read()
         {
-            if (Session.Begin(Monitor, 0, 0, 100, 100, Dpi, 0) is not { } ticket) return;
+            if (Session.Begin(Monitor, Area.X, Area.Y, Area.Width, Area.Height, Dpi, 0) is not { } ticket) return;
             var read = new TaskCompletionSource<bool>();
             Running.Add((ticket, read));
             bool ok = await read.Task;
-            if (Session.Finish(ticket, Monitor, Dpi, ok) == GlassOpeningSession.Outcome.Applied) AppliedEpochs.Add(ticket.OpenEpoch);
+            if (Session.Finish(ticket, Monitor, Dpi, Area, ok) == GlassOpeningSession.Outcome.Applied) AppliedEpochs.Add(ticket.OpenEpoch);
             if (Session.TakePending()) Read();
         }
 
@@ -91,6 +93,25 @@ internal static class GlassOpeningSessionTests
             && hidden.Session.Last == GlassOpeningSession.Outcome.SceneChanged
             && moved.AppliedEpochs.Count + display.AppliedEpochs.Count + hidden.AppliedEpochs.Count == 0);
 
+        // V4 F02: the panel moved on the same display at the same scale while its area was read (dragged, its capsule placed
+        // anew): the read is of the area it left and is dropped as StaleArea; the same opening's read of the area it covers now
+        // still applies. A move also ends the scene (MainWindow.GlassLocation: SceneChanged), so the read is stale both ways.
+        var dragged = new Panel();
+        dragged.Open();
+        dragged.Area = (240, 0, 100, 100);
+        dragged.Answer(0);
+        bool draggedDropped = dragged.Session.Last == GlassOpeningSession.Outcome.StaleArea && dragged.AppliedEpochs.Count == 0
+            && dragged.Session.AppliedEpoch == 0;
+        dragged.Read();
+        dragged.Answer(1);
+        var shifted = new Panel();
+        shifted.Open();
+        shifted.Area = (0, 1, 100, 100);
+        shifted.Answer(0);
+        check("A cover read for an area the panel left on the same display and scale is dropped; a read of where it is now applies",
+            draggedDropped && dragged.AppliedEpochs.SequenceEqual([dragged.Session.OpenEpoch])
+            && shifted.Session.Last == GlassOpeningSession.Outcome.StaleArea && shifted.AppliedEpochs.Count == 0);
+
         // A read that found nothing: Unknown, no cover, and the veil keeps the capsule's requirement (NaN cover) instead of the
         // worst range.
         var empty = new Panel();
@@ -99,12 +120,62 @@ internal static class GlassOpeningSessionTests
         var refused = new GlassOpeningSession();
         refused.Intent();
         var ticket = refused.Begin(1, 0, 0, 10, 10, 1, 0)!.Value;
-        bool refusedOutcome = refused.Finish(ticket, 1, 1, read: false, refused: true) == GlassOpeningSession.Outcome.Refused;
+        bool refusedOutcome = refused.Finish(ticket, 1, 1, (0, 0, 10, 10), read: false, refused: true) == GlassOpeningSession.Outcome.Refused;
         check("A cover read that read nothing (or was refused) is Unknown: the opening keeps the capsule's veil, not the worst range",
             empty.Session.Last == GlassOpeningSession.Outcome.Unknown && empty.AppliedEpochs.Count == 0 && refusedOutcome
             && GlassOpening.Required(.3, double.NaN, 1) == .3);
 
+        Faults(check);
         Scenes(check);
+    }
+
+    // V4 F04: a cover read whose capture (or what is done with it) throws. The read is the panel's own Task: nothing escapes to
+    // the window's dispatcher, the read budget's slot comes back, the opening records the read as Unknown (the capsule's veil,
+    // never the worst range) and is free for the next read, and an intent that waited for it still gets its read.
+    private static void Faults(Action<string, bool> check)
+    {
+        var budget = new GlassReadBudget<object>();
+        var key = new object();
+        var session = new GlassOpeningSession();
+        session.Intent();
+        var ticket = session.Begin(1, 0, 0, 100, 100, 1.25, 0)!.Value;
+        var capture = new TaskCompletionSource<int?>();
+        int again = 0, failures = 0;
+        Task<GlassOpeningSession.Outcome> task;
+        try
+        {
+            task = session.Read(ticket, budget, key, () => capture.Task, () => (1, 1.25, (0, 0, 100, 100)), (_, _) => { }, () => again++, _ => failures++);
+        }
+        catch (Exception) { task = Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("thrown at once")); }
+        bool held = budget.Running == 1;
+        // An intent while the capture runs waits for it.
+        bool waits = session.Begin(1, 0, 0, 100, 100, 1.25, 0) is null && session.Pending;
+        capture.SetException(new System.ComponentModel.Win32Exception(5, "the screen could not be read"));
+        bool quiet = task.IsCompletedSuccessfully;
+        check("A cover read whose capture throws ends quietly: its budget slot is released and it is recorded as Unknown",
+            held && quiet && task.Result == GlassOpeningSession.Outcome.Unknown && budget.Running == 0
+            && session.Count(GlassOpeningSession.Outcome.Unknown) == 1 && !session.Running && failures == 1);
+        check("The intent that waited for a cover read that threw still gets its own read (none starves)",
+            waits && again == 1 && session.Begin(1, 0, 0, 100, 100, 1.25, 0) is not null);
+
+        // The capture throwing before it returns a task, and the glass's own handling of a reading throwing.
+        var early = new GlassOpeningSession();
+        early.Intent();
+        var first = early.Begin(1, 0, 0, 100, 100, 1.25, 0)!.Value;
+        Task<GlassOpeningSession.Outcome> thrown, applying;
+        try { thrown = early.Read<int>(first, budget, key, () => throw new OutOfMemoryException("injected"), () => (1, 1.25, (0, 0, 100, 100)), (_, _) => { }, () => { }); }
+        catch (Exception) { thrown = Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("thrown at once")); }
+        var second = early.Begin(1, 0, 0, 100, 100, 1.25, 0);
+        try
+        {
+            applying = second is { } next
+                ? early.Read<int>(next, budget, key, () => Task.FromResult<int?>(1), () => (1, 1.25, (0, 0, 100, 100)), (_, _) => throw new InvalidOperationException("injected"), () => { })
+                : Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("no second read"));
+        }
+        catch (Exception) { applying = Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("thrown at once")); }
+        check("A capture that throws at once, or applying a reading that throws, escapes nowhere and frees the budget and the opening",
+            thrown.IsCompletedSuccessfully && thrown.Result == GlassOpeningSession.Outcome.Unknown && applying.IsCompletedSuccessfully
+            && applying.Result == GlassOpeningSession.Outcome.Applied && budget.Running == 0 && !early.Running);
     }
 
     private static byte[] Image(Func<int, int, (byte R, byte G, byte B)> at, int size = 24)
@@ -124,6 +195,37 @@ internal static class GlassOpeningSessionTests
     {
         var decision = new GlassAppearance(dark, appDark);
         return decision.Open(scene, 10_000) && decision.Dark != dark;
+    }
+
+    // V4 F01: a capture that began after the opening's first frame may show the panel's own glass on the side the panel grows
+    // in from. It used to be trusted half (.5 under the .6 a turn needs), so it could never turn the look. Now it is judged on
+    // the part of the area the panel had not reached (all of it when the panel had not reached the area yet); when too little is
+    // left, the read is Unknown: no turn, and the veils keep the capsule's (never the worst range).
+    private static void Occlusion(Action<string, bool> check, GlassSceneSnapshot pure, (byte, byte, byte) white, (byte, byte, byte) glass)
+    {
+        // The panel had not reached the area yet when the capture began: the same as a capture before its first frame.
+        var early = pure.Uncovered(GlassSceneSnapshot.Side.Top, 0);
+        check("A capture after the opening's first frame, the panel not yet over the area, is trusted as one before it and turns the look",
+            early is not null && Math.Abs(early.Confidence - pure.Confidence) < 1e-9 && Turns(early, dark: true));
+
+        // A white page whose nearest fifth already shows the dark glass growing in from the top: judged on the rest, it turns.
+        var shown = GlassSceneSnapshot.FromPixels(Image((_, y) => y < 5 ? glass : white), 24, 24)!;
+        var beyond = shown.Uncovered(GlassSceneSnapshot.Side.Top, .2);
+        check("A capture whose nearest fifth shows the panel's own glass is judged on the rest of the area and turns a dark look light",
+            beyond is not null && beyond.DarkShare == 0 && beyond.LightShare > 1 - 1e-9 && beyond.Confidence >= GlassAppearance.OpenConfidence
+            && Turns(beyond, dark: true));
+
+        // The same from each side the panel can grow in from (a panel under a bottom capsule grows up, a side panel sideways).
+        var below = GlassSceneSnapshot.FromPixels(Image((_, y) => y >= 19 ? glass : white), 24, 24)!.Uncovered(GlassSceneSnapshot.Side.Bottom, .2);
+        var left = GlassSceneSnapshot.FromPixels(Image((x, _) => x < 5 ? glass : white), 24, 24)!.Uncovered(GlassSceneSnapshot.Side.Left, .2);
+        var right = GlassSceneSnapshot.FromPixels(Image((x, _) => x >= 19 ? glass : white), 24, 24)!.Uncovered(GlassSceneSnapshot.Side.Right, .2);
+        check("The covered part is left out on the side the panel grows in from (top, bottom, left or right)",
+            new[] { below, left, right }.All(scene => scene is not null && scene.LightShare > 1 - 1e-9 && Turns(scene, dark: true)));
+
+        // Most of the area already under the panel: too little is left to tell, so the read is Unknown (it turns nothing).
+        check("A capture with most of the area already under the panel is Unknown: no turn, and the veils keep the capsule's",
+            shown.Uncovered(GlassSceneSnapshot.Side.Top, 1 - GlassSceneSnapshot.VisibleLeast + .05) is null
+            && GlassOpening.Required(.3, double.NaN, 1) == .3);
     }
 
     private static void Scenes(Action<string, bool> check)
@@ -154,9 +256,7 @@ internal static class GlassOpeningSessionTests
             fine.Confidence < GlassAppearance.OpenConfidence && Math.Abs(coarse.LightShare - .5) < 1e-9
             && !Turns(fine, true) && !Turns(fine, false) && !Turns(coarse, true) && !Turns(coarse, false));
 
-        // A capture that may already show the panel's own glass is trusted half: it turns nothing.
-        check("A covered-area capture taken after the opening's first frame is trusted less and turns no look",
-            pure.Occluded().OcclusionPossible && pure.Occluded().Confidence <= GlassSceneSnapshot.OccludedTrust && !Turns(pure.Occluded(), dark: true));
+        Occlusion(check, pure, white, ide);
 
         // v3b: the first opening over a white page turned the look light about 20 ms after the intent, the panel still almost
         // shut, and the palette's spring then took 250-365 ms from dark: the panel's body showed dark glass (.50 of its settled
