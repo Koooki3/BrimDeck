@@ -77,6 +77,10 @@ internal static class GlassClarityTests
                 && Math.Abs(GlassClarityPolicy.Tint(a.Clarity / 100) - a.Tint) < 1e-12 && Math.Abs(GlassClarityPolicy.Saturation(a.Clarity / 100) - a.Saturation) < 1e-12)
             && veils.Zip(veils.Skip(1)).All(x => x.Second <= x.First + 1e-12) && tints.Zip(tints.Skip(1)).All(x => x.Second <= x.First + 1e-12)
             && saturations.Zip(saturations.Skip(1)).All(x => x.Second >= x.First - 1e-12));
+        // The anchors are published for reading only: no caller can rewrite the clarity's anchors behind the curves built from them.
+        object anchors = GlassClarityPolicy.Anchors;
+        check("The clarity's anchors are read-only to every caller",
+            anchors is IList<GlassClarityPolicy.Anchor> { IsReadOnly: true, Count: 5 } && anchors is not GlassClarityPolicy.Anchor[]);
 
         // u = .5 weighs both goals half: the veil is the mean of the optical target and the readable one, for any guard.
         bool half = true, ends = true;
