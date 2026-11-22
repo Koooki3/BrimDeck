@@ -447,8 +447,6 @@ public partial class MainWindow
         if (_glassWatchdog is not { } watchdog) return;
         watchdog.Stop();
         if (!_glassActive) return;
-        // A burst that has ended counts at rest from now, not only from the next reading (which may be up to a rest interval away).
-        _glassValidity.Mode(now < _glassBurstUntil, now);
         if (_glassValidity.Protection(now) > 0 || _glassValidity.Protecting)
         {
             if (!_glassProtected)
