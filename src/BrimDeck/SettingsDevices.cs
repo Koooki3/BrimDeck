@@ -73,6 +73,21 @@ public partial class SettingsWindow
         };
         Group(Row(Loc.T("预警阈值", "Warning threshold"), warning, help: () => Loc.T("电量不高于此值时显示为偏低，使用预警颜色。", "At or under this level a battery shows as getting low, in its warning color.")),
             Row(Loc.T("告警阈值", "Critical threshold"), low, help: () => Loc.T("电量不高于此值时显示为低电量，使用告警颜色。", "At or under this level a battery shows as low, in its critical color.")));
+        Group(Toggle(Loc.T("电量时间估计", "Battery time estimates"), S.DeviceBatteryEstimates, value =>
+        {
+            Change(s => s.DeviceBatteryEstimates = value);
+            if (value)
+            {
+                if (_app.Devices is { } devices)
+                {
+                    _app.DevicePace.Observe(devices.Showing, DateTimeOffset.UtcNow);
+                    if (_app.DevicePace.Dirty) DeviceBatteryPaceStore.Save(_app.DevicePace);
+                }
+            }
+            else _app.ForgetDevicePace();
+        }, help:
+            Loc.T("开启后，BrimDeck 会在本机保存设备的近期电量读数（%LocalAppData%\\BrimDeck，关闭此选项或恢复默认时清除），用来估计还能用多久、充满还需多久，并显示在展开的设备页上。不会上传任何数据。默认关闭。",
+                "When on, BrimDeck keeps recent battery readings on this PC (%LocalAppData%\\BrimDeck; cleared when this is turned off or defaults are restored) to estimate how long a device will last or take to charge, shown on the expanded devices page. Nothing is sent anywhere. Off by default.")));
 
         SectionTitle(Loc.T("设备", "Devices"));
         var headings = DeviceColumns(); headings.Height = 34;

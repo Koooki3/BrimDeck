@@ -124,7 +124,7 @@ public partial class MainWindow
         return DevicesLayout.For(ContentCanvas.Width - 2 * _header.ContentSide, height - _header.Row - MonitorBottom(height), ShownDevices.Count, _devicesView is not null ? _devicesLayout : null);
     }
     private string DevicesKey() => string.Join("|", CurrentDevicesLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "",
-        Inks.Key, Loc.Language, Look.Generation, SystemParameters.HighContrast);
+        Inks.Key, Loc.Language, Look.Generation, SystemParameters.HighContrast, Settings.DeviceBatteryEstimates);
 
     // handover: a page on screen crossfades into the new build; false replaces it at once.
     private void RenderDevices(bool handover = true)
@@ -144,7 +144,7 @@ public partial class MainWindow
         var layout = CurrentDevicesLayout();
         _devicesKey = key; _devicesLayout = layout;
         var old = shown ? _devicesView : null;
-        _devicesView = new DevicesView(layout, Inks);
+        _devicesView = new DevicesView(layout, Inks, Settings.DeviceBatteryEstimates ? _app.DevicePace : null);
         _devicesView.Update(ShownDevices, DevicesSettled, motion: false);
         if (old is not null) MonitorCrossfade.Swap(DevicesContent, _devicesView, old, MonitorMotion);
         else { DevicesContent.Children.Clear(); DevicesContent.Children.Add(_devicesView); }

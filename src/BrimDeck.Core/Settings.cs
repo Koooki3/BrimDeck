@@ -737,6 +737,9 @@ public sealed class DeckSettings
     // At or under these charges a battery shows as low and as getting low (Devices.Level).
     public int DeviceLowPercent { get; set; } = Devices.DefaultLowPercent;
     public int DeviceWarningPercent { get; set; } = Devices.DefaultWarningPercent;
+    // Remembers recent battery readings on this PC (DeviceBatteryPace / device-battery-pace.json) to estimate time left and
+    // time to full on the devices page. Off by default; collects and keeps no readings while off.
+    public bool DeviceBatteryEstimates { get; set; }
     // The notch and the capsule each show the devices' batteries (CompactPart.Devices).
     public bool NotchDevices { get; set; }
     public bool CapsuleDevices { get; set; }
