@@ -40,7 +40,8 @@ internal static class GlassMotionGateTests
 
         // Validity: a reading accepted at 10 ms, a burst from 100 ms (an opening's hint) and the reads paused for its motion until
         // 600 ms. Without the pause the burst TTL would raise the protection at 350 ms; with it, the age stops while paused and the
-        // protection rises only a burst TTL after the catch-up could have come (shifted by the pause).
+        // protection rises only a burst TTL (plus the 10 ms pace of that reading) after the catch-up could have come (shifted by the
+        // pause).
         (double, double) calm = (.3, .1);
         GlassSampleValidity Calm()
         {
@@ -57,7 +58,7 @@ internal static class GlassMotionGateTests
         paused.Resume(600);
         double rightAfter = paused.Protection(640);
         bool calmAfter = !paused.Protecting && paused.SafeTails(640) == calm;
-        double later = paused.Protection(851);
+        double later = paused.Protection(861);
         var control = Calm();
         control.Mode(true, 100);
         check(FormattableString.Invariant($"Liquid glass does not count a pause for motion as a stale reading (control {control.Protection(599):0.000} at 599 ms, paused {during:0.000}; next look {deadline} ms)"),
@@ -67,7 +68,7 @@ internal static class GlassMotionGateTests
         var endless = Calm();
         endless.Mode(true, 100);
         endless.Pause(100);
-        long rise = 100 + GlassSampleValidity.ActiveTtl + GlassMotionGate.MaxPause;
+        long rise = 100 + GlassSampleValidity.ActiveTtl + 10 + GlassMotionGate.MaxPause;
         long endlessDeadline = endless.NextDeadline(200);
         check($"Liquid glass's motion pause lasts at most MaxPause (rises after {rise} ms, watchdog at {endlessDeadline} ms)",
             endless.Protection(rise - 1) == 0 && endless.Protection(rise + 50) > 0 && endlessDeadline <= rise + 1 && endlessDeadline > 200);

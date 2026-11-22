@@ -4,12 +4,16 @@ namespace BrimDeck.Core;
 // the text meanwhile (review v2 U05, §5). The window asks Begin before a capture and Complete when the worker answers; an
 // independent watchdog (a one-shot timer at NextDeadline, never waiting for the worker) asks Protection at any time.
 //   Age: a reading is as old as its capture's START (a slow capture is not fresh because it finished late).
-//   TTL: a reading answered later than ActiveTtl (bursts) or IdleTtl (rest) after its capture began is late and dropped;
-//     so is one for an epoch or a place the panel has left (a drag), and a capture that read nothing (no area, no pixels).
-//   Protection (0..1): rises from 0 once the last accepted capture is older than the TTL of the mode now - or HardSafety after a
-//     capture that has not answered began; a capture that began before the TTL ran out holds it off until then - to 1 (the worst
-//     range: tails 1 and 0) no later than WorstBy after the last accepted capture. The ring around the island cannot prove the pixels under it safe, so nothing less than the worst range is assumed
-//     at 1.
+//   Pace (V3 C4): how long the last capture took to answer (at most HardSafety). On a busy machine a ring read takes 150-490 ms,
+//     so the next reading can only answer that much after it begins: the TTLs below allow for it (on an idle machine about 30 ms).
+//   TTL: a reading answered later than ActiveTtl (bursts) or IdleTtl (rest) plus the pace after its capture began, and later
+//     than HardSafety, is late and dropped; so is one for an epoch or a place the panel has left (a drag), and a capture that read
+//     nothing (no area, no pixels).
+//   Protection (0..1): rises from 0 once the last accepted capture is older than the TTL of the mode now plus the pace - or
+//     HardSafety after a capture that has not answered began; a capture that began before that holds it off until then, as it
+//     is no gap but a slow reading - to 1 (the worst range: tails 1 and 0) no later than WorstBy after the last accepted
+//     capture. The ring around the island cannot prove the pixels under it safe, so nothing less than the worst range is
+//     assumed at 1.
 //   Recovery: once protection has risen, it falls back to 0 only after two fresh readings in a row agree (within RecoverAgree on
 //     both tails); a single one only starts the recovery.
 //   A capture still running Abandon after it began is given up, so a worker that never returns cannot stop all later readings.
@@ -26,7 +30,7 @@ public sealed class GlassSampleValidity
     public readonly record struct Ticket(long Id, long Start, long Epoch, bool Active);
     public enum Verdict { Accepted, Recovering, Late, Mismatch, Empty, Stale }
 
-    private long _nextId, _validStart, _activeSince, _pausedSince;
+    private long _nextId, _validStart, _activeSince, _pausedSince, _pace;
     private bool _paused;
     private Ticket? _inFlight;
     private bool _active, _protecting;
@@ -87,9 +91,11 @@ public sealed class GlassSampleValidity
         // Risen or not as of now with the capture still under way (it may hold the protection off, see ProtectFrom).
         Rise(now);
         _inFlight = null;
+        long took = now - ticket.Start, allowed = Math.Max((ticket.Active ? ActiveTtl : IdleTtl) + _pace, HardSafety);
+        _pace = Math.Clamp(took, 0, HardSafety);
         if (tails is not { } read || !double.IsFinite(read.Bright) || !double.IsFinite(read.Dark)) return Verdict.Empty;
         if (ticket.Epoch != epoch || !matches) { Dropped++; return Verdict.Mismatch; }
-        if (now - ticket.Start > (ticket.Active ? ActiveTtl : IdleTtl)) { Dropped++; return Verdict.Late; }
+        if (took > allowed) { Dropped++; return Verdict.Late; }
         if (_protecting && !First)
         {
             bool agrees = _recoverFrom is { } before && Math.Abs(before.Bright - read.Bright) <= RecoverAgree
@@ -161,13 +167,12 @@ public sealed class GlassSampleValidity
     private long ProtectFrom(long now)
     {
         long credit = Credit(now);
-        long from = _validStart + IdleTtl;
-        if (_active) from = Math.Min(from, Math.Max(_validStart, _activeSince) + ActiveTtl);
+        long from = _validStart + IdleTtl + _pace;
+        if (_active) from = Math.Min(from, Math.Max(_validStart, _activeSince) + ActiveTtl + _pace);
         from += credit;
         // A capture under way decides from HardSafety after it began: one that has not answered by then may be stuck (it may be
-        // before the TTL runs out), and one that began before the TTL ran out and answers by then is no gap (a busy machine's
-        // read takes 150-490 ms, and the next one at rest is due 500 ms after the last: V3 C4 slow mode). WorstBy still holds.
-        if (_inFlight is { } running && running.Start <= from) from = running.Start + HardSafety;
+        // before the TTL runs out), and one that began before the TTL ran out and answers by then is no gap. WorstBy still holds.
+        if (_inFlight is { } running && running.Start <= from) from = Math.Min(running.Start + HardSafety, _validStart + credit + WorstBy);
         return Math.Max(from, _validStart);
     }
 

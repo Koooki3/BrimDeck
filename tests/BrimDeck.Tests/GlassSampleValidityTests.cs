@@ -64,7 +64,8 @@ internal static class GlassSampleValidityTests
         check($"Liquid glass drops a reading that answers 2 s after its capture began ({lateVerdict})",
             lateVerdict == GlassSampleValidity.Verdict.Late && late.Protection(2600) == 1 && late.Tails == calm && late.Dropped == 1);
 
-        // No area to read (no capture starts at all): the watchdog still runs from the last accepted capture.
+        // No area to read (no capture starts at all): the watchdog still runs from the last accepted capture (its TTL plus the
+        // 10 ms that capture took, the pace).
         var noArea = new GlassSampleValidity(0);
         var noAreaProbe = new FakeProbe(noArea);
         noAreaProbe.Start(1, 10, calm);
@@ -72,7 +73,7 @@ internal static class GlassSampleValidityTests
         long deadline = noArea.NextDeadline(10);
         noAreaProbe.Advance(1600, 1);
         check($"Liquid glass guards the text when there is no area to read (watchdog first at {deadline} ms)",
-            deadline == GlassSampleValidity.IdleTtl + 1 && noArea.Protection(760) > 0 && noArea.Protection(1600) == 1);
+            deadline == GlassSampleValidity.IdleTtl + 10 + 1 && noArea.Protection(760) == 0 && noArea.Protection(762) > 0 && noArea.Protection(1600) == 1);
 
         // A drag: every reading is for a place the panel has left (another epoch, a mismatching area): all dropped, protection rises.
         var drag = new GlassSampleValidity(0);
@@ -105,14 +106,16 @@ internal static class GlassSampleValidityTests
             first == GlassSampleValidity.Verdict.Recovering && disagree == GlassSampleValidity.Verdict.Recovering
             && agree == GlassSampleValidity.Verdict.Accepted && recover.Protection(2170) == 0 && recover.Tails == (.92, .45));
 
-        // The age is the capture's start: a 600 ms idle capture that answers within the TTL is kept, but counts from when it began.
+        // The age is the capture's start: a 600 ms idle capture that answers within the TTL is kept, but counts from when it began;
+        // the protection allows the next reading as long as this one took (the pace, at most HardSafety).
         var slow = new GlassSampleValidity(0);
         var slowProbe = new FakeProbe(slow);
         slowProbe.Start(1, 600, calm);
         var slowVerdict = slowProbe.Advance(600, 1);
         long slowDeadline = slow.NextDeadline(600);
         check($"Liquid glass counts a reading's age from its capture's start ({slowVerdict}, next look at {slowDeadline} ms)",
-            slowVerdict == GlassSampleValidity.Verdict.Accepted && slowDeadline == GlassSampleValidity.IdleTtl + 1 && slow.Protection(760) > 0);
+            slowVerdict == GlassSampleValidity.Verdict.Accepted && slowDeadline == GlassSampleValidity.IdleTtl + GlassSampleValidity.HardSafety + 1
+            && slow.Protection(1250) == 0 && slow.Protection(1260) > 0);
 
         // V3 C4 slow mode: on a busy machine a ring read takes 150-490 ms. A capture that began in time (the next one at rest, 500 ms
         // after the last) and answers 400 ms later is no gap: the protection waits for it, so the veils do not pulse at rest.
@@ -137,6 +140,23 @@ internal static class GlassSampleValidityTests
         var timelyBurstVerdict = timelyBurstProbe.Advance(290, 1);
         check($"Liquid glass waits for a slow capture that began in time in a burst ({timelyBurstVerdict})",
             timelyBurstVerdict == GlassSampleValidity.Verdict.Accepted && !timelyBurst.Protecting && timelyBurst.Protection(290) == 0);
+        // A burst on a busy machine: every read takes 300 ms (the first after fast ones 400 ms) and the next begins 80 ms after the
+        // last answered. Each is kept and the protection never rises: the TTL allows for the pace.
+        var busy = new GlassSampleValidity(0);
+        busy.Mode(true, 0);
+        var busyProbe = new FakeProbe(busy);
+        busyProbe.Start(1, 30, calm);
+        busyProbe.Advance(30, 1);
+        var busyWatch = new List<(long At, double Level)>();
+        var busyVerdicts = new List<GlassSampleValidity.Verdict?>();
+        for (int i = 0; i < 6; i++)
+        {
+            busyProbe.Now += 80;
+            busyProbe.Start(1, i == 0 ? 400 : 300, calm);
+            busyVerdicts.Add(busyProbe.Advance(busyProbe.Now + (i == 0 ? 400 : 300), 1, busyWatch));
+        }
+        check($"Liquid glass keeps a busy machine's slow readings in a burst ({string.Join(", ", busyVerdicts.Distinct())}, {busyWatch.Count(w => w.Level > 0)} looks with protection)",
+            busyVerdicts.All(v => v == GlassSampleValidity.Verdict.Accepted) && busyWatch.All(w => w.Level == 0) && busy.Dropped == 0);
         // A capture that began in time but never answers is still not hidden: protection from HardSafety after it began, the worst
         // range by WorstBy after the last reading.
         var timelyStuck = new GlassSampleValidity(0);
@@ -155,7 +175,7 @@ internal static class GlassSampleValidityTests
         burstProbe.Start(1, 10, calm);
         burstProbe.Advance(10, 1);
         burst.Mode(true, 400);
-        check("Liquid glass's burst TTL counts from the burst's start", burst.Protection(500) == 0 && burst.Protection(651) > 0);
+        check("Liquid glass's burst TTL counts from the burst's start", burst.Protection(500) == 0 && burst.Protection(660) == 0 && burst.Protection(661) > 0);
 
         // Before the first reading the glass answers for the worst range.
         var fresh = new GlassSampleValidity(0);
