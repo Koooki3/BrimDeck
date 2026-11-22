@@ -85,6 +85,48 @@ public sealed class GlassOpeningSession
         return outcome;
     }
 
+    // One cover read for the ticket, from the app's read budget to the read that waited for it (V4 F04): read captures (null: it
+    // read nothing), where tells the panel's monitor and scale once it answered, apply gets the outcome and the reading, again
+    // starts the pending read. Whatever throws on the way (the capture, telling the place, applying) is handed to failed and
+    // ends here: the budget's slot is always given back, a read that ended without an outcome is recorded as Unknown (or as the
+    // staler reason it already had), so the opening is free for its next read, and a pending intent still gets its read.
+    public async Task<Outcome> Read<T>(Ticket ticket, GlassReadBudget<object> budget, object key, Func<Task<T?>> read,
+        Func<(nint Monitor, double Dpi)> where, Action<Outcome, T?> apply, Action again, Action<Exception>? failed = null) where T : struct
+    {
+        Outcome? outcome = null;
+        try
+        {
+            bool refused = !budget.TryEnter(key, ticket.OpenEpoch);
+            T? reading = null;
+            if (!refused)
+            {
+                try { reading = await read(); }
+                finally { budget.Leave(key, ticket.OpenEpoch); }
+            }
+            var (monitor, dpi) = where();
+            outcome = Finish(ticket, monitor, dpi, reading is not null, refused);
+            apply(outcome.Value, reading);
+        }
+        catch (Exception error)
+        {
+            outcome ??= Finish(ticket, ticket.Monitor, ticket.Dpi, read: false);
+            Report(failed, error);
+        }
+        finally
+        {
+            if (TakePending())
+                try { again(); }
+                catch (Exception error) { Report(failed, error); }
+        }
+        return outcome.Value;
+    }
+
+    private static void Report(Action<Exception>? failed, Exception error)
+    {
+        try { failed?.Invoke(error); }
+        catch (Exception) { }
+    }
+
     // After Finish: whether a pending intent asks for a new capture now (and clears it).
     public bool TakePending()
     {

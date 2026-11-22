@@ -640,8 +640,9 @@ public partial class MainWindow
     // for an opening that has ended, or for another display or scale, is dropped with its reason; one that read nothing (refused
     // by the app's read budget, the probe busy, the area off the display) is Unknown: the veils keep what the capsule asks for,
     // never the worst range (V304). A read that began after the opening's first frame may show the panel's own glass: its grid
-    // is trusted less (GlassSceneSnapshot.Occluded).
-    private async void ReadGlassCover()
+    // is trusted less (GlassSceneSnapshot.Occluded). The read is a Task of its own (GlassOpeningSession.Read): a capture or an
+    // apply that throws ends there as Unknown, with its read budget slot given back, and never reaches the window's dispatcher.
+    private void ReadGlassCover()
     {
         // Always on the window's thread: a pending read restarts from a continuation, which must not run elsewhere.
         if (!Dispatcher.CheckAccess()) { _ = Dispatcher.BeginInvoke(ReadGlassCover); return; }
@@ -653,22 +654,20 @@ public partial class MainWindow
         _glassCoverCancel?.Dispose();
         var cancel = _glassCoverCancel = new CancellationTokenSource();
         var token = cancel.Token;
-        bool refused = !GlassReads.TryEnter(_glassCoverKey, ticket.OpenEpoch);
-        AcrylicProbe.Reading? reading = null;
-        if (!refused)
-        {
-            try { reading = await Task.Run(() => probe.ReadArea(covered, screen, token)); }
-            finally { GlassReads.Leave(_glassCoverKey, ticket.OpenEpoch); }
-        }
+        _ = _glassOpening.Read(ticket, GlassReads, _glassCoverKey, () => Task.Run(() => probe.ReadArea(covered, screen, token)),
+            () => CurrentGlassSampleArea() is { } current ? (current.Monitor, current.Scale) : (0, double.NaN),
+            (outcome, reading) => GlassCoverRead(ticket, covered, outcome, reading), ReadGlassCover,
+            error => GlassCoverTrace?.Invoke(FormattableString.Invariant($"cover epoch={ticket.OpenEpoch} failed={error.GetType().Name}: {error.Message}")));
+    }
+
+    private void GlassCoverRead(GlassOpeningSession.Ticket ticket, Int32Rect covered, GlassOpeningSession.Outcome outcome, AcrylicProbe.Reading? reading)
+    {
         long now = Environment.TickCount64;
-        var current = CurrentGlassSampleArea();
-        var outcome = _glassOpening.Finish(ticket, current?.Monitor ?? 0, current?.Scale ?? double.NaN, reading is not null, refused);
         bool occluded = reading is { } read && read.Started > _glassIntentFrameAt;
         var scene = reading?.Scene is { } grid ? occluded ? grid.Occluded() : grid : null;
         GlassCoverTrace?.Invoke(FormattableString.Invariant(
             $"cover epoch={ticket.OpenEpoch} outcome={outcome} frame={(_glassIntentFrameAt == long.MaxValue ? -1 : StampMs(_glassIntentFrameAt - _glassIntentStamp))} gdi={(reading is { } g ? StampMs(g.Started - _glassIntentStamp) : -1)} done={now - _glassIntentAt} area={covered.X},{covered.Y},{covered.Width}x{covered.Height} middle={reading?.MiddleMean ?? double.NaN:0.000} bright={reading?.Bright ?? double.NaN:0.000} dark={reading?.Dark ?? double.NaN:0.000} {scene}"));
         if (outcome == GlassOpeningSession.Outcome.Applied && reading is { } sample && _glassActive) ApplyGlassCover(sample, scene, now);
-        if (_glassOpening.TakePending()) ReadGlassCover();
     }
 
     private static long StampMs(long ticks) => ticks * 1000 / System.Diagnostics.Stopwatch.Frequency;

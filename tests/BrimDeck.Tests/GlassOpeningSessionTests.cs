@@ -104,7 +104,57 @@ internal static class GlassOpeningSessionTests
             empty.Session.Last == GlassOpeningSession.Outcome.Unknown && empty.AppliedEpochs.Count == 0 && refusedOutcome
             && GlassOpening.Required(.3, double.NaN, 1) == .3);
 
+        Faults(check);
         Scenes(check);
+    }
+
+    // V4 F04: a cover read whose capture (or what is done with it) throws. The read is the panel's own Task: nothing escapes to
+    // the window's dispatcher, the read budget's slot comes back, the opening records the read as Unknown (the capsule's veil,
+    // never the worst range) and is free for the next read, and an intent that waited for it still gets its read.
+    private static void Faults(Action<string, bool> check)
+    {
+        var budget = new GlassReadBudget<object>();
+        var key = new object();
+        var session = new GlassOpeningSession();
+        session.Intent();
+        var ticket = session.Begin(1, 0, 0, 100, 100, 1.25, 0)!.Value;
+        var capture = new TaskCompletionSource<int?>();
+        int again = 0, failures = 0;
+        Task<GlassOpeningSession.Outcome> task;
+        try
+        {
+            task = session.Read(ticket, budget, key, () => capture.Task, () => (1, 1.25), (_, _) => { }, () => again++, _ => failures++);
+        }
+        catch (Exception) { task = Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("thrown at once")); }
+        bool held = budget.Running == 1;
+        // An intent while the capture runs waits for it.
+        bool waits = session.Begin(1, 0, 0, 100, 100, 1.25, 0) is null && session.Pending;
+        capture.SetException(new System.ComponentModel.Win32Exception(5, "the screen could not be read"));
+        bool quiet = task.IsCompletedSuccessfully;
+        check("A cover read whose capture throws ends quietly: its budget slot is released and it is recorded as Unknown",
+            held && quiet && task.Result == GlassOpeningSession.Outcome.Unknown && budget.Running == 0
+            && session.Count(GlassOpeningSession.Outcome.Unknown) == 1 && !session.Running && failures == 1);
+        check("The intent that waited for a cover read that threw still gets its own read (none starves)",
+            waits && again == 1 && session.Begin(1, 0, 0, 100, 100, 1.25, 0) is not null);
+
+        // The capture throwing before it returns a task, and the glass's own handling of a reading throwing.
+        var early = new GlassOpeningSession();
+        early.Intent();
+        var first = early.Begin(1, 0, 0, 100, 100, 1.25, 0)!.Value;
+        Task<GlassOpeningSession.Outcome> thrown, applying;
+        try { thrown = early.Read<int>(first, budget, key, () => throw new OutOfMemoryException("injected"), () => (1, 1.25), (_, _) => { }, () => { }); }
+        catch (Exception) { thrown = Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("thrown at once")); }
+        var second = early.Begin(1, 0, 0, 100, 100, 1.25, 0);
+        try
+        {
+            applying = second is { } next
+                ? early.Read<int>(next, budget, key, () => Task.FromResult<int?>(1), () => (1, 1.25), (_, _) => throw new InvalidOperationException("injected"), () => { })
+                : Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("no second read"));
+        }
+        catch (Exception) { applying = Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("thrown at once")); }
+        check("A capture that throws at once, or applying a reading that throws, escapes nowhere and frees the budget and the opening",
+            thrown.IsCompletedSuccessfully && thrown.Result == GlassOpeningSession.Outcome.Unknown && applying.IsCompletedSuccessfully
+            && applying.Result == GlassOpeningSession.Outcome.Applied && budget.Running == 0 && !early.Running);
     }
 
     private static byte[] Image(Func<int, int, (byte R, byte G, byte B)> at, int size = 24)
