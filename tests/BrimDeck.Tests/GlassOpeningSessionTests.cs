@@ -197,6 +197,37 @@ internal static class GlassOpeningSessionTests
         return decision.Open(scene, 10_000) && decision.Dark != dark;
     }
 
+    // V4 F01: a capture that began after the opening's first frame may show the panel's own glass on the side the panel grows
+    // in from. It used to be trusted half (.5 under the .6 a turn needs), so it could never turn the look. Now it is judged on
+    // the part of the area the panel had not reached (all of it when the panel had not reached the area yet); when too little is
+    // left, the read is Unknown: no turn, and the veils keep the capsule's (never the worst range).
+    private static void Occlusion(Action<string, bool> check, GlassSceneSnapshot pure, (byte, byte, byte) white, (byte, byte, byte) glass)
+    {
+        // The panel had not reached the area yet when the capture began: the same as a capture before its first frame.
+        var early = pure.Uncovered(GlassSceneSnapshot.Side.Top, 0);
+        check("A capture after the opening's first frame, the panel not yet over the area, is trusted as one before it and turns the look",
+            early is not null && Math.Abs(early.Confidence - pure.Confidence) < 1e-9 && Turns(early, dark: true));
+
+        // A white page whose nearest fifth already shows the dark glass growing in from the top: judged on the rest, it turns.
+        var shown = GlassSceneSnapshot.FromPixels(Image((_, y) => y < 5 ? glass : white), 24, 24)!;
+        var beyond = shown.Uncovered(GlassSceneSnapshot.Side.Top, .2);
+        check("A capture whose nearest fifth shows the panel's own glass is judged on the rest of the area and turns a dark look light",
+            beyond is not null && beyond.DarkShare == 0 && beyond.LightShare > 1 - 1e-9 && beyond.Confidence >= GlassAppearance.OpenConfidence
+            && Turns(beyond, dark: true));
+
+        // The same from each side the panel can grow in from (a panel under a bottom capsule grows up, a side panel sideways).
+        var below = GlassSceneSnapshot.FromPixels(Image((_, y) => y >= 19 ? glass : white), 24, 24)!.Uncovered(GlassSceneSnapshot.Side.Bottom, .2);
+        var left = GlassSceneSnapshot.FromPixels(Image((x, _) => x < 5 ? glass : white), 24, 24)!.Uncovered(GlassSceneSnapshot.Side.Left, .2);
+        var right = GlassSceneSnapshot.FromPixels(Image((x, _) => x >= 19 ? glass : white), 24, 24)!.Uncovered(GlassSceneSnapshot.Side.Right, .2);
+        check("The covered part is left out on the side the panel grows in from (top, bottom, left or right)",
+            new[] { below, left, right }.All(scene => scene is not null && scene.LightShare > 1 - 1e-9 && Turns(scene, dark: true)));
+
+        // Most of the area already under the panel: too little is left to tell, so the read is Unknown (it turns nothing).
+        check("A capture with most of the area already under the panel is Unknown: no turn, and the veils keep the capsule's",
+            shown.Uncovered(GlassSceneSnapshot.Side.Top, 1 - GlassSceneSnapshot.VisibleLeast + .05) is null
+            && GlassOpening.Required(.3, double.NaN, 1) == .3);
+    }
+
     private static void Scenes(Action<string, bool> check)
     {
         (byte, byte, byte) white = (255, 255, 255), orange = (200, 70, 10), ide = (30, 30, 32), black = (0, 0, 0);
@@ -225,9 +256,7 @@ internal static class GlassOpeningSessionTests
             fine.Confidence < GlassAppearance.OpenConfidence && Math.Abs(coarse.LightShare - .5) < 1e-9
             && !Turns(fine, true) && !Turns(fine, false) && !Turns(coarse, true) && !Turns(coarse, false));
 
-        // A capture that may already show the panel's own glass is trusted half: it turns nothing.
-        check("A covered-area capture taken after the opening's first frame is trusted less and turns no look",
-            pure.Occluded().OcclusionPossible && pure.Occluded().Confidence <= GlassSceneSnapshot.OccludedTrust && !Turns(pure.Occluded(), dark: true));
+        Occlusion(check, pure, white, ide);
 
         // v3b: the first opening over a white page turned the look light about 20 ms after the intent, the panel still almost
         // shut, and the palette's spring then took 250-365 ms from dark: the panel's body showed dark glass (.50 of its settled

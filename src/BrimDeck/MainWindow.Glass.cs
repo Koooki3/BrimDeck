@@ -75,6 +75,9 @@ public partial class MainWindow
     // frame after the open intent began (a read that began later may show our own glass, V303/V319).
     private readonly GlassOpeningSession _glassOpening = new();
     private readonly object _glassCoverKey = new();
+    // How far the island has reached (its height, the farthest since the open intent): what an opening's panel may already
+    // cover of the area read for it (V4 F01).
+    private double _glassCoverReach;
     private CancellationTokenSource? _glassCoverCancel;
     private long _glassIntentAt, _glassIntentStamp, _glassIntentFrameAt; // _glassIntentStamp, _glassIntentFrameAt: Stopwatch timestamps
     // Diagnostics for the isolated harness (one line per cover read's outcome); null in normal use.
@@ -153,6 +156,7 @@ public partial class MainWindow
     private GlassLayoutKey? _glassLayoutKey;
     private void GlassLayout(object? sender, EventArgs e)
     {
+        if (_glassOpening.IsOpen && double.IsFinite(Island.ActualHeight)) _glassCoverReach = Math.Max(_glassCoverReach, Island.ActualHeight);
         var key = new GlassLayoutKey(Island.RenderSize, default, default, VisualTreeHelper.GetDpi(Island).PixelsPerDip,
             IsVisible && Island.IsVisible && HoverZone.IsVisible, HoverZone.Opacity * Island.MaterialOpacity, _expanded, WindowState, Island.CornerRadius);
         if (Island.IsVisible && Island.RenderSize is { Width: > 0, Height: > 0 } size && Island.TransformToAncestor(this) is { } toWindow)
@@ -625,6 +629,7 @@ public partial class MainWindow
         }
         _glassOpening.Intent();
         _glassCoverDark = _glassCoverLight = double.NaN;
+        _glassCoverReach = Island.ActualHeight;
         _glassIntentAt = Environment.TickCount64;
         _glassIntentStamp = System.Diagnostics.Stopwatch.GetTimestamp();
         _glassIntentFrameAt = long.MaxValue;
@@ -642,14 +647,16 @@ public partial class MainWindow
     // One read of the area for the opening under way (at most one runs; one asked for meanwhile follows it, the latest). A read
     // for an opening that has ended, for another display or scale, or for an area the panel has left, is dropped with its
     // reason; one that read nothing (refused by the app's read budget, the probe busy, the area off the display) is Unknown: the
-    // veils keep what the capsule asks for, never the worst range (V304). A read that began after the opening's first frame may show the panel's own glass: its grid
-    // is trusted less (GlassSceneSnapshot.Occluded). The read is a Task of its own (GlassOpeningSession.Read): a capture or an
-    // apply that throws ends there as Unknown, with its read budget slot given back, and never reaches the window's dispatcher.
+    // veils keep what the capsule asks for, never the worst range (V304). A read that began after the opening's first frame
+    // may show the panel's own glass: it is judged on the part the panel had not reached (GlassCoverRead). The read is a Task
+    // of its own (GlassOpeningSession.Read): a capture or an apply that throws ends there as Unknown, with its read budget slot
+    // given back, and never reaches the window's dispatcher.
     private void ReadGlassCover()
     {
         // Always on the window's thread: a pending read restarts from a continuation, which must not run elsewhere.
         if (!Dispatcher.CheckAccess()) { _ = Dispatcher.BeginInvoke(ReadGlassCover); return; }
-        if (!_glassActive || CurrentGlassSampleArea() is not { } area || GlassCoveredArea() is not { } covered) return;
+        if (!_glassActive || CurrentGlassSampleArea() is not { } area || GlassCoveredArea() is not { } cover) return;
+        var covered = cover.Area;
         if (_glassOpening.Begin(area.Monitor, covered.X, covered.Y, covered.Width, covered.Height, area.Scale, Environment.TickCount64) is not { } ticket) return;
         var monitor = area.Screen;
         var screen = new Int32Rect((int)monitor.X, (int)monitor.Y, (int)monitor.Width, (int)monitor.Height);
@@ -666,18 +673,27 @@ public partial class MainWindow
                 var area = (covered.X + (int)Math.Round(shift.X), covered.Y + (int)Math.Round(shift.Y), covered.Width, covered.Height);
                 return CurrentGlassSampleArea() is { } current ? (current.Monitor, current.Scale, area) : (0, double.NaN, area);
             },
-            (outcome, reading) => GlassCoverRead(ticket, covered, outcome, reading), ReadGlassCover,
+            (outcome, reading) => GlassCoverRead(ticket, cover, outcome, reading), ReadGlassCover,
             error => GlassCoverTrace?.Invoke(FormattableString.Invariant($"cover epoch={ticket.OpenEpoch} failed={error.GetType().Name}: {error.Message}")));
     }
 
-    private void GlassCoverRead(GlassOpeningSession.Ticket ticket, Int32Rect covered, GlassOpeningSession.Outcome outcome, AcrylicProbe.Reading? reading)
+    // A read that began after the opening's first frame is judged on the part of the area the panel had not reached (bounded by
+    // how far the island has reached by now, GlassSceneSnapshot.Uncovered); with too little of it left the read is Unknown: no
+    // cover and no turn (V4 F01).
+    private void GlassCoverRead(GlassOpeningSession.Ticket ticket, GlassCover cover, GlassOpeningSession.Outcome outcome, AcrylicProbe.Reading? reading)
     {
         long now = Environment.TickCount64;
+        var covered = cover.Area;
         bool occluded = reading is { } read && read.Started > _glassIntentFrameAt;
-        var scene = reading?.Scene is { } grid ? occluded ? grid.Occluded() : grid : null;
+        double reach = Math.Max(_glassCoverReach, Island.ActualHeight);
+        // The share of the area's depth the panel (with its shadow's margin, as the area keeps from it) may have reached.
+        double share = !occluded ? 0 : double.IsFinite(reach) ? Math.Clamp((reach + GlassCoverMargin - cover.From) / (cover.Open - cover.From), 0, 1) : 1;
+        var grid = reading?.Scene;
+        var scene = grid?.Uncovered(cover.Near, share);
+        bool unknown = occluded && scene is null;
         GlassCoverTrace?.Invoke(FormattableString.Invariant(
-            $"cover epoch={ticket.OpenEpoch} outcome={outcome} frame={(_glassIntentFrameAt == long.MaxValue ? -1 : StampMs(_glassIntentFrameAt - _glassIntentStamp))} gdi={(reading is { } g ? StampMs(g.Started - _glassIntentStamp) : -1)} done={now - _glassIntentAt} area={covered.X},{covered.Y},{covered.Width}x{covered.Height} middle={reading?.MiddleMean ?? double.NaN:0.000} bright={reading?.Bright ?? double.NaN:0.000} dark={reading?.Dark ?? double.NaN:0.000} {scene}"));
-        if (outcome == GlassOpeningSession.Outcome.Applied && reading is { } sample && _glassActive) ApplyGlassCover(sample, scene, now);
+            $"cover epoch={ticket.OpenEpoch} outcome={outcome}{(unknown ? " unknown=occluded" : "")} frame={(_glassIntentFrameAt == long.MaxValue ? -1 : StampMs(_glassIntentFrameAt - _glassIntentStamp))} gdi={(reading is { } g ? StampMs(g.Started - _glassIntentStamp) : -1)} done={now - _glassIntentAt} area={covered.X},{covered.Y},{covered.Width}x{covered.Height} near={cover.Near} covered={share:0.00} middle={reading?.MiddleMean ?? double.NaN:0.000} bright={reading?.Bright ?? double.NaN:0.000} dark={reading?.Dark ?? double.NaN:0.000} {scene}"));
+        if (outcome == GlassOpeningSession.Outcome.Applied && !unknown && reading is { } sample && _glassActive) ApplyGlassCover(sample, scene, now);
     }
 
     private static long StampMs(long ticks) => ticks * 1000 / System.Diagnostics.Stopwatch.Frequency;
@@ -685,8 +701,10 @@ public partial class MainWindow
     private void ApplyGlassCover(AcrylicProbe.Reading sample, GlassSceneSnapshot? scene, long now)
     {
         int transparency = Settings.GlassTransparency;
-        _glassCoverDark = GlassRecipe.LuminosityFor(true, sample.Bright, sample.Dark, transparency);
-        _glassCoverLight = GlassRecipe.LuminosityFor(false, sample.Bright, sample.Dark, transparency);
+        // The tails of the part judged (all of the area, or the part the panel had not reached).
+        var (bright, dark) = scene is { Visible: < 1 } part ? (part.BrightTail, part.DarkTail) : (sample.Bright, sample.Dark);
+        _glassCoverDark = GlassRecipe.LuminosityFor(true, bright, dark, transparency);
+        _glassCoverLight = GlassRecipe.LuminosityFor(false, bright, dark, transparency);
         QueueGlass();
         if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) return;
         // Only the shared look's leader turns it (V314/V317): a follower opening over another backdrop keeps the shared look and
@@ -701,19 +719,26 @@ public partial class MainWindow
     // The screen pixels the open panel will cover beyond the island shown now (a margin past it, as the ring keeps from its
     // shadow): the open panel's height away from the edge, its width along it (the island's own on a side edge, where the open
     // width is not kept), centred on the island; null when nothing of it can be told.
-    private Int32Rect? GlassCoveredArea()
+    // The area, with the side nearest the island (the one the panel grows in from) and its depth along the island's height.
+    private readonly record struct GlassCover(Int32Rect Area, GlassSceneSnapshot.Side Near, double From, double Open);
+    private const double GlassCoverMargin = 24;
+    private GlassCover? GlassCoveredArea()
     {
         if (Island.RenderSize is not { Width: > 1, Height: > 1 } size || PresentationSource.FromVisual(Island) is null) return null;
-        double open = _glassOpenHeight, from = size.Height + 24;
+        double open = _glassOpenHeight, from = size.Height + GlassCoverMargin;
         if (!double.IsFinite(open) || open - from < 8) return null;
         double width = _frame.Across ? size.Width : Math.Max(size.Width, _pageWidth * _scale), left = (size.Width - width) / 2;
         Point[] corners = [new(left, from), new(left + width, from), new(left, open), new(left + width, open)];
         var screen = corners.Select(Island.PointToScreen).ToArray();
         int x = (int)Math.Floor(screen.Min(p => p.X)), y = (int)Math.Floor(screen.Min(p => p.Y));
         var rect = new Int32Rect(x, y, (int)Math.Ceiling(screen.Max(p => p.X)) - x, (int)Math.Ceiling(screen.Max(p => p.Y)) - y);
+        var deeper = screen[2] - screen[0];
+        var near = Math.Abs(deeper.Y) >= Math.Abs(deeper.X)
+            ? deeper.Y >= 0 ? GlassSceneSnapshot.Side.Top : GlassSceneSnapshot.Side.Bottom
+            : deeper.X >= 0 ? GlassSceneSnapshot.Side.Left : GlassSceneSnapshot.Side.Right;
         return WindowsHost.MonitorScreen(MonitorHandle) is { Bounds: var monitor }
             && AcrylicProbe.Clip(rect, new Int32Rect((int)monitor.X, (int)monitor.Y, (int)monitor.Width, (int)monitor.Height)) is { IsEmpty: false } clipped
-            ? clipped : null;
+            ? new GlassCover(clipped, near, from, open) : null;
     }
 
     // Heads the palette for dark or light from wherever it is now (a reversal mid-way included), for the group's epoch; at once:
