@@ -12,6 +12,8 @@ internal static class GlassOpeningSessionTests
         public readonly GlassOpeningSession Session = new();
         public nint Monitor = 1;
         public double Dpi = 1.25;
+        // The area the opening covers now, on the screen (the panel moved on its display: another area).
+        public (int X, int Y, int Width, int Height) Area = (0, 0, 100, 100);
 
         public readonly List<(GlassOpeningSession.Ticket Ticket, TaskCompletionSource<bool> Read)> Running = [];
         public readonly List<long> AppliedEpochs = [];
@@ -21,11 +23,11 @@ internal static class GlassOpeningSessionTests
 
         public async void Read()
         {
-            if (Session.Begin(Monitor, 0, 0, 100, 100, Dpi, 0) is not { } ticket) return;
+            if (Session.Begin(Monitor, Area.X, Area.Y, Area.Width, Area.Height, Dpi, 0) is not { } ticket) return;
             var read = new TaskCompletionSource<bool>();
             Running.Add((ticket, read));
             bool ok = await read.Task;
-            if (Session.Finish(ticket, Monitor, Dpi, ok) == GlassOpeningSession.Outcome.Applied) AppliedEpochs.Add(ticket.OpenEpoch);
+            if (Session.Finish(ticket, Monitor, Dpi, Area, ok) == GlassOpeningSession.Outcome.Applied) AppliedEpochs.Add(ticket.OpenEpoch);
             if (Session.TakePending()) Read();
         }
 
@@ -91,6 +93,25 @@ internal static class GlassOpeningSessionTests
             && hidden.Session.Last == GlassOpeningSession.Outcome.SceneChanged
             && moved.AppliedEpochs.Count + display.AppliedEpochs.Count + hidden.AppliedEpochs.Count == 0);
 
+        // V4 F02: the panel moved on the same display at the same scale while its area was read (dragged, its capsule placed
+        // anew): the read is of the area it left and is dropped as StaleArea; the same opening's read of the area it covers now
+        // still applies. A move also ends the scene (MainWindow.GlassLocation: SceneChanged), so the read is stale both ways.
+        var dragged = new Panel();
+        dragged.Open();
+        dragged.Area = (240, 0, 100, 100);
+        dragged.Answer(0);
+        bool draggedDropped = dragged.Session.Last == GlassOpeningSession.Outcome.StaleArea && dragged.AppliedEpochs.Count == 0
+            && dragged.Session.AppliedEpoch == 0;
+        dragged.Read();
+        dragged.Answer(1);
+        var shifted = new Panel();
+        shifted.Open();
+        shifted.Area = (0, 1, 100, 100);
+        shifted.Answer(0);
+        check("A cover read for an area the panel left on the same display and scale is dropped; a read of where it is now applies",
+            draggedDropped && dragged.AppliedEpochs.SequenceEqual([dragged.Session.OpenEpoch])
+            && shifted.Session.Last == GlassOpeningSession.Outcome.StaleArea && shifted.AppliedEpochs.Count == 0);
+
         // A read that found nothing: Unknown, no cover, and the veil keeps the capsule's requirement (NaN cover) instead of the
         // worst range.
         var empty = new Panel();
@@ -99,7 +120,7 @@ internal static class GlassOpeningSessionTests
         var refused = new GlassOpeningSession();
         refused.Intent();
         var ticket = refused.Begin(1, 0, 0, 10, 10, 1, 0)!.Value;
-        bool refusedOutcome = refused.Finish(ticket, 1, 1, read: false, refused: true) == GlassOpeningSession.Outcome.Refused;
+        bool refusedOutcome = refused.Finish(ticket, 1, 1, (0, 0, 10, 10), read: false, refused: true) == GlassOpeningSession.Outcome.Refused;
         check("A cover read that read nothing (or was refused) is Unknown: the opening keeps the capsule's veil, not the worst range",
             empty.Session.Last == GlassOpeningSession.Outcome.Unknown && empty.AppliedEpochs.Count == 0 && refusedOutcome
             && GlassOpening.Required(.3, double.NaN, 1) == .3);
@@ -123,7 +144,7 @@ internal static class GlassOpeningSessionTests
         Task<GlassOpeningSession.Outcome> task;
         try
         {
-            task = session.Read(ticket, budget, key, () => capture.Task, () => (1, 1.25), (_, _) => { }, () => again++, _ => failures++);
+            task = session.Read(ticket, budget, key, () => capture.Task, () => (1, 1.25, (0, 0, 100, 100)), (_, _) => { }, () => again++, _ => failures++);
         }
         catch (Exception) { task = Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("thrown at once")); }
         bool held = budget.Running == 1;
@@ -142,13 +163,13 @@ internal static class GlassOpeningSessionTests
         early.Intent();
         var first = early.Begin(1, 0, 0, 100, 100, 1.25, 0)!.Value;
         Task<GlassOpeningSession.Outcome> thrown, applying;
-        try { thrown = early.Read<int>(first, budget, key, () => throw new OutOfMemoryException("injected"), () => (1, 1.25), (_, _) => { }, () => { }); }
+        try { thrown = early.Read<int>(first, budget, key, () => throw new OutOfMemoryException("injected"), () => (1, 1.25, (0, 0, 100, 100)), (_, _) => { }, () => { }); }
         catch (Exception) { thrown = Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("thrown at once")); }
         var second = early.Begin(1, 0, 0, 100, 100, 1.25, 0);
         try
         {
             applying = second is { } next
-                ? early.Read<int>(next, budget, key, () => Task.FromResult<int?>(1), () => (1, 1.25), (_, _) => throw new InvalidOperationException("injected"), () => { })
+                ? early.Read<int>(next, budget, key, () => Task.FromResult<int?>(1), () => (1, 1.25, (0, 0, 100, 100)), (_, _) => throw new InvalidOperationException("injected"), () => { })
                 : Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("no second read"));
         }
         catch (Exception) { applying = Task.FromException<GlassOpeningSession.Outcome>(new InvalidOperationException("thrown at once")); }

@@ -8,9 +8,12 @@ namespace BrimDeck.Core;
 public sealed class GlassOpeningSession
 {
     public readonly record struct Ticket(long OpenEpoch, long SceneEpoch, nint Monitor, int X, int Y, int Width, int Height,
-        double Dpi, long Start);
+        double Dpi, long Start)
+    {
+        public (int X, int Y, int Width, int Height) Area => (X, Y, Width, Height);
+    }
 
-    public enum Outcome { Applied, Closed, Superseded, SceneChanged, Moved, Unknown, Refused }
+    public enum Outcome { Applied, Closed, Superseded, SceneChanged, Moved, StaleArea, Unknown, Refused }
 
     private long _openEpoch, _sceneEpoch;
     private Ticket? _running;
@@ -46,7 +49,7 @@ public sealed class GlassOpeningSession
         AppliedEpoch = 0;
     }
 
-    // The place or the glass changed under the panel (hidden, another display, another scale or theme).
+    // The place or the glass changed under the panel (hidden, moved, another display, another scale or theme).
     public void SceneChanged()
     {
         _sceneEpoch++;
@@ -67,15 +70,17 @@ public sealed class GlassOpeningSession
     // Whether the ticket is still the opening's own (for a worker deciding whether to read at all).
     public bool Current(Ticket ticket) => IsOpen && ticket.OpenEpoch == _openEpoch && ticket.SceneEpoch == _sceneEpoch;
 
-    // The capture ended: what may be done with it. monitor and dpi are the panel's now; read is false when it read nothing;
-    // refused when the app's read budget refused it before it started.
-    public Outcome Finish(Ticket ticket, nint monitor, double dpi, bool read, bool refused = false)
+    // The capture ended: what may be done with it. monitor, dpi and area (the screen pixels the opening covers) are the panel's
+    // now: a read of an area the panel left, on the same display at the same scale, is StaleArea (V4 F02). read is false when it
+    // read nothing; refused when the app's read budget refused it before it started.
+    public Outcome Finish(Ticket ticket, nint monitor, double dpi, (int X, int Y, int Width, int Height) area, bool read, bool refused = false)
     {
         if (_running == ticket) _running = null;
         var outcome = !IsOpen ? Outcome.Closed
             : ticket.OpenEpoch != _openEpoch ? Outcome.Superseded
             : ticket.SceneEpoch != _sceneEpoch ? Outcome.SceneChanged
             : ticket.Monitor != monitor || Math.Abs(ticket.Dpi - dpi) > 1e-6 ? Outcome.Moved
+            : ticket.Area != area ? Outcome.StaleArea
             : refused ? Outcome.Refused
             : !read ? Outcome.Unknown
             : Outcome.Applied;
@@ -91,7 +96,7 @@ public sealed class GlassOpeningSession
     // ends here: the budget's slot is always given back, a read that ended without an outcome is recorded as Unknown (or as the
     // staler reason it already had), so the opening is free for its next read, and a pending intent still gets its read.
     public async Task<Outcome> Read<T>(Ticket ticket, GlassReadBudget<object> budget, object key, Func<Task<T?>> read,
-        Func<(nint Monitor, double Dpi)> where, Action<Outcome, T?> apply, Action again, Action<Exception>? failed = null) where T : struct
+        Func<(nint Monitor, double Dpi, (int X, int Y, int Width, int Height) Area)> where, Action<Outcome, T?> apply, Action again, Action<Exception>? failed = null) where T : struct
     {
         Outcome? outcome = null;
         try
@@ -103,13 +108,13 @@ public sealed class GlassOpeningSession
                 try { reading = await read(); }
                 finally { budget.Leave(key, ticket.OpenEpoch); }
             }
-            var (monitor, dpi) = where();
-            outcome = Finish(ticket, monitor, dpi, reading is not null, refused);
+            var (monitor, dpi, area) = where();
+            outcome = Finish(ticket, monitor, dpi, area, reading is not null, refused);
             apply(outcome.Value, reading);
         }
         catch (Exception error)
         {
-            outcome ??= Finish(ticket, ticket.Monitor, ticket.Dpi, read: false);
+            outcome ??= Finish(ticket, ticket.Monitor, ticket.Dpi, ticket.Area, read: false);
             Report(failed, error);
         }
         finally

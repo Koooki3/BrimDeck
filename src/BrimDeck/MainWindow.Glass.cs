@@ -198,6 +198,9 @@ public partial class MainWindow
     private void GlassLocation(object? sender, EventArgs e)
     {
         _glassGeneration++;
+        // A cover read under way, or the cover shown, is of the area the panel has left (V4 F02).
+        _glassOpening.SceneChanged();
+        _glassCoverDark = _glassCoverLight = double.NaN;
         GlassBurst();
         QueueGlass();
     }
@@ -637,9 +640,9 @@ public partial class MainWindow
     }
 
     // One read of the area for the opening under way (at most one runs; one asked for meanwhile follows it, the latest). A read
-    // for an opening that has ended, or for another display or scale, is dropped with its reason; one that read nothing (refused
-    // by the app's read budget, the probe busy, the area off the display) is Unknown: the veils keep what the capsule asks for,
-    // never the worst range (V304). A read that began after the opening's first frame may show the panel's own glass: its grid
+    // for an opening that has ended, for another display or scale, or for an area the panel has left, is dropped with its
+    // reason; one that read nothing (refused by the app's read budget, the probe busy, the area off the display) is Unknown: the
+    // veils keep what the capsule asks for, never the worst range (V304). A read that began after the opening's first frame may show the panel's own glass: its grid
     // is trusted less (GlassSceneSnapshot.Occluded). The read is a Task of its own (GlassOpeningSession.Read): a capture or an
     // apply that throws ends there as Unknown, with its read budget slot given back, and never reaches the window's dispatcher.
     private void ReadGlassCover()
@@ -654,8 +657,15 @@ public partial class MainWindow
         _glassCoverCancel?.Dispose();
         var cancel = _glassCoverCancel = new CancellationTokenSource();
         var token = cancel.Token;
+        // The area it covers once the read answers: the same pixels, shifted as far as the window moved meanwhile (V4 F02).
+        var origin = PointToScreen(default);
         _ = _glassOpening.Read(ticket, GlassReads, _glassCoverKey, () => Task.Run(() => probe.ReadArea(covered, screen, token)),
-            () => CurrentGlassSampleArea() is { } current ? (current.Monitor, current.Scale) : (0, double.NaN),
+            () =>
+            {
+                var shift = PointToScreen(default) - origin;
+                var area = (covered.X + (int)Math.Round(shift.X), covered.Y + (int)Math.Round(shift.Y), covered.Width, covered.Height);
+                return CurrentGlassSampleArea() is { } current ? (current.Monitor, current.Scale, area) : (0, double.NaN, area);
+            },
             (outcome, reading) => GlassCoverRead(ticket, covered, outcome, reading), ReadGlassCover,
             error => GlassCoverTrace?.Invoke(FormattableString.Invariant($"cover epoch={ticket.OpenEpoch} failed={error.GetType().Name}: {error.Message}")));
     }
