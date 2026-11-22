@@ -76,6 +76,16 @@ public static class MediaRouting
         CanNext = primary.CanNext || controls?.CanNext == true
     };
 
+    // Whether NetEase's SMTC session may supply the song. The two writers update independently: a session
+    // often reports the skipped-to song before the log writes its own track event, and just as often lags
+    // behind while the log already plays it. Preferring the session whenever the two disagree therefore
+    // swapped the panel to a neighbouring song (with its artwork and a fresh lyric lookup) until the other
+    // side caught up. Only a session on the log's own song, or one that is all the log has (no song yet),
+    // is used; otherwise the log's song stays on screen.
+    public static bool PreferSession(MediaTrack log, MediaTrack? system) =>
+        system is not null && !string.IsNullOrWhiteSpace(system.Title)
+        && (LogMatchesSession(log, system) || string.IsNullOrWhiteSpace(log.Title));
+
     // NetEase without full control, with its SMTC switched on: the session reports a skip about 60 ms
     // after it happens (measured in the player's own log), so it supplies the song, its artwork and its
     // state. The log still supplies what the session lacks for the same song: its id, album, timeline and

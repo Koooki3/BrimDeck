@@ -34,16 +34,23 @@ internal static class MusicVisuals
         var canvas = new Canvas { Width = 24, Height = 24 }; canvas.Children.Add(path);
         return new Viewbox { Width = size, Height = size, Child = canvas };
     }
-    internal static Border Cover(BitmapSource? image, double size, double radius, bool outlined = false, PanelLook? look = null)
+    // `under` is the artwork already on screen when the cover changes: it stays beneath the new picture so the page never
+    // blinks through the placeholder, and the caller fades the new picture in over it (Tag holds the picture to animate).
+    internal static Border Cover(BitmapSource? image, double size, double radius, bool outlined = false, PanelLook? look = null, BitmapSource? under = null)
     {
         var Look = look ?? PanelTheme.Main;
         double corner = Look.Corner(radius);
         var content = new Grid { Background = UI.Brush(Look.Hex("coverPlaceholder")) };
-        if (image is not null) content.Children.Add(new Image { Source = image, Stretch = Stretch.UniformToFill });
-        else content.Children.Add(Icon("music", size * .34, look: Look));
+        bool keepsUnder = under is not null && !ReferenceEquals(under, image);
+        if (keepsUnder) content.Children.Add(new Image { Source = under, Stretch = Stretch.UniformToFill });
+        Image? foreground = null;
+        if (image is not null) { foreground = new Image { Source = image, Stretch = Stretch.UniformToFill }; content.Children.Add(foreground); }
+        else if (!keepsUnder) content.Children.Add(Icon("music", size * .34, look: Look));
         if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush(Look.Hex("coverOutline")), StrokeThickness = 1, RadiusX = corner, RadiusY = corner, Margin = new Thickness(.5), IsHitTestVisible = false });
         content.Clip = new RectangleGeometry(new Rect(0, 0, size, size), corner, corner);
-        return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(corner), Child = content };
+        var border = new Border { Width = size, Height = size, CornerRadius = new CornerRadius(corner), Child = content };
+        if (keepsUnder) border.Tag = foreground;
+        return border;
     }
     // The color taken from the cover, or the theme's equalizer color when there is no cover or it gives none.
     internal static Brush Accent(BitmapSource? source, PanelLook? look = null) => Accent(source, out _, look);

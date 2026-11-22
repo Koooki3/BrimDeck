@@ -31,6 +31,18 @@ internal static class MediaRoutingTests
         var ahead = MediaRouting.PreferSystem(log, smtc);
         check("NetEase's session leads while the log is still on the previous song",
             ahead is { Title: "新歌", Artist: "C", Id: "netease:7", Source: "网易云音乐", SongId: "", IsNeteaseLog: true, State: MediaState.Playing } && !ahead.HasTimeline && ahead.TimelinePending);
+        // The session is only taken as the song while the log is on it or has none; a session that lags behind or runs
+        // ahead of the log must not swap the panel to the previous or next song.
+        check("The log keeps its own song while the session reports a neighbouring one",
+            !MediaRouting.PreferSession(log, smtc));
+        check("A session on the log's own song leads at once",
+            MediaRouting.PreferSession(log with { Title = "新歌", Artist = "C" }, smtc));
+        check("A paused or just-switched log is not displaced by a different session song",
+            !MediaRouting.PreferSession(log with { State = MediaState.Paused }, smtc)
+            && !MediaRouting.PreferSession(log with { State = MediaState.Unknown, TimelinePending = true }, smtc));
+        check("A session without a title, or no session, never leads",
+            !MediaRouting.PreferSession(log, smtc with { Title = " " }) && !MediaRouting.PreferSession(log, null)
+            && MediaRouting.PreferSession(log with { Title = "" }, smtc));
         check("The leading session adds no seeking or modes in log mode", !ahead.CanSeek && !ahead.CanShuffle && !ahead.Shuffle && ahead.CanNext && ahead.CanToggle);
         var caught = MediaRouting.PreferSystem(log with { Title = "新歌", Artist = "C", SongId = "netease:2", ReportedPosition = TimeSpan.FromSeconds(1) }, smtc with { State = MediaState.Unknown });
         check("Once the log reaches the song it supplies id, album, timeline and a known state",
