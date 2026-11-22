@@ -526,8 +526,10 @@ public partial class MainWindow
         // again, and a form that changes during it is taken at once rather than morphed twice.
         bool newCover = shown && !ReferenceEquals(_mediaCover, _musicCoverShown);
         // The picture already on screen stays under the new one while it fades in, so the rebuild does not blink through
-        // the placeholder first. Only an animated change keeps it; otherwise the new picture is simply there.
-        var coverUnder = newCover && animate ? _musicCoverShown : null;
+        // the placeholder first. Only an animated change keeps it, and only while there is a new picture to cover it: a
+        // cover that was cleared (the download failed) must fall back to the placeholder instead of keeping the old one,
+        // which would otherwise stay for good once the fade is over.
+        var coverUnder = newCover && animate && _mediaCover is not null ? _musicCoverShown : null;
         _musicCoverShown = _mediaCover;
         if (shown && song != _musicSong && Environment.TickCount64 - _songArrived >= Soft.Move) _songArrived = Environment.TickCount64;
         long sinceSong = Environment.TickCount64 - _songArrived;
