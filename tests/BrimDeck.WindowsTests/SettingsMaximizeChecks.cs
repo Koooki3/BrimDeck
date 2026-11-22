@@ -48,9 +48,13 @@ internal static class SettingsMaximizeChecks
                 bool fits = rect.Left == work.Left && rect.Top == work.Top && rect.Right == work.Right && rect.Bottom == work.Bottom;
                 if (!fits) Console.WriteLine($"  window {rect.Left},{rect.Top} {rect.Right - rect.Left}x{rect.Bottom - rect.Top}");
                 check($"A maximized settings window fills the work area of its screen ({name})", fits);
-                var scale = VisualTreeHelperDpi(window);
+                // The scale WPF draws this window at. VisualTreeHelper.GetDpi is not used: WPF decides once, at the process's first
+                // window, whether the process is per-monitor aware, and the checks before this one make windows that are not.
+                var toDevice = PresentationSource.FromVisual(window)!.CompositionTarget!.TransformToDevice;
+                check($"It is drawn at its screen's scale ({name})",
+                    Math.Abs(toDevice.M11 - dpi / 96.0) < 0.001 && Math.Abs(toDevice.M22 - dpi / 96.0) < 0.001);
                 check($"Its content is laid out for the work area, not for the whole screen ({name})",
-                    Math.Abs(window.ActualHeight * scale - (work.Bottom - work.Top)) <= 1 && Math.Abs(window.ActualWidth * scale - (work.Right - work.Left)) <= 1);
+                    Math.Abs(window.ActualHeight * toDevice.M22 - (work.Bottom - work.Top)) <= 1 && Math.Abs(window.ActualWidth * toDevice.M11 - (work.Right - work.Left)) <= 1);
                 window.WindowState = WindowState.Normal;
                 GetWindowRect(handle, out rect);
                 check($"Restored, it goes back to its normal size ({name})", rect.Right - rect.Left < work.Right - work.Left);
@@ -58,8 +62,6 @@ internal static class SettingsMaximizeChecks
             finally { window.Close(); }
         }
     }
-
-    private static double VisualTreeHelperDpi(Window window) => System.Windows.Media.VisualTreeHelper.GetDpi(window).DpiScaleY;
 
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct MONITORINFO { public int Size; public RECT Monitor, Work; public uint Flags; }
