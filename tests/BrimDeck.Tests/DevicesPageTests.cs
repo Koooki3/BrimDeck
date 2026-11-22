@@ -41,9 +41,9 @@ static class DevicesPageTests
     private static void Settings(Action<string, bool> check)
     {
         var defaults = new DeckSettings();
-        check("Devices settings: the page is on, low at 15 % and getting low at 25 %, every device everywhere with its figure, the part off",
+        check("Devices settings: the page is on, low at 15 % and getting low at 25 %, every device everywhere with its figure, time estimates off, the part off",
             defaults.DevicesPage && defaults.DeviceLowPercent == 15 && defaults.DeviceWarningPercent == 25 && defaults.DeviceChoices.Count == 0 && defaults.DeviceFigures
-            && !defaults.NotchDevices && !defaults.CapsuleDevices && defaults.NotchOrder.Contains(CompactPart.Devices));
+            && !defaults.DeviceBatteryEstimates && !defaults.NotchDevices && !defaults.CapsuleDevices && defaults.NotchOrder.Contains(CompactPart.Devices));
         var saved = new DeckSettings { DevicesWidth = 9999, DevicesHeight = double.NaN, DeviceLowPercent = 7, DeviceWarningPercent = 33,
             DeviceChoices = [new() { Key = "bt:AA", Name = "Mouse", Label = "  ", Color = "#12345G" }, new() { Key = "bt:AA" }, new() { Key = " " },
                 new() { Key = "bt:BB", Label = new string('x', 80), Kind = (DeviceKind)40, ChargeColor = "#00ff00" }] };

@@ -193,7 +193,7 @@ internal static class MusicTests
             && MusicLayout.Calculate(1200, 400, true, true).Density == 3);
         check("The compact preset puts the artist on the title line to keep a lyric line", compact.MergeTitle && compact.LyricLines == 1);
         check("The standard preset gives the artist its own line above one lyric line", !standard.MergeTitle && standard.LyricLines == 1);
-        check("The spacious preset shows the lines before and after the current lyric", !spacious.MergeTitle && spacious.LyricLines == 3);
+        check("The spacious preset fills the room under the titles with lyric lines", !spacious.MergeTitle && spacious.LyricLines >= 3);
         check("Without lyrics the artist keeps its own line at the compact preset", !MusicLayout.Calculate(440, 140, false, true).MergeTitle);
         bool steadyTitles = true;
         foreach (var (w, h) in new[] { (440.0, 140.0), (440.0, 200.0), (560.0, 280.0), (1200.0, 400.0) })
@@ -216,9 +216,9 @@ internal static class MusicTests
                 var l = MusicLayout.Calculate(width, height, true, true); var cols = l.Columns(true);
                 double lyricsHeight = cols.CurrentLine + (cols.LyricLines - 1) * l.Metrics.LyricLine;
                 double titles = l.Metrics.TitleLine + (cols.ShowAlbum ? 2 : 1) * l.Metrics.ArtistLine + (cols.EqualizerBelow ? cols.EqualizerGap + l.Metrics.Equalizer : 0);
-                columnsOk &= cols.LyricLines is >= 1 and <= 7 && lyricsHeight <= cols.Height + 1e-9 && titles <= cols.Height + 1e-9
+                columnsOk &= cols.LyricLines >= 1 && lyricsHeight <= cols.Height + 1e-9 && titles <= cols.Height + 1e-9
                     && cols.InfoWidth + 2 * cols.DividerGap + 1 + cols.LyricsWidth == l.BodyWidth && cols.LyricsWidth > cols.InfoWidth
-                    && Math.Abs(cols.After - cols.Before) <= 1 && (cols.EqualizerBelow ? cols.Before <= cols.After : cols.Before >= cols.After) && cols.CurrentLyric > l.Metrics.Lyric;
+                    && Math.Abs(cols.After - cols.Before) <= 1 && cols.Before <= cols.After && cols.CurrentLyric > l.Metrics.Lyric;
             }
         }
         var wideColumns = MusicLayout.Calculate(1200, 400, true, true).Columns(true);
@@ -272,10 +272,10 @@ internal static class MusicTests
             {
                 var cols = MusicLayout.Calculate(760, height, true, true).Columns(true, withCover); int lines = cols.LyricLines;
                 if (withCover) counts.Add(lines);
-                int expected = lines % 2 == 1 || cols.EqualizerBelow ? (lines - 1) / 2 : lines / 2;
+                int expected = (lines - 1) / 2;
                 if (cols.Before != expected || cols.Before + 1 + cols.After != lines) linesFailures.Add($"{height} cover={withCover}: {cols.Before} before, {cols.After} after");
             }
-        check("Column layout: five lyric lines have the current one third, and six have it fourth beside the cover" + (linesFailures.Count > 0 ? " (" + string.Join("; ", linesFailures.Take(4)) + ")" : ""),
+        check("Column layout: the current line sits high, with the extra line of an even count left for the lines after it" + (linesFailures.Count > 0 ? " (" + string.Join("; ", linesFailures.Take(4)) + ")" : ""),
             linesFailures.Count == 0 && counts.Contains(5) && counts.Contains(6));
         check("Column layout: without the cover nothing is kept for one", MusicLayout.Calculate(760, 300, true, true).Columns(true) is { Cover: 0, SideCover: 0 });
         check("The bottom margin below the transport equals the side margin", standard.Metrics.Bottom == standard.Metrics.Side && spacious.Metrics.Bottom == spacious.Metrics.Side);

@@ -64,7 +64,7 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
     // The height of the upper part, above the progress bar; the cover is centred in it.
     public double UpperHeight { get; init; }
     // The lyric lines the room beside the cover holds, whether or not there are lyrics to show in them.
-    public int LyricRoom => (int)Math.Clamp(Math.Floor((MiddleHeight - Metrics.MiddleGap) / Metrics.LyricLine), 0, 3);
+    public int LyricRoom => Math.Max(0, (int)Math.Floor((MiddleHeight - Metrics.MiddleGap) / Metrics.LyricLine));
     // lyricsExpected lays out the titles as if lyrics were shown, so they keep their place while lyrics are still looked up,
     // or when a song has none.
     public static MusicLayout Calculate(double width, double height, bool lyrics, bool timeline, bool message = false, bool fullControlEntry = false, bool transport = true,
@@ -88,7 +88,8 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
         bool below = lyrics || lyricsExpected || message;
         bool merge = below ? Room(separate) < c.LyricLine : cover < separate;
         double headH = merge ? c.TitleLine : separate, room = Room(headH);
-        int lines = !lyrics ? 0 : (int)Math.Clamp(Math.Floor(room / c.LyricLine), 0, 3);
+        // The room under the titles holds as many lines as the room allows: it is filled rather than capped at three.
+        int lines = !lyrics ? 0 : Math.Max(0, (int)Math.Floor(room / c.LyricLine));
         bool showMessage = message && room >= c.LyricLine;
         // The play button sits at the centre of the panel, with previous and next spread out with the panel's width
         // rather than packed beside it. The mode button is left of previous, with the same gap as between the others.
@@ -108,9 +109,8 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
     // In the column layout the upper part has two columns, so the titles and the lyrics are not read as one block: the title,
     // artist and album centred in the left one, and the lyrics right of a thin divider. The left column takes about a third of
     // the width; a wider panel gives the lyrics the rest. The lyrics fill the upper part's height, the current line a size
-    // larger, with as many lines before it as after it. An even count has one line more on one side: after it while the
-    // equalizer is under the titles, and before it while the equalizer is at the top right corner, so the current line stands
-    // in the lower half, away from the bars. Without lyrics the titles are centred across the whole width.
+    // larger, with as many lines before it as after it. An even count gives the extra line to the lines still to come, so the
+    // current line stays as high as the room allows. Without lyrics the titles are centred across the whole width.
     //
     // Without the cover the equalizer is under the titles, in the middle of their column (EqualizerBelow), where the height
     // holds it; the album's own line gives way to it first. A part too short for that leaves it at the upper part's top right
@@ -130,10 +130,13 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
         double info = lyrics ? Math.Round(Math.Clamp(BodyWidth * .36, 120, 480), MidpointRounding.AwayFromZero) : BodyWidth;
         double lyricsX = lyrics ? info + 2 * gap + 1 : BodyWidth, lyricsW = Math.Max(0, BodyWidth - lyricsX);
         double currentFont = Math.Round(c.Lyric * 1.15 * 2, MidpointRounding.AwayFromZero) / 2, currentLine = Math.Round(c.LyricLine * 1.15, MidpointRounding.AwayFromZero);
-        int lines = !lyrics ? 0 : (int)Math.Clamp(1 + Math.Floor((height - currentLine) / c.LyricLine), 1, 7);
+        // The current line is a size larger; the rest of the height holds as many lines as fit, above and below it.
+        int lines = !lyrics ? 0 : 1 + Math.Max(0, (int)Math.Floor((height - currentLine) / c.LyricLine));
         double bars = c.SectionGap + c.Equalizer;
         bool below = !cover && c.TitleLine + c.ArtistLine + bars <= height;
-        int before = below ? Math.Max(0, lines - 1) / 2 : lines / 2, after = Math.Max(0, lines - 1 - before);
+        // The current line sits as high in the room as it can; the lines after it take the extra one when the count is even,
+        // so the lines still to come read below it. The equalizer no longer decides which side gets the extra line.
+        int before = Math.Max(0, lines - 1) / 2, after = Math.Max(0, lines - 1 - before);
         bool album = c.TitleLine + 2 * c.ArtistLine + (below ? bars : 0) <= height;
         double above = 0, beside = 0;
         if (cover)
