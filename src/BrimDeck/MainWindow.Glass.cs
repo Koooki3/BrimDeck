@@ -30,11 +30,15 @@ namespace BrimDeck;
 // The springs run on the display's frames (CompositionTarget.Rendering) only while one moves, and set the persistent graph's
 // weights (GlassSurface.Present): nothing is compiled while the material moves. Sampling never stops for a turn. It runs
 // twice a second at rest and in a short burst after a hint that the backdrop may have changed (another window came to the
-// front, the window in front changed its title - a browser's tab or page, told by GlassHintBroker -, the panel moved or began
-// to open or close, a reading that changed a lot), one reading at a time.
+// front, the window in front changed its title - a browser's tab or page, told by GlassHintBroker -, the panel moved, a reading
+// that changed a lot), one reading at a time. While the island opens, closes or resizes no ring is read (GlassMotionGate: each
+// GDI read stretches the display's frames, and a ring for a size still changing is dropped anyway); the motion's pause is no age
+// for the readings' validity, and a short burst catches up once the island is still. An opening's cover read is not held.
 public partial class MainWindow
 {
     private const int GlassProbeInterval = 500, GlassBurstInterval = 80, GlassBurstMs = 700;
+    // The catch-up once the island is still (V3 C4): a reading at once and one or two more, so the veils can thin on two that agree.
+    private const int GlassSettleBurstMs = 240;
     // Soft hints (a title change, a reading that moved a lot) start a burst at most this often.
     private const int GlassHintGap = 2000;
     // Stiffness (rad/s): the veil thickens within 5 % in about 180 ms and thins in about 300 ms; a palette turn about 365 ms.
@@ -49,7 +53,9 @@ public partial class MainWindow
     // Keyed by the panel for its ring reads and by its _glassCoverKey for its covered area's.
     private static readonly GlassReadBudget<object> GlassReads = new();
     private GlassLookGroup<MainWindow> GlassGroup => GlassGroups.GetValue(Look, _ => new());
-    private DispatcherTimer? _glassProbe, _glassWatchdog;
+    private DispatcherTimer? _glassProbe, _glassWatchdog, _glassSettle;
+    private readonly GlassMotionGate _glassMotion = new();
+    private bool _glassSettleBurst;
     private GlassSampleValidity _glassValidity = new(0);
     private bool _glassActive, _glassQueued, _glassRendering, _glassProtected;
     private long _glassGeneration, _glassTurnEpoch;
@@ -112,6 +118,8 @@ public partial class MainWindow
         // The watchdog (U05): Normal priority, so a busy Background queue does not delay the text's protection.
         _glassWatchdog = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher);
         _glassWatchdog.Tick += GlassWatchdogTick;
+        _glassSettle = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
+        _glassSettle.Tick += GlassSettleTick;
         LayoutUpdated += GlassLayout;
         LocationChanged += GlassLocation;
         IsVisibleChanged += GlassVisibility;
@@ -150,8 +158,42 @@ public partial class MainWindow
         if (Island.IsVisible && Island.RenderSize is { Width: > 0, Height: > 0 } size && Island.TransformToAncestor(this) is { } toWindow)
             key = key with { Origin = toWindow.Transform(new Point()), Far = toWindow.Transform(new Point(size.Width, size.Height)) };
         if (_glassActive && key == _glassLayoutKey) return;
+        // The island's size, shape or place in the window moved: its ring is not read until it is still.
+        if (_glassActive && _glassLayoutKey is { } was && (was.Size != key.Size || was.Origin != key.Origin || was.Far != key.Far
+                || was.Corners != key.Corners || was.Dpi != key.Dpi))
+            GlassMoved(Environment.TickCount64);
         _glassLayoutKey = key;
         QueueGlass();
+    }
+
+    // The island moves (V3 C4, GlassMotionGate): the readings pause from the motion's start and the catch-up is set for when it
+    // settles. Opening or closing (burst): the catch-up is a short burst (the backdrop around the island is new); another move of
+    // the island (its content's length) a single reading.
+    private void GlassMoved(long now, bool burst = false)
+    {
+        if (_glassSettle is null) return;
+        if (_glassMotion.Moved(now)) { _glassValidity.Pause(now); _glassSettleBurst = false; }
+        _glassSettleBurst |= burst;
+        if (!_glassSettle.IsEnabled) ArmGlassSettle(now);
+    }
+
+    private void ArmGlassSettle(long now)
+    {
+        if (_glassSettle is not { } settle) return;
+        settle.Interval = TimeSpan.FromMilliseconds(Math.Max(1, _glassMotion.SettlesAt - now));
+        settle.Start();
+    }
+
+    private void GlassSettleTick(object? sender, EventArgs e)
+    {
+        _glassSettle?.Stop();
+        long now = Environment.TickCount64;
+        if (_glassMotion.Moving(now)) { ArmGlassSettle(now); return; }
+        _glassValidity.Resume(now);
+        GlassWatch(now);
+        if (!_glassMotion.CatchUp(now) || !_glassActive) return;
+        if (_glassSettleBurst) GlassBurst(length: GlassSettleBurstMs);
+        else if (!_glassValidity.Reading) SampleGlass(this, EventArgs.Empty);
     }
     private void GlassLocation(object? sender, EventArgs e)
     {
@@ -276,7 +318,8 @@ public partial class MainWindow
             _glassWasExpanded = expanded;
             // An opening or closing SetExpanded did not see (a new foreground context closes the panel directly).
             if (expanded != _glassOpening.IsOpen) GlassOpenChanged(expanded);
-            GlassBurst();
+            // No burst for the opening or closing itself: the ring is read once the island is still (GlassMoved).
+            GlassMoved(now, burst: true);
         }
         GlassTargets(now, snap: !Animates);
         var material = GlassMaterialNow(now);
@@ -379,7 +422,7 @@ public partial class MainWindow
 
     // A hint that the backdrop may have changed: read at once (unless a reading runs or one was taken within a burst's interval)
     // and keep reading quickly for a while. Soft hints start a burst at most every GlassHintGap.
-    private void GlassBurst(bool soft = false)
+    private void GlassBurst(bool soft = false, int length = GlassBurstMs)
     {
         if (_glassProbe is null) return;
         long now = Environment.TickCount64;
@@ -388,7 +431,7 @@ public partial class MainWindow
             if (now - _glassSoftBurstAt < GlassHintGap) return;
             _glassSoftBurstAt = now;
         }
-        _glassBurstUntil = now + GlassBurstMs;
+        _glassBurstUntil = Math.Max(_glassBurstUntil, now + length);
         if (_glassProbe.Interval.TotalMilliseconds != GlassBurstInterval) _glassProbe.Interval = TimeSpan.FromMilliseconds(GlassBurstInterval);
         if (_glassActive && !_glassValidity.Reading && now - _glassReadAt >= GlassBurstInterval) SampleGlass(this, EventArgs.Empty);
     }
@@ -452,8 +495,11 @@ public partial class MainWindow
         }
         var validity = _glassValidity;
         validity.Mode(bursting, start);
+        // Not while the island moves (GlassMotionGate); a read let through by a long motion ends the validity's pause.
+        bool held = !_glassMotion.MayRead(start);
+        if (!held) validity.Resume(start);
         GlassWatch(start);
-        if (!_glassActive || CurrentGlassSampleArea() is not { } area) return;
+        if (held || !_glassActive || CurrentGlassSampleArea() is not { } area) return;
         int abandoned = validity.Abandoned;
         if (validity.Begin(start, _glassGeneration) is not { } ticket) return;
         if (validity.Abandoned != abandoned)
@@ -564,6 +610,8 @@ public partial class MainWindow
     // opening's cover and any read still running for it are void at once (V308), whatever the closing motion still shows.
     private void GlassOpenChanged(bool open)
     {
+        // The island is about to move: the ring is not read until it is still (the cover read below is not held).
+        GlassMoved(Environment.TickCount64, burst: true);
         if (!open)
         {
             _glassOpening.Close();
@@ -750,6 +798,8 @@ public partial class MainWindow
     {
         _glassProbe?.Stop();
         _glassWatchdog?.Stop();
+        _glassSettle?.Stop();
+        _glassMotion.Reset();
         _glassSurface?.Hide();
         if (!_glassActive) return;
         _glassActive = false;
@@ -793,6 +843,7 @@ public partial class MainWindow
         _glassSurface = null;
         _glassProbe = null;
         if (_glassWatchdog is not null) { _glassWatchdog.Stop(); _glassWatchdog.Tick -= GlassWatchdogTick; _glassWatchdog = null; }
+        if (_glassSettle is not null) { _glassSettle.Stop(); _glassSettle.Tick -= GlassSettleTick; _glassSettle = null; }
         _glassOutline = null;
         _glassOutlinePoints = null;
         _glassContour = null;

@@ -140,6 +140,7 @@ try
     GlassClarityTests.Run(Check);
     GlassLookTests.Run(Check);
     GlassSampleValidityTests.Run(Check);
+    GlassMotionGateTests.Run(Check);
     GlassLookGroupTests.Run(Check);
     GlassOpeningSessionTests.Run(Check);
     FluidMotionTests.Run(Check);
