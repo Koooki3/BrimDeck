@@ -191,7 +191,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     internal static DeviceBattery Pushed(HidInfo info, Pushes.Kind kind, BatteryRead state, string? name)
     {
         string key = Key("push", info) + (kind == Pushes.Kind.SteamPuck ? ":" + info.Interface : "");
-        return new DeviceBattery(key, name ?? Pushes.Name(kind, null), Pushes.KindOf(kind), Pushes.Source(kind), state.Percent)
+        return new DeviceBattery(key, name ?? Pushes.Name(kind, null, info.Product), Pushes.KindOf(kind), Pushes.Source(kind), state.Percent)
             { Charging = state.Charging, Accuracy = state.Accuracy, Asleep = state.Asleep, Hardware = Devices.Hardware(info.Vendor, info.Product) };
     }
 
