@@ -220,5 +220,43 @@ internal static class GlassSampleValidityTests
         alone.Leave(two, 1);
         check($"Liquid glass lets a stuck panel read again beside its given-up capture without passing the cap ({alone.Running} outstanding)",
             stuckThenReplaced && slotFreed && alone.Running == 0);
+
+        // The same with real work in flight, counted apart from the budget: a capture runs on a worker task and is held until
+        // released; the budget is entered before it starts and left once it answers, on this thread, as the window does (the
+        // capture's continuation comes back to the window's thread). Panel A's first capture is given up as stuck while panel B's
+        // runs; A's replacement is refused, and the captures actually running never pass two.
+        var tasks = new GlassReadBudget<object>();
+        int live = 0, most = 0;
+        var gates = new Dictionary<(object, long), TaskCompletionSource>();
+        var workers = new Dictionary<(object, long), Task>();
+        bool Start(object holder, long id)
+        {
+            if (!tasks.TryEnter(holder, id)) return false;
+            var gate = gates[(holder, id)] = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var entered = new ManualResetEventSlim();
+            workers[(holder, id)] = Task.Run(async () =>
+            {
+                int now = Interlocked.Increment(ref live);
+                int seen; while ((seen = Volatile.Read(ref most)) < now && Interlocked.CompareExchange(ref most, now, seen) != seen) { }
+                entered.Set();
+                try { await gate.Task; } finally { Interlocked.Decrement(ref live); }
+            });
+            return entered.Wait(TimeSpan.FromSeconds(5));
+        }
+        bool Answer(object holder, long id)
+        {
+            gates[(holder, id)].SetResult();
+            bool done = workers[(holder, id)].Wait(5000);
+            tasks.Leave(holder, id);
+            return done;
+        }
+        object a = new(), b = new();
+        bool bothRunning = Start(a, 1) && Start(b, 1) && Volatile.Read(ref live) == 2;
+        bool replacementRefused = !Start(a, 2) && Volatile.Read(ref live) == 2 && tasks.Running == 2;
+        bool stuckAnswered = Answer(a, 1) && Volatile.Read(ref live) == 1 && tasks.Running == 1;
+        bool replacementLater = Start(a, 2) && Volatile.Read(ref live) == 2 && !Start(new object(), 1);
+        bool allDone = Answer(a, 2) && Answer(b, 1) && Volatile.Read(ref live) == 0 && tasks.Running == 0;
+        check($"Liquid glass never has more than two captures actually running, a stuck one's replacement refused until it answers (most {most})",
+            bothRunning && replacementRefused && stuckAnswered && replacementLater && allDone && most == 2);
     }
 }
