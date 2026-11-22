@@ -19,38 +19,40 @@ internal static class ThemeMotionTests
             builtIns.All(id => Palette(id).Motion.AnyInteraction == id is not ("dark" or "light" or "github-dark" or "github-light")));
         check("Only the cyberpunk, glass and island themes have ambient light", builtIns.All(id => Palette(id).Motion.Ambient.Any == ambient.Contains(id)));
         check("Glass: only a slow drifting glint, no breathing, sweep or flicker; a lens on hover, no particles",
-            new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion is { Hover: HoverFx.Lens, Particles: ParticleFx.None, Steps: 0 } m
+            new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion is { Hover: HoverFx.None, Particles: ParticleFx.None, Steps: 0 } m
                 && m.Ambient is { Drift: >= 20, Breathe: 0, Sweep: 0, Flicker: 0 })
             && new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion.Press == PressFx.Jelly));
         var firstDay = Palette(PanelThemes.IslandHoliday).Motion;
         var firstNight = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!, true).Motion;
         check("Island holiday: a swell and waves; sun glints by day, glowing plankton by night",
-            firstDay is { Hover: HoverFx.Wave, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Steps: 0 } && firstDay.Ambient is { Breathe: > 0, Drift: > 0, Sweep: > 0 }
-            && firstNight is { Hover: HoverFx.Wave, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 } && firstNight.Ambient.Breathe > firstDay.Ambient.Breathe);
+            firstDay is { Hover: HoverFx.None, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Steps: 0 } && firstDay.Ambient is { Breathe: > 0, Drift: > 0, Sweep: > 0 }
+            && firstNight is { Hover: HoverFx.None, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 } && firstNight.Ambient.Breathe > firstDay.Ambient.Breathe);
         var islandDay = Palette(PanelThemes.IslandHoliday2).Motion;
         var islandNight = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.IslandHoliday2)!, true).Motion;
         check("Island holiday 2: a swell and waves; a splash of water, bubbles by day and glowing plankton by night",
-            islandDay is { Hover: HoverFx.Wave, Press: PressFx.Splash, Particles: ParticleFx.Bubble, ParticleStrength: > 0, Steps: 0, Spring: SpringTier.Default } && islandDay.Ambient is { Breathe: > 0, Drift: > 0, Sweep: > 0 }
-            && islandNight is { Hover: HoverFx.Wave, Press: PressFx.Splash, Particles: ParticleFx.Firefly, ParticleStrength: > 0 } && islandNight.Ambient.Breathe > islandDay.Ambient.Breathe
+            islandDay is { Hover: HoverFx.None, Press: PressFx.Splash, Particles: ParticleFx.Bubble, ParticleStrength: > 0, Steps: 0, Spring: SpringTier.Default } && islandDay.Ambient is { Breathe: > 0, Drift: > 0, Sweep: > 0 }
+            && islandNight is { Hover: HoverFx.None, Press: PressFx.Splash, Particles: ParticleFx.Firefly, ParticleStrength: > 0 } && islandNight.Ambient.Breathe > islandDay.Ambient.Breathe
             && islandNight.Pace == islandDay.Pace);
         check("Pixel blocks: slots and bevels in four hard steps, square particles, no ambient light",
-            Palette(PanelThemes.PixelBlocks).Motion is { Hover: HoverFx.Slot, Press: PressFx.Bevel, Particles: ParticleFx.Pixel, ParticleStrength: > 0, Steps: 4 } pixel && !pixel.Ambient.Any);
+            Palette(PanelThemes.PixelBlocks).Motion is { Hover: HoverFx.None, Press: PressFx.Bevel, Particles: ParticleFx.Pixel, ParticleStrength: > 0, Steps: 4 } pixel && !pixel.Ambient.Any);
         var cyber = Palette(PanelThemes.Demo).Motion;
         check("Cyberpunk: breathing, drifting, sweeping, a rare flicker; hard HUD answers in steps, and rain",
             cyber.Ambient is { Breathe: 6.5, BreatheDepth: .22, Drift: 11, Sweep: 16, SweepOpacity: .07, Flicker: 41, FlickerDepth: .1 }
-            && cyber is { Hover: HoverFx.Brackets, Press: PressFx.Lock, Focus: FocusFx.Brackets, Color: "accent", Secondary: "shadow", Highlight: "clock", Particles: ParticleFx.Rain, Steps: 3, Pace: < 1, Spring: SpringTier.Firm });
+            && cyber is { Hover: HoverFx.None, Press: PressFx.Lock, Focus: FocusFx.Brackets, Color: "accent", Secondary: "shadow", Highlight: "clock", Particles: ParticleFx.Rain, Steps: 3, Pace: < 1, Spring: SpringTier.Firm });
         check("GitHub themes have no motion section: no hover, press or focus marks",
             new[] { "github-dark", "github-light" }.All(id => Palette(id).Motion is { Hover: HoverFx.None, Press: PressFx.None, Focus: FocusFx.None, AnyInteraction: false, Ambient.Any: false }));
         check("Dark and light keep BrimDeck's default look: no hover, press or focus marks",
             new[] { "dark", "light" }.All(id => Palette(id).Motion is { Hover: HoverFx.None, Press: PressFx.None, Focus: FocusFx.None, Particles: ParticleFx.None, Ambient.Any: false })
             && ThemeMotion.Default is { AnyInteraction: false });
         check("One Dark Pro is the editor: a caret, a selection",
-            Palette("one-dark-pro").Motion is { Hover: HoverFx.Caret, Press: PressFx.Select, Focus: FocusFx.Caret, Particles: ParticleFx.None });
+            Palette("one-dark-pro").Motion is { Hover: HoverFx.None, Press: PressFx.Select, Focus: FocusFx.Caret, Particles: ParticleFx.None });
         check("Dracula sparkles in purple and pink; Night Owl glows warm with fireflies",
-            Palette("dracula").Motion is { Hover: HoverFx.Sheen, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Secondary: "liked" }
-            && Palette("night-owl").Motion is { Hover: HoverFx.Glow, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 });
-        // The glass pair is one material in two tones, and shares its answers; dark, light and the GitHub pair share having none.
-        check("Every built-in theme has a language of its own", builtIns.Select(id => (Palette(id).Motion.Hover, Palette(id).Motion.Press)).Distinct().Count() == builtIns.Length - 4);
+            Palette("dracula").Motion is { Hover: HoverFx.None, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Secondary: "liked" }
+            && Palette("night-owl").Motion is { Hover: HoverFx.None, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 });
+        // No built-in theme marks hovered controls (as upstream); each keeps its own press, particles, focus and pace. The glass pair is
+        // one material in two tones, and shares its answers; dark, light and the GitHub pair share having none.
+        check("No built-in theme marks a hovered control", builtIns.All(id => Palette(id).Motion.Hover == HoverFx.None));
+        check("Every built-in theme has a language of its own", builtIns.Select(id => Palette(id).Motion is var m ? (m.Press, m.Particles, m.Focus, m.Pace) : default).Distinct().Count() == builtIns.Length - 4);
         check("Only the mechanical and pixel themes move in steps", builtIns.All(id => (Palette(id).Motion.Steps > 0) == (id is PanelThemes.Demo or PanelThemes.PixelBlocks)));
         check("Particle styles inherit and unknown ones keep the base's",
             Custom("""{ "base": "dracula", "motion": { "particles": "firefly" } }""").Motion.Particles == ParticleFx.Firefly
@@ -58,11 +60,11 @@ internal static class ThemeMotionTests
         check("System on the default themes draws nothing either",
             new[] { "dark", "light" }.All(id => Palette(id).Motion.ForSystem() is { AnyInteraction: false, Color: ThemeMotion.SystemAccent } system && !system.Ambient.Any));
         var system = Palette("dracula").Motion.ForSystem();
-        check("System follows the Windows accent, quietly", system is { Color: ThemeMotion.SystemAccent, Highlight: ThemeMotion.SystemAccent, Hover: HoverFx.Reveal, Press: PressFx.Shade, Particles: ParticleFx.None, Steps: 0, Focus: FocusFx.Ring } && !system.Ambient.Any
+        check("System follows the Windows accent, quietly", system is { Color: ThemeMotion.SystemAccent, Highlight: ThemeMotion.SystemAccent, Hover: HoverFx.None, Press: PressFx.Shade, Particles: ParticleFx.None, Steps: 0, Focus: FocusFx.Ring } && !system.Ambient.Any
             && system.HoverStrength == Palette("dracula").Motion.HoverStrength && system.Pace == Palette("dracula").Motion.Pace);
         check("System keeps a theme's lift and sink, in the Windows accent",
             (Palette("dracula").Motion with { Hover = HoverFx.Lift, Press = PressFx.Sink, Secondary = "shadow" }).ForSystem() is { Hover: HoverFx.Lift, Press: PressFx.Sink, Secondary: "shadow", Color: ThemeMotion.SystemAccent });
-        check("System never takes a theme's steps or particles", Palette(PanelThemes.Demo).Motion.ForSystem() is { Steps: 0, Particles: ParticleFx.None, Hover: HoverFx.Reveal, Press: PressFx.Shade });
+        check("System never takes a theme's steps or particles", Palette(PanelThemes.Demo).Motion.ForSystem() is { Steps: 0, Particles: ParticleFx.None, Hover: HoverFx.None, Press: PressFx.Shade });
 
         // Names of earlier versions still read sensibly; numbers are not names.
         var old = Custom("""{ "motion": { "hover": "neon", "press": "ring", "focus": "neon" } }""").Motion;
@@ -80,10 +82,10 @@ internal static class ThemeMotionTests
             neonEdge.Hover == HoverFx.Underline && neonEdge.Press == PressFx.Lock && neonEdge.Steps == 3 && neonEdge.Highlight == "clock"
             && neonEdge.Ambient.Breathe == 6.5 && neonEdge.Ambient.Sweep == 0 && neonEdge.Ambient.Drift == 11);
         check("Steps and the highlight inherit and can be changed",
-            Custom("""{ "base": "cyberpunk-edgerunners", "motion": { "steps": 0, "highlight": "#FF0000" } }""").Motion is { Steps: 0, Highlight: "#FF0000", Hover: HoverFx.Brackets }
-            && Custom("""{ "base": "dracula", "motion": { "steps": 5 } }""").Motion is { Steps: 5, Hover: HoverFx.Sheen });
+            Custom("""{ "base": "cyberpunk-edgerunners", "motion": { "steps": 0, "highlight": "#FF0000" } }""").Motion is { Steps: 0, Highlight: "#FF0000", Hover: HoverFx.None }
+            && Custom("""{ "base": "dracula", "motion": { "steps": 5 } }""").Motion is { Steps: 5, Hover: HoverFx.None });
         var calm = Custom("""{ "base": "dracula", "motion": { "ambient": { "breathe": 8, "breatheDepth": 0.1 } } }""").Motion;
-        check("A custom theme can add ambient light to any base", calm.Ambient is { Breathe: 8, BreatheDepth: .1, Drift: 0 } && calm.Ambient.Any && calm.Hover == HoverFx.Sheen && calm.Secondary == "liked");
+        check("A custom theme can add ambient light to any base", calm.Ambient is { Breathe: 8, BreatheDepth: .1, Drift: 0 } && calm.Ambient.Any && calm.Hover == HoverFx.None && calm.Secondary == "liked");
         check("A theme without a motion section has its base's", Custom("""{ "base": "github-light" }""").Motion == Palette("github-light").Motion);
 
         // Limits: nothing a file says can make the light flash or the answers loud.

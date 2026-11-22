@@ -90,7 +90,7 @@
   // focus glows.
   "motion": {
     "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 28, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },
-    "hover": "lens", "hoverStrength": 0.14, "press": "jelly", "pressStrength": 0.16, "trail": 0, "particles": "none", "focus": "glow", "pace": 1.1, "steps": 0,
+    "hover": "none", "hoverStrength": 0.14, "press": "jelly", "pressStrength": 0.16, "trail": 0, "particles": "none", "focus": "glow", "pace": 1.1, "steps": 0,
     "color": "accent", "secondary": "accent", "highlight": "accent"
   }
 }

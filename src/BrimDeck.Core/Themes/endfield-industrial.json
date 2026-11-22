@@ -98,7 +98,7 @@
   // firm, nothing breathes, flashes or leaves particles, and nothing runs while the island is idle.
   "motion": {
     "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 0, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },
-    "hover": "caret", "hoverStrength": 0.2, "press": "shade", "pressStrength": 0.3, "trail": 0, "particles": "none", "spring": "firm",
+    "hover": "none", "hoverStrength": 0.2, "press": "shade", "pressStrength": 0.3, "trail": 0, "particles": "none", "spring": "firm",
     "focus": "brackets", "pace": 1, "steps": 0, "color": "accent", "secondary": "textSecondary", "highlight": "indicator"
   },
   "daylight": { "mode": "system" },

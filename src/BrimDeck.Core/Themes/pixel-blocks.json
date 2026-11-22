@@ -86,7 +86,7 @@
   // clock's yellow, keyboard focus is a square ring; all of it in four hard steps.
   "motion": {
     "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 0, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },
-    "hover": "slot", "hoverStrength": 0.2, "press": "bevel", "pressStrength": 0.26, "trail": 0.45, "particles": "pixel", "focus": "ring", "pace": 0.9, "steps": 4,
+    "hover": "none", "hoverStrength": 0.2, "press": "bevel", "pressStrength": 0.26, "trail": 0.45, "particles": "pixel", "focus": "ring", "pace": 0.9, "steps": 4,
     "color": "textPrimary", "secondary": "accent", "highlight": "clock"
   }
 }

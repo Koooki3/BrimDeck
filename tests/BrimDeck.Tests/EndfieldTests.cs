@@ -37,7 +37,7 @@ internal static class EndfieldTests
             && day.ClockGradients.SelectMany(g => g.Stops).All(stop => ThemeColor.Parse(stop).MinimumContrast(day.SurfaceStops) >= PanelThemes.TextContrast)
             && night.ClockGradients.SelectMany(g => g.Stops).All(stop => ThemeColor.Parse(stop).MinimumContrast(night.SurfaceStops) >= PanelThemes.TextContrast));
         check("It moves mechanically and costs nothing at rest: no ambient light, no particles, no steps, firm springs, brackets on focus",
-            day.Motion is { Hover: HoverFx.Caret, Press: PressFx.Shade, Particles: ParticleFx.None, Steps: 0, Spring: SpringTier.Firm, Focus: FocusFx.Brackets } m && !m.Ambient.Any && night.Motion == day.Motion);
+            day.Motion is { Hover: HoverFx.None, Press: PressFx.Shade, Particles: ParticleFx.None, Steps: 0, Spring: SpringTier.Firm, Focus: FocusFx.Brackets } m && !m.Ambient.Any && night.Motion == day.Motion);
 
         // The cut effect: a range, an effect by name, ruled out by pixel art. A user's glass is ignored (only the built-in liquid
         // glass themes have the material), so it never takes the cuts away.

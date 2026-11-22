@@ -68,5 +68,5 @@
   },
   "effects": { "shadowOpacity": 0.4 },
   // Calm and warm: a soft amber glow inside the control with a glint at its corner; a press swells it, and on release fireflies rise slowly from the top.
-  "motion": { "hover": "glow", "hoverStrength": 0.16, "press": "ember", "pressStrength": 0.22, "trail": 0.5, "particles": "firefly", "focus": "glow", "pace": 1.2, "steps": 0, "color": "accent", "secondary": "#FFCB6B", "highlight": "#C5E478" }
+  "motion": { "hover": "none", "hoverStrength": 0.16, "press": "ember", "pressStrength": 0.22, "trail": 0.5, "particles": "firefly", "focus": "glow", "pace": 1.2, "steps": 0, "color": "accent", "secondary": "#FFCB6B", "highlight": "#C5E478" }
 }

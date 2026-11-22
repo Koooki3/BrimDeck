@@ -68,5 +68,5 @@
   },
   "effects": { "shadowOpacity": 0.35 },
   // The editor: a line highlight and a blue caret at the left of the hovered control; a press sweeps a selection across behind the caret.
-  "motion": { "hover": "caret", "hoverStrength": 0.2, "press": "select", "pressStrength": 0.24, "trail": 0, "particles": "none", "focus": "caret", "pace": 0.9, "steps": 0, "color": "#528BFF", "secondary": "accent", "highlight": "accent" }
+  "motion": { "hover": "none", "hoverStrength": 0.2, "press": "select", "pressStrength": 0.24, "trail": 0, "particles": "none", "focus": "caret", "pace": 0.9, "steps": 0, "color": "#528BFF", "secondary": "accent", "highlight": "accent" }
 }

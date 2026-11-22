@@ -68,5 +68,5 @@
   },
   "effects": { "shadowOpacity": 0.4 },
   // Elegant: a purple-to-pink sheen with a fine gradient edge; a press deepens it, and on release a few stars twinkle on the corners. A little unhurried.
-  "motion": { "hover": "sheen", "hoverStrength": 0.16, "press": "sparkle", "pressStrength": 0.22, "trail": 0.5, "particles": "star", "focus": "glow", "pace": 1.1, "steps": 0, "color": "accent", "secondary": "liked", "highlight": "#F8F8F2" }
+  "motion": { "hover": "none", "hoverStrength": 0.16, "press": "sparkle", "pressStrength": 0.22, "trail": 0.5, "particles": "star", "focus": "glow", "pace": 1.1, "steps": 0, "color": "accent", "secondary": "liked", "highlight": "#F8F8F2" }
 }

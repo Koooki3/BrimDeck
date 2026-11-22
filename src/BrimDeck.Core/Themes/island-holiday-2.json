@@ -99,7 +99,7 @@
   // completed one lets a few bubbles rise.
   "motion": {
     "ambient": { "breathe": 9, "breatheDepth": 0.12, "drift": 20, "sweep": 26, "sweepOpacity": 0.05, "flicker": 0, "flickerDepth": 0 },
-    "hover": "wave", "hoverStrength": 0.12, "press": "splash", "pressStrength": 0.18, "trail": 0.35, "particles": "bubble", "spring": "default", "splashMs": 500, "particleMs": 1450, "focus": "glow", "pace": 1.15, "steps": 0,
+    "hover": "none", "hoverStrength": 0.12, "press": "splash", "pressStrength": 0.18, "trail": 0.35, "particles": "bubble", "spring": "default", "splashMs": 500, "particleMs": 1450, "focus": "glow", "pace": 1.15, "steps": 0,
     "color": "accent", "secondary": "clock", "highlight": "clock"
   },
   // Dusk, the hour before night: a peach sunset sky over a sea warmed by the low sun, a gold line along the horizon and
@@ -193,7 +193,7 @@
     // The swell is slower at night and the moon's glint rarer; a completed press lets glowing plankton rise from the ring of water.
     "motion": {
       "ambient": { "breathe": 11, "breatheDepth": 0.14, "drift": 24, "sweep": 40, "sweepOpacity": 0.04, "flicker": 0, "flickerDepth": 0 },
-      "hover": "wave", "hoverStrength": 0.14, "press": "splash", "pressStrength": 0.2, "trail": 0.4, "particles": "firefly", "focus": "glow",
+      "hover": "none", "hoverStrength": 0.14, "press": "splash", "pressStrength": 0.2, "trail": 0.4, "particles": "firefly", "focus": "glow",
       "color": "accent", "secondary": "clock", "highlight": "accent"
     }
   }

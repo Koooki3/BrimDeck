@@ -85,7 +85,7 @@
   // the surface every 26 s. A wave rolls in along a hovered control; a completed press leaves sun glints.
   "motion": {
     "ambient": { "breathe": 9, "breatheDepth": 0.12, "drift": 20, "sweep": 26, "sweepOpacity": 0.05, "flicker": 0, "flickerDepth": 0 },
-    "hover": "wave", "hoverStrength": 0.12, "press": "sparkle", "pressStrength": 0.18, "trail": 0.35, "particles": "star", "focus": "glow", "pace": 1.15, "steps": 0,
+    "hover": "none", "hoverStrength": 0.12, "press": "sparkle", "pressStrength": 0.18, "trail": 0.35, "particles": "star", "focus": "glow", "pace": 1.15, "steps": 0,
     "color": "accent", "secondary": "clock", "highlight": "clock"
   },
   // Laid over everything above from 18:30 to 06:30 (or the hours chosen in the settings).
@@ -158,7 +158,7 @@
     // The swell is slower at night and the moon's glint rarer; a completed press lets glowing plankton rise.
     "motion": {
       "ambient": { "breathe": 11, "breatheDepth": 0.14, "drift": 24, "sweep": 40, "sweepOpacity": 0.04, "flicker": 0, "flickerDepth": 0 },
-      "hover": "wave", "hoverStrength": 0.14, "press": "ember", "pressStrength": 0.2, "trail": 0.4, "particles": "firefly", "focus": "glow",
+      "hover": "none", "hoverStrength": 0.14, "press": "ember", "pressStrength": 0.2, "trail": 0.4, "particles": "firefly", "focus": "glow",
       "color": "accent", "secondary": "clock", "highlight": "accent"
     }
   }
