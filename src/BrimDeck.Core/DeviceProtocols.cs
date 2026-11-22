@@ -1731,10 +1731,11 @@ public static class Pushes
     }
     public static BatteryRead? Battery(Kind kind, byte[] r) => Apply(kind, null, r);
 
-    // The device's name: a Beken report names its mouse; the rest are fixed (Rapoo's battery collection calls itself a keyboard).
-    public static string Name(Kind kind, byte[]? report) => kind switch
+    // A Beken report names its mouse. Rapoo's VT7 can be identified by its receiver or cable PID.
+    public static string Name(Kind kind, byte[]? report, int product = 0) => kind switch
     {
         Kind.Beken => report is { Length: > 1 } && BekenNames.TryGetValue(report[1], out var name) ? name : "ATTACK SHARK",
+        Kind.Rapoo when product is 0x1413 or 0x4613 => "Rapoo VT7",
         Kind.Delux => "DELUX M900 Pro", Kind.InphicZhen => "Inphic ZHEN", Kind.Rapoo => "Rapoo Mouse", Kind.AulaG9 => "AULA G9",
         Kind.Jbl => "JBL Quantum 910 Wireless", Kind.Pulse3D => "PULSE 3D Wireless Headset", Kind.CloudFlight2 => "HyperX Cloud Flight 2",
         Kind.RapooKeyboard => "Rapoo V700DIY-98", _ => "Steam Controller"

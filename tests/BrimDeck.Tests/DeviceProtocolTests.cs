@@ -367,6 +367,14 @@ static class DeviceProtocolTests
             && Pushes.Battery(Pushes.Kind.Rapoo, unlinked) == new BatteryRead(null, Asleep: true) && Pushes.Battery(Pushes.Kind.Rapoo, cable) == new BatteryRead(95, true)
             && Pushes.Battery(Pushes.Kind.Rapoo, settling) is null && Pushes.Find(0x24AE, 0x1B13, 0xFF00, 0x0002, 1, 19) == Pushes.Kind.Rapoo
             && Pushes.Find(0x24AE, 0x1B13, 0xFF00, 0x000E, 1, 33) is null && Pushes.Name(Pushes.Kind.Rapoo, rapoo) == "Rapoo Mouse");
+        // Captured from the VT7's 2.4 GHz receiver on FF00:0002 (interface 1, collection 9).
+        var vt7 = Bytes("07 10 02 02 08 02 08 01 2C 00 03 08 01 13 46 01 02 00 C1");
+        check("Rapoo VT7: its receiver's status report reads 44% and both connection modes have the model name",
+            Pushes.Find(0x24AE, 0x1413, 0xFF00, 0x0002, 1, vt7.Length) == Pushes.Kind.Rapoo
+            && Pushes.Battery(Pushes.Kind.Rapoo, vt7) == new BatteryRead(44)
+            && Pushes.Name(Pushes.Kind.Rapoo, null, 0x1413) == "Rapoo VT7"
+            && Pushes.Name(Pushes.Kind.Rapoo, null, 0x4613) == "Rapoo VT7"
+            && Pushes.Name(Pushes.Kind.Rapoo, null, 0x1B13) == "Rapoo Mouse");
         check("AULA G9: the percent and charging; 0 and 0 is none", Pushes.Battery(Pushes.Kind.AulaG9, Bytes("AB 47 4D 86 00 00 50 02")) == new BatteryRead(80, true)
             && Pushes.Battery(Pushes.Kind.AulaG9, Bytes("AB 47 4D 86 00 00 00 00")) is null && Pushes.KindOf(Pushes.Kind.AulaG9) == DeviceKind.Headphones);
         var steam = new byte[15]; steam[0] = 0x43; steam[1] = 2; steam[2] = 55;
