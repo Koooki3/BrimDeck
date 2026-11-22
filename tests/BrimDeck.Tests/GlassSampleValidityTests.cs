@@ -195,18 +195,30 @@ internal static class GlassSampleValidityTests
         var fresh = new GlassSampleValidity(0);
         check("Liquid glass answers for the worst range before its first reading", fresh.SafeTails(0) == (1, 0) && fresh.First);
 
-        // Review v2 U12: at most two captures in the whole app; a panel's stuck capture given up frees its slot for its next one,
-        // and the stuck one's late answer frees nothing.
+        // Review v2 U12: at most two captures outstanding in the whole app. A capture given up (stuck on its worker) still counts
+        // until its own Leave: the panel's replacement is refused while the other slot is taken, and is let in once one frees.
         var budget = new GlassReadBudget<object>();
         object one = new(), two = new(), three = new();
         bool firstTwo = budget.TryEnter(one, 1) && budget.TryEnter(two, 1), third = budget.TryEnter(three, 1);
-        bool retake = budget.TryEnter(one, 2);
-        budget.Leave(one, 1);
-        bool stillHeld = budget.Running == 2;
+        bool replacement = budget.TryEnter(one, 2);
+        bool capped = budget.Running == 2;
         budget.Leave(one, 2);
-        bool thirdLater = budget.TryEnter(three, 1);
-        budget.Drop(two);
-        check($"Liquid glass runs at most two captures at once in the app ({budget.Refused} refused)",
-            firstTwo && !third && retake && stillHeld && thirdLater && budget.Running == 1 && budget.Refused == 1);
+        bool unknownFreesNothing = budget.Running == 2;
+        budget.Leave(one, 1);
+        bool replacedLater = budget.Running == 1 && budget.TryEnter(one, 2) && budget.Running == 2 && !budget.TryEnter(three, 1);
+        budget.Leave(one, 1);
+        bool lateFreesNothing = budget.Running == 2;
+        check($"Liquid glass runs at most two captures at once in the app, a given-up capture counted until it answers ({budget.Refused} refused)",
+            firstTwo && !third && !replacement && capped && unknownFreesNothing && replacedLater && lateFreesNothing && budget.Refused == 3);
+        // A panel stuck alone recovers: its replacement takes the free slot, the stuck capture still counted, and a third capture
+        // waits for one of them to answer.
+        var alone = new GlassReadBudget<object>();
+        bool stuckThenReplaced = alone.TryEnter(one, 1) && alone.TryEnter(one, 2) && alone.Running == 2 && !alone.TryEnter(two, 1);
+        alone.Leave(one, 2);
+        bool slotFreed = alone.Running == 1 && alone.TryEnter(two, 1);
+        alone.Leave(one, 1);
+        alone.Leave(two, 1);
+        check($"Liquid glass lets a stuck panel read again beside its given-up capture without passing the cap ({alone.Running} outstanding)",
+            stuckThenReplaced && slotFreed && alone.Running == 0);
     }
 }

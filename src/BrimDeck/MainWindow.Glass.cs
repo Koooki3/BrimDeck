@@ -808,13 +808,12 @@ public partial class MainWindow
         _glassTurning = false;
         // A hidden leader hands its look's turn and decision over (U08); the heir looks at its turn on its next pass.
         if (ElectGlassLeader() is { } heir && !ReferenceEquals(heir, this)) heir.QueueGlass();
-        GlassReads.Drop(this);
-        // A worker still reading keeps the old probe until it answers (then it is released); late answers are dropped.
+        // A worker still reading keeps the old probe and its read budget slot until it answers (then both are released); late
+        // answers are dropped.
         _acrylicProbe.Dispose();
         _acrylicProbe = new AcrylicProbe();
         _glassCoverProbe?.Dispose();
         _glassCoverProbe = null;
-        GlassReads.Drop(_glassCoverKey);
         _glassCoverCancel?.Cancel();
         _glassOpening.SceneChanged();
         _glassCoverDark = _glassCoverLight = _glassVeilOpenness = double.NaN;
