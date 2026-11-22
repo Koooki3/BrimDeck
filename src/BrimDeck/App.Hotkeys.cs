@@ -52,6 +52,7 @@ public partial class App
     {
         if (_hotkeySuspensions++ > 0 || _hotkeys is null) return;
         foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys.Unregister(kind);
+        StopClickThroughObserver();
     }
 
     public void ResumeHotkeys()
@@ -62,6 +63,7 @@ public partial class App
 
     internal void DisposeHotkeys()
     {
+        StopClickThroughObserver();
         if (_hotkeys is null) return;
         _hotkeys.Pressed -= HotkeyPressed; _hotkeys.Dispose(); _hotkeys = null;
     }
@@ -153,6 +155,7 @@ public partial class App
     {
         // Everything is released first, so a combination one hotkey gives up is free for another this time round.
         foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys?.Unregister(kind);
+        StopClickThroughObserver();
         var plans = HotkeyText.Plan(kind => _hotkeyTexts.GetValueOrDefault(kind), HotkeyGesture.IsKeyName);
         foreach (var kind in HotkeyText.Priority)
         {
@@ -164,9 +167,14 @@ public partial class App
 
     private HotkeyStatus Register(HotkeyKind kind, string text, int slot, bool repeat)
     {
-        HotkeyGesture.TryParse(text, out var modifiers, out var key);
-        return !HotkeyGesture.ToNative(modifiers, key, out uint fs, out uint vk, repeat) ? HotkeyStatus.Invalid
-            : _hotkeys is null || _hotkeySuspensions > 0 ? HotkeyStatus.Active : _hotkeys.Register(kind, fs, vk, slot);
+        bool bare = HotkeyText.AllowsBareKey(kind);
+        if (!HotkeyGesture.TryParse(text, out var modifiers, out var key, bare)
+            || !HotkeyGesture.ToNative(modifiers, key, out uint fs, out uint vk, repeat, bare))
+            return HotkeyStatus.Invalid;
+        // Bare Escape/CapsLock/etc. for pass-through: watch without RegisterHotKey so other apps still get the key.
+        if (kind == HotkeyKind.ClickThrough && ObservesClickThrough(modifiers, key))
+            return ObserveClickThrough((int)vk);
+        return _hotkeys is null || _hotkeySuspensions > 0 ? HotkeyStatus.Active : _hotkeys.Register(kind, fs, vk, slot);
     }
 
     // An arrow shortcut's four combinations, each repeating while its key is held. It is active only when all four are; one
@@ -190,7 +198,7 @@ public partial class App
             case HotkeyKind.Expand: ToggleExpandFromHotkey(); break;
             case HotkeyKind.Resize: ResizeFromHotkey(slot); break;
             case HotkeyKind.Move: DeckUnderPointer().MoveFromKeyboard(slot); break;
-            case HotkeyKind.ClickThrough: ToggleClickThrough(); break;
+            case HotkeyKind.ClickThrough: ClickThroughFromHotkey(); break;
             case HotkeyKind.OpenSettings: ToggleSettingsFromHotkey(); break;
             case >= HotkeyKind.Page1 and <= HotkeyKind.Page10: OpenPageFromHotkey(kind - HotkeyKind.Page1); break;
             case HotkeyKind.Refresh: Deck.SyncNow(); break;
