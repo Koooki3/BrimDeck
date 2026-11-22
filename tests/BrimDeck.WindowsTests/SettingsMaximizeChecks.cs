@@ -51,8 +51,10 @@ internal static class SettingsMaximizeChecks
                 // The scale WPF draws this window at. VisualTreeHelper.GetDpi is not used: WPF decides once, at the process's first
                 // window, whether the process is per-monitor aware, and the checks before this one make windows that are not.
                 var toDevice = PresentationSource.FromVisual(window)!.CompositionTarget!.TransformToDevice;
+                // The window's own DPI (GetDpiForWindow), which holds for a per-monitor aware window wherever the process stands.
+                double expected = GetDpiForWindow(handle) / 96.0;
                 check($"It is drawn at its screen's scale ({name})",
-                    Math.Abs(toDevice.M11 - dpi / 96.0) < 0.001 && Math.Abs(toDevice.M22 - dpi / 96.0) < 0.001);
+                    Math.Abs(toDevice.M11 - expected) < 0.001 && Math.Abs(toDevice.M22 - expected) < 0.001);
                 check($"Its content is laid out for the work area, not for the whole screen ({name})",
                     Math.Abs(window.ActualHeight * toDevice.M22 - (work.Bottom - work.Top)) <= 1 && Math.Abs(window.ActualWidth * toDevice.M11 - (work.Right - work.Left)) <= 1);
                 window.WindowState = WindowState.Normal;
@@ -70,6 +72,7 @@ internal static class SettingsMaximizeChecks
     [DllImport("user32")] private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
     [DllImport("shcore")] private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
     [DllImport("user32")] private static extern bool GetWindowRect(IntPtr window, out RECT rect);
+    [DllImport("user32")] private static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32", EntryPoint = "SetWindowLongW")] private static extern int SetWindowLong(IntPtr window, int index, int value);
     [DllImport("user32")] private static extern bool SetLayeredWindowAttributes(IntPtr window, uint key, byte alpha, uint flags);
