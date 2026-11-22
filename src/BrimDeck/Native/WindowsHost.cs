@@ -100,7 +100,10 @@ public sealed class WindowsHost : IDisposable
     private readonly Func<bool>? _forceTopmost;
     // Whether the mirror can be shown; where it cannot, ForceTopmost raises the panel again whenever it is covered.
     public Func<bool>? CanMirror { get; set; }
-    public bool MirrorsTopmost => _forceTopmost?.Invoke() == true && CanMirror?.Invoke() != false;
+    // While the panel has a pop-up open it is raised instead, with its pop-ups: under the mirror a menu's items did not light up
+    // or take clicks, for WPF finds the item under the pointer by asking Windows which window is there, and the answer was the
+    // mirror. Raised, every pop-up gets the mouse as usual; once none is open, the mirror takes over again.
+    public bool MirrorsTopmost => _forceTopmost?.Invoke() == true && CanMirror?.Invoke() != false && !PopupOpen(_window());
     private readonly Func<bool>? _backgroundWindows;
     private readonly Func<bool>? _alwaysOnTop;
     private readonly Func<Rect?>? _occupiedArea;
@@ -169,6 +172,7 @@ public sealed class WindowsHost : IDisposable
             {
                 if (!IsWindowVisible(above) || IsIconic(above)) continue;
                 if (DwmGetWindowAttribute(above, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue;
+                if (IsPenCanvas(above)) continue;
                 GetWindowThreadProcessId(above, out var pid);
                 if (pid == Environment.ProcessId) continue;
                 bool over = (GetWindowLongPtr(above, -20).ToInt64() & 0x8) != 0;
@@ -231,6 +235,7 @@ public sealed class WindowsHost : IDisposable
             if (!IsWindowVisible(above) || IsIconic(above)) continue;
             if ((GetWindowLongPtr(above, -20).ToInt64() & 0x8) == 0) continue;
             if (DwmGetWindowAttribute(above, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue;
+            if (IsPenCanvas(above)) continue;
             GetWindowThreadProcessId(above, out var pid);
             if (pid == Environment.ProcessId || !GetWindowRect(above, out var r)) continue;
             var reach = Rect.Intersect(island, r.ToRect());
@@ -368,6 +373,25 @@ public sealed class WindowsHost : IDisposable
         return r.Left < island.Right && r.Right > island.Left && r.Top < island.Bottom && r.Bottom > island.Top;
     }
     private static bool IsTaskbar(IntPtr window) => ClassName(window, stackalloc char[32]) is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+    // The pen input's writing surface (TabTip): a topmost window across the whole screen that lets the mouse through and draws
+    // only while a pen writes. It covers nothing; counted as a cover, it put the mirror over the panel and its menus all the time.
+    // Its class name goes on with a GUID ("ShellHandwritingCanvas {18E91349-…}"), cut short by the buffer.
+    private static bool IsPenCanvas(IntPtr window) => ClassName(window, stackalloc char[32]).StartsWith("ShellHandwritingCanvas");
+    // Whether the panel has a pop-up open: a menu, a tooltip or a detail window — any shown topmost window of this app's that the
+    // panel owns or that reaches over the panel's window. Found by window, so a pop-up added later needs nothing of its own.
+    private static bool PopupOpen(IntPtr panel)
+    {
+        if (panel == IntPtr.Zero || !GetWindowRect(panel, out var p)) return false;
+        foreach (PresentationSource source in PresentationSource.CurrentSources)
+        {
+            if (source is not HwndSource { IsDisposed: false } hwnd || hwnd.Handle == panel) continue;
+            var window = hwnd.Handle;
+            if (!IsWindowVisible(window) || IsIconic(window) || (GetWindowLongPtr(window, -20).ToInt64() & 0x8) == 0) continue;
+            if (GetWindow(window, 4) == panel) return true; // GW_OWNER
+            if (GetWindowRect(window, out var r) && r.Left < p.Right && r.Right > p.Left && r.Top < p.Bottom && r.Bottom > p.Top) return true;
+        }
+        return false;
+    }
     // The desktop and the taskbars.
     private static bool IsShell(IntPtr window) => ClassName(window, stackalloc char[32]) is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
     // The window's class name, read into the caller's buffer: the windows are polled several times a second.

@@ -19,7 +19,7 @@ public static class MonitorSpeech
         string body = usage is { } used
             ? Loc.T("占用 ", "usage ") + MonitorFormat.Percent(used) + "%" + (vram is { } memory ? Loc.T(" · 显存 ", " · VRAM ") + MonitorFormat.Percent(memory) + "%" : "")
             : note.Length > 0 ? note : Loc.T("暂无读数", "No reading");
-        return head + body + Loc.T("，", ", ") + action;
+        return head + body + (action.Length > 0 ? Loc.T("，", ", ") + action : "");
     }
 
     // The collapsed row's GPU: its usage and, when the row shows the graphics memory, the share of it in use ("GPU 12%，显存 18%").

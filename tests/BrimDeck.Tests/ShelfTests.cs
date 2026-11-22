@@ -303,11 +303,11 @@ internal static class ShelfTests
             settings.ShelfArrangement == ShelfArrangement.Split && settings.ShelfFileShare == 40 && arranged.ShelfArrangement == ShelfArrangement.Split
             && arranged.ShelfFileShare == 80 && unsure.ShelfFileShare == 40
             && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"ShelfArrangement\":1,\"ShelfFileShare\":35.5}") is { ShelfArrangement: ShelfArrangement.Stacked, ShelfFileShare: 35.5 });
-        check("Shelf settings: stacked quick-switch defaults (middle-click on, hover and swipe off), JSON round-trip and copy",
-            !settings.ShelfHoverSwitch && settings.ShelfMiddleSwitch && !settings.ShelfSwipeSwitch
-            && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{}") is { ShelfHoverSwitch: false, ShelfMiddleSwitch: true, ShelfSwipeSwitch: false }
-            && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"ShelfHoverSwitch\":true,\"ShelfMiddleSwitch\":false,\"ShelfSwipeSwitch\":true}") is { ShelfHoverSwitch: true, ShelfMiddleSwitch: false, ShelfSwipeSwitch: true }
-            && new DeckSettings { ShelfHoverSwitch = true, ShelfMiddleSwitch = false, ShelfSwipeSwitch = true }.Copy() is { ShelfHoverSwitch: true, ShelfMiddleSwitch: false, ShelfSwipeSwitch: true });
+        check("Shelf settings: stacked quick-switch defaults (middle-click and swipe on, wheel over the strip off), JSON round-trip and copy",
+            !settings.ShelfStripWheelSwitch && settings.ShelfMiddleSwitch && settings.ShelfSwipeSwitch
+            && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{}") is { ShelfStripWheelSwitch: false, ShelfMiddleSwitch: true, ShelfSwipeSwitch: true }
+            && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{\"ShelfStripWheelSwitch\":true,\"ShelfMiddleSwitch\":false,\"ShelfSwipeSwitch\":false}") is { ShelfStripWheelSwitch: true, ShelfMiddleSwitch: false, ShelfSwipeSwitch: false }
+            && new DeckSettings { ShelfStripWheelSwitch = true, ShelfMiddleSwitch = false, ShelfSwipeSwitch = false }.Copy() is { ShelfStripWheelSwitch: true, ShelfMiddleSwitch: false, ShelfSwipeSwitch: false });
         var unknownShown = new DeckSettings { ShelfShown = (ShelfShown)9 };
         var dragDefaults = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("{}")!;
         check("File drag: old settings keep left copy and optional removal off; a right-button choice saved by a test build is ignored",

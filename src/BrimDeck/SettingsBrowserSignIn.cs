@@ -30,11 +30,45 @@ public sealed partial class SettingsWindow
     {
         var id = entry.QuotaSource;
         var edition = QianwenUsage.For(id);
-        string name = ProviderCatalog.Name(id), cli = edition.China ? "QianWen CLI" : "QwenCloud CLI";
-        string help = Loc.T($"在浏览器中登录 {name} 账户后读取额度。授权页显示的应用为 {cli}。凭据加密保存在本机，过期后需重新登录。",
-            $"Sign in to your {name} account in the browser to read the quota. The authorization page names the app {cli}. The sign-in is stored encrypted on this PC; sign in again when it expires.");
+        string cli = edition.China ? "QianWen CLI" : "QwenCloud CLI";
+        string help = Loc.T($"授权页显示的应用为 {cli}。", $"The authorization page names the app {cli}.");
         return BrowserSignInDetails(entry, "qianwen", help, () => _app.Usage.QianwenConnected(id), _app.Usage.ConnectQianwenAsync, _app.Usage.DisconnectQianwen,
             ex => ex is QianwenUsage.RejectedException, Loc.T("登录请求已过期，请重试。", "The sign-in request expired. Try again."));
+    }
+
+    // The Volcengine Ark and BytePlus ModelArk rows can also sign in via OAuth Device Code in the default browser
+    // (UsageService.ConnectVolcengineAsync); the line sits above the row's AccessKey fields (SourceDetails).
+    private FrameworkElement VolcengineSignIn(AppEntry entry)
+    {
+        var id = entry.QuotaSource;
+        string help = Loc.T("填写了 AK/SK 时优先使用 AK/SK。", "An AK/SK, when entered, is used first.");
+        // The sign-in page asks for a device code its address does not carry; it shows under the line while the sign-in waits.
+        var code = TextLine("", 15, TextPrimary, FontWeights.SemiBold); code.FontFamily = new System.Windows.Media.FontFamily("Consolas"); code.VerticalAlignment = VerticalAlignment.Center;
+        code.Margin = new Thickness(0, 0, 12, 0);
+        var copy = ActionButton(Loc.T("复制", "Copy"), () => { try { Clipboard.SetText(code.Text); } catch (System.Runtime.InteropServices.ExternalException) { } });
+        copy.Style = (Style)FindResource("SettingsOutlineButton"); copy.Height = 28;
+        AutomationProperties.SetAutomationId(copy, "volcengine-copy-code-" + entry.InstanceId.ToString("N"));
+        var steps = TextLine(Loc.T("在打开的页面输入设备码，再确认授权：", "Enter this device code on the page that opened, then authorize:"), 12, TextSecondary);
+        steps.VerticalAlignment = VerticalAlignment.Center; steps.Margin = new Thickness(0, 0, 10, 0);
+        var codeContent = new StackPanel { Orientation = Orientation.Horizontal };
+        codeContent.Children.Add(steps); codeContent.Children.Add(code); codeContent.Children.Add(copy);
+        var codeLine = new Grid { Margin = new Thickness(0, 0, 0, 5), Visibility = Visibility.Collapsed };
+        codeLine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
+        codeLine.ColumnDefinitions.Add(new ColumnDefinition());
+        Grid.SetColumn(codeContent, 1); codeLine.Children.Add(codeContent);
+        async Task<bool> Connect(ProviderId source, Func<string, bool> open, CancellationToken cancellation)
+        {
+            try
+            {
+                return await _app.Usage.ConnectVolcengineAsync(source, open,
+                    userCode => Dispatcher.Invoke(() => { code.Text = userCode; codeLine.Visibility = Visibility.Visible; }), cancellation);
+            }
+            finally { codeLine.Visibility = Visibility.Collapsed; code.Text = ""; }
+        }
+        var lines = (Panel)BrowserSignInLines(entry, "volcengine", help, () => _app.Usage.VolcengineConnected(id), Connect, _app.Usage.DisconnectVolcengine,
+            ex => ex is VolcengineArkUsage.RejectedException, Loc.T("登录请求已过期，请重试。", "The sign-in request expired. Try again."));
+        lines.Children.Insert(1, codeLine);
+        return lines;
     }
 
     // A line that shows whether the row is signed in and offers to sign in or out; the sign-in is saved encrypted on this PC.
@@ -42,6 +76,15 @@ public sealed partial class SettingsWindow
         Func<ProviderId, Func<string, bool>, CancellationToken, Task<bool>> connect, Action<ProviderId> disconnect, Func<Exception, bool> refused, string timedOut)
     {
         var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
+        var lines = BrowserSignInLines(entry, automation, help, isConnected, connect, disconnect, refused, timedOut);
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetColumn(lines, 1); Grid.SetColumnSpan(lines, 6); grid.Children.Add(lines);
+        return grid;
+    }
+
+    private FrameworkElement BrowserSignInLines(AppEntry entry, string automation, string help, Func<bool> isConnected,
+        Func<ProviderId, Func<string, bool>, CancellationToken, Task<bool>> connect, Action<ProviderId> disconnect, Func<Exception, bool> refused, string timedOut)
+    {
         var id = entry.QuotaSource;
         string name = ProviderCatalog.Name(id);
         string title = Loc.T(name + " 账号", name + " account");
@@ -109,8 +152,6 @@ public sealed partial class SettingsWindow
         noteLine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
         noteLine.ColumnDefinitions.Add(new ColumnDefinition());
         Grid.SetColumn(note, 1); noteLine.Children.Add(note); lines.Children.Add(noteLine);
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        Grid.SetColumn(lines, 1); Grid.SetColumnSpan(lines, 6); grid.Children.Add(lines);
-        return grid;
+        return lines;
     }
 }

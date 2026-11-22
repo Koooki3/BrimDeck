@@ -5,7 +5,8 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // Mouse pass-through (DeckSettings.ClickThrough) in the General page's Compatibility group: its switch, and under it, while it is on, whether the open
-// panel takes clicks (ClickThroughPanel) and the keyboard (ClickThroughKeyboard). Its shortcut and the tray menu also turn it on and off; the switch follows them.
+// panel takes clicks (ClickThroughPanel) and the keyboard (ClickThroughKeyboard). ClickThroughHold makes the shortcut momentary.
+// Its shortcut and the tray menu also turn sticky mode on and off; the switch follows them.
 public sealed partial class SettingsWindow
 {
     private CheckBox? _clickThroughBox;
@@ -30,8 +31,13 @@ public sealed partial class SettingsWindow
         }, help: Loc.T("开启后，鼠标经过不会展开面板，点击会直接落到下方窗口，适合玩游戏时使用。快捷键在“设置 › 快捷键”中设置。",
             "When on, the pointer passing over does not expand the panel and clicks go to the window beneath, which suits games. Set shortcuts in Settings › Shortcuts."));
         _clickThroughBox = ((Panel)main).Children.OfType<CheckBox>().FirstOrDefault();
+        var hold = Toggle(Loc.T("按住快捷键穿透", "Hold hotkey while pressed"), S.ClickThroughHold, value => Change(s => s.ClickThroughHold = value),
+            help: Loc.T("开启后，按下鼠标穿透快捷键时临时穿透，松开后恢复，适合点到刘海下方的标签页。粘性穿透仍可用上方开关或托盘菜单。快捷键在“设置 › 快捷键”中设置。",
+                "When on, the mouse pass-through shortcut passes clicks only while held, then restores normal behavior — useful for tab buttons under the island. Sticky pass-through remains available from the switch above or the tray menu. Set the shortcut in Settings › Shortcuts."));
         var group = new StackPanel();
         group.Children.Add(main); group.Children.Add(more);
+        group.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
+        group.Children.Add(hold);
         return group;
     }
 

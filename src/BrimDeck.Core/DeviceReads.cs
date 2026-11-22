@@ -17,8 +17,9 @@ public sealed class DeviceReadEntry
 
 // Which of a brand's reads each device answers, kept across runs and versions (device-reads.json), so a device is asked
 // only the read it answered and is not tried again with every one:
-// - No entry: the reads are tried, at most ProbeRounds times (when it is first seen, then RetryMs apart), and again only when
-//   it arrives anew (Arrived).
+// - No entry: the reads are tried, at most ProbeRounds times (when it is first seen, then RetryMs apart), and again when it
+//   arrives anew (Arrived). A search that ran out gets one more try when the machine wakes or the user comes back (Again):
+//   a keyboard asleep behind its receiver through every search answers once it is used again.
 // - An entry: only its read, on its collection. After MissesBeforeRecheck readings in a row without an answer it is checked
 //   once (its read first, then the others); another read that answers then replaces it. A check that finds nothing is not
 //   made again until the kept read answers again or the device arrives anew, so a device asleep for days is not asked every
@@ -28,10 +29,12 @@ public sealed class DeviceReadEntry
 // Times are Environment.TickCount64 values for the waits, wall-clock values for what is kept.
 public sealed class DeviceReadBook
 {
-    public const int ProbeRounds = 3, MissesBeforeRecheck = 20, HarmToStop = 2, MaximumEntries = 512;
+    public const int ProbeRounds = 3, MissesBeforeRecheck = 20, HarmToStop = 2, MaximumEntries = 512, AgainLimit = 8;
+    public const long AgainMs = 30 * 60_000;
     public static readonly long[] RetryMs = [5 * 60_000, 30 * 60_000];
 
-    private sealed class Run { public int Rounds; public long Next; public int Misses; public bool Rechecked; }
+    // Last: when its last search went unanswered. Again: the tries the user coming back gave it (Again).
+    private sealed class Run { public int Rounds; public long Next; public int Misses; public bool Rechecked; public long Last; public int Again; }
     private readonly Dictionary<string, DeviceReadEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Run> _runs = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
@@ -116,7 +119,7 @@ public sealed class DeviceReadBook
         lock (_gate)
         {
             var run = RunOf(device, collection);
-            run.Misses = 0; run.Rounds = 0; run.Next = 0; run.Rechecked = false;
+            run.Misses = 0; run.Rounds = 0; run.Next = 0; run.Rechecked = false; run.Again = 0;
             var entry = EntryOf(device);
             if (entry.Way == way && string.Equals(entry.Collection, collection, StringComparison.OrdinalIgnoreCase)) return;
             entry.Way = way; entry.Collection = collection; entry.Found = at;
@@ -137,9 +140,31 @@ public sealed class DeviceReadBook
                 case Kind.Probe:
                     run.Rounds++;
                     run.Next = run.Rounds <= RetryMs.Length ? now + RetryMs[run.Rounds - 1] : long.MaxValue;
+                    run.Last = now;
                     break;
             }
         }
+    }
+
+    // The machine woke (woke), or input came after a while without any: a search that ran out is made once more. Input says
+    // nothing about which device was used (another mouse moved, a pause in typing), so it gives a search another try AgainLimit
+    // times a run: the first at once (a keyboard woken just after the last search is answered while it is being used, which
+    // brings no more coming back), each later one at most once in AgainMs after the last try. Waking is rare and gives one each
+    // time; given while nothing is read, it is made when the devices are read again. A device stopped, or with no read left to
+    // try, is still sent nothing (Plan).
+    public void Again(long now, bool woke)
+    {
+        lock (_gate)
+            foreach (var run in _runs.Values)
+            {
+                if (run.Rounds < ProbeRounds) continue;
+                if (!woke)
+                {
+                    if (run.Again >= AgainLimit || run.Again > 0 && now - run.Last < AgainMs) continue;
+                    run.Again++;
+                }
+                run.Rounds = ProbeRounds - 1; run.Next = 0;
+            }
     }
 
     // The device came anew (plugged in): its reads may be tried again.

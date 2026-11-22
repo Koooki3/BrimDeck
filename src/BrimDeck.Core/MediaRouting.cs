@@ -57,6 +57,15 @@ public static class MediaRouting
             Album = string.IsNullOrWhiteSpace(primary.Album) ? details.Album : primary.Album
         };
     }
+    // Whether after is before with only a blank artist or album filled in (FillDetails): the same song of the same player,
+    // so lyrics found for before still belong to it.
+    public static bool OnlyDetailsFilled(MediaTrack before, MediaTrack after)
+    {
+        static bool Filled(string was, string now) => was == now || string.IsNullOrWhiteSpace(was);
+        return before.Id == after.Id && before.SongId.StartsWith("netease:", StringComparison.Ordinal) && before.SongId == after.SongId
+            && before.Title == after.Title && before.Duration == after.Duration && before.EmbeddedLyrics == after.EmbeddedLyrics
+            && Filled(before.Artist, after.Artist) && Filled(before.Album, after.Album);
+    }
 
     // A supplement owns only these three controls. It cannot replace metadata, time,
     // modes, or state, even while the primary is waiting for the next song to load.

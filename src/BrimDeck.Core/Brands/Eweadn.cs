@@ -20,7 +20,14 @@ namespace BrimDeck.Core;
 //   EweadnMouseCodec and its notes (MIT; from EWEADN's web HUB, its answer 03 50 00 0B 02 01 49 ..: 73 %, reported by a
 //   contributor). The same frame goes to the S7 and S9 series' other beiyin receivers, 1027, 1029, 103D, 105E, 106E, 107B,
 //   107C, 108A and 108D, which EWEADN's web driver (its beiying SDK) speaks to the same way; not measured by us. The SDK's
-//   keyboards on 372E (ES98, X98, Alpha 87) need a per-model key first and are not read.
+//   keyboards on 372E (ES98, X98, Alpha 87) need a per-model key first and are not read. Machenike's L9 X1 8K takes the same
+//   frame on 372E:101F (receiver) and 1020 and 104F (cables), as its web driver (machenike.com/L9X1_8Kdriver) sends it.
+// - Machenike's L9 X1 (1K) is on the same receiver and cable ids, 089D:062F and 088D:062E, on 0xFF01 usage 0x10, and its web
+//   driver (machenike.com/L9X1_1Kdriver) asks the same device info with command 0x10 instead of 0x30 (00 10, zeros, the
+//   checksum of bytes 5 to 31 in the last: 0), the answer laid out the same from 4 on: device id at 4 to 7, charging 0/1 at
+//   12, the percent at 13, online 0/1 at 14 (it checks nothing before 4). On that firmware 0x0F restores the factory
+//   settings and 0x02 to 0x09 write; 0x30 is not among its commands. Both reads are tried, 0x30 first as before, and the one
+//   answered is kept. Not measured by us.
 [BrandFamilies]
 public static class EweadnMice
 {
@@ -39,8 +46,25 @@ public static class EweadnMice
         if (r[14] == 0) return new(null, Asleep: true);
         return r[13] is > 0 and <= 100 ? new(r[13], r[12] == 1) : null;
     }
+    // On the cable: charging, and the online byte not taken (a mouse on its cable is not "online" through a receiver).
+    public static BatteryRead? CableInfo10(byte[] r)
+    {
+        if (r.Length < 15 || r[0] != 0x10 || r[12] > 1) return null;
+        for (int i = 4; i < 8; i++) if (r[i] is < 0x20 or > 0x7E) return null;
+        return r[13] is > 0 and <= 100 ? new(r[13], true) : null;
+    }
     // The mouse on its cable: charging.
     public static BatteryRead? CableInfo(byte[] r) => Info(r) is { Percent: not null } read ? read with { Charging = true } : Info(r);
+
+    // Machenike's device info (command 0x10), the answer without its report id.
+    public static byte[] Info10Request() => BrandFamilies.Frame(33, 0x00, 0x10);
+    public static BatteryRead? Info10(byte[] r)
+    {
+        if (r.Length < 15 || r[0] != 0x10 || r[12] > 1 || r[14] > 1) return null;
+        for (int i = 4; i < 8; i++) if (r[i] is < 0x20 or > 0x7E) return null;
+        if (r[14] == 0) return new(null, Asleep: true);
+        return r[13] is > 0 and <= 100 ? new(r[13], r[12] == 1) : null;
+    }
 
     public static byte[] BeiyinRequest()
     {
@@ -63,7 +87,8 @@ public static class EweadnMice
     private static bool Hub(HidShape shape) => shape.Vendor == ReceiverVendor && shape.Product == Receiver || shape.Vendor == CableVendor && shape.Product == Cable;
     private static bool InfoCollection(HidShape shape) => MouseShapes.Collection(shape, 0xFF01, 0x10) && shape.OutputLength >= 33 && shape.InputLength >= 16;
     private static bool IdentifyCollection(HidShape shape) => MouseShapes.Collection(shape, 0xFF02, 0x00) && shape.OutputLength == 33 && shape.InputLength == 33;
-    public static readonly IReadOnlySet<int> BeiyinReceivers = new HashSet<int> { BeiyinReceiver, 0x1027, 0x1029, 0x103D, 0x105E, 0x106E, 0x107B, 0x107C, 0x108A, 0x108D };
+    public static readonly IReadOnlySet<int> BeiyinReceivers = new HashSet<int> { BeiyinReceiver, 0x1027, 0x1029, 0x103D, 0x105E, 0x106E, 0x107B, 0x107C, 0x108A, 0x108D,
+        0x101F, 0x1020, 0x104F };
     // The beiyin read's collection: usage page 0xFF00, usage 1, with the 63-byte feature report 3.
     public static bool BeiyinShape(HidShape shape) => MouseShapes.Collection(shape, 0xFF00, 0x01) && shape.FeatureLength >= 64;
     private static bool BeiyinCollection(HidShape shape) => shape.Vendor == BeiyinVendor && BeiyinReceivers.Contains(shape.Product) && BeiyinShape(shape);
@@ -74,7 +99,11 @@ public static class EweadnMice
     {
         if (BeiyinCollection(shape)) return [new BrandWay("eweadn.beiyin", WayTransport.Feature, BeiyinRequest(), Beiyin) { GapMs = 20, FeatureLength = 64 }];
         Func<byte[], BatteryRead?> parse = shape.Vendor == CableVendor ? CableInfo : Info;
-        if (InfoCollection(shape)) return [new BrandWay("eweadn.info", WayTransport.Output, InfoRequest(), parse) { TimeoutMs = 600, StripZero = true }];
+        if (InfoCollection(shape)) return
+        [
+            new BrandWay("eweadn.info", WayTransport.Output, InfoRequest(), parse) { TimeoutMs = 600, StripZero = true },
+            new BrandWay("eweadn.info10", WayTransport.Output, Info10Request(), shape.Vendor == CableVendor ? CableInfo10 : Info10) { TimeoutMs = 600, StripZero = true },
+        ];
         return [new BrandWay("eweadn.identify", WayTransport.Output, IdentifyRequest(), parse) { TimeoutMs = 600, StripZero = true }];
     }
 

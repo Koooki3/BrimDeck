@@ -565,6 +565,8 @@ public static class Dongles
         // and sends M1, M2, X, X Air and X Pro to Compx's Control HUB (controlhub.top/gravastar), whose cfg.json lists receivers
         // F54B, F575, F548, F577 and cables F576, F549 (F577 is the one GS HUB names no model for; the X Air's, unconfirmed).
         (0x3554, 0xF54B), (0x3554, 0xF575), (0x3554, 0xF548), (0x3554, 0xF577), (0x3554, 0xF576), (0x3554, 0xF549),
+        // Machenike's L7 Air 4K (machenike.com, its driver 1.0.0.4): the mouse F54D and its receivers F54C and F54F.
+        (0x3554, 0xF54D), (0x3554, 0xF54C), (0x3554, 0xF54F),
     ];
     private static readonly HashSet<(int, int)> CompxOfficialSet = [.. CompxOfficial];
     public static bool IsCompxOfficial(int vendor, int product) => CompxOfficialSet.Contains((vendor, product));
@@ -1178,10 +1180,16 @@ public static class Dongles
     }
 
     // Inphic IN9 (248A:5B2E cable, 5B2F receiver; on 2.4 GHz vendor 0x249A, whose product is not fixed; feature 0x0C, 33
-    // bytes): [0x0C, 0x01, command, 0, sequence, payload...]; 0xF0 the handshake (payload 01 01 FF), 0x20 the battery, the two
-    // with one sequence number. The reply echoes 0x20 at 2, is valid with byte 6 set, the percentage at 0x12, 2 at 0x13 charging.
+    // bytes): [0x0C, 0x01, command, 0, sequence, payload...]; 0x20 the battery. The reply echoes 0x20 at 2, is valid with byte 6
+    // set, the percentage at 0x12, the power state at 0x13. Machenike's (机械师) M7 Pro (its PAW3104 and 3395 models, and the
+    // Hatsune Miku edition), M720 and M840 use the same ids and frame: their app ("M800DB DRIVER", one build for all four, from
+    // machenike.com) sets 0C 01 20 00 <sequence> and zeros, gets report 0x0C back 10 ms later, asks again once when byte 6 is 0,
+    // and takes 0x12 as the percent (over 100 shown as 0) and 0x13 as 1 charging, 2 full on the cable (shown as 100), else on
+    // battery. InphicBatteryTray-IN9 reads 2 there as charging; both are taken as on the cable, the level kept as read. The
+    // InphicBatteryTray projects send a "handshake" 0C 01 F0 00 <seq> 01 01 FF before it, which neither says the read needs;
+    // Machenike's app never sends F0, and on its firmware the same payload under command 0x0F is the factory reset (sent only
+    // from its firmware-reset dialog). So only 0x20 is sent. Not measured by us on either brand.
     public const int InphicVendor = 0x248A, InphicWireless = 0x249A;
-    public static readonly byte[] InphicHandshake = [0x01, 0x01, 0xFF];
     public static byte[] InphicRequest(byte command, byte sequence, params byte[] payload)
     {
         var frame = new byte[33];
@@ -1189,7 +1197,7 @@ public static class Dongles
         Array.Copy(payload, 0, frame, 5, Math.Min(payload.Length, frame.Length - 5));
         return frame;
     }
-    public static BatteryRead? InphicBattery(byte[] reply) => reply.Length >= 0x14 && reply[0] == 0x0C && reply[2] == 0x20 && reply[6] != 0 && reply[0x12] <= 100 ? new(reply[0x12], reply[0x13] == 2) : null;
+    public static BatteryRead? InphicBattery(byte[] reply) => reply.Length >= 0x14 && reply[0] == 0x0C && reply[2] == 0x20 && reply[6] != 0 && reply[0x12] <= 100 ? new(reply[0x12], reply[0x13] is 1 or 2) : null;
 
     // MCHOSE mice (VID 0x3837; usage page 0xFF01 or 0xFF0B; output report 0x4D, 64 bytes), from the vendor's web driver. Not
     // tested by us on a receiver. Realtek's 0x0BDA:0x4762 is not sent to: Realtek's id is on countless products and the pair is
@@ -1321,7 +1329,7 @@ public static class Dongles
     public enum Protocol
     {
         BitMouse, Compx, Vgn, Endgame, Vaxee, Inphic, Mchose, Ajazz, CompxFramed, F83, Nordic, MchoseRealtek, Gmouse, Lingbao, Nzxt, Cherry, Hecate,
-        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial, RapooQuery
+        Asus, SteelSeries, RapooGen1, Aula, MchoseKeyboard, CompxSplit, AtkSerial, RapooQuery, EposSerial
     }
 
     // The Compx receivers atkctl documents (the ATK A9 Ultra), by vendor, product and usage page.
@@ -1377,6 +1385,9 @@ public static class Dongles
         // sent to it, the battery being read on the device's serial port (AtkHeadsets.SerialRequest).
         if (vendor == AtkVendor && AtkHeadsets.SerialProducts.Any(p => p.Product == product))
             return usagePage == 0x000C && usage == 0x0001 ? Protocol.AtkSerial : null;
+        // EPOS's GSP 370 dongle: the same, its battery read on its serial port (Epos.SerialRequest).
+        if (vendor == Epos.Vendor && Epos.SerialProducts.Any(p => p.Product == product))
+            return usagePage == 0x000C && usage == 0x0001 ? Protocol.EposSerial : null;
         if (CompxVerified.Contains((vendor, product, usagePage))) return Protocol.Compx;
         if (vendor == VgnVendor && usagePage == 0xFF1C && product == 0x5088) return Protocol.Vgn;
         // ATK's keyboards on the same page, answered with VGN's frame (AtkKeyboards): the measured Z87 Pro and the receivers ATK
@@ -2041,28 +2052,57 @@ public static class HidBattery
 // 0x07, length 0x19), in steps of ten; written from the layout OpenPods and AirPodsDesktop read (facts only). Byte 6 holds the
 // buds' levels, byte 7 the charging bits (high nibble) and the case (low); 15 is no reading. With byte 5's bit 0x20 set the
 // left bud is byte 6's low nibble; clear (flipped), its high one. Single-unit models (AirPods Max, the one-piece Beats) carry
-// their one level in byte 6's low nibble.
+// their one level in byte 6's low nibble. Model codes as AirPodsDesktop lists them; Beats Solo Pro, Studio Buds, Studio Buds+
+// and Studio Pro as AppleJuice lists them.
 public static class AppleAdvert
 {
     public const ushort Company = 0x004C;
     public static string? Model(byte[] data) => data.Length >= 5 ? ((data[3] << 8) | data[4]) switch
     {
-        0x0220 => "AirPods", 0x0F20 => "AirPods", 0x1320 => "AirPods", 0x0E20 => "AirPods Pro", 0x1420 or 0x2420 => "AirPods Pro", 0x2720 => "AirPods Pro",
-        0x0A20 => "AirPods Max", 0x0B20 => "Powerbeats Pro", 0x0520 => "BeatsX", 0x1020 => "Beats Flex", 0x0620 => "Beats Solo", 0x0920 => "Beats Studio",
-        0x0320 => "Powerbeats", _ => null
+        0x0220 or 0x0F20 or 0x1320 => "AirPods", 0x1920 or 0x1B20 => "AirPods 4", 0x0E20 or 0x1420 or 0x2420 or 0x2720 => "AirPods Pro",
+        0x0A20 or 0x1F20 => "AirPods Max", 0x0B20 => "Powerbeats Pro", 0x0520 => "BeatsX", 0x1020 => "Beats Flex", 0x0620 => "Beats Solo",
+        0x0C20 => "Beats Solo Pro", 0x0920 => "Beats Studio", 0x1720 => "Beats Studio Pro", 0x1120 or 0x1620 => "Beats Studio Buds",
+        0x1220 => "Beats Fit Pro", 0x0320 => "Powerbeats", _ => null
     } : null;
+
+    // The exact AirPods model, as AirPodsDesktop tells them apart; null for Beats and a model not in the table.
+    public static string? Product(byte[] data) => data.Length >= 5 ? ((data[3] << 8) | data[4]) switch
+    {
+        0x0220 => "AirPods 1", 0x0F20 => "AirPods 2", 0x1320 => "AirPods 3", 0x1920 => "AirPods 4", 0x1B20 => Loc.T("AirPods 4 降噪款", "AirPods 4 ANC"),
+        0x0E20 => "AirPods Pro 1", 0x1420 => "AirPods Pro 2", 0x2420 => "AirPods Pro 2 USB-C", 0x2720 => "AirPods Pro 3",
+        0x0A20 => "AirPods Max", 0x1F20 => "AirPods Max USB-C", _ => null
+    } : null;
+
+    // The name to show: the exact model in place of a plain Apple name ("AirPods", "AirPods Pro"), when the model is of that
+    // line; a name the user gave ("Koooki's AirPods") stays.
+    public static string Shown(string name, string? product)
+    {
+        var plain = name.Trim();
+        return product is not null && System.Text.RegularExpressions.Regex.IsMatch(plain, @"^AirPods( Pro| Max)?( \d+)?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            && product.StartsWith(plain, StringComparison.OrdinalIgnoreCase) ? product : name;
+    }
 
     private static bool IsProximity(byte[] data) => data.Length >= 8 && data[0] == 0x07 && data[1] == 0x19;
     private static int? Level(int nibble) => nibble <= 10 ? nibble * 10 : null;
-    // One piece, without buds or a case of its own: AirPods Max, Beats Solo, Studio and Flex, BeatsX, Powerbeats 3.
-    public static bool IsSingle(byte[] data) => data.Length >= 5 && ((data[3] << 8) | data[4]) is 0x0A20 or 0x0620 or 0x0920 or 0x0520 or 0x1020 or 0x0320;
+    // One piece, without buds or a case of its own: AirPods Max, Beats Solo, Solo Pro, Studio, Studio Pro and Flex, BeatsX, Powerbeats 3.
+    private static bool IsKnownSingle(byte[] data) => data.Length >= 5 && ((data[3] << 8) | data[4]) is 0x0A20 or 0x1F20 or 0x0620 or 0x0C20 or 0x0920 or 0x1720 or 0x0520 or 0x1020 or 0x0320;
+    // A model not in the table that carries one level only, with no case: taken for a one-piece model. Earbuds worn with the
+    // other bud gone and the case unknown look the same and show as one level, which is still their right level.
+    private static bool IsLone(byte[] data) => IsProximity(data) && Model(data) is null && Level(data[7] & 0x0F) is null
+        && (Level(data[6] & 0x0F) is null) != (Level(data[6] >> 4) is null);
+    private static bool IsSingle(byte[] data) => IsKnownSingle(data) || IsLone(data);
 
-    // A single-unit model's one level, and charging (bit 0x01); null for earbuds, another advertisement, or no reading.
+    // A single-unit model's one level, and charging; null for earbuds, another advertisement, or no reading. A known model's is
+    // byte 6's low nibble (charging bit 0x10 of byte 7); an unknown one's is whichever nibble holds it (the high one charging 0x20).
     public static BatteryRead? Single(byte[] data)
-        => IsProximity(data) && IsSingle(data) && Level(data[6] & 0x0F) is { } level ? new(level, (data[7] & 0x10) != 0, Accuracy: BatteryAccuracy.Steps) : null;
+    {
+        if (!IsProximity(data) || !IsSingle(data)) return null;
+        if (Level(data[6] & 0x0F) is { } low) return new(low, (data[7] & 0x10) != 0, Accuracy: BatteryAccuracy.Steps);
+        return IsLone(data) && Level(data[6] >> 4) is { } high ? new(high, (data[7] & 0x20) != 0, Accuracy: BatteryAccuracy.Steps) : null;
+    }
 
     // The parts' levels: left, right and the case; empty for a single-unit model (Single), null when this is not a proximity
-    // pairing advertisement.
+    // pairing advertisement. A model not in the table (Model is null) is read as earbuds, unless it carries one level only (IsLone).
     public static IReadOnlyList<PartBattery>? Parts(byte[] data)
     {
         if (!IsProximity(data)) return null;

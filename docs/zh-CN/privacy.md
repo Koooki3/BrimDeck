@@ -8,7 +8,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | --- | --- | --- |
 | Claude | 读取 Claude Code 的登录（`%USERPROFILE%\.claude\.credentials.json`），不可用时改用 Claude 桌面版的登录，向 Anthropic 查询账户用量。账户同时属于多个组织（例如个人 Pro 与 Team）时，用桌面版为各组织保存的登录分别查询。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Claude 桌面版在本机记录的额度（`plan-usage-history.json`） | 读取 Claude Code 的本地会话记录（`projects\**\*.jsonl`），不含 Claude 桌面版的普通聊天 |
 | Codex | 读取 `%USERPROFILE%\.codex\auth.json` 中的登录，向 OpenAI 查询账户用量；查询失败时显示会话记录中的配额，并标明可能已过时 | 读取本地会话记录（`sessions` 与 `archived_sessions`） |
-| Antigravity | 从正在运行的 Antigravity 桌面版的本机服务（仅限 127.0.0.1）读取 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
+| Antigravity | 从正在运行的 Antigravity 桌面版或 Antigravity IDE 的本机服务（仅限 127.0.0.1）读取；两者都未运行且已开启“通过 CLI 读取”（默认关闭）时，在后台运行 `agy -p /usage` 读取，最多每 5 分钟一次 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
 | Cursor | 以只读方式从 `%APPDATA%\Cursor\User\globalStorage\state.vscdb` 读取登录，向 Cursor 查询账户用量 | 向 Cursor 查询账户用量明细，包含该账户在其他设备上的用量 |
 | Grok Bot | 读取 Grok Bot 桌面版自己的登录（`%APPDATA%\Grok Bot\sand-secrets.json`），向 Cursor 查询该账户的每周额度。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Grok Bot 桌面版在本机缓存的每周额度（`%APPDATA%\Grok Bot\sand-client-persistence`） | 不提供 |
 | ZCode | 读取 ZCode 的登录，查询 Coding Plan、Start Plan 与 MCP 每日额度 | 读取本地请求记录（`%USERPROFILE%\.zcode\cli\db\db.sqlite`） |
@@ -20,9 +20,12 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | WorkBuddy AI | 与 WorkBuddy 相同，凭据单独保存，只发往 www.workbuddy.ai；不读取 WorkBuddy AI 桌面版的登录 | 读取本地会话记录（`%USERPROFILE%\.workbuddy-ai\projects`）中的 Token 数 |
 | Xiaomi MiMo 桌面订阅 | 使用在设置中通过浏览器登录小米账号获得的登录信息（加密保存在 BrimDeck 设置目录的 `mimo-session.dat`），向 mimo-server-cn.xiaomimimo.com 查询桌面版会员额度，过期时经 account.xiaomi.com 续期；登录时打开的浏览器窗口使用独立的临时目录，登录后删除 | 读取本地数据库（`%USERPROFILE%\.local\share\mimocode\mimocode.db`） |
 | Xiaomi MiMo | 读取 Xiaomi MiMo 桌面版与 MiMo Code CLI 保存的开放平台密钥（`%USERPROFILE%\.local\share\mimocode\auth.json`），向 api.xiaomimimo.com 查询余额与本月扣费，向对应集群的 token-plan 地址查询 Token Plan 额度；不修改这个文件 | 使用 Xiaomi MiMo 的本机记录 |
-| Qoder、Qoder CN | 在后台启动本机的 Qoder CLI，使用 CLI 的登录（`%USERPROFILE%\.qoder\.auth\user`，由 CLI 自己读取）查询积分；没有可用的 CLI 登录时，读取 Qoder 桌面版的登录（`%APPDATA%\com.qoder.app.stable\auth.v1.dat`，按 Windows 当前用户解密），交给桌面版自带的同一个程序查询；都不可用时，向正在运行的 Qoder IDE 的本机端口查询（端口记录在 `%APPDATA%\Qoder\SharedClientCache\.info.json`）。查询由 Qoder 自己的程序发往 Qoder 的服务器；不续期登录，不修改这些文件。Qoder CN 对应 `.qoder-cn`、`com.qodercn.app.stable` 与 `QoderCN` | 以只读方式读取 Qoder IDE 的本地数据库（`%APPDATA%\Qoder\SharedClientCache\cache\db\local.db`）与模型列表（`User\globalStorage\state.vscdb`），以及 CLI 与桌面版的会话记录（`%USERPROFILE%\.qoder\projects`）；在设置中开启“CLI 与桌面版 Token”时，为当前用户设置环境变量 `QODER_EXPOSE_TOKEN_USAGE`（Qoder CN 为 `QODERCN_EXPOSE_TOKEN_USAGE`）；设置中显示这一行时，每隔几秒读取正在运行的 Qoder CLI 与桌面版进程是否带有这个变量 |
+| Qoder、Qoder CN | 读取 Qoder 桌面版的登录（`%APPDATA%\com.qoder.app.stable\auth.v1.dat`，按 Windows 当前用户解密），用其中的令牌向 Qoder 的服务器（`openapi.qoder.sh`）查询积分与套餐；令牌只发往这个服务器。没有可用的桌面版登录时，在后台启动本机的 Qoder CLI，使用 CLI 的登录（`%USERPROFILE%\.qoder\.auth\user`，由 CLI 自己读取）查询；都不可用时，向正在运行的 Qoder IDE 的本机端口查询（端口记录在 `%APPDATA%\Qoder\SharedClientCache\.info.json`）。不续期登录，不修改这些文件。Qoder CN 对应 `.qoder-cn`、`com.qodercn.app.stable`、`QoderCN` 与 `openapi.qoder.com.cn` | 以只读方式读取 Qoder IDE 的本地数据库（`%APPDATA%\Qoder\SharedClientCache\cache\db\local.db`）与模型列表（`User\globalStorage\state.vscdb`），以及 CLI 与桌面版的会话记录（`%USERPROFILE%\.qoder\projects`）；在设置中开启“CLI 与桌面版 Token”时，为当前用户设置环境变量 `QODER_EXPOSE_TOKEN_USAGE`（Qoder CN 为 `QODERCN_EXPOSE_TOKEN_USAGE`）；设置中显示这一行时，每隔几秒读取正在运行的 Qoder CLI 与桌面版进程是否带有这个变量 |
 | 千问办公、QwenWork | 读取桌面版保存的登录（千问办公为 `%APPDATA%\QwenWorkCN\auth-v2.dat`，QwenWork 为 `%APPDATA%\QwenWork\auth-v2.dat`，按 Windows 当前用户解密），只向登录中记录的服务地址查询剩余积分与套餐：千问办公只发往 qwenwork.cn 下的地址（gateway.qwenwork.cn），QwenWork 只发往 qwenwork.ai 下的地址（gateway.qwenwork.ai）；不续期登录，不修改这个文件 | 以只读方式读取对话引擎的数据库（千问办公为 `%USERPROFILE%\.qwenworkcn\.harness\` 下各引擎目录中的 `qwenwork\qwenwork.db`，QwenWork 为 `%USERPROFILE%\.qwenwork\.harness\` 下的同名文件）与档位名称（`%APPDATA%\QwenWorkCN\data\dynamic-text\qwenwork.json`，QwenWork 为 `%APPDATA%\QwenWork` 下的同名文件） |
+| TRAE、TRAE CN | 读取客户端保存的登录（TRAE 为 `%APPDATA%\Trae` 或 `TRAE SOLO` 下 `User\globalStorage\storage.json` 中的 `iCubeAuthInfo://icube.cloudide`，TRAE CN 为 `Trae CN` 或 `TRAE SOLO CN` 下的同名键），只向登录中记录的服务地址查询套餐与用量：TRAE 只发往 trae.ai 下的地址，TRAE CN 只发往 trae.cn 下的地址；不续期登录，不修改客户端文件 | 以只读方式在内存中解密读取本机对话数据库（`ModularData\ai-agent\database.db` 及同目录 `-wal`）中的模型与 Token 记录，不向磁盘写入解密后的文件 |
 | 千问、QwenCloud | 使用在设置中通过浏览器登录获得的凭据（加密保存在 BrimDeck 设置目录的 `secrets.dat`）查询 Token Plan、账户余额与本月扣费。千问的凭据只发往 t.qianwenai.com、cli.qianwenai.com 与 cs-data.qianwenai.com；QwenCloud 的凭据只发往 t.qwencloud.com 与 cli.qwencloud.com。凭据不续期 | 不提供 |
+| 豆包、Dola | 使用在设置中通过独立浏览器窗口登录获得的会话（分别加密保存在 BrimDeck 设置目录的 `doubao-quota-session.dat` 与 `dola-quota-session.dat`），向 www.doubao.com 或 www.dola.com 查询个人、团队与企业订阅额度及额度包；登录窗口使用独立临时目录，登录后删除 | 不提供 |
+| 火山方舟、BytePlus ModelArk | 使用在设置中填写的 AK/SK，或通过浏览器登录获得的临时凭据（均加密保存在 BrimDeck 设置目录的 `secrets.dat`；登录经 signin.volcengine.com / signin.byteplus.com 授权与自动续期），向 ark.cn-beijing.volcengineapi.com 与 open.volcengineapi.com（火山方舟）或 ark.ap-southeast-1.byteplusapi.com 与 billing.byteplusapi.com（BytePlus ModelArk）查询个人与团队/企业的 Coding Plan、Agent Plan 额度与账户余额。AK/SK 只用于对请求签名，Secret Access Key 不以明文传输 | 不提供 |
 | 智谱 GLM、Z.ai GLM、Xiaomi MiMo API、Xiaomi MiMo Token Plan、DeepSeek、Kimi Code API、Kimi 开放平台、OpenCode Go、Command Code API、OpenRouter、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址；Kimi Code API 的密钥只发往 api.kimi.com 与 api.kimi.ai，读取的额度不写入 `kimi-quota.json`；Kimi 开放平台的密钥只发往 api.moonshot.cn 与 api.moonshot.ai；OpenCode Go 的密钥只发往 opencode.ai；Command Code API 的密钥只发往 api.commandcode.ai；Xiaomi MiMo API 的密钥只发往 api.xiaomimimo.com；Xiaomi MiMo Token Plan 的密钥只发往 token-plan-cn、token-plan-sgp 与 token-plan-ams.xiaomimimo.com；OpenRouter 的密钥只发往 openrouter.ai。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
 
 - 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ZCODE_HOME`、`DSH_HOME` 或 `KIMI_CODE_HOME`（须为绝对路径）时，从该目录读取。OpenCode 按 `XDG_DATA_HOME` 与 `OPENCODE_DB` 确定数据库位置。
@@ -36,8 +39,9 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | 文件 | 内容 |
 | --- | --- |
 | `settings.json` | 设置，不含任何登录令牌或 API 密钥 |
-| `secrets.dat` | 手动填写的 API 密钥与 WorkBuddy、千问、QwenCloud 的登录凭据，使用 Windows 的加密功能按当前用户加密 |
+| `secrets.dat` | 手动填写的 API 密钥、AK/SK 与 WorkBuddy、千问、QwenCloud、火山方舟、BytePlus ModelArk 的登录凭据，使用 Windows 的加密功能按当前用户加密 |
 | `mimo-session.dat` | Xiaomi MiMo 的小米账号登录信息，使用 Windows 的加密功能按当前用户加密 |
+| `doubao-quota-session.dat`、`dola-quota-session.dat` | 豆包与 Dola 的浏览器登录会话，使用 Windows 的加密功能按当前用户加密 |
 | `model-prices.json`、`manual-model-prices.json` | 同步的模型单价、手动添加的单价 |
 | `official-prices.json` | 从 OpenRouter 同步的模型厂商官方渠道单价，只包含记录中用到的模型，以及 Kimi Code 计费所需的 Kimi K3、K3.1 Pro 与 K3.1 Pro Highspeed。没有这个文件时，读取旧版本保存的 `moonshot-prices.json` |
 | `claude-quota.json` | 最近一次联网读取的 Claude 额度（各项百分比、重置时间与订阅名称），重启后接口被限流时用来继续显示 Fable 等额度；不含登录令牌；账户与组织仅以其 ID 的单向哈希记录（不保存 ID 本身），每个组织一条，只在同一账户登录时使用；超过 7 天不再使用，登录失效或退出登录时删除 |

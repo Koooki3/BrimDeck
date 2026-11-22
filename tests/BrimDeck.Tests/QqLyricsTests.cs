@@ -104,14 +104,15 @@ internal static class QqLyricsTests
         using (var lookup = new LyricsService(client))
         {
             var result = await lookup.FindAsync(track, true, default);
-            check("No QQ match never searches LRCLIB or Netease", result.Lines.Count == 0 && none.Urls.Count == 1 && none.Urls[0].Host == "c.y.qq.com");
+            check("Without a QQ match the other providers are asked, and QQ not again", result.Lines.Count == 0 && none.Urls.Count == 1 && none.Urls[0].Host == "c.y.qq.com"
+                && AskedOthers(none));
         }
         using (var offline = new Handler(_ => "{}", HttpStatusCode.ServiceUnavailable))
         using (var client = new HttpClient(offline))
         using (var lookup = new LyricsService(client))
         {
             var result = await lookup.FindAsync(track with { SongId = "qq:" + Mid }, true, default);
-            check("Failed QQ endpoints never fall through to another lyrics provider", result.Lines.Count == 0 && offline.Urls.Count == 4 && offline.Urls.All(u => u.Host is "u.y.qq.com" or "c.y.qq.com"));
+            check("When QQ's endpoints fail the other providers are asked, and QQ not again", result.Lines.Count == 0 && offline.Urls.Count == 4 && AskedOthers(offline));
         }
         using (var empty = new Handler(_ => "{\"code\":0,\"lyric\":{\"code\":0,\"data\":{\"lyric\":\"\"}}}"))
         using (var client = new HttpClient(empty))
@@ -123,20 +124,25 @@ internal static class QqLyricsTests
             check("Empty QQ results do not poison the lyrics cache", first == 2 && empty.Urls.Count == first * 2);
             int before = empty.Urls.Count;
             var invalid = await lookup.FindAsync(track with { SongId = "qq:bad&mid" }, true, default);
-            check("Invalid QQ identities are rejected without cross-provider fallback", invalid.Lines.Count == 0 && empty.Urls.Count == before);
+            check("An invalid QQ identity sends QQ no request, and the other providers are asked", invalid.Lines.Count == 0 && empty.Urls.Count == before && AskedOthers(empty));
         }
     }
 
+    private static bool AskedOthers(Handler handler) => new[] { "mobiles.kugou.com", "music.163.com", "lrclib.net" }.All(host => handler.Others.Any(u => u.Host == host));
+
     private sealed class Handler(Func<HttpRequestMessage, string> response, HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler
     {
+        // QQ's requests, and those to the other providers, which answer with nothing.
         public List<Uri> Urls { get; } = [];
+        public List<Uri> Others { get; } = [];
         public List<JsonElement> Parameters { get; } = [];
         public bool HeadersCorrect { get; private set; } = true;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var uri = request.RequestUri!; Urls.Add(uri);
-            if (uri.Host is not ("u.y.qq.com" or "c.y.qq.com")) throw new InvalidOperationException("QQ requested another provider: " + uri.Host);
+            var uri = request.RequestUri!;
+            if (uri.Host is not ("u.y.qq.com" or "c.y.qq.com")) { Others.Add(uri); return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)); }
+            Urls.Add(uri);
             HeadersCorrect &= request.Headers.Referrer?.AbsoluteUri == "https://y.qq.com/" && request.Headers.UserAgent.ToString().Contains("BrimDeck") && request.Headers.Authorization is null && !request.Headers.Contains("Cookie");
             if (uri.Host == "u.y.qq.com")
             {

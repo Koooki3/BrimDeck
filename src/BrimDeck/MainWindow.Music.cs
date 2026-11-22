@@ -39,9 +39,11 @@ public partial class MainWindow
     // The color the cover gave, if it gave one; _musicAccent is the theme's equalizer color otherwise.
     private Color? _coverAccent;
     private Lyrics _lyrics = Lyrics.Empty;
+    // The track _lyrics were found for.
+    private MediaTrack? _lyricsTrack;
     private CancellationTokenSource? _lyricsRequest;
-    // Completed when Apple Music writes a lyric file while the current Apple Music song has no lyrics of Apple's.
-    private TaskCompletionSource? _appleLyricsWritten;
+    // Completed when Apple Music or KuGou writes a lyric file while the current song has none of its player's own.
+    private TaskCompletionSource? _localLyricsWritten;
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
     // Drives the equalizer, which must keep moving while the cursor moves; see PromptTimer.
     private PromptTimer _musicTick = null!;
@@ -98,7 +100,7 @@ public partial class MainWindow
         _musicTick = new(Dispatcher, TickMusic) { Interval = TimeSpan.FromMilliseconds(33) };
         IsVisibleChanged += (_, _) => UpdateMusicTimer();
         _app.MediaChanged += MediaChanged;
-        _app.Lyrics.AppleLyricsWritten += AppleLyricsWritten;
+        _app.Lyrics.AppleLyricsWritten += LocalLyricsWritten; _app.Lyrics.KugouLyricsWritten += LocalLyricsWritten;
         DisplayPower.Changed += DisplayPowerChanged;
     }
     private void StartMusic()
@@ -119,11 +121,14 @@ public partial class MainWindow
     }
     private void ApplyDefaultMusicPage()
     {
-        // A part of the collapsed row under the pointer chose the page it opens on (_hoverPage, taken by OpenAtPointer); that
-        // choice is spent here, so the next opening with the pointer on no part falls back to the rules below. A page hotkey still
-        // wins, and a page the settings leave out is passed over.
-        var hover = _hoverPage; _hoverPage = null;
-        if (hover is { } chosen && !DeckPages.Shown(Settings, chosen)) hover = null;
+        // Opening on the part under the pointer (DefaultDeckPage.Hover), the part taken by OpenAtPointer chose the page; that
+        // choice is spent here. A page hotkey still wins; the clock, a page the settings leave out and an opening without the
+        // pointer (a hotkey) keep the last page. The file transfer's count opens its page with the file transfer in front.
+        var part = _hoverPart; _hoverPart = null;
+        // Opened by files dragged in, the panel stays on the clipboard page it was turned to (ShelfDragEnter, OpenForDrag).
+        if (_dropping) return;
+        DeckPage? hover = part is { Page: { } chosen } && DeckPages.Shown(Settings, chosen) ? chosen : null;
+        if (hover is not null && part!.Files && _hotkeyPage is null) _shelfFront = ShelfSide.Files;
         // A page hotkey opens on its page and remembers it, as choosing it on the page switch does (MainWindow.Hotkeys.cs).
         // Opened from the file transfer's count on the island, the panel opens on the clipboard and file transfer page.
         var wanted = _hotkeyPage ?? hover ?? (DeckPages.Shown(Settings, DeckPage.Clipboard) && OpensOnTransfer() ? DeckPage.Clipboard : (DeckPage?)null) ?? DeckPages.Opening(Settings.DefaultPage) ?? _page;
@@ -307,7 +312,7 @@ public partial class MainWindow
         _timelineHoldEnd.Interval = until - now + TimeSpan.FromMilliseconds(50); _timelineHoldEnd.Start();
     }
     // The expanded page and the compact text choose lyrics independently; either one is enough to look them up.
-    private bool CompactLyrics => Settings.ShowsMusic(Settings.Style) && Settings.MusicText == CompactMusicText.Lyrics;
+    private bool CompactLyrics => (Settings.ShowsMusic(Settings.Style) || Settings.IslandFromIndicator is { } island && Settings.ShowsMusic(island)) && Settings.MusicText == CompactMusicText.Lyrics;
     private bool NeedsLyrics => Settings.MusicPage && Settings.LyricsEnabled || CompactLyrics;
     // While the song is paused the collapsed title or lyric, the cover, or both give way (DeckSettings.MusicPausedHide); the state
     // change builds the row again.
@@ -318,37 +323,34 @@ public partial class MainWindow
     {
         string key = LyricsKey(_mediaTrack);
         if (_lyricsKey == key) return;
+        var requested = _mediaTrack;
+        // NetEase's song/detail can fill a blank artist or album after the song's lyrics are shown (MediaRouting.FillDetails):
+        // the lyrics found stay, and are not looked up again.
+        if (key.Length > 0 && requested is not null && _lyricsTrack is { } found && (_lyrics.Lines.Count > 0 || _lyrics.Instrumental)
+            && MediaRouting.OnlyDetailsFilled(found, requested))
+        { _lyricsKey = key; _lyricsTrack = requested; return; }
         _lyricsKey = key; _lyricsRequest?.Cancel(); _lyricsRequest?.Dispose(); _lyricsRequest = null;
-        _lyrics = Lyrics.Empty; _compactLyric = ""; _musicRenderKey = "";
-        if (key.Length == 0) return;
-        var requested = _mediaTrack!;
+        // A player announces a song in a few updates (its title, then its length or its song ID), each of which looks the lyrics
+        // up again. Lyrics found for the same song stay shown until the next ones are found: cleared, the lyrics of KuGou's own
+        // file, found at once, went and came back.
+        if (key.Length == 0 || requested is null || _lyricsTrack is not { } shown || shown.Id != requested.Id || !SameMediaSong(shown, requested))
+        { _lyrics = Lyrics.Empty; _lyricsTrack = null; _compactLyric = ""; _musicRenderKey = ""; }
+        if (key.Length == 0 || requested is null) return;
         if (!requested.IsQqMusic && !string.IsNullOrWhiteSpace(requested.EmbeddedLyrics))
-        {
-            _lyrics = Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source);
-            if (IsMusicPage) RenderMusic(); RenderCompact(); return;
-        }
+        { ShowLyrics(Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source), requested); return; }
         var request = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token); _lyricsRequest = request;
         try
         {
-            // Apple Music writes a song's lyrics to its cache as the song starts, which can be after the song changes here, or later
-            // still: they are looked for again 3 and 15 seconds later and whenever Apple Music writes a lyric file, keeping any
-            // lyrics already shown.
+            // Apple Music and KuGou write a song's lyrics as the song starts, which can be after the song changes here, or later
+            // still: until the player's own are found they are looked for again 3 and 15 seconds later and whenever the player
+            // writes a lyric file, keeping any lyrics already shown.
             for (int attempt = 0; ; attempt++)
             {
-                var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token, available =>
-                {
-                    if (request.IsCancellationRequested || _lyricsKey != key) return;
-                    _lyrics = available; _musicRenderKey = "";
-                    if (IsMusicPage) RenderMusic(); RenderCompact();
-                });
+                var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
                 if (request.IsCancellationRequested || _lyricsKey != key) return;
-                if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0)
-                {
-                    _lyrics = lyrics; _musicRenderKey = "";
-                    if (IsMusicPage) RenderMusic(); RenderCompact();
-                }
-                if (!requested.IsAppleMusic || lyrics.Source == LyricsService.AppleSource) break;
-                var written = (_appleLyricsWritten = new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+                if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0) ShowLyrics(lyrics, requested);
+                if (requested.IsAppleMusic ? lyrics.Source == LyricsService.AppleSource : !requested.IsKugou || lyrics.Source == LyricsService.KugouLocalSource) break;
+                var written = (_localLyricsWritten = new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
                 await (attempt < 2 ? Task.WhenAny(written, Task.Delay(TimeSpan.FromSeconds(attempt == 0 ? 3 : 15), request.Token)) : written.WaitAsync(request.Token));
                 request.Token.ThrowIfCancellationRequested();
                 // The file is read once Apple Music has finished writing it.
@@ -358,7 +360,20 @@ public partial class MainWindow
         catch (OperationCanceledException) { }
         catch (Exception) { /* Lyrics are optional; provider failures keep the no-lyrics layout. */ }
     }
-    private void AppleLyricsWritten() => Dispatcher.BeginInvoke(() => _appleLyricsWritten?.TrySetResult());
+    // Timed lyrics in place of timed lyrics (found again, or the player's own in place of a provider's) change only the lines
+    // shown, as the song plays; the page and the collapsed row are built again only when the lyrics take another form.
+    private void ShowLyrics(Lyrics lyrics, MediaTrack track)
+    {
+        bool sameForm = ReferenceEquals(lyrics, _lyrics) || LyricsForm(lyrics).Equals(LyricsForm(_lyrics)) && lyrics.Synced && lyrics.Lines.Count > 0;
+        _lyrics = lyrics; _lyricsTrack = track;
+        if (sameForm) { UpdateMusicPosition(); return; }
+        _musicRenderKey = "";
+        if (IsMusicPage) RenderMusic(); RenderCompact();
+    }
+    // What of the lyrics the page is built from (RenderMusic): timed lyrics fill its lines as the song plays, so other timed
+    // lyrics build no new page; untimed lyrics are shown whole.
+    private static object LyricsForm(Lyrics lyrics) => lyrics.Synced && lyrics.Lines.Count > 0 ? "timed" : lyrics;
+    private void LocalLyricsWritten() => Dispatcher.BeginInvoke(() => _localLyricsWritten?.TrySetResult());
     private void ToggleSourcePin(ContextMenu menu, MenuItem item, string id)
     {
         bool pin = !Equals(item.Tag, "pinned");
@@ -496,7 +511,7 @@ public partial class MainWindow
         bool bare = !Settings.MusicPageCover && !Settings.LyricsEnabled;
         bool splitLyrics = Settings.MusicLyricsLayout == MusicLyricsLayout.Columns && !bare;
         bool lyricColumn = splitLyrics && (hasLyrics || message.Length > 0);
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{kugouEntry}|{_media?.RestartingNetease}|{_media?.RestartingKugou}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{LyricsForm(_lyrics).GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{_media?.KugouError}|{Settings.LyricsEnabled}|{Settings.MusicPageCover}|{Settings.MusicLyricsLayout}|{Settings.MusicLyricsAlign}|{Settings.EqualizerColor}|{Settings.EqualizerCustomColor}|{Settings.MusicLyricColor}|{Settings.MusicLyricCustomColor}|{Settings.MusicEqualizerBars}|{Settings.UiFont}|{Loc.Language}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
@@ -1215,19 +1230,6 @@ public partial class MainWindow
     // opens the panel, so the collapsed title is not seen while the pointer is on it.)
     private void ReplayCompactTitle() { _compactTitleRested = null; _compactMarquee?.Replay(); }
 
-    // The page a part of the collapsed row opens the panel on when the pointer rests over it. It follows the part's meaning, not
-    // its place, so the row may reorder or resize without the mapping going stale; the clock and a part the settings leave out
-    // name none and the page choice keeps its own rules. The transfer count names none on purpose: opening from it already turns
-    // the page to the clipboard and puts the files' card in front (OpensOnTransfer), which a page chosen here would skip.
-    private static DeckPage? CompactPartPage(object part) => part switch
-    {
-        "cover" => DeckPage.Music,
-        CompactPart.Equalizer or CompactPart.Music => DeckPage.Music,
-        CompactPart.Monitor => DeckPage.Monitor,
-        CompactPart.Devices => DeckPage.Devices,
-        CompactPart.Rings => DeckPage.Usage,
-        _ => null,
-    };
     private void RenderCompactMusic()
     {
         // The collapsed shape gives the row's width in DIPs and the height scale; every size below follows from them.
@@ -1384,9 +1386,8 @@ public partial class MainWindow
                     else { strip.Width = room; element = strip; }
                     break;
             }
-            // The part names the page the panel opens on when the pointer rests on it (CompactPageAt, MainWindow.Hover.cs); the
-            // clock and the file transfer's count say nothing, so the page choice falls back to its own rules there.
-            if (CompactPartPage(shown[i].Part) is { } opening) element.Tag = opening;
+            // What the part opens the panel on when the pointer is at it (HoverPartAt, MainWindow.Hover.cs).
+            element.Tag = HoverPartOf(shown[i].Part);
             // The carousels' fades lie outside their window (a negative margin); the margin puts the window at its place.
             element.Margin = new Thickness(element.Margin.Left + left, 0, element.Margin.Right, 0);
             element.HorizontalAlignment = HorizontalAlignment.Left; element.VerticalAlignment = VerticalAlignment.Center;
@@ -1554,5 +1555,5 @@ public partial class MainWindow
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
-    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= AppleLyricsWritten; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false, false); }
+    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= LocalLyricsWritten; _app.Lyrics.KugouLyricsWritten -= LocalLyricsWritten; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false, false); }
 }

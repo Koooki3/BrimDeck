@@ -10,7 +10,7 @@ public enum DeviceKind { Mouse, Keyboard, Headphones, Earbuds, Controller, Pen, 
 
 // Where a reading comes from, roughly from the most to the least exact. A device seen by more than one source keeps the
 // reading of the first in this order that has a percentage (DeviceRoster.Merge).
-public enum DeviceSource { PhoneLink, Logitech, Razer, SteelSeries, HyperX, Sony, Apple, Gatt, Gaming, Hid, Bluetooth }
+public enum DeviceSource { PhoneLink, Logitech, Razer, SteelSeries, HyperX, Sony, Apple, EncoDeck, Gatt, Gaming, Hid, Bluetooth }
 
 // The parts of earbuds that report their own charge.
 public enum BatteryPart { Left, Right, Case }
@@ -32,10 +32,12 @@ public sealed record DeviceBattery(string Key, string Name, DeviceKind Kind, Dev
     // controller and as a Bluetooth device is one device.
     public string? Hardware { get; init; }
     public IReadOnlyList<PartBattery> Parts { get; init; } = [];
+    // The reading of the last time the devices were read, shown faded while they are being read again (DeviceRoster.WithEarlier).
+    public bool Earlier { get; init; }
     // The lowest of the parts with a reading (the earbuds, not the case), or the device's own.
     public int? Lowest => Parts.Where(part => part.Part != BatteryPart.Case && part.Percent is not null).Select(part => part.Percent).Min() ?? Percent;
     public bool Same(DeviceBattery other) => Key == other.Key && Name == other.Name && Kind == other.Kind && Source == other.Source && Percent == other.Percent
-        && Charging == other.Charging && Accuracy == other.Accuracy && Asleep == other.Asleep && Parts.SequenceEqual(other.Parts);
+        && Charging == other.Charging && Accuracy == other.Accuracy && Asleep == other.Asleep && Earlier == other.Earlier && Parts.SequenceEqual(other.Parts);
 }
 
 // A device's own choices (DeckSettings.DeviceChoices): a name of the user's (Label, null for the device's own), and whether it
@@ -313,6 +315,7 @@ public static class Devices
         DeviceSource.Logitech => Loc.T("罗技接收器", "Logitech receiver"), DeviceSource.Razer => "Razer", DeviceSource.SteelSeries => "SteelSeries",
         DeviceSource.HyperX => "HyperX", DeviceSource.Sony => "PlayStation", DeviceSource.Gatt => Loc.T("蓝牙电池服务", "Bluetooth battery service"),
         DeviceSource.Gaming => Loc.T("游戏控制器", "Game controller"), DeviceSource.Hid => Loc.T("HID 电量", "HID battery"), DeviceSource.Apple => Loc.T("Apple 广播", "Apple broadcast"),
+        DeviceSource.EncoDeck => "EncoDeck",
         _ => Loc.T("蓝牙", "Bluetooth")
     };
 
@@ -482,6 +485,21 @@ public sealed class DeviceRoster
             var kind = best.Kind != DeviceKind.Other ? best.Kind : group.Select(device => device.Kind).FirstOrDefault(kind => kind != DeviceKind.Other, DeviceKind.Other);
             result.Add(best with { Key = key, Kind = kind, Charging = group.Any(device => device.Charging && device.Percent is not null || device == best && best.Charging) });
         }
+        result.Sort(Devices.Order);
+        return result;
+    }
+
+    // What shows while the devices are read again, until every source has listed what is connected: the readings now, and for a
+    // device without one yet its reading from the last time, marked Earlier. Once listed, only the readings now show, so a
+    // device switched off since, or one that gives no reading this time, never keeps the old one.
+    public static IReadOnlyList<DeviceBattery> WithEarlier(IReadOnlyList<DeviceBattery> now, IReadOnlyList<DeviceBattery> earlier)
+    {
+        var read = now.Where(device => device.Lowest is not null).Select(device => device.Key).ToHashSet(StringComparer.Ordinal);
+        var standIns = new Dictionary<string, DeviceBattery>(StringComparer.Ordinal);
+        foreach (var device in earlier)
+            if (device.Lowest is not null && !read.Contains(device.Key)) standIns.TryAdd(device.Key, device with { Earlier = true });
+        if (standIns.Count == 0) return now;
+        var result = now.Where(device => !standIns.ContainsKey(device.Key)).Concat(standIns.Values).ToList();
         result.Sort(Devices.Order);
         return result;
     }

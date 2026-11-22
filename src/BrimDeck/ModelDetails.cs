@@ -19,6 +19,8 @@ public partial class MainWindow
     private Window? _detailPopup;
     // Set while a pop-up is closed without its fade (ShowModelDetails).
     private bool _popupAtOnce;
+    // Model-details usage trend: Cost when true, Tokens when false (session only).
+    private bool _trendCost;
     internal UsageDateRange ModelRange => _customRange ?? UsageDateRange.Recent(_days, DateTime.Today);
 
     private Button DetailLink(UIElement content, string name, Action click)
@@ -133,6 +135,24 @@ public partial class MainWindow
         return button;
     }
 
+    // The toolbar's width for its filters, and the table's size tiers.
+    private double ModelToolbarRoom => Math.Max(0, ContentCanvas.Width - ModelToolbar.Margin.Left - ModelToolbar.Margin.Right - 36);
+    private (bool Expanded, bool Compact, bool Tiny) ModelTiers =>
+        (ContentCanvas.Width >= 600, ContentCanvas.Width < 640 || ContentCanvas.Height < 170, ContentCanvas.Height < 170);
+    // What the model details were last built for: the table's tiers, the header's height (UnfittedHeader steps with the panel's
+    // height), and the room within which the toolbar's stage holds.
+    private ((bool Expanded, bool Compact, bool Tiny) Tiers, double Header)? _modelTiersBuilt;
+    private (double Need, double Wider) _modelToolbarFits;
+
+    // Whether the model details as built still fit the panel's size. Between the tiers the table's model column and the toolbar
+    // stretch by themselves, so a resize builds them again only where one changes: building every row on each frame of the drag
+    // made it stutter once the list grew long.
+    private bool ModelDetailsFit()
+    {
+        double room = ModelToolbarRoom;
+        return _modelTiersBuilt == (ModelTiers, PanelHeader.ToolbarFor(ContentCanvas.Height)) && room >= _modelToolbarFits.Need && room < _modelToolbarFits.Wider;
+    }
+
     private void RenderModelToolbar(IReadOnlyList<ProviderId> apps)
     {
         ModelToolbar.ColumnDefinitions.Clear();
@@ -150,7 +170,9 @@ public partial class MainWindow
             _customRange is null && days == _days, () => SelectModelPeriod(days))).ToList(), 12, 22, padding, centerText: true, glide: "periods");
         var periods = Periods(7);
         FrameworkElement applications = null!; Button dates = null!;
-        double available = Math.Max(0, ContentCanvas.Width - ModelToolbar.Margin.Left - ModelToolbar.Margin.Right - 36);
+        double available = ModelToolbarRoom;
+        // The room this stage needs and the room the stage before it needed: the toolbar holds while the room stays between them.
+        double need = 0, wider = double.PositiveInfinity;
         for (int stage = 0; stage <= 4; stage++)
         {
             applications = ModelApplicationFilter(apps, stage);
@@ -158,10 +180,13 @@ public partial class MainWindow
             dates = ModelDateButton(stage >= 3);
             if (stage == 4) periods = Periods(3);
             foreach (var element in new[] { applications, periods, dates }) element.Measure(new Size(double.PositiveInfinity, 28));
-            if (applications.DesiredSize.Width + periods.DesiredSize.Width + dates.DesiredSize.Width + 16 <= available) break;
+            double width = applications.DesiredSize.Width + periods.DesiredSize.Width + dates.DesiredSize.Width + 16;
+            if (width <= available) { need = width; break; }
+            wider = width;
             if (stage == 4)
                 applications = ModelAction(Loc.T("应用 ▾", "Apps ▾"), Loc.T("筛选应用", "Filter apps"), () => OpenModelApplications(apps), toolTip: false);
         }
+        _modelToolbarFits = (need, wider);
         Grid.SetColumn(periods, 2); Grid.SetColumn(dates, 4);
         filters.Children.Add(applications); filters.Children.Add(periods); filters.Children.Add(dates);
         Grid.SetColumn(filters, 2); ModelToolbar.Children.Add(filters);
@@ -330,10 +355,24 @@ public partial class MainWindow
         return grid;
     }
 
+    // A line's width in whole DIPs as a Centered text block measures it, kept across rebuilds: the details are built again every
+    // minute and when a resize ends, mostly with the same figures.
+    private static readonly Dictionary<(string Text, string Font, double Size, int Weight), double> TextWidths = [];
+    private static double TextWidth(string text, double size, FontWeight weight)
+    {
+        var key = (text, UI.PanelFont.Source, size, weight.ToOpenTypeWeight());
+        if (TextWidths.TryGetValue(key, out var width)) return width;
+        if (TextWidths.Count >= 4096) TextWidths.Clear();
+        var block = UI.Centered(text, size, "#FFFFFF", weight);
+        block.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        return TextWidths[key] = Math.Ceiling(block.DesiredSize.Width);
+    }
+
     private void RenderModels(IReadOnlyList<ProviderSnapshot> snapshots)
     {
         var result = ModelUsage.Filter(snapshots, _modelApps, ModelRange);
-        bool expanded = ContentCanvas.Width >= 600, compact = ContentCanvas.Width < 640 || ContentCanvas.Height < 170, tiny = ContentCanvas.Height < 170;
+        var (expanded, compact, tiny) = ModelTiers;
+        _modelTiersBuilt = ((expanded, compact, tiny), PanelHeader.ToolbarFor(ContentCanvas.Height));
         double font = tiny ? 11.5 : 12.5, rowHeight = tiny ? 22 : 27, headerHeight = tiny ? 18 : 22, totalHeight = tiny ? 24 : 29;
         double inset = tiny ? 14 : 20, gap = expanded ? 8 : 12;
         UsageContent.Margin = new Thickness(inset, 0, inset, tiny ? 8 : 10);
@@ -369,28 +408,33 @@ public partial class MainWindow
         for (int n = 0; n < totals.Length; n++)
         {
             // English headings are longer than the numbers under them; a column also fits its heading.
-            var heading = UI.Centered(headings[n], tiny ? 10 : 11, Look.Tertiary); heading.Measure(new Size(double.PositiveInfinity, headerHeight));
-            widths[n + 2] = Math.Max(widths[n + 2], Math.Ceiling(heading.DesiredSize.Width));
+            widths[n + 2] = Math.Max(widths[n + 2], TextWidth(headings[n], tiny ? 10 : 11, FontWeights.Normal));
             // Amounts such as $1,234.56 + give up model-name space, never numeric digits.
             foreach (var value in values.Select(row => row[n]).Append(totals[n]))
-            {
-                var text = UI.Centered(value, font, Look.Primary, FontWeights.SemiBold); text.Measure(new Size(double.PositiveInfinity, rowHeight));
-                widths[n + 2] = Math.Max(widths[n + 2], Math.Ceiling(text.DesiredSize.Width));
-            }
+                widths[n + 2] = Math.Max(widths[n + 2], TextWidth(value, font, FontWeights.SemiBold));
         }
         var panel = new Grid { Name = "ModelTable" };
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(headerHeight + 1) });
         panel.RowDefinitions.Add(new RowDefinition()); panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(totalHeight + 1) });
-        Grid Row(string app, string model, string[] numbers, bool header, bool total, ProviderId? provider = null)
+        // The figures lie in one block of their own at the right: a resize moves the block, and nothing inside it is laid out again.
+        // Only the model name takes the change of width.
+        double figuresWidth = widths.Skip(2).Sum() + gap * (widths.Length - 3);
+        // A row and its cells by column: the app (its dot cell in a data row), the model, then each figure.
+        (Grid Row, FrameworkElement[] Cells) Row(string app, string model, string[] numbers, bool header, bool total, ProviderId? provider = null)
         {
             double height = header ? headerHeight : total ? totalHeight : rowHeight;
             var row = new Grid { Height = height, Name = header ? "ModelHeader" : total ? "ModelTotal" : "ModelDataRow" };
-            for (int i = 0; i < widths.Length; i++)
+            foreach (var width in new[] { new GridLength(widths[0]), new GridLength(gap), new GridLength(1, GridUnitType.Star), new GridLength(gap), new GridLength(figuresWidth) })
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+            var figures = new Grid();
+            for (int i = 2; i < widths.Length; i++)
             {
-                if (i > 0) row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(gap) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = i == 1 ? new GridLength(1, GridUnitType.Star) : new GridLength(widths[i]) });
+                if (i > 2) figures.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(gap) });
+                figures.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(widths[i]) });
             }
+            Grid.SetColumn(figures, 4); row.Children.Add(figures);
             string[] labels = [app, model, ..numbers];
+            var cells = new FrameworkElement[labels.Length];
             for (int i = 0; i < labels.Length; i++)
             {
                 var text = UI.Centered(labels[i], header ? tiny ? 10 : 11 : font,
@@ -405,24 +449,33 @@ public partial class MainWindow
                     text.ToolTip = labels[i];
                     text.ToolTipOpening += (_, e) => { if (!UI.IsCut(text)) e.Handled = true; };
                 }
-                Grid.SetColumn(cell, i * 2); row.Children.Add(cell);
+                cells[i] = cell;
+                if (i < 2) { Grid.SetColumn(cell, i * 2); row.Children.Add(cell); }
+                else { Grid.SetColumn(cell, (i - 2) * 2); figures.Children.Add(cell); }
             }
-            return row;
+            return (row, cells);
         }
-        panel.Children.Add(new Border { Child = Row(Loc.T("应用", "App"), Loc.T("模型", "Model"), headings, true, false), BorderBrush = UI.Brush(Look.Hairline), BorderThickness = new Thickness(0, 0, 0, 1) });
-        var list = new StackPanel();
+        panel.Children.Add(new Border { Child = Row(Loc.T("应用", "App"), Loc.T("模型", "Model"), headings, true, false).Row, BorderBrush = UI.Brush(Look.Hairline), BorderThickness = new Thickness(0, 0, 0, 1) });
+        // Chart sits in the scroll content so the model rows stay reachable; pinning it above the table left no room to scroll.
+        // RowsInView only lays out children with an explicit Height.
+        var list = new RowsInView();
+        if (!tiny)
+        {
+            var chart = ModelTrendChart(result.Entries, ModelRange);
+            chart.Height = 128;
+            list.Children.Add(chart);
+        }
         for (int i = 0; i < result.Rows.Count; i++)
         {
             var record = result.Rows[i];
-            var row = Row(AppPresets.Name(record.Provider), record.Model, values[i], false, false, record.Provider);
+            var (row, cells) = Row(AppPresets.Name(record.Provider), record.Model, values[i], false, false, record.Provider);
             var tips = Tips(record.Entries, false);
             // The model name shows the unit prices; the app name, inside its dot cell, shows its full name only when cut off (Row).
-            foreach (var text in row.Children.OfType<TextBlock>())
-            {
-                int column = Grid.GetColumn(text) / 2;
-                text.ToolTip = column == 1 ? PriceBreakdown(record, snapshots.FirstOrDefault(s => s.Id == record.Provider)) : column >= 2 ? tips[column - 2] : (object?)null;
-            }
-            var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush(Look.Hex("rowDivider")), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
+            cells[1].ToolTip = PriceBreakdown(record, snapshots.FirstOrDefault(s => s.Id == record.Provider));
+            for (int column = 2; column < cells.Length; column++) cells[column].ToolTip = tips[column - 2];
+            // Its height is given, so the list places it without laying it out (RowsInView).
+            double divider = i > 0 ? 1 : 0;
+            var item = new Border { Child = row, Height = rowHeight + divider, Background = Brushes.Transparent, BorderBrush = UI.Brush(Look.Hex("rowDivider")), BorderThickness = new Thickness(0, divider, 0, 0) };
             item.MouseEnter += (_, _) => item.Background = UI.Brush(Look.Hex("rowHover")); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
             if (restoredIds.Contains(record.Provider)) row.Opacity = UsageLastSeen.Dimmed;
             list.Children.Add(item);
@@ -443,7 +496,7 @@ public partial class MainWindow
         }
         string selected = _modelApps.SetEquals(Settings.StatisticsProviders) ? Loc.T("全部", "All") : _modelApps.Count == 1 ? AppPresets.Name(_modelApps.Single()) : Loc.T($"{_modelApps.Count} 个应用", Loc.Count(_modelApps.Count, "app", "apps"));
         string summary = $"{selected} · {ModelPeriodLabel} · " + Loc.T($"{result.Rows.Count} 项", Loc.Count(result.Rows.Count, "item", "items"));
-        var totalRow = Row(incomplete ? Loc.T("已知合计", "Known total") : Loc.T("合计", "Total"), summary, totals, false, true);
+        var (totalRow, totalCells) = Row(incomplete ? Loc.T("已知合计", "Known total") : Loc.T("合计", "Total"), summary, totals, false, true);
         string missing = incomplete ? Loc.T("部分明细尚未读取完整：", "Some details are not fully read yet: ") + string.Join(Loc.T("、", ", "), result.IncompleteProviders.Select(AppPresets.Name)) : "";
         // The label cells explain only an incomplete total; otherwise the visible summary says it all.
         string? totalTip = incomplete ? missing : null;
@@ -453,13 +506,48 @@ public partial class MainWindow
         var totalTips = incomplete && result.Entries.Count == 0 ? totals.Select(_ => (string?)missing).ToArray() : Tips(result.Entries, true);
         if (incomplete && result.Entries.Count > 0) totalTips[^1] = totalTips[^1] is { } note ? note + "\n" + missing : missing;
         totalRow.ToolTip = totalTip;
-        foreach (var cell in totalRow.Children.OfType<FrameworkElement>())
-        {
-            int column = Grid.GetColumn(cell) / 2;
-            cell.ToolTip = column >= 2 ? totalTips[column - 2] : totalTip;
-        }
+        for (int column = 0; column < totalCells.Length; column++) totalCells[column].ToolTip = column >= 2 ? totalTips[column - 2] : totalTip;
         if (restored.Count > 0) totalRow.Opacity = UsageLastSeen.Dimmed;
         var footer = new Border { Child = totalRow, BorderBrush = UI.Brush(Look.Outline), BorderThickness = new Thickness(0, 1, 0, 0) };
-        Grid.SetRow(footer, 2); panel.Children.Add(footer); UsageContent.Children.Add(panel);
+        Grid.SetRow(footer, 2); panel.Children.Add(footer);
+        UsageContent.Children.Add(panel);
+    }
+
+    private FrameworkElement ModelTrendChart(IReadOnlyList<TokenEntry> entries, UsageDateRange range)
+    {
+        var days = UsageTrend.Days(entries, range, list => _app.Prices.Summarize(list));
+        var (peakTokens, peakCost, unpriced) = UsageTrend.Peak(days);
+        // Peak figure changes with the toggle so Tokens vs Cost is obvious even when daily shapes look alike.
+        // A cost peak is only a confirmed amount when every record in the range could be priced.
+        string amount = UI.Amount(new CostSummary(peakCost, peakCost > 0 ? 1 : 0, 0, 0));
+        string peak = _trendCost
+            ? unpriced == 0 ? Loc.T($"峰值 {amount}", $"Peak {amount}")
+                : peakCost > 0 ? Loc.T($"已知峰值 {amount}", $"Known peak {amount}")
+                : Loc.T("峰值未知", "Peak unknown")
+            : Loc.T($"峰值 {UI.Number(peakTokens)}", $"Peak {UI.Number(peakTokens)}");
+        var head = new Grid { Margin = new Thickness(0, 2, 0, 4) };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition());
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var title = UI.Centered(Loc.T("用量趋势", "Usage trend"), 11, Look.Tertiary);
+        title.VerticalAlignment = VerticalAlignment.Center; head.Children.Add(title);
+        var scale = UI.Centered(peak, 11, Look.Secondary);
+        scale.HorizontalAlignment = HorizontalAlignment.Left; scale.VerticalAlignment = VerticalAlignment.Center;
+        scale.Margin = new Thickness(10, 0, 8, 0); Grid.SetColumn(scale, 1); head.Children.Add(scale);
+        var toggle = Segmented(
+        [
+            new(Loc.T("Token", "Tokens"), Loc.T("按 Token", "By tokens"), !_trendCost, () => { _trendCost = false; _usageHandover = Handover.Dissolve; RenderUsage(); }),
+            new(Loc.T("费用", "Cost"), Loc.T("按费用", "By cost"), _trendCost, () => { _trendCost = true; _usageHandover = Handover.Dissolve; RenderUsage(); }),
+        ], 11, 20, 8, centerText: true, glide: "trend");
+        Grid.SetColumn(toggle, 2); head.Children.Add(toggle);
+        var graph = new UsageTrendGraph();
+        string color = _modelApps.Count == 1
+            ? Settings.EnabledApps.FirstOrDefault(app => app.UsageSource == _modelApps.Single()) is { } app ? Look.AppTheme(app) : Look.DefaultAppColor(_modelApps.Single())
+            : Look.Primary;
+        graph.Set(days, _trendCost, color);
+        var block = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+        block.Children.Add(head);
+        block.Children.Add(graph);
+        return block;
     }
 }

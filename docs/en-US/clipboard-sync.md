@@ -34,8 +34,18 @@ Notes:
 - WeType puts a received image on the clipboard as an image file, which programs that take only image data may not paste. That is WeType's own behaviour.
 - Other devices can rename this PC. The card then shows the name WeType uses for it. This PC's own name can be changed only before linking.
 - If another device removes this PC, the status says so. Choose Unlink, then link again.
-- BrimDeck cannot take this PC off the other devices' lists. After unlinking in BrimDeck, delete this PC under My devices (我的设备) in their cross-device pages, or linking again will list it twice.
+- Unlinking in BrimDeck also removes this PC from My devices (我的设备) on the other devices. If that fails, for example without a network connection, BrimDeck says so; you can still unlink, then delete this PC on those devices yourself, or linking again will list it twice.
 - Images are PNG or JPEG, up to 16 MiB.
+
+### Send a file from the file shelf
+
+After pairing your phone in BrimDeck, right-click a file and choose **Share**. When Windows sharing is also available, hover over **Share** and choose **Send with WeType** or **Share to more apps**. Sending a Windows shortcut transfers the shortcut file itself.
+
+Choose a paired recipient or display a one-time QR code for the other device to scan. When the two devices are not on the same local network, the files go through the WeType server. You can send several files at once; folders are not supported.
+
+### Receive files from a paired device
+
+In WeType on the sending device, select the device running BrimDeck. BrimDeck shows the sender's name. You can also open **Receive files from WeType** at the top of the file shelf to see this computer’s device name and wait for an invitation. Choose **Accept…** to select a destination, or **Decline**. Each verified file is saved in that folder and added to the file shelf. Files with an existing name receive a numbered suffix. When several files arrive at once, the window shows how many there are and the overall progress.
 
 ## Doubao IME
 

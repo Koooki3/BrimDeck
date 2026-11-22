@@ -46,7 +46,7 @@ public sealed partial class SettingsWindow
         HotkeyKind.Expand => Loc.T("展开/收起面板", "Expand/collapse panel"),
         HotkeyKind.Resize => Loc.T("调整面板大小", "Resize panel"),
         HotkeyKind.Move => Loc.T("移动刘海、胶囊或指示条", "Move notch, capsule or bar"),
-        HotkeyKind.ClickThrough => Loc.T("开启/关闭鼠标穿透", "Mouse pass-through on/off"),
+        HotkeyKind.ClickThrough => Loc.T("鼠标穿透", "Mouse pass-through"),
         HotkeyKind.OpenSettings => Loc.T("打开/关闭设置", "Open/close settings"),
         HotkeyKind.Refresh => Loc.T("立即同步用量", "Sync usage now"),
         HotkeyKind.CycleStyle => Loc.T("切换刘海、胶囊或指示条", "Switch notch, capsule or bar"),
@@ -61,7 +61,8 @@ public sealed partial class SettingsWindow
         HotkeyKind.Resize => Loc.T("展开时调整当前页面的宽度和高度，收起时调整刘海、胶囊或指示条的长度。",
             "When expanded, changes the current page's width and height; when collapsed, the length of the notch, capsule or indicator bar."),
         HotkeyKind.Move => Loc.T("刘海和指示条沿屏幕边缘移动，胶囊可以上下左右移动。", "The notch and the bar move along their screen edge, the capsule in any direction."),
-        HotkeyKind.ClickThrough => Loc.T("开启或关闭鼠标穿透模式。", "Turns mouse pass-through on or off."),
+        HotkeyKind.ClickThrough => Loc.T("开启或关闭鼠标穿透模式；在“通用 › 兼容”中开启“按住快捷键穿透”后，按住期间临时穿透。修饰键可选，可用 Esc、CapsLock 等单键（字母和数字仍需搭配 Ctrl、Alt 或 Win）；Esc、CapsLock 等非功能单键不会独占，其它程序仍可收到。单独的 F1–F24 仍按普通热键注册。",
+            "Turns sticky mouse pass-through on or off; with Hold hotkey while pressed in General › Compatibility, passes through only while held. Modifiers are optional, and a single key such as Esc or CapsLock works (letters and digits still need Ctrl, Alt or Win). A bare non-function key such as Esc or CapsLock is not reserved, so other programs still receive it. Bare F1–F24 still use ordinary hotkey registration."),
         HotkeyKind.OpenSettings => Loc.T("打开设置窗口，再按一次关闭。", "Opens the settings window; press again to close it."),
         HotkeyKind.Refresh => Loc.T("立即读取一次 AI 用量与模型消耗。", "Reads AI usage and model consumption once, now."),
         HotkeyKind.CycleStyle => Loc.T("按刘海、胶囊、指示条的顺序循环切换收起样式。", "Cycles the collapsed style: notch, capsule, bar."),
@@ -81,7 +82,10 @@ public sealed partial class SettingsWindow
         Func<string>? help = HotkeyHelp(kind) is { } helpText ? () => helpText : null;
         // An arrow box records only the modifiers that go with Alt; Alt and the arrow keys are written beside it.
         bool arrows = HotkeyText.IsArrows(kind);
-        string waiting = arrows ? Loc.T("请按 Ctrl、Shift 或 Win…", "Press Ctrl, Shift or Win…") : Loc.T("请按下组合键…", "Press a combination…");
+        bool bareOk = HotkeyText.AllowsBareKey(kind);
+        string waiting = arrows ? Loc.T("请按 Ctrl、Shift 或 Win…", "Press Ctrl, Shift or Win…")
+            : bareOk ? Loc.T("请按键或组合键…", "Press a key or combination…")
+            : Loc.T("请按下组合键…", "Press a combination…");
         string Saved() => S.Hotkey(kind);
         // The other shortcuts, with the names a clash message gives them. The arrow shortcuts yield to the single combinations
         // (HotkeyText.Priority), so only an arrow row speaks of a clash with those.
@@ -133,15 +137,17 @@ public sealed partial class SettingsWindow
         {
             string saved = Saved();
             text.Text = recording ? waiting
-                : saved.Length == 0 ? (arrows ? Loc.T("点击后按 Ctrl、Shift 或 Win", "Click, then Ctrl, Shift or Win") : Loc.T("未设置", "Not set"))
-                : arrows && HotkeyText.ArrowExtras(saved) is { Length: > 0 } extras ? extras : HotkeyDisplay(saved);
+                : saved.Length == 0 ? (arrows ? Loc.T("点击后按 Ctrl、Shift 或 Win", "Click, then Ctrl, Shift or Win")
+                    : bareOk ? Loc.T("未设置（单键亦可）", "Not set (single key OK)")
+                    : Loc.T("未设置", "Not set"))
+                : arrows && HotkeyText.ArrowExtras(saved) is { Length: > 0 } extras ? extras : HotkeyDisplay(saved, bareOk);
             text.Foreground = UI.Brush(recording ? TextSecondary : saved.Length == 0 ? TextTertiary : TextPrimary);
             // A long combination is trimmed in the box; hovering shows it whole.
-            box.ToolTip = !recording && saved.Length > 0 ? HotkeyDisplay(saved) : null;
+            box.ToolTip = !recording && saved.Length > 0 ? HotkeyDisplay(saved, bareOk) : null;
             chrome.BorderBrush = UI.Brush(recording ? _palette.Accent : _palette.InputBorder);
             clear.IsEnabled = saved.Length > 0; clear.Opacity = clear.IsEnabled ? 1 : .35;
             if (!recording) Note(HotkeyProblem(kind, saved, Others()));
-            AutomationProperties.SetHelpText(box, (saved.Length == 0 ? Loc.T("未设置。", "Not set. ") : HotkeyDisplay(saved) + Loc.T("。", ". ")) + help?.Invoke());
+            AutomationProperties.SetHelpText(box, (saved.Length == 0 ? Loc.T("未设置。", "Not set. ") : HotkeyDisplay(saved, bareOk) + Loc.T("。", ". ")) + help?.Invoke());
         }
         Action stop = null!;
         void Start()
@@ -214,10 +220,13 @@ public sealed partial class SettingsWindow
                 text.Text = waiting; text.Foreground = UI.Brush(TextSecondary);
                 return;
             }
-            string gesture = FormatHotkey(modifiers, key);
+            string gesture = FormatHotkey(modifiers, key, bareOk);
             if (gesture.Length == 0)
             {
-                Note(Loc.T("请同时按住 Ctrl、Alt、Shift 或 Win；F1–F24 可以单独使用。", "Hold Ctrl, Alt, Shift or Win as well; F1–F24 can be used alone."));
+                Note(bareOk
+                    ? Loc.T("可用单键（如 CapsLock），或搭配 Ctrl、Alt、Shift、Win；字母和数字仍需修饰键。",
+                        "Use a single key (such as CapsLock), or add Ctrl, Alt, Shift or Win; letters and digits still need a modifier.")
+                    : Loc.T("请同时按住 Ctrl、Alt、Shift 或 Win；F1–F24 可以单独使用。", "Hold Ctrl, Alt, Shift or Win as well; F1–F24 can be used alone."));
                 text.Text = waiting; text.Foreground = UI.Brush(TextSecondary);
                 return;
             }
@@ -312,11 +321,11 @@ public sealed partial class SettingsWindow
 
     // A saved shortcut as the user reads it: digits as "1" rather than "D1", punctuation as its character, an arrow shortcut's
     // arrows as one name.
-    private static string HotkeyDisplay(string saved)
+    private static string HotkeyDisplay(string saved, bool bareKeyOk = false)
     {
         if (HotkeyText.TryParseArrows(saved, out var arrowModifiers))
             return HotkeyText.Format(arrowModifiers, Loc.T("方向键", "Arrow keys"));
-        if (!ParseHotkey(saved, out var modifiers, out var key)) return saved;
+        if (!ParseHotkey(saved, out var modifiers, out var key, bareKeyOk)) return saved;
         string name = key switch
         {
             >= Key.D0 and <= Key.D9 => ((char)('0' + (key - Key.D0))).ToString(),
@@ -333,8 +342,10 @@ public sealed partial class SettingsWindow
         return modifiers == ModifierKeys.None ? name : ModifierDisplay(modifiers) + "+" + name;
     }
 
-    private static bool ParseHotkey(string text, out ModifierKeys modifiers, out Key key) => HotkeyGesture.TryParse(text, out modifiers, out key);
-    private static string FormatHotkey(ModifierKeys modifiers, Key key) => HotkeyGesture.Format(modifiers, key);
+    private static bool ParseHotkey(string text, out ModifierKeys modifiers, out Key key, bool bareKeyOk = false)
+        => HotkeyGesture.TryParse(text, out modifiers, out key, bareKeyOk);
+    private static string FormatHotkey(ModifierKeys modifiers, Key key, bool bareKeyOk = false)
+        => HotkeyGesture.Format(modifiers, key, bareKeyOk);
     private HotkeyStatus AppHotkeyState(HotkeyKind kind) => _app.StatusOf(kind);
     private void SuspendAppHotkeys() => _app.SuspendHotkeys();
     private void ResumeAppHotkeys() => _app.ResumeHotkeys();

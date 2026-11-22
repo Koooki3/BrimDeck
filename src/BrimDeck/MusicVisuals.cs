@@ -325,7 +325,7 @@ internal sealed class MusicMarquee : FrameworkElement
     protected override Size ArrangeOverride(Size finalSize) { _glyphs?.Arrange(new Rect(finalSize)); return finalSize; }
     private Brush? _tailInk;
     // The line's words and how far it is sung (Karaoke): the part still to come is drawn faded below the line's color, and the
-    // sweep between the two crosses the line a character at a time, so a character lights up as it is sung. The player reports
+    // sweep between the two crosses each character from left to right as it is sung (SoftEdge). The player reports
     // four times a second; the sweep is carried on between the reports on frames of its own, at the rate of the word being sung
     // (LyricSweep), and rests where that word ends.
     private IReadOnlyList<LyricWord>? _words;
@@ -337,10 +337,11 @@ internal sealed class MusicMarquee : FrameworkElement
     private bool _sweepReady;
     // A jump of more than this many characters shows at once instead of easing to it: a new line, or a seek.
     private const double Jump = 2;
-    // The sweep lights a character over the beat it is sung: one character's worth of travel from dark to the line's own
-    // color, so every character — the first included — starts dark and reaches full color as the sweep passes it. The window
-    // ends on the last character's last beat, so no character jumps to full at the line's end.
-    private const double Feather = 1;
+    // The sweep crosses a character from left to right: its edge is a short gradient, this share of the font size wide, from the
+    // line's own color behind it to the faded color ahead, so a character being sung is lit on its left and faded on its right.
+    private const double SoftEdge = .35;
+    // The left edge of each character of Text as the line is laid out, and the line's end (Edges).
+    private double[]? _edges;
     // The share of the line's color the words still to come are drawn in (KaraokeFaded).
     private const double FadedShare = .35;
     // The faded color the words still to come are drawn in (KaraokeFaded), cached for the line's color.
@@ -370,7 +371,8 @@ internal sealed class MusicMarquee : FrameworkElement
         if (Math.Abs(eased - sweep.Sung) < .002) eased = sweep.Sung;
         if (changed || eased != _sweep) { _sweep = eased; Painter.InvalidateVisual(); }
     }
-    private void ApplyKaraoke(FormattedText text)
+    // origin: where the line starts in the drawing, which the sweep's gradient is placed by.
+    private void ApplyKaraoke(FormattedText text, double origin)
     {
         int total = Text.Length;
         if (total <= 0) return;
@@ -389,30 +391,54 @@ internal sealed class MusicMarquee : FrameworkElement
         double sung = Math.Clamp(_sweep, 0, total);
         text.SetForegroundBrush(_ink ?? Foreground, 0, total);
         if (sung >= total) return;
-        int front = (int)Math.Floor(sung);
-        // Only the characters about the sweep are drawn one by one: behind them the line is lit, ahead of them faded.
-        int from = Math.Max(0, front - 1), to = Math.Min(total, front + 2);
-        // A range may not cut a surrogate pair in two, or the pair is drawn as two broken halves.
-        if (from > 0 && char.IsLowSurrogate(Text[from])) from--;
-        if (to < total) text.SetForegroundBrush(KaraokeFaded, to, total - to);
-        var color = InkColor;
-        for (int i = from; i < to;)
+        var edges = Edges(text);
+        int front = Math.Min((int)Math.Floor(sung), total - 1);
+        double soft = Math.Max(1, FontSize * SoftEdge);
+        // Where the sweep stands: as far into the character being sung as it is sung. Over the line the edge moves a little
+        // further, from wholly before the first character to wholly past the last, so the line starts all faded and ends all lit.
+        double at = edges[front] + (sung - front) * (edges[front + 1] - edges[front]) + soft * (sung / total - .5);
+        double from = at - soft / 2, to = at + soft / 2;
+        // Only the characters under the edge take its gradient: behind them the line is lit, ahead of them faded. A range may
+        // not cut a surrogate pair in two, or the pair is drawn as two broken halves.
+        int first = 0;
+        while (first < total - 1 && edges[first + 1] <= from) first++;
+        int last = first;
+        while (last < total && edges[last] < to) last++;
+        if (first > 0 && char.IsLowSurrogate(Text[first])) first--;
+        if (last < total && char.IsLowSurrogate(Text[last])) last++;
+        if (last < total) text.SetForegroundBrush(KaraokeFaded, last, total - last);
+        if (last > first) text.SetForegroundBrush(SweepEdge(origin + from, origin + to), first, last - first);
+    }
+    // The left edge of each character of Text in the laid-out line (and the line's end last), from the start of the line. A
+    // surrogate pair's halves split its width, as the sweep counts them as two characters. Kept until the text is laid out again.
+    private double[] Edges(FormattedText text)
+    {
+        if (_edges is { } known && known.Length == Text.Length + 1) return known;
+        int total = Text.Length;
+        var edges = new double[total + 1];
+        double right = 0;
+        for (int i = 0; i < total;)
         {
             int length = i + 1 < total && char.IsHighSurrogate(Text[i]) && char.IsLowSurrogate(Text[i + 1]) ? 2 : 1;
-            text.SetForegroundBrush(Swept(color, (sung - i) / Feather), i, length);
+            var bounds = text.BuildHighlightGeometry(new Point(0, 0), i, length)?.Bounds ?? Rect.Empty;
+            double left = bounds.IsEmpty ? right : bounds.Left;
+            right = bounds.IsEmpty ? left : Math.Max(left, bounds.Right);
+            edges[i] = left;
+            if (length == 2) edges[i + 1] = (left + right) / 2;
             i += length;
         }
+        edges[total] = right;
+        return _edges = edges;
     }
     // The line's own color, which the lit part is drawn in: the ink brush's where it fades at the ends (InkFade), the
     // foreground's otherwise.
     private Color InkColor => (_ink as SolidColorBrush)?.Color ?? (Foreground as SolidColorBrush)?.Color ?? Colors.White;
-    // The line's color at the share of a character the sweep has lit, from 1 (it has passed) to 0 (it has not reached it): the
-    // faded color brought up to the line's own, so a character comes in gradually rather than in one step.
-    private Brush Swept(Color color, double lit)
+    // The sweep's edge from from to to in the drawing: the line's color before it, the faded color after it.
+    private Brush SweepEdge(double from, double to)
     {
-        if (lit >= 1) return _ink ?? Foreground;
-        if (lit <= 0) return KaraokeFaded;
-        var brush = new SolidColorBrush(Color.FromArgb((byte)Math.Round(255 * (FadedShare + (1 - FadedShare) * lit)), color.R, color.G, color.B));
+        var color = InkColor;
+        var brush = new LinearGradientBrush(new GradientStopCollection { new(color, 0), new(Color.FromArgb((byte)(255 * FadedShare), color.R, color.G, color.B), 1) },
+            new Point(from, 0), new Point(to, 0)) { MappingMode = BrushMappingMode.Absolute };
         brush.Freeze();
         return brush;
     }
@@ -439,6 +465,7 @@ internal sealed class MusicMarquee : FrameworkElement
     private int _formattedFont = -1;
     private FormattedText Format()
     {
+        _edges = null;
         var text = new FormattedText(Text + Tail, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
             _typeface, FontSize, _ink ?? Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
         if (Tail.Length > 0)
@@ -626,7 +653,7 @@ internal sealed class MusicMarquee : FrameworkElement
         if (_glyphs is null) dc.PushClip(new RectangleGeometry(new Rect(size)));
         dc.PushTransform(_shift);
         double x = overflow == 0 && CenterWhenFits ? Snap((size.Width - text.Width) / 2) : 0;
-        ApplyKaraoke(text);
+        ApplyKaraoke(text, x);
         dc.DrawText(text, new Point(x, Snap((size.Height - text.Height) / 2 + text.Baseline) - text.Baseline));
         dc.Pop();
         if (_glyphs is null) dc.Pop(); else if (_fade is not null) dc.DrawRectangle(_fade, null, new Rect(size));

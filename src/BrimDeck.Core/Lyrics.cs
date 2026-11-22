@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -94,19 +95,41 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
         return (words, track.State == MediaState.Playing ? sweep : sweep with { Rate = 0 });
     }
     private readonly Dictionary<int, IReadOnlyList<LyricWord>> _simulatedWords = new();
+    // The simulated sweep crosses a line at the song's singing pace, not over all the time until the next line: a line before an
+    // interlude is sung through and the sweep then rests on its last character until the next line starts.
     private (IReadOnlyList<LyricWord>? Words, LyricSweep Sweep) SimulatedKaraoke(double seconds, double duration, LyricHold? hold)
     {
         int index = FindIndex(seconds, hold);
         if (index < 0 || Instrumental || string.IsNullOrWhiteSpace(Lines[index].Text)) return (null, default);
         var line = Lines[index];
         double end = index + 1 < Lines.Count ? Lines[index + 1].Seconds : duration > line.Seconds ? duration : line.Seconds + 4.8;
-        double span = Math.Max(0.75, end - line.Seconds);
+        double span = Math.Clamp(line.Text.Trim().Length * CharacterSeconds(), .75, Math.Max(.75, end - line.Seconds));
         double progress = Math.Clamp((seconds - line.Seconds) / span, 0, 1);
-        if (!_simulatedWords.TryGetValue(index, out var words))
+        // Words made for a line are kept, so the lyric area sees the same line from one frame to the next; a copy of these
+        // lyrics with other lines (with) makes them again.
+        if (!_simulatedWords.TryGetValue(index, out var words) || words[0].Time != line.Seconds || words[0].Count != line.Text.Length)
             _simulatedWords[index] = words = new[] { new LyricWord(line.Seconds, line.Text.Length) };
-        double sung = line.Text.Length * progress * progress * (3 - 2 * progress);
-        double rate = line.Text.Length * 6 * progress * (1 - progress) / span;
-        return (words, new(sung, rate, line.Text.Length));
+        return (words, new(line.Text.Length * progress, progress < 1 ? line.Text.Length / span : 0, line.Text.Length));
+    }
+    // The seconds one character takes to sing in this lyric: the median of each line's time until the next line shared among its
+    // characters. Most lines run on into the next one, so the median is the song's pace; lines before an interlude are the few
+    // that give much more. Kept for these lines.
+    private (IReadOnlyList<LyricLine> Lines, double Seconds)? _characterSeconds;
+    internal double CharacterSeconds()
+    {
+        if (_characterSeconds is { } known && ReferenceEquals(known.Lines, Lines)) return known.Seconds;
+        var paces = new List<double>();
+        for (int i = 0; i + 1 < Lines.Count; i++)
+        {
+            int length = Lines[i].Text.Trim().Length;
+            double gap = Lines[i + 1].Seconds - Lines[i].Seconds;
+            if (length > 0 && gap > 0) paces.Add(gap / length);
+        }
+        paces.Sort();
+        // The lower middle of an even count, so two lines with one interlude between them still give the singing pace.
+        double seconds = paces.Count > 0 ? paces[(paces.Count - 1) / 2] : .35;
+        _characterSeconds = (Lines, seconds);
+        return seconds;
     }
     public (IReadOnlyList<LyricWord>? Words, LyricSweep Sweep) Karaoke(double seconds, LyricHold? hold = null)
     {
@@ -351,9 +374,11 @@ public sealed partial class LyricsService : IDisposable
     public const int MaxResponseBytes = 2 * 1024 * 1024;
     private const int MaxRedirects = 2;
     // appleLyricsFile keeps which Apple Music lyrics each song was matched to; none keeps it only in memory.
+    // kugouLyricFolder: KuGou's lyric folder (KugouLyricFolder); none reads no lyrics KuGou keeps.
     public LyricsService(HttpClient? http = null, Func<IEnumerable<string>>? appleCacheRoots = null, string? appleLyricsFile = null,
-        Func<string>? queMusicSettings = null)
+        Func<string>? queMusicSettings = null, Func<string?>? kugouLyricFolder = null)
     {
+        _kugouLyricFolder = kugouLyricFolder ?? (() => null);
         _appleCacheRoots = appleCacheRoots ?? AppleCacheRoots;
         _queMusicSettings = queMusicSettings ?? QueMusicSettingsFile;
         _appleLyricsFile = appleLyricsFile; _appleLyricsIds = LoadAppleLyricsIds(appleLyricsFile);
@@ -361,9 +386,10 @@ public sealed partial class LyricsService : IDisposable
         // Redirects are followed by Get, only to HTTPS on the same host.
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(8) };
     }
-    public async Task<Lyrics> FindAsync(MediaTrack track, bool enabled, CancellationToken token, Action<Lyrics>? onAvailable = null)
+    public async Task<Lyrics> FindAsync(MediaTrack track, bool enabled, CancellationToken token)
     {
-        if (!enabled || string.IsNullOrWhiteSpace(track.Title) || string.IsNullOrWhiteSpace(track.Artist)) return Lyrics.Empty;
+        // A track without an artist is told by its title and length (FitOf), so one without a length either is not looked up.
+        if (!enabled || string.IsNullOrWhiteSpace(track.Title) || string.IsNullOrWhiteSpace(track.Artist) && track.Duration <= TimeSpan.Zero) return Lyrics.Empty;
         if (!track.IsQqMusic && !string.IsNullOrWhiteSpace(track.EmbeddedLyrics))
             return Lyrics.Parse(track.EmbeddedLyrics, null, track.Duration.TotalSeconds, track.Source);
         if (track.IsQueMusic)
@@ -376,38 +402,57 @@ public sealed partial class LyricsService : IDisposable
         try
         {
             string cacheKey = string.Join("\n", track.Source, track.SongId, track.SongKey);
-            // A third-party result for Apple Music is kept only until Apple Music caches its own lyrics.
+            // A third-party result for Apple Music is kept only until Apple Music caches its own lyrics, and one for KuGou until
+            // KuGou keeps its own; those are looked for first.
             bool hit = _cache.TryGetValue(cacheKey, out var cached);
+            var lyrics = track.IsKugou && (!hit || cached!.Source != KugouLocalSource) ? FindKugouLocal(track) : Lyrics.Empty;
+            if (lyrics.Lines.Count > 0 || lyrics.Instrumental) { Remember(cacheKey, lyrics); return lyrics; }
             if (hit && (!track.IsAppleMusic || cached!.Source == AppleSource))
             { _order.Remove(cacheKey); _order.AddLast(cacheKey); return cached!; }
-            var lyrics = Lyrics.Empty;
-            // QQ tracks must stay within QQ, including when lookup fails or metadata is incomplete.
-            if (track.IsQqMusic) lyrics = await FindQq(track, token);
-            else if (track.IsAppleMusic)
-            {
-                lyrics = await FindApple(track, token);
-                if (!lyrics.Synced || lyrics.Lines.Count == 0) lyrics = hit ? cached! : await FindAppleFallback(track, lyrics, token);
-            }
-            else
-            {
-                if (track.SongId.StartsWith("netease:", StringComparison.Ordinal))
-                    lyrics = await FindNeteaseId(track.SongId[8..], track.Duration.TotalSeconds, token, onAvailable);
-                // KuGou's songs ask KuGou first; for the others it is the last provider asked.
-                if (track.IsKugou) lyrics = await FindKugou(track, token);
-                if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindLrclib(track, token);
-                if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindNetease(track, token, onAvailable);
-                if (lyrics.Lines.Count == 0 && !lyrics.Instrumental && !track.IsKugou) lyrics = await FindKugou(track, token);
-            }
+            // First the player's own lyrics: Apple Music's cache, and the lyrics KuGou, NetEase and QQ Music keep for the song's ID.
+            // A player without an ID (or without its own lyrics) has none of these.
+            bool kugou = false, qq = false, netease = false;
+            if (track.IsAppleMusic) lyrics = await FindApple(track, token);
+            else if (track.IsQqMusic) { lyrics = await FindQq(track, token); qq = true; }
+            else if (track.SongId.StartsWith("netease:", StringComparison.Ordinal)) { lyrics = await FindNeteaseId(track.SongId[8..], track.Duration.TotalSeconds, token); netease = true; }
+            else if (track.SongId.StartsWith("kugou:", StringComparison.Ordinal)) { lyrics = await FindKugou(track, token); kugou = true; }
+            // A third-party result kept for Apple Music stays until Apple Music caches its own lyrics. A QQ preview keeps QQ's
+            // lyrics, which follow the clip by QQ's current line. A QQ song without its length is not matched elsewhere yet: a
+            // preview reports the clip's length, which keeps other providers from taking the whole song's lyrics for it.
+            bool done = Timed(lyrics) || lyrics.QqPreview || track.IsQqMusic && track.Duration <= TimeSpan.Zero;
+            if (!done && track.IsAppleMusic && hit) lyrics = cached!;
+            else if (!done) lyrics = await FindShared(track, lyrics, kugou, qq, netease, token);
             token.ThrowIfCancellationRequested();
             // An empty result can be a temporary provider failure. Do not keep it for the entire app session.
-            if (lyrics.Lines.Count > 0 || lyrics.Instrumental)
-            {
-                _cache[cacheKey] = lyrics; _order.Remove(cacheKey); _order.AddLast(cacheKey);
-                while (_order.Count > 80) { _cache.Remove(_order.First!.Value); _order.RemoveFirst(); }
-            }
+            if (lyrics.Lines.Count > 0 || lyrics.Instrumental) Remember(cacheKey, lyrics);
             return lyrics;
         }
         finally { _gate.Release(); }
+    }
+    // Lyrics that need no further search: timed ones, or a song known to have no words.
+    private static bool Timed(Lyrics lyrics) => lyrics.Instrumental || lyrics.Synced && lyrics.Lines.Count > 0;
+    // Every player then asks the same providers in the same order, leaving out one it has already asked by the song's ID:
+    // KuGou, QQ Music and NetEase, whose catalogs hold most Chinese songs and many others, then LRCLIB. The first timed lyrics are taken;
+    // untimed ones (the player's own first) only when no provider has timed ones.
+    private async Task<Lyrics> FindShared(MediaTrack track, Lyrics untimed, bool kugou, bool qq, bool netease, CancellationToken token)
+    {
+        var providers = new List<Func<Task<Lyrics>>>();
+        if (!kugou) providers.Add(() => FindKugouSearch(track, token));
+        if (!qq) providers.Add(() => FindQq(track, token));
+        if (!netease) providers.Add(() => FindNetease(track, token));
+        providers.Add(() => FindLrclib(track, token));
+        foreach (var find in providers)
+        {
+            var lyrics = await find();
+            if (Timed(lyrics)) return lyrics;
+            if (untimed.Lines.Count == 0) untimed = lyrics;
+        }
+        return untimed;
+    }
+    private void Remember(string cacheKey, Lyrics lyrics)
+    {
+        _cache[cacheKey] = lyrics; _order.Remove(cacheKey); _order.AddLast(cacheKey);
+        while (_order.Count > 80) { _cache.Remove(_order.First!.Value); _order.RemoveFirst(); }
     }
     private async Task<JsonElement?> Get(string url, CancellationToken token)
     {
@@ -470,65 +515,80 @@ public sealed partial class LyricsService : IDisposable
     }
     private static string Str(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
     private static double Num(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) ? number : 0;
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int LCMapStringEx(string locale, uint flags, string source, int sourceLength,
+        StringBuilder destination, int destinationLength, IntPtr version, IntPtr reserved, IntPtr sortHandle);
+    // LCMAP_SIMPLIFIED_CHINESE.
+    private const uint SimplifiedChinese = 0x02000000;
+    private static string Simplify(string value)
+    {
+        if (value.Length == 0) return value;
+        var result = new StringBuilder(value.Length + 1);
+        return LCMapStringEx("zh-CN", SimplifiedChinese, value, -1, result, result.Capacity, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero) > 0 ? result.ToString() : value;
+    }
+
     private static string Normalize(string value) => Regex.Replace(value, @"[\s\p{P}\p{S}]", "").ToUpperInvariant();
-    // Apple Music shows names in the storefront's script (李耀陽); the other providers may use another (李耀阳).
-    private static string MatchText(MediaTrack track, string value) => Normalize(track.IsAppleMusic ? SimplifyAppleText(value) : value);
-    private static bool Matches(MediaTrack track, string title, string artist, double seconds)
-        => MatchText(track, track.Title) == MatchText(track, title) && Regex.Split(track.Artist, @"\s*[/、,，&;；]\s*").Where(a => a.Length > 0).All(a => MatchText(track, artist).Contains(MatchText(track, a), StringComparison.Ordinal))
-            && (track.Duration.TotalSeconds <= 0 || Math.Abs(seconds - track.Duration.TotalSeconds) <= 2);
-    private async Task<Lyrics> FindNeteaseId(string id, double duration, CancellationToken token, Action<Lyrics>? onAvailable = null)
+    // Players and providers write one name in either script (李耀陽, 李耀阳); names are compared in simplified Chinese.
+    private static string MatchText(string value) => Normalize(Simplify(value));
+
+    // How well a provider's song fits the track; a lower one fits better. Title 0: the same title; 1: the same title once a
+    // note at the end of either is removed ("(Live)", "【DJ版】", "- Remastered 2011", "feat. …"), that is another version of
+    // the song, taken only when no result has the title itself. Artists 0: all the track's artists; 1: some of them.
+    private readonly record struct Fit(int Title, int Artists, double Gap);
+    // A song whose title marks it as without words ("(伴奏)", "Instrumental") is not the sung track (measured: an accompaniment
+    // lasts as long as the song to the second, so the length does not tell them apart).
+    private static readonly Regex Wordless = new(@"伴奏|纯音乐|instrumental|karaoke|off\s*vocal", RegexOptions.IgnoreCase);
+    private static readonly Regex TrailingNote = new(@"\s*(?:\([^()]*\)|（[^（）]*）|\[[^\[\]]*\]|【[^【】]*】)\s*$");
+    private static readonly Regex FeaturedNote = new(@"\s+(?:feat\.?|ft\.|featuring)\s.*$", RegexOptions.IgnoreCase);
+    private static readonly Regex VersionNote = new(@"\s[-–—]\s.*(?:remaster|live|version|edit|mix|mono|stereo|acoustic|版|现场|重制)[^-–—]*$", RegexOptions.IgnoreCase);
+    private static string BareTitle(string title)
+    {
+        string text = title.Trim();
+        while (true)
+        {
+            string next = VersionNote.Replace(FeaturedNote.Replace(TrailingNote.Replace(text, ""), ""), "").Trim();
+            // A title that is all note ("(Untitled)") stays as it is.
+            if (next == text || next.Length == 0) return text;
+            text = next;
+        }
+    }
+    private static string[] ArtistNames(string artist) => [.. Regex.Split(artist, @"\s*(?:[/、,，&;；]|\s(?:feat\.?|ft\.|featuring)\s)\s*", RegexOptions.IgnoreCase)
+        .Select(MatchText).Where(name => name.Length > 0).Distinct()];
+    // seconds: the song's length at the provider. A track with no artist (some players report none) is told by its title and
+    // length alone; FindAsync asks for none without a length.
+    private static Fit? FitOf(MediaTrack track, string title, string artist, double seconds)
+    {
+        double gap = 0;
+        if (track.Duration.TotalSeconds > 0 && (gap = Math.Abs(seconds - track.Duration.TotalSeconds)) > 2) return null;
+        if (Wordless.IsMatch(title) && !Wordless.IsMatch(track.Title)) return null;
+        string expected = MatchText(track.Title), found = MatchText(title);
+        int titleFit = expected.Length > 0 && expected == found ? 0 : MatchText(BareTitle(track.Title)) is { Length: > 0 } bare && bare == MatchText(BareTitle(title)) ? 1 : -1;
+        if (titleFit < 0) return null;
+        var names = ArtistNames(track.Artist);
+        if (names.Length == 0) return new(titleFit, 0, gap);
+        var theirs = ArtistNames(artist);
+        int shared = names.Count(name => theirs.Any(other => other.Contains(name, StringComparison.Ordinal) || name.Contains(other, StringComparison.Ordinal)));
+        return shared == 0 ? null : new(titleFit, shared == names.Length ? 0 : 1, gap);
+    }
+    // The items that fit the track, the best first; items that fit equally keep their order.
+    private static IEnumerable<T> Fitting<T>(MediaTrack track, IEnumerable<T> items, Func<T, (string Title, string Artist, double Seconds)> song) =>
+        items.Select(item => (Item: item, Fit: song(item) is var (title, artist, seconds) ? FitOf(track, title, artist, seconds) : null))
+            .Where(row => row.Fit is not null).OrderBy(row => row.Fit!.Value.Title).ThenBy(row => row.Fit!.Value.Artists).ThenBy(row => row.Fit!.Value.Gap)
+            .Select(row => row.Item);
+    // The words to search a provider with: the title, then the artist when the player reported one.
+    private static string SearchWords(MediaTrack track) => (track.Title + " " + track.Artist).Trim();
+    private async Task<Lyrics> FindNeteaseId(string id, double duration, CancellationToken token)
     {
         if (!Regex.IsMatch(id, @"\A[0-9]{1,16}\z")) return Lyrics.Empty;
-        using var race = CancellationTokenSource.CreateLinkedTokenSource(token);
-        var pending = new List<Task<Lyrics>> { FindNeteaseNew(id, duration, race.Token), FindNeteaseOld(id, duration, race.Token) };
-        var first = Lyrics.Empty;
-        try
-        {
-            while (pending.Count > 0)
-            {
-                var completed = await Task.WhenAny(pending);
-                var result = await completed;
-                pending.Remove(completed);
-                token.ThrowIfCancellationRequested();
-                if (result.Lines.Count == 0 && !result.Instrumental) continue;
-                if (result.Lines.Any(line => line.Words is { Count: > 0 }))
-                {
-                    // Word timing is the best outcome: return at once so the slower endpoint cannot hold the
-                    // service gate while it retries or times out. The finally cancels and observes the loser.
-                    // A plain LRC already offered stays with its caller; only a word-timed reply upgrades it.
-                    onAvailable?.Invoke(result);
-                    return result;
-                }
-                if (first.Lines.Count == 0 && !first.Instrumental)
-                {
-                    first = result;
-                    onAvailable?.Invoke(first);
-                }
-            }
-            return first;
-        }
-        finally
-        {
-            race.Cancel();
-            foreach (var task in pending) _ = ObserveNeteaseRequest(task);
-        }
-    }
-    private static async Task ObserveNeteaseRequest(Task<Lyrics> task)
-    {
-        try { await task; } catch (Exception) { /* Canceled or failed losing request. */ }
-    }
-    private async Task<Lyrics> FindNeteaseOld(string id, double duration, CancellationToken token)
-    {
-        var data = await Get($"https://music.163.com/api/song/lyric?id={id}&lv=1&kv=1&tv=1&yv=1&ytv=1&rv=1&yrv=1", token);
-        return data is { ValueKind: JsonValueKind.Object } value ? NeteaseLyric(value, duration) : Lyrics.Empty;
-    }
-    // A NetEase lyric reply: the word-timed lyric wins over the plain one when it has words, its times being the
-    // line's own. It is labelled yrc (the version asked for with yv) or klyric; both hold the word-timed rows
-    // ParseYrc reads. The plain lrc is the fallback for a song without word timings.
-    private Lyrics NeteaseLyric(JsonElement value, double duration)
-    {
+        // lv, kv, tv and yv name the lyric versions the caller already holds; the reply leaves out a version that is
+        // not newer. lv=1 therefore received an empty lyric for every song still at its first version (measured), and
+        // yv asks for the word-timed yrc the same way.
+        var data = await Get($"https://music.163.com/api/song/lyric?id={id}&lv=-1&kv=-1&tv=-1&yv=-1", token);
+        if (data is not { ValueKind: JsonValueKind.Object } value) return Lyrics.Empty;
         // NetEase marks a song without words; its lyric then holds only credits and a notice.
         if (value.TryGetProperty("pureMusic", out var pure) && pure.ValueKind == JsonValueKind.True) return new([], true, "网易云音乐", true);
+        // The word-timed lyric (yrc, or klyric in older replies) wins over the plain one when it has words; the plain
+        // lrc is the fallback for a song without word timings.
         static string WordTimed(JsonElement root, string name) => root.TryGetProperty(name, out var entry) ? Str(entry, "lyric") : "";
         string wordTimed = WordTimed(value, "yrc");
         if (wordTimed.Length == 0) wordTimed = WordTimed(value, "klyric");
@@ -542,28 +602,30 @@ public sealed partial class LyricsService : IDisposable
     private async Task<Lyrics> FindLrclib(MediaTrack track, CancellationToken token)
     {
         string query = $"track_name={Uri.EscapeDataString(track.Title)}&artist_name={Uri.EscapeDataString(track.Artist)}";
-        string duration = track.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
-        var exact = await Get($"https://lrclib.net/api/get?{query}&album_name={Uri.EscapeDataString(track.Album)}&duration={duration}", token);
         Lyrics Parse(JsonElement value) => Lyrics.Parse(Str(value, "syncedLyrics"), Str(value, "plainLyrics"), track.Duration.TotalSeconds, "LRCLIB",
             value.TryGetProperty("instrumental", out var instrumental) && instrumental.ValueKind == JsonValueKind.True);
-        if (exact is { ValueKind: JsonValueKind.Object } row && Matches(track, Str(row, "trackName"), Str(row, "artistName"), Num(row, "duration")))
-        { var lyrics = Parse(row); if (lyrics.Lines.Count > 0 || lyrics.Instrumental) return lyrics; }
+        // The exact lookup names the artist; a track without one is only searched for.
+        if (track.Artist.Trim().Length > 0)
+        {
+            string duration = track.Duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+            var exact = await Get($"https://lrclib.net/api/get?{query}&album_name={Uri.EscapeDataString(track.Album)}&duration={duration}", token);
+            if (exact is { ValueKind: JsonValueKind.Object } row && FitOf(track, Str(row, "trackName"), Str(row, "artistName"), Num(row, "duration")) is { Title: 0 })
+            { var lyrics = Parse(row); if (lyrics.Lines.Count > 0 || lyrics.Instrumental) return lyrics; }
+        }
         var search = await Get("https://lrclib.net/api/search?" + query, token);
         if (search is { ValueKind: JsonValueKind.Array } list)
-            foreach (var item in list.EnumerateArray().Where(v => Matches(track, Str(v, "trackName"), Str(v, "artistName"), Num(v, "duration"))).OrderByDescending(v => Str(v, "syncedLyrics").Length > 0))
+            foreach (var item in Fitting(track, list.EnumerateArray().OrderByDescending(v => Str(v, "syncedLyrics").Length > 0), v => (Str(v, "trackName"), Str(v, "artistName"), Num(v, "duration"))))
             { var lyrics = Parse(item); if (lyrics.Lines.Count > 0 || lyrics.Instrumental) return lyrics; }
         return Lyrics.Empty;
     }
-    private Task<Lyrics> FindNetease(MediaTrack track, CancellationToken token) => FindNetease(track, token, null);
-    private async Task<Lyrics> FindNetease(MediaTrack track, CancellationToken token, Action<Lyrics>? onAvailable)
+    private async Task<Lyrics> FindNetease(MediaTrack track, CancellationToken token)
     {
-        var search = await Get("https://music.163.com/api/search/get/web?type=1&limit=8&s=" + Uri.EscapeDataString(track.Title + " " + track.Artist), token);
+        var search = await Get("https://music.163.com/api/search/get/web?type=1&limit=8&s=" + Uri.EscapeDataString(SearchWords(track)), token);
         if (search is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty("result", out var result) || !result.TryGetProperty("songs", out var songs) || songs.ValueKind != JsonValueKind.Array) return Lyrics.Empty;
-        foreach (var song in songs.EnumerateArray())
+        static string Artists(JsonElement song) => song.TryGetProperty("artists", out var artists) && artists.ValueKind == JsonValueKind.Array ? string.Join(" / ", artists.EnumerateArray().Select(a => Str(a, "name"))) : "";
+        foreach (var song in Fitting(track, songs.EnumerateArray().Where(song => song.TryGetProperty("id", out _)), song => (Str(song, "name"), Artists(song), Num(song, "duration") / 1000)))
         {
-            string artist = song.TryGetProperty("artists", out var artists) && artists.ValueKind == JsonValueKind.Array ? string.Join(" / ", artists.EnumerateArray().Select(a => Str(a, "name"))) : "";
-            if (!Matches(track, Str(song, "name"), artist, Num(song, "duration") / 1000) || !song.TryGetProperty("id", out var id)) continue;
-            var lyrics = await FindNeteaseId(id.ToString(), track.Duration.TotalSeconds, token, onAvailable);
+            var lyrics = await FindNeteaseId(song.GetProperty("id").ToString(), track.Duration.TotalSeconds, token);
             if (lyrics.Lines.Count > 0 || lyrics.Instrumental) return lyrics;
         }
         return Lyrics.Empty;
@@ -572,5 +634,6 @@ public sealed partial class LyricsService : IDisposable
     {
         if (_ownsHttp) _http.Dispose();
         foreach (var watcher in _appleWatchers.Values) watcher.Dispose();
+        _kugouWatcher?.Dispose();
     }
 }

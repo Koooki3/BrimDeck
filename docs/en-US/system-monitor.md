@@ -30,6 +30,12 @@ Under "When expanded", "What the page shows" has a chip for each reading, clicke
 - Until you change these switches or the order, the expanded page is exactly as before the upgrade; the old switches for the process list, drives, power and battery, and frame rate are now part of "What the page shows".
 - With both the CPU and the GPU shown, click the smaller one on the expanded page to choose which one is shown large.
 
+Under **When expanded › Layout mode**, choose **Reorder only** or **Grid layout**. In reorder mode, drag reading groups to change their order.
+
+In grid mode, each row has four columns. Drag available readings into the grid. Drag a tile to move it, and the other tiles make room as you go. Drag the handles on its edges to resize it. Click the cross at a tile's top right to remove it from the grid. A CPU or GPU tile one row high shows total usage (with the last minute's curve when two columns or wider); two rows or more show its own graph. Memory can take two rows; download, upload, a drive, the frame rate, and power and battery take one. Memory, download, upload, and each drive letter can be placed independently. Power and battery, frame rate, and the process list can also be placed in the grid. Use arrow keys to move a tile, Shift+arrows to resize it, or Delete to remove it.
+
+Each mode keeps its own settings, and the grid is saved in the profile. A disconnected drive keeps its position and resumes showing readings when it returns. Each column is always a quarter of the expanded page; a layout using fewer columns sits in the middle. Resizing the panel keeps the arrangement, and every row has a fixed height: to make a CPU or GPU graph or the process list taller, give it more rows in the settings. Rows that do not fill the panel sit in its middle; on a panel too short for every row, scroll the grid. A download or upload tile one column wide shows the rate and its curve; from two columns it also shows the traffic over the chosen period.
+
 ## CPU and GPU
 
 - CPU usage is worked out from the time the processor is busy (including WSL2 and virtual machines when Hyper-V is on), as Task Manager does from Windows 11 24H2.

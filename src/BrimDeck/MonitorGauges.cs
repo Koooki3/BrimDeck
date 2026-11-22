@@ -593,15 +593,15 @@ internal sealed class MemoryBlock : FrameworkElement
     // The look of the panel this element is drawn in (PanelLook.Of); the main look outside a panel.
     private PanelLook Look => PanelLook.Of(this);
     private readonly MonitorColors _colors;
-    private readonly bool _compact, _free;
+    private readonly bool _compact, _free, _compactBar;
     private readonly double _body, _caption;
     private Eased _used, _cached, _commit;
     private MemorySample? _memory;
 
-    public MemoryBlock(MonitorColors colors, bool compact, double body, double caption, bool free = false)
+    public MemoryBlock(MonitorColors colors, bool compact, double body, double caption, bool free = false, bool compactBar = false)
     {
-        _colors = colors; _compact = compact; _body = body; _caption = caption; _free = free;
-        Height = compact ? Math.Ceiling(body * 1.7) : Math.Ceiling(body * 1.7 + 6 + 5 + 5 + 3);
+        _colors = colors; _compact = compact; _body = body; _caption = caption; _free = free; _compactBar = compactBar;
+        Height = compact ? ExpandedCards.LineHeight(body) : ExpandedCards.MemoryHeight(body);
     }
 
     // For screen readers: "物理内存 63% · 正常", the memory in use (or free) as its value.
@@ -631,7 +631,7 @@ internal sealed class MemoryBlock : FrameworkElement
 
     protected override void OnRender(DrawingContext drawing)
     {
-        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), now = Eased.Now, line = Math.Ceiling(_body * 1.7), badge = Math.Round(_body + 5);
+        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), now = Eased.Now, line = ExpandedCards.LineHeight(_body), badge = Math.Round(_body + 5);
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
         string color = _memory is null ? Look.Tertiary : _colors.Memory;
         MonitorDraw.Dial(drawing, new Point(badge / 2, line / 2), badge, FigureGauge.DialRing(badge), FigureGauge.DialLetter(badge), _memory is null ? null : Shown(_used.At(now)), color, "M", ppd, look: Look);
@@ -647,18 +647,19 @@ internal sealed class MemoryBlock : FrameworkElement
         {
             // One line: the bar fills what the figures leave, with the commit charge as a thin line just under it, so it shows at
             // every size and not only where memory has a block of its own.
-            double start = x + 10, end = w;
-            if (end - start > 16)
+            double start = x + 10, available = w - start, width = available * (_compactBar ? .6 : 1);
+            if (width > 16)
             {
                 double top = Math.Round(line / 2 - 4);
-                Bar(drawing, new Rect(start, top, end - start, 4), color, now);
-                Commit(drawing, new Rect(start, top + 4 + 3, end - start, 2), now);
+                Bar(drawing, new Rect(start, top, width, 4), color, now);
+                Commit(drawing, new Rect(start, top + 4 + 3, width, 2), now);
             }
             return;
         }
         double barTop = line + 6;
-        Bar(drawing, new Rect(0, barTop, w, 5), color, now);
-        Commit(drawing, new Rect(0, barTop + 5 + 5, w, 2), now);
+        double fullWidth = w * (_compactBar ? .6 : 1);
+        Bar(drawing, new Rect(0, barTop, fullWidth, 5), color, now);
+        Commit(drawing, new Rect(0, barTop + 5 + 5, fullWidth, 2), now);
     }
 
     // The commit charge as a thin line under the bar, as ftop draws swap.
@@ -707,15 +708,17 @@ internal sealed class NetworkBlock : FrameworkElement
     private readonly bool _download, _upload;
     // With both shown: the upload at the left, as the table orders them.
     private readonly bool _uploadFirst;
+    // A grid tile, which may be a quarter of the page wide: what it shows follows its width, not the rate of the moment (Half).
+    private readonly bool _steady;
     private NetworkSample? _rates;
     private IReadOnlyList<double> _down = [], _up = [];
     private string _reason = "";
 
-    public NetworkBlock(MonitorColors colors, MetricsMode mode, double body, double caption, bool download = true, bool upload = true, bool uploadFirst = false)
+    public NetworkBlock(MonitorColors colors, MetricsMode mode, double body, double caption, bool download = true, bool upload = true, bool uploadFirst = false, bool steady = false)
     {
         _colors = colors; _mode = mode == MetricsMode.Blocks ? MetricsMode.Lines : mode; _body = body; _caption = caption;
-        _download = download || !upload; _upload = upload || !download; _uploadFirst = uploadFirst;
-        Height = Math.Ceiling(body * 1.7);
+        _download = download || !upload; _upload = upload || !download; _uploadFirst = uploadFirst; _steady = steady;
+        Height = ExpandedCards.LineHeight(body);
     }
 
     // For screen readers: "网络 · 下载 1.2 MB/s · 上传 85 KB/s".
@@ -737,7 +740,7 @@ internal sealed class NetworkBlock : FrameworkElement
 
     protected override void OnRender(DrawingContext drawing)
     {
-        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), line = Math.Ceiling(_body * 1.7), half = Math.Floor((w - 12) / 2);
+        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), line = ExpandedCards.LineHeight(_body), half = Math.Floor((w - 12) / 2);
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
         if (_download && _upload)
         {
@@ -750,7 +753,9 @@ internal sealed class NetworkBlock : FrameworkElement
     }
 
     // total: the traffic over the period chosen (TrafficPeriods), at the end of the half in the caption's type where there is room for it (with
-    // its label if that fits, else the figure alone), and the curve ends before it.
+    // its label if that fits, else the figure alone), and the curve ends before it. Steady (a grid tile): the rate keeps the room of
+    // its widest text and the curve comes before the total, which shows only where a curve still fits beside it, so a narrow tile
+    // keeps its curve and nothing appears or goes as the rate changes.
     private void Half(DrawingContext drawing, double left, double width, double line, MonitorGlyph glyph, double? rate, double? total, IReadOnlyList<double> history, string color, double ppd)
     {
         double badge = Math.Round(_body + 5), baseline = Math.Round(line / 2 + _body * .38);
@@ -763,7 +768,15 @@ internal sealed class NetworkBlock : FrameworkElement
         MonitorDraw.Baseline(drawing, number, x, baseline);
         x += number.WidthIncludingTrailingWhitespace;
         if (q.Unit.Length > 0) { var unit = MonitorDraw.Text(q.Unit, _caption, Look.Tertiary, ppd); MonitorDraw.Baseline(drawing, unit, x + 3, baseline); x += 3 + unit.WidthIncludingTrailingWhitespace; }
-        double reserved = 0;
+        bool curve = _mode != MetricsMode.Line;
+        if (_steady)
+        {
+            double widest = new[] { "888", "88.8" }.Max(sample => MonitorDraw.Text(sample, _body + 1, Look.Primary, ppd, strong: true).WidthIncludingTrailingWhitespace)
+                + 3 + MonitorDraw.Text("MB/s", _caption, Look.Tertiary, ppd).WidthIncludingTrailingWhitespace;
+            x = Math.Max(x, left + badge + Math.Round(_body * .5) + Math.Ceiling(widest));
+        }
+        // Where the curve starts: after the rate, and no earlier than a set share of the half, so curves one above another line up.
+        double start = Math.Max(x + 10, left + width * .45), reserved = 0;
         if (total is { } moved)
         {
             var figure = MonitorFormat.Total(moved).Text;
@@ -771,17 +784,18 @@ internal sealed class NetworkBlock : FrameworkElement
             {
                 var drawn = MonitorDraw.Text(label, _caption, Look.Tertiary, ppd);
                 double drawnWidth = Math.Ceiling(drawn.WidthIncludingTrailingWhitespace);
-                if (x + 8 + drawnWidth > left + width) continue;
+                // Steady: the room is the widest figure's, so tiles of one width show the same parts and their curves end together.
+                double room = _steady ? Math.Max(drawnWidth, Math.Ceiling(MonitorDraw.Text(label.Replace(figure, "8.88 MB"), _caption, Look.Tertiary, ppd).WidthIncludingTrailingWhitespace)) : drawnWidth;
+                if ((_steady && curve ? start + 24 : x) + 8 + room > left + width) continue;
                 MonitorDraw.Baseline(drawing, drawn, left + width - drawnWidth, baseline);
-                reserved = drawnWidth + 8;
+                reserved = room + 8;
                 break;
             }
         }
-        if (_mode == MetricsMode.Line || history.Count < 3) return;
+        if (!curve || history.Count < 3) return;
         // The sparkline takes the rest of the half after the rate, centred on the line and as tall as the power line's curve (a drive
         // line less 4), so the page's small curves are one size. Measured before a Rect is made: a Rect does not take a negative size,
         // and a narrow half leaves none.
-        double start = Math.Max(x + 10, left + width * .45);
         double areaWidth = left + width - reserved - start, areaHeight = Math.Min(line - 4, Math.Ceiling(_body * 1.5) - 4), areaTop = Math.Round((line - areaHeight) / 2);
         if (areaWidth >= 24 && areaHeight >= 6) Sparkline(drawing, new Rect(start, areaTop, areaWidth, areaHeight), history, color);
     }
@@ -807,7 +821,7 @@ internal sealed class StorageBlock : FrameworkElement
     // Between the columns.
     private const double ColumnGap = 20;
     private readonly MonitorColors _colors;
-    private readonly double _body, _caption, _row;
+    private readonly double _body, _caption, _row, _baselineOffset;
     private readonly int _columns, _room;
     private readonly bool _temperatures, _free;
     private IReadOnlyList<StorageRow> _rows = [];
@@ -816,9 +830,10 @@ internal sealed class StorageBlock : FrameworkElement
 
     // lines and columns: the places the page keeps for the volumes; temperatures: whether entries carry temperatures; free: the
     // entries show the space free in place of the space in use.
-    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int columns, bool temperatures, bool free = false)
+    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int columns, bool temperatures, bool free = false, bool alignCardBaseline = false)
     {
         _colors = colors; _body = body; _caption = caption; _row = row; _columns = Math.Max(1, columns);
+        _baselineOffset = body * (alignCardBaseline ? .38 : .36);
         _room = Math.Max(1, lines) * _columns; _temperatures = temperatures; _free = free;
         Height = Math.Max(1, lines) * row;
         SnapsToDevicePixels = true;
@@ -906,15 +921,19 @@ internal sealed class StorageBlock : FrameworkElement
             * Math.Clamp(_heat.At(now), 0, 1);
         double glyph = Math.Round(badge * 9 / 16), labelX = badge + Math.Round(_body * .5), figureX = labelX + labels + space, barX = figureX + figures + space;
         double cell = Math.Floor((w - ColumnGap * (_columns - 1)) / _columns);
-        double barEnd = Math.Max(barX, cell - heatWidth);
+        // A narrow cell (a grid tile a quarter of the page wide) leaves out the temperature first, then the total and the bar, so
+        // nothing is drawn over anything else.
+        if (cell < barX + 16 + heatWidth) heatWidth = 0;
+        bool sizes = cell >= barX - space;
+        double barEnd = sizes ? Math.Max(barX, cell - heatWidth) : barX;
         for (int i = 0; i < _rows.Count; i++)
         {
             var row = _rows[i]; var t = texts[i];
-            double left = i % _columns * (cell + ColumnGap), top = i / _columns * _row, baseline = Math.Round(top + _row / 2 + _body * .36), middle = top + _row / 2;
+            double left = i % _columns * (cell + ColumnGap), top = i / _columns * _row, baseline = Math.Round(top + _row / 2 + _baselineOffset), middle = top + _row / 2;
             MonitorDraw.Arrow(drawing, new Point(left + (badge - glyph) / 2, middle - glyph / 2), glyph, Math.Max(1, glyph * .13), MonitorGlyph.Drive, Look.Secondary);
             MonitorDraw.Baseline(drawing, t.Label, left + labelX, baseline);
             MonitorDraw.Baseline(drawing, t.Used, left + figureX, baseline);
-            MonitorDraw.Baseline(drawing, t.Size, left + figureX + t.Used.WidthIncludingTrailingWhitespace, baseline);
+            if (sizes) MonitorDraw.Baseline(drawing, t.Size, left + figureX + t.Used.WidthIncludingTrailingWhitespace, baseline);
             if (barEnd - barX >= 16) Bar(drawing, new Rect(left + barX, Math.Round(middle - 2), barEnd - barX, 4), row, i, now);
             if (row.Celsius is { } celsius && heatWidth > 1)
             {

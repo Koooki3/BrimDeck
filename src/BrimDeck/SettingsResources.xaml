@@ -538,7 +538,8 @@
           <!-- Keep the scrollbar in its own column so it never covers a highlighted item. The column stays reserved while
                the pointer leaves the list, preventing the items from shifting when the scrollbar is hidden. -->
           <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" Margin="0,4,0,0" Background="{DynamicResource SettingsInput}" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="1" CornerRadius="6" Padding="4">
-            <ScrollViewer MaxHeight="{TemplateBinding MaxDropDownHeight}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False" PanningMode="VerticalOnly">
+            <!-- Scrolled by pixels: by whole items, the list's end left the room of a part item blank below its last one. -->
+            <ScrollViewer MaxHeight="{TemplateBinding MaxDropDownHeight}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False" PanningMode="VerticalOnly" CanContentScroll="False">
               <ScrollViewer.Template><ControlTemplate TargetType="ScrollViewer">
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

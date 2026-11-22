@@ -9,6 +9,7 @@ static class DevicesTests
         Kinds(check);
         Ids(check);
         Roster(check);
+        Earlier(check);
         Levels(check);
     }
 
@@ -84,6 +85,23 @@ static class DevicesTests
         { Parts = [new(BatteryPart.Left, 80, false), new(BatteryPart.Right, 60, false), new(BatteryPart.Case, 10, false)] };
         check("Devices: earbuds' lowest is the lower bud, not the case", parts.Lowest == 60);
         check("Devices: a device that reports nothing has no lowest", Bt("EE", null).Lowest is null);
+    }
+
+    // The last time's readings while the devices are read again (DeviceRoster.WithEarlier).
+    private static void Earlier(Action<string, bool> check)
+    {
+        var earlier = new List<DeviceBattery> { Bt("AA", 60), Bt("BB", 40, "Buds", DeviceKind.Earbuds), Bt("CC", null, "Pad", DeviceKind.Controller) };
+        var shown = DeviceRoster.WithEarlier([], earlier);
+        check("Devices: before any reading, the last time's readings show, marked", shown.Count == 2 && shown.All(d => d.Earlier)
+            && shown.Select(d => d.Key).SequenceEqual(["bt:AA", "bt:BB"]));
+        shown = DeviceRoster.WithEarlier([Bt("AA", 58), Bt("BB", null, "Buds", DeviceKind.Earbuds)], earlier);
+        check("Devices: a reading now replaces the last time's; a device listed without one keeps the last time's",
+            shown.Count == 2 && shown.Single(d => d.Key == "bt:AA") is { Percent: 58, Earlier: false } && shown.Single(d => d.Key == "bt:BB") is { Percent: 40, Earlier: true });
+        shown = DeviceRoster.WithEarlier([Bt("DD", 90, "Keys", DeviceKind.Keyboard)], earlier);
+        check("Devices: the last time's readings take their places in the order", shown.Select(d => d.Kind).SequenceEqual([DeviceKind.Mouse, DeviceKind.Keyboard, DeviceKind.Earbuds]));
+        IReadOnlyList<DeviceBattery> now = [Bt("AA", 58)];
+        check("Devices: with nothing from the last time, the readings now are shown as they are", ReferenceEquals(DeviceRoster.WithEarlier(now, []), now));
+        check("Devices: a marked reading is a change to the page", !Bt("AA", 60).Same(Bt("AA", 60) with { Earlier = true }));
     }
 
     private static void Levels(Action<string, bool> check)

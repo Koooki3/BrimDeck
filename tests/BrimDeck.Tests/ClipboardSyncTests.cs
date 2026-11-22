@@ -51,6 +51,7 @@ static class ClipboardSyncTests
             check("Reject missing or ambiguous Doubao capability " + json, rejected);
         }
         check("Doubao server errors retain only numeric code", new DoubaoRequestException(900102010).Message.Contains("900102010"));
+        WeTypeFileTests.Run(check);
         CloudContent(check);
         LanRoutes(check);
         LanFramesAsync(check).GetAwaiter().GetResult();

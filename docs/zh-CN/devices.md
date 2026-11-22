@@ -26,7 +26,7 @@ BrimDeck 只读取电量：不配对、不断开，也不改动任何设备与 W
 | --- | --- |
 | 罗技、迈从（MCHOSE）、ATK、Endgame Gear、VAXEE、雷柏（Rapoo）、Keychron、Finalmouse | 整个品牌 |
 | 雷蛇、华硕 ROG、赛睿（SteelSeries）、海盗船（Corsair）、HyperX | 已知的无线型号 |
-| VXE、VGN、Pulsar、LAMZU、G-Wolves、WLmouse、Ninjutso、LINGBAO、NZXT、HECATE、达尔优（Dareu）、英菲克（Inphic）、黑爵（AJAZZ）、Attack Shark、多彩（DELUX）、Glorious、Darmoshark、前行者（EWEADN）、狼蛛（AULA）、雷神 ML903、玄派 玄熊猫 P1、Scyrox、Cougar、红龙（Redragon）、Hitscan、iRocks、Vancer、Incott、Ryunix、京东京造 JZM5、RIDLAG、摩豹（Motospeed）X6、重力星球（GravaStar，含 Mercury 系列与 S1 Pro、R1） | 已知型号 |
+| VXE、VGN、Pulsar、LAMZU、G-Wolves、WLmouse、Ninjutso、LINGBAO、NZXT、HECATE、达尔优（Dareu）、英菲克（Inphic）、黑爵（AJAZZ）、Attack Shark、多彩（DELUX）、Glorious、Darmoshark、前行者（EWEADN）、狼蛛（AULA）、雷神 ML903、玄派 玄熊猫 P1、Scyrox、Cougar、红龙（Redragon）、Hitscan、iRocks、Vancer、Incott、Ryunix、京东京造 JZM5、RIDLAG、摩豹（Motospeed）X6、重力星球（GravaStar，含 Mercury 系列与 S1 Pro、R1）、IQUNIX Q101 | 已知型号 |
 
 **键盘**
 
@@ -41,7 +41,7 @@ BrimDeck 只读取电量：不配对、不断开，也不改动任何设备与 W
 | 品牌 | 范围 |
 | --- | --- |
 | Jabra、FIFINE、西伯利亚 | 整个品牌 |
-| 罗技（含 G PRO X 2）、赛睿（含 GameBuds X）、HyperX、海盗船（含 Virtuoso、HS80、Void 系列）、雷蛇、索尼 INZONE 与 PULSE Explore、华硕 ROG、ASTRO A50、Audeze Maxwell、Skullcandy PLYR、AKG N9、迈从（含 V9 PRO、G9 PRO）、狼蛛（G9、A9）、JBL Quantum 910、PULSE 3D、ATK（N9 Pro、N9 Ultra、N9 V2 系列）、联想、寸渊影弑、漫步者 Halo Space、竹林鸟（烛龙 ZG4、朱雀 ZG3） | 已知型号 |
+| 罗技（含 G PRO X 2）、赛睿（含 GameBuds X）、HyperX、海盗船（含 Virtuoso、HS80、Void 系列）、雷蛇、索尼 INZONE 与 PULSE Explore、华硕 ROG、ASTRO A50、Audeze Maxwell、Skullcandy PLYR、AKG N9、迈从（含 V9 PRO、G9 PRO）、狼蛛（G9、A9）、JBL Quantum 910、PULSE 3D、ATK（N9 Pro、N9 Ultra、N9 V2 系列）、联想、寸渊影弑、漫步者 Halo Space、竹林鸟（烛龙 ZG4、朱雀 ZG3）、EPOS（H3PRO Hybrid、GSP 670、GSP 370、GTW 270 Hybrid）、IQUNIX ITX Pro | 已知型号 |
 
 **手柄**
 

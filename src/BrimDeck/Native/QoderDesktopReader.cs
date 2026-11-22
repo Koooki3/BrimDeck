@@ -9,8 +9,9 @@ namespace BrimDeck.Native;
 
 // The Qoder desktop app (and Qoder CN) is an Electron app installed per user or for every user; its uninstall entry is named
 // "Qoder 0.5.14" ("Qoder CN 0.5.14") with the publisher Qoder, and its uninstaller sits in the install folder. The Qoder IDE has
-// entries of its own ("Qoder IDE"), which the version in the name keeps apart. The app keeps its sign-in in auth.v1.dat in its
-// data folder, encrypted with Chromium's os_crypt like the other Electron apps (ChromiumSecrets).
+// entries of its own ("Qoder IDE"), which the version in the name keeps apart. Find serves QoderProcesses, which tells the app's
+// processes apart; reading the credits needs only the sign-in. The app keeps it in auth.v1.dat in its data folder, encrypted
+// with Chromium's os_crypt like the other Electron apps (ChromiumSecrets).
 internal static partial class QoderDesktopReader
 {
     private const string Uninstall = @"Software\Microsoft\Windows\CurrentVersion\Uninstall";

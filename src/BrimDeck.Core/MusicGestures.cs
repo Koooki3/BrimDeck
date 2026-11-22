@@ -1,11 +1,20 @@
 namespace BrimDeck.Core;
 
 // What a gesture over the expanded music page does. Saved as numbers, so new members go at the end.
-public enum MusicGestureAction { None, NextTrack, PreviousTrack, NextPlayer, PreviousPlayer, PlayPause, VolumeUp, VolumeDown }
+// VolumeUp and VolumeDown change the system volume; PlayerVolumeUp and PlayerVolumeDown change only the current player's volume
+// in the system's volume mixer.
+public enum MusicGestureAction { None, NextTrack, PreviousTrack, NextPlayer, PreviousPlayer, PlayPause, VolumeUp, VolumeDown, PlayerVolumeUp, PlayerVolumeDown }
 public enum GestureDirection { None, Left, Right, Up, Down }
 
 public static class MusicGestures
 {
+    public static bool IsVolume(MusicGestureAction action) => IsSystemVolume(action) || IsPlayerVolume(action);
+    public static bool IsSystemVolume(MusicGestureAction action) => action is MusicGestureAction.VolumeUp or MusicGestureAction.VolumeDown;
+    public static bool IsPlayerVolume(MusicGestureAction action) => action is MusicGestureAction.PlayerVolumeUp or MusicGestureAction.PlayerVolumeDown;
+    // How much (0 to 1) a touchpad swipe set to the player's volume changes it.
+    public const double PlayerVolumeStep = .1;
+    public static double PlayerVolumeStepped(double level, MusicGestureAction action) =>
+        Math.Clamp(Math.Round((level + (action == MusicGestureAction.PlayerVolumeUp ? PlayerVolumeStep : -PlayerVolumeStep)) * 100) / 100, 0, 1);
     // How far, in DIPs, a drag goes along its main axis before it counts as a gesture.
     public const double DragDistance = 36;
     // How far the pointer moves with the button down before the drag starts and its trail shows.
@@ -20,7 +29,12 @@ public static class MusicGestures
     public static int VolumeSign(GestureDirection direction, MusicGestureAction action)
     {
         int towards = direction is GestureDirection.Right or GestureDirection.Down ? 1 : direction is GestureDirection.Left or GestureDirection.Up ? -1 : 0;
-        return action switch { MusicGestureAction.VolumeUp => towards, MusicGestureAction.VolumeDown => -towards, _ => 0 };
+        return action switch
+        {
+            MusicGestureAction.VolumeUp or MusicGestureAction.PlayerVolumeUp => towards,
+            MusicGestureAction.VolumeDown or MusicGestureAction.PlayerVolumeDown => -towards,
+            _ => 0
+        };
     }
     public static double VolumeLevel(double start, int sign, double moved) => Math.Clamp(start + sign * moved * VolumePerDip, 0, 1);
 
