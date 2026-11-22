@@ -114,6 +114,41 @@ internal static class GlassSampleValidityTests
         check($"Liquid glass counts a reading's age from its capture's start ({slowVerdict}, next look at {slowDeadline} ms)",
             slowVerdict == GlassSampleValidity.Verdict.Accepted && slowDeadline == GlassSampleValidity.IdleTtl + 1 && slow.Protection(760) > 0);
 
+        // V3 C4 slow mode: on a busy machine a ring read takes 150-490 ms. A capture that began in time (the next one at rest, 500 ms
+        // after the last) and answers 400 ms later is no gap: the protection waits for it, so the veils do not pulse at rest.
+        var timely = new GlassSampleValidity(0);
+        var timelyProbe = new FakeProbe(timely);
+        timelyProbe.Start(1, 10, calm);
+        timelyProbe.Advance(10, 1);
+        timelyProbe.Now = 520;
+        timelyProbe.Start(1, 400, (.31, .1));
+        var timelyWatch = new List<(long At, double Level)>();
+        var timelyVerdict = timelyProbe.Advance(920, 1, timelyWatch);
+        check($"Liquid glass waits for a slow capture that began in time at rest ({timelyVerdict}, {timelyWatch.Count(w => w.Level > 0)} looks with protection)",
+            timelyVerdict == GlassSampleValidity.Verdict.Accepted && timelyWatch.All(w => w.Level == 0) && !timely.Protecting && timely.Tails == (.31, .1));
+        // The same in a burst (80 ms apart, a 200 ms read).
+        var timelyBurst = new GlassSampleValidity(0);
+        timelyBurst.Mode(true, 0);
+        var timelyBurstProbe = new FakeProbe(timelyBurst);
+        timelyBurstProbe.Start(1, 10, calm);
+        timelyBurstProbe.Advance(10, 1);
+        timelyBurstProbe.Now = 90;
+        timelyBurstProbe.Start(1, 200, calm);
+        var timelyBurstVerdict = timelyBurstProbe.Advance(290, 1);
+        check($"Liquid glass waits for a slow capture that began in time in a burst ({timelyBurstVerdict})",
+            timelyBurstVerdict == GlassSampleValidity.Verdict.Accepted && !timelyBurst.Protecting && timelyBurst.Protection(290) == 0);
+        // A capture that began in time but never answers is still not hidden: protection from HardSafety after it began, the worst
+        // range by WorstBy after the last reading.
+        var timelyStuck = new GlassSampleValidity(0);
+        var timelyStuckProbe = new FakeProbe(timelyStuck);
+        timelyStuckProbe.Start(1, 10, calm);
+        timelyStuckProbe.Advance(10, 1);
+        timelyStuckProbe.Now = 520;
+        timelyStuckProbe.Start(1, null, null);
+        timelyStuckProbe.Advance(1510, 1);
+        check(FormattableString.Invariant($"Liquid glass guards the text when a capture that began in time never answers ({timelyStuck.Protection(1020):0.000} at 1020 ms)"),
+            timelyStuck.Protection(1019) == 0 && timelyStuck.Protection(1021) > 0 && timelyStuck.Protection(1510) == 1);
+
         // A burst's shorter TTL counts from the burst: a hint after a quiet 400 ms does not raise the protection at once.
         var burst = new GlassSampleValidity(0);
         var burstProbe = new FakeProbe(burst);
