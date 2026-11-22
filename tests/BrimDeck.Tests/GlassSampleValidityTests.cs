@@ -90,7 +90,8 @@ internal static class GlassSampleValidityTests
         check($"Liquid glass drops the readings of a drag and guards the text meanwhile ({dropped} dropped)",
             dropped >= 18 && drag.Protection(1600) == 1 && drag.Tails == calm && drag.Protection(300) > 0);
 
-        // Recovery: one fresh reading only starts it; two in a row that agree end it; two that disagree do not.
+        // Recovery: one fresh reading that differs from the last one kept only starts it; two in a row that agree end it; two that
+        // disagree do not.
         var recover = new GlassSampleValidity(0);
         var recoverProbe = new FakeProbe(recover);
         recoverProbe.Start(1, 10, calm);
@@ -105,6 +106,19 @@ internal static class GlassSampleValidityTests
         check($"Liquid glass recovers only from two fresh readings that agree ({first}, {disagree}, {agree})",
             first == GlassSampleValidity.Verdict.Recovering && disagree == GlassSampleValidity.Verdict.Recovering
             && agree == GlassSampleValidity.Verdict.Accepted && recover.Protection(2170) == 0 && recover.Tails == (.92, .45));
+
+        // A gap that ends on the same scene: the first fresh reading agrees with the last one kept, so the two agree and the
+        // protection ends at once (V3 C4: a busy machine's stalled timer otherwise keeps the veils thick for one more reading).
+        var same = new GlassSampleValidity(0);
+        var sameProbe = new FakeProbe(same);
+        sameProbe.Start(1, 10, calm);
+        sameProbe.Advance(10, 1);
+        sameProbe.Advance(1300, 1);
+        double sameBefore = same.Protection(1300);
+        sameProbe.Now = 1300; sameProbe.Start(1, 150, (.35, .05));
+        var sameVerdict = sameProbe.Advance(1450, 1);
+        check(FormattableString.Invariant($"Liquid glass ends the protection on one fresh reading that agrees with the last one kept ({sameBefore:0.000} -> {sameVerdict})"),
+            sameBefore > 0 && sameVerdict == GlassSampleValidity.Verdict.Accepted && same.Protection(1450) == 0 && same.Tails == (.35, .05));
 
         // The age is the capture's start: a 600 ms idle capture that answers within the TTL is kept, but counts from when it began;
         // the protection allows the next reading as long as this one took (the pace, at most HardSafety).

@@ -14,8 +14,9 @@ namespace BrimDeck.Core;
 //     is no gap but a slow reading - to 1 (the worst range: tails 1 and 0) no later than WorstBy after the last accepted
 //     capture. The ring around the island cannot prove the pixels under it safe, so nothing less than the worst range is
 //     assumed at 1.
-//   Recovery: once protection has risen, it falls back to 0 only after two fresh readings in a row agree (within RecoverAgree on
-//     both tails); a single one only starts the recovery.
+//   Recovery: once protection has risen, it falls back to 0 only after two readings in a row agree (within RecoverAgree on
+//     both tails): the first fresh one and the last one kept (the scene has not changed over the gap), or else two fresh ones;
+//     a single fresh one that differs only starts the recovery.
 //   A capture still running Abandon after it began is given up, so a worker that never returns cannot stop all later readings.
 //   Pause (V3 C4): while the island moves the ring is not read (GlassMotionGate); the time paused, up to GlassMotionGate.MaxPause,
 //     is no age: the TTLs and WorstBy count from the last reading as if the pause had not been. A capture under way when the pause
@@ -98,7 +99,8 @@ public sealed class GlassSampleValidity
         if (took > allowed) { Dropped++; return Verdict.Late; }
         if (_protecting && !First)
         {
-            bool agrees = _recoverFrom is { } before && Math.Abs(before.Bright - read.Bright) <= RecoverAgree
+            var before = _recoverFrom ?? Tails;
+            bool agrees = Math.Abs(before.Bright - read.Bright) <= RecoverAgree
                 && Math.Abs(before.Dark - read.Dark) <= RecoverAgree;
             _recoverFrom = read;
             if (!agrees) return Verdict.Recovering;
