@@ -80,6 +80,8 @@ internal static class GlassEffect
     internal static GlassBackendState GraphState { get; private set; }
     // Whether the persistent graph can be used now (false once Composition refused it for this generation).
     public static bool GraphAvailable => !_graphRefused;
+    // When the graph may be tried again after a transient failure (a surface showing a fallback wakes for it).
+    internal static long RetryAt => _retryAt;
 
     // The display, a resume or the capabilities changed: what was refused may work now, and the failure streak starts again.
     // Safe from any thread; the UI thread takes it up at its next request.
@@ -135,9 +137,9 @@ internal static class GlassEffect
             brush.SetSourceParameter("backdrop", backdrop);
             Own(brush, factory);
             var status = Status(factory);
-            if (status == CompositionEffectFactoryLoadStatus.Success) Succeeded();
-            else if (status == CompositionEffectFactoryLoadStatus.Pending) GraphState = GlassBackendState.Loading;
-            else throw new NotSupportedException($"the glass graph did not load: {status}");
+            // A factory that loaded is no success yet: the streak ends only once a brush of it has presented (Succeeded).
+            if (status == CompositionEffectFactoryLoadStatus.Pending) GraphState = GlassBackendState.Loading;
+            else if (status != CompositionEffectFactoryLoadStatus.Success) throw new NotSupportedException($"the glass graph did not load: {status}");
             return brush;
         }
         catch (Exception error) when (Expected(error))
@@ -185,7 +187,7 @@ internal static class GlassEffect
         catch (Exception error) when (Expected(error)) { return CompositionEffectFactoryLoadStatus.Other; }
     }
 
-    // A graph brush drew (its factory loaded, its weights were taken): the failure streak starts again.
+    // A graph brush presented (its factory loaded and its first weights were taken): the failure streak starts again.
     public static void Succeeded()
     {
         _graphFailures = 0;
