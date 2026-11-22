@@ -13,16 +13,18 @@ public enum HotkeyStatus { Unset, Active, InUse, Invalid, Duplicate }
 public enum HotkeyModifiers { None = 0, Ctrl = 1, Alt = 2, Shift = 4, Win = 8 }
 
 // The saved text of a global hotkey: modifiers in the fixed order Ctrl+Alt+Shift+Win, then the main key's name (a WPF Key
-// name such as "K", "D1" or "F9"), joined by "+". Only F1 to F24 may stand without a modifier. Left and right modifiers are
-// not told apart. Whether the key name names a real key is decided by the caller (HotkeyGesture in the app).
+// name such as "K", "D1" or "F9"), joined by "+". Only F1 to F24 may stand without a modifier, except ClickThrough, which
+// may also use a bare non-typing key (see AllowsBareKey). Left and right modifiers are not told apart. Whether the key name
+// names a real key is decided by the caller (HotkeyGesture in the app).
 public static class HotkeyText
 {
     private static readonly (HotkeyModifiers Flag, string Name)[] Order =
         [(HotkeyModifiers.Ctrl, "Ctrl"), (HotkeyModifiers.Alt, "Alt"), (HotkeyModifiers.Shift, "Shift"), (HotkeyModifiers.Win, "Win")];
 
     // Accepts the modifiers in any order and letter case, and the aliases Control and Windows; rejects repeated modifiers,
-    // a missing or repeated main key and spaces inside a part. An empty text is not a hotkey (see IsUnset).
-    public static bool TryParse(string? text, out HotkeyModifiers modifiers, out string key)
+    // a missing or repeated main key and spaces inside a part. An empty text is not a hotkey (see IsUnset). bareKeyOk lets a
+    // non-function main key stand alone (ClickThrough).
+    public static bool TryParse(string? text, out HotkeyModifiers modifiers, out string key, bool bareKeyOk = false)
     {
         modifiers = HotkeyModifiers.None; key = "";
         if (string.IsNullOrWhiteSpace(text)) return false;
@@ -43,29 +45,47 @@ public static class HotkeyText
                 key = part;
             }
         }
-        return IsAllowed(modifiers, key);
+        return IsAllowed(modifiers, key, bareKeyOk);
     }
+
+    // Mouse pass-through may be a single key (modifiers optional); other shortcuts still need a modifier except F1–F24.
+    public static bool AllowsBareKey(HotkeyKind kind) => kind == HotkeyKind.ClickThrough;
 
     public static string Format(HotkeyModifiers modifiers, string key)
         => string.Join("+", Order.Where(o => modifiers.HasFlag(o.Flag)).Select(o => o.Name).Append(key));
 
     // The canonical form of a saved text, or "" when it is empty or not an allowed combination.
-    public static string Normalize(string? text) => TryParse(text, out var modifiers, out var key) ? Format(modifiers, key) : "";
+    public static string Normalize(string? text, bool bareKeyOk = false)
+        => TryParse(text, out var modifiers, out var key, bareKeyOk) ? Format(modifiers, key) : "";
 
     public static bool IsUnset(string? text) => string.IsNullOrWhiteSpace(text);
 
-    public static bool IsAllowed(HotkeyModifiers modifiers, string key)
+    public static bool IsAllowed(HotkeyModifiers modifiers, string key, bool bareKeyOk = false)
         => key.Length > 0 && (modifiers & ~(HotkeyModifiers.Ctrl | HotkeyModifiers.Alt | HotkeyModifiers.Shift | HotkeyModifiers.Win)) == 0
-           && (modifiers != HotkeyModifiers.None || IsFunctionKey(key));
+           && (modifiers != HotkeyModifiers.None || IsFunctionKey(key)
+               || (bareKeyOk && !IsTypingKey(key) && !string.Equals(key, Arrows, StringComparison.OrdinalIgnoreCase)));
 
     // F1 to F24, which may be used alone.
     public static bool IsFunctionKey(string key)
         => key.Length is 2 or 3 && (key[0] is 'F' or 'f') && int.TryParse(key.AsSpan(1), System.Globalization.NumberStyles.None, null, out int n)
            && n is >= 1 and <= 24 && key[1] != '0';
 
+    // Keys that type a character: a bare binding would take over ordinary typing, so they still need a modifier.
+    public static bool IsTypingKey(string key)
+        => key.Length == 1 && char.IsLetter(key[0])
+           || key.Length == 2 && (key[0] is 'D' or 'd') && char.IsDigit(key[1])
+           || key.StartsWith("NumPad", StringComparison.OrdinalIgnoreCase)
+           || key.StartsWith("Oem", StringComparison.OrdinalIgnoreCase)
+           || key is ("Space" or "Add" or "Subtract" or "Multiply" or "Divide" or "Decimal");
+
     // Whether two saved texts name the same combination, whatever their spelling. Two unset or invalid texts are not the same.
+    // Bare keys (ClickThrough) still compare equal when both sides name the same main key.
     public static bool Same(string? first, string? second)
-        => Normalize(first) is { Length: > 0 } a && string.Equals(a, Normalize(second), StringComparison.OrdinalIgnoreCase);
+        => Canonical(first) is { Length: > 0 } a && string.Equals(a, Canonical(second), StringComparison.OrdinalIgnoreCase);
+
+    // Normalize that also accepts a bare main key, so clash checks see ClickThrough's single-key shortcuts.
+    private static string Canonical(string? text)
+        => Normalize(text) is { Length: > 0 } usual ? usual : Normalize(text, bareKeyOk: true);
 
     // Whether a hotkey is saved as modifiers with the arrow keys (see Arrows).
     public static bool IsArrows(HotkeyKind kind) => kind is HotkeyKind.Resize or HotkeyKind.Move;
@@ -95,7 +115,8 @@ public static class HotkeyText
         if (IsUnset(text)) return (HotkeyStatus.Unset, "");
         if (IsArrows(kind)) return TryParseArrows(text, out var arrowModifiers) ? (null, Format(arrowModifiers, Arrows)) : (HotkeyStatus.Invalid, "");
         // "Arrows" names no key: only an arrow shortcut stands for the arrow keys.
-        if (!TryParse(text, out var modifiers, out var key) || !isKey(key) || string.Equals(key, Arrows, StringComparison.OrdinalIgnoreCase)) return (HotkeyStatus.Invalid, "");
+        bool bare = AllowsBareKey(kind);
+        if (!TryParse(text, out var modifiers, out var key, bare) || !isKey(key) || string.Equals(key, Arrows, StringComparison.OrdinalIgnoreCase)) return (HotkeyStatus.Invalid, "");
         return (null, Format(modifiers, key));
     }
 
@@ -131,7 +152,7 @@ public static class HotkeyText
 
     // The combinations a saved text stands for: the four arrow keys for an arrow shortcut, otherwise the text itself.
     public static string[] Combinations(string? text)
-        => TryParseArrows(text, out var modifiers) ? [.. ArrowKeys.Select(key => Format(modifiers, key))] : Normalize(text) is { Length: > 0 } one ? [one] : [];
+        => TryParseArrows(text, out var modifiers) ? [.. ArrowKeys.Select(key => Format(modifiers, key))] : Canonical(text) is { Length: > 0 } one ? [one] : [];
 
     // Whether two saved texts share a combination (an arrow shortcut and Ctrl+Alt+Left do).
     public static bool Overlap(string? first, string? second)

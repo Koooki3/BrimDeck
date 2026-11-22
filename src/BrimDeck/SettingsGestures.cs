@@ -20,6 +20,8 @@ public sealed partial class SettingsWindow
         MusicGestureAction.PlayPause => Loc.T("播放/暂停", "Play/pause"),
         MusicGestureAction.VolumeUp => Loc.T("增大音量", "Volume up"),
         MusicGestureAction.VolumeDown => Loc.T("减小音量", "Volume down"),
+        MusicGestureAction.PlayerVolumeUp => Loc.T("增大播放器音量", "Player volume up"),
+        MusicGestureAction.PlayerVolumeDown => Loc.T("减小播放器音量", "Player volume down"),
         _ => Loc.T("无操作", "No action")
     };
 
@@ -39,7 +41,7 @@ public sealed partial class SettingsWindow
     private FrameworkElement GestureRow(string title, MusicGestureAction selected, Action<MusicGestureAction> change)
     {
         var actions = Enum.GetValues<MusicGestureAction>();
-        var choice = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo"), ItemsSource = actions.Select(GestureName).ToList(),
+        var choice = new ComboBox { Width = 160, Style = (Style)FindResource("SettingsCombo"), ItemsSource = actions.Select(GestureName).ToList(),
             SelectedIndex = Array.IndexOf(actions, selected), IsEnabled = S.MusicPage };
         AutomationProperties.SetName(choice, title); PopupMotion.Attach(choice);
         choice.SelectionChanged += (_, _) => { if (choice.SelectedIndex >= 0) change(actions[choice.SelectedIndex]); };

@@ -36,7 +36,7 @@ public sealed partial class SettingsWindow
     private static string AppColorName(string key) => key switch
     {
         "claude" => "Claude", "codex" => "Codex", "antigravity" => "Antigravity", "cursor" => "Cursor", "zcode" => "ZCode", "dsh" => "DeepSeek Harness",
-        "grokBot" => "Grok Bot", "kimi" => "Kimi Code", "opencode" => "OpenCode", "codeagent" => "CodeAgent", "commandcode" => "Command Code", "workbuddy" => "WorkBuddy", "qoder" => "Qoder", "qwenwork" => Loc.T("千问办公与 QwenWork", "QwenWork CN and QwenWork"), "manual" => Loc.T("手动填写的来源", "Sources entered by hand"), "other" => Loc.T("其他应用", "Other apps"),
+        "grokBot" => "Grok Bot", "kimi" => "Kimi Code", "opencode" => "OpenCode", "codeagent" => "CodeAgent", "commandcode" => "Command Code", "workbuddy" => "WorkBuddy", "qoder" => "Qoder", "qwenwork" => Loc.T("千问办公与 QwenWork", "QwenWork CN and QwenWork"), "trae" => "TRAE", "doubao" => Loc.T("豆包与 Dola", "Doubao and Dola"), "volcengine" => Loc.T("火山方舟与 BytePlus", "Volcengine Ark and BytePlus"), "manual" => Loc.T("手动填写的来源", "Sources entered by hand"), "other" => Loc.T("其他应用", "Other apps"),
         "warning" => Loc.T("预警", "Warning"), "critical" => Loc.T("告警", "Critical"), _ => key
     };
 

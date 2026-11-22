@@ -7,13 +7,13 @@ using BrimDeck.Core;
 
 namespace BrimDeck.Native;
 
-public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
+public sealed class DesktopSources(MiMoAccount? mimo = null, DoubaoQuotaAccount? doubaoQuota = null) : IDesktopSources
 {
     public string? ReadMiMoSession() => mimo?.Read();
     public void SaveMiMoSession(string session) => mimo?.Save(session);
+    public string? ReadDoubaoQuotaSession(ProviderId id) => doubaoQuota?.Read(id);
     public ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => ClaudeDesktopReader.Read(locations);
     public GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => GrokBotDesktopReader.Read(locations);
-    public string? FindQoderDesktop(bool china) => QoderDesktopReader.Find(china);
     public string? ReadQoderDesktopSignIn(string folder) => QoderDesktopReader.ReadSignIn(folder);
     public string? ReadQwenWorkSignIn(string folder) => QoderDesktopReader.ReadSignIn(folder, QwenWorkUsage.SignInFile);
 
@@ -142,11 +142,50 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
     public IReadOnlyList<string?[]>? QueryDatabase(string database, string sql)
     {
         if (!File.Exists(database)) return null;
-        IntPtr db = IntPtr.Zero, statement = IntPtr.Zero;
+        IntPtr db = IntPtr.Zero;
         try
         {
             if (sqlite3_open_v2(database, out db, 1, IntPtr.Zero) != 0) return null; // SQLITE_OPEN_READONLY
             sqlite3_busy_timeout(db, 1000);
+            return ExecuteQuery(db, sql);
+        }
+        finally
+        {
+            if (db != IntPtr.Zero) sqlite3_close(db);
+        }
+    }
+
+    // Decrypts Trae's SQLCipher 4 database (plus committed WAL frames) into a sqlite3_malloc64 buffer and queries it
+    // read-only in memory via sqlite3_deserialize; no plaintext database is ever written to disk.
+    public IReadOnlyList<string?[]>? QueryTraeDatabase(string database, string sql)
+    {
+        byte[]? image = TraeUsage.DecryptDatabase(database);
+        if (image is null || image.Length == 0) return null;
+        IntPtr db = IntPtr.Zero, buffer = IntPtr.Zero;
+        bool ownedBySqlite = false;
+        try
+        {
+            buffer = sqlite3_malloc64((ulong)image.Length);
+            if (buffer == IntPtr.Zero) return null;
+            Marshal.Copy(image, 0, buffer, image.Length);
+            if (sqlite3_open_v2(":memory:", out db, 6, IntPtr.Zero) != 0) return null; // SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
+            if (sqlite3_deserialize(db, "main", buffer, image.Length, image.Length, 5) != 0) return null; // FREEONCLOSE | READONLY
+            ownedBySqlite = true;
+            return ExecuteQuery(db, sql);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(image);
+            if (!ownedBySqlite && buffer != IntPtr.Zero) sqlite3_free(buffer);
+            if (db != IntPtr.Zero) sqlite3_close(db);
+        }
+    }
+
+    private static List<string?[]>? ExecuteQuery(IntPtr db, string sql)
+    {
+        IntPtr statement = IntPtr.Zero;
+        try
+        {
             if (sqlite3_prepare_v2(db, sql, -1, out statement, IntPtr.Zero) != 0) return null;
             var rows = new List<string?[]>();
             int columns = sqlite3_column_count(statement), step;
@@ -161,13 +200,12 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
         finally
         {
             if (statement != IntPtr.Zero) sqlite3_finalize(statement);
-            if (db != IntPtr.Zero) sqlite3_close(db);
         }
     }
 
-    // Discovery reads the language servers' service files, otherwise asks WMI for their command lines. Its result is kept for
-    // as long as that process lives and still listens on the same ports, so each refresh then costs one read of the system's
-    // listener table.
+    // Discovery reads the service files of the language servers and agy hubs, otherwise asks WMI for the language servers'
+    // command lines. Its result is kept for as long as that process lives and still listens on the same ports, so each refresh
+    // then costs one read of the system's listener table.
     private (int Id, DateTime Started, IReadOnlyList<LocalEndpoint> Endpoints)[] _antigravity = [];
     public bool AntigravityUnreadable { get; private set; }
 
@@ -178,10 +216,19 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
         var known = _antigravity.Where(p => Alive(p.Id, p.Started) &&
             p.Endpoints.All(e => listeners.Any(l => l.ProcessId == p.Id && l.Port == e.Port))).ToArray();
         if (known.Length > 0 && known.Length == _antigravity.Length) return known.SelectMany(p => p.Endpoints).ToList();
-        // No language server running (Antigravity closed): nothing to look for.
-        if (!ProcessSnapshot.Any(name => name.Contains("language_server", StringComparison.OrdinalIgnoreCase))) { _antigravity = []; return []; }
+        // No language server and no agy running (neither the Antigravity app nor Antigravity IDE runs): nothing to look for.
+        bool languageServer = false, agy = false;
+        ProcessSnapshot.Any(name =>
+        {
+            if (IsLanguageServer(name)) languageServer = true;
+            else if (IsAgy(name)) agy = true;
+            return languageServer;
+        });
+        if (!languageServer && !agy) { _antigravity = []; return []; }
         var found = FromServiceFiles(listeners);
-        if (found.Count == 0)
+        // The command lines are asked for only for a language server: an agy hub always writes its service file, and a user who
+        // runs the agy CLI in a terminal (no hub) would otherwise cost a WMI query on every refresh.
+        if (found.Count == 0 && languageServer)
         {
             // A WMI query has no timeout of its own; a stalled service must not hold the refresh.
             var processes = await Task.Run(FindAntigravityProcesses, cancellation).WaitAsync(TimeSpan.FromSeconds(15), cancellation);
@@ -200,8 +247,13 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
         return found.SelectMany(p => p.Endpoints).ToList();
     }
 
-    // A service file is used while its process is a language server listening on the ports it names; the files of servers
-    // that have ended stay behind.
+    // The Antigravity app runs language_server_*.exe. Antigravity IDE, a separate product (seen with 1.107.0), starts the agy CLI
+    // as its hub ("agy.exe --hub --csrf_token=…"), which writes the same hub_<port>.json service file and answers the same requests.
+    private static bool IsLanguageServer(ReadOnlySpan<char> file) => file.Contains("language_server", StringComparison.OrdinalIgnoreCase);
+    private static bool IsAgy(ReadOnlySpan<char> file) => file.Equals("agy.exe", StringComparison.OrdinalIgnoreCase);
+
+    // A service file is used while its process is a language server or an agy hub listening on the ports it names; the files of
+    // servers that have ended stay behind.
     private static List<(int Id, DateTime Started, IReadOnlyList<LocalEndpoint> Endpoints)> FromServiceFiles(List<TcpListeners.Listener> listeners)
     {
         var found = new List<(int, DateTime, IReadOnlyList<LocalEndpoint>)>();
@@ -211,7 +263,7 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
             int pid = server.Key;
             var endpoints = server.SelectMany(s => new LocalEndpoint[] { new(s.HttpsPort, "https", s.Token), new(s.HttpPort, "http", s.Token) })
                 .Where(e => listeners.Any(l => l.ProcessId == pid && l.Port == e.Port)).Distinct().ToList();
-            if (endpoints.Count == 0 || !Path.GetFileName(AppIdentity.ImagePath(pid)).Contains("language_server", StringComparison.OrdinalIgnoreCase)
+            if (endpoints.Count == 0 || Path.GetFileName(AppIdentity.ImagePath(pid)) is var image && !IsLanguageServer(image) && !IsAgy(image)
                 || StartTime(pid) is not { } started) continue;
             found.Add((pid, started, endpoints));
         }
@@ -285,4 +337,7 @@ public sealed class DesktopSources(MiMoAccount? mimo = null) : IDesktopSources
     [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_close(IntPtr db);
     [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_busy_timeout(IntPtr db, int milliseconds);
     [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_column_count(IntPtr statement);
+    [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr sqlite3_malloc64(ulong size);
+    [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern void sqlite3_free(IntPtr pointer);
+    [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)] private static extern int sqlite3_deserialize(IntPtr db, [MarshalAs(UnmanagedType.LPUTF8Str)] string schema, IntPtr data, long dbSize, long bufferSize, uint flags);
 }

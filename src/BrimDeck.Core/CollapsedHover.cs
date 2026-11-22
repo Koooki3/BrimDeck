@@ -29,6 +29,16 @@ public static class CollapsedHover
         return new(surface.X - padX, top, surface.Width + padX * 2, surface.Bottom + padBelow - top);
     }
 
+    // The part that answers for a place along the surface, given each part's stretch along it in order (MainWindow.Hover.cs):
+    // two neighbours meet halfway across the gap between them and the first and the last reach past the ends, so every place has
+    // exactly one part, whatever its distance from the parts across the edge. -1 when there is no part.
+    public static int PartAt(IReadOnlyList<(double Start, double End)> parts, double along)
+    {
+        for (int i = 0; i < parts.Count; i++)
+            if (i + 1 == parts.Count || along < (parts[i].End + parts[i + 1].Start) / 2) return i;
+        return -1;
+    }
+
     // The edge a bridge reaches up to: the work area's top for the capsule, the screen edge for the others.
     private static double BridgeTop(CompactStyle style, double workTop)
         => style == CompactStyle.Capsule && double.IsFinite(workTop) ? Math.Max(0, workTop) : 0;

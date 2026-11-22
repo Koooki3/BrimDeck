@@ -27,6 +27,7 @@ public partial class App : Application
     internal IReadOnlyList<ProviderSnapshot> RestoredUsage { get; set; } = [];
     public ProviderSecrets Secrets { get; private set; } = null!;
     public MiMoAccount MiMo { get; private set; } = null!;
+    public DoubaoQuotaAccount DoubaoQuota { get; private set; } = null!;
     public Pricing Prices { get; private set; } = null!;
     public AppUpdates Updates { get; internal set; } = null!;
     // Dynamic notices (NoticeCenter): created before the panels, which take their turns on the island through it.
@@ -139,8 +140,9 @@ public partial class App : Application
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
         MiMo = new MiMoAccount(folder);
-        Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
-        Usage = new UsageService(new DesktopSources(MiMo), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
+        DoubaoQuota = new DoubaoQuotaAccount(folder);
+        Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"), kugouLyricFolder: LyricsService.KugouLyricFolder);
+        Usage = new UsageService(new DesktopSources(MiMo, DoubaoQuota), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName), cursorPriceCache: Path.Combine(folder, CursorPrices.FileName));
         // A source read in the background (Qoder) that ended after its round asks for another round to show it; the first reading
         // of a source always does, a later one only while the panel syncs by itself.
@@ -170,7 +172,12 @@ public partial class App : Application
         Step(() => { if (Settings.MonitorPage && Settings.ShowsExpanded(ExpandedItem.Power)) PowerWarm.Start(Dispatcher); });
         Step(WarmSettingsWriter);
         Step(ApplyMemoryMode);
-        Step(() => { DisplayPower.Install(Dispatcher); DisplayPower.Changed += UpdateDeviceDemand; });
+        Step(() =>
+        {
+            DisplayPower.Install(Dispatcher);
+            DisplayPower.Changed += UpdateDeviceDemand;
+            DisplayPower.Changed += UpdateMonitorSettingsDemand;
+        });
         _save.Tick += (_, _) => FlushSettings();
         Step(ApplyTray);
         Step(WatchSurface);
@@ -507,6 +514,18 @@ public partial class App : Application
     private const ExpandedDemand EveryDemand = (ExpandedDemand)511;
     private readonly Dictionary<MainWindow, ExpandedDemand> _pageDemands = [];
     private ExpandedDemand _lastPageDemand;
+    private bool _monitorSettingsDrives;
+    private bool FindDrivesForLayout => _monitorSettingsDrives && !DisplayPower.Off;
+    internal void WatchMonitorGridDrives(bool open)
+    {
+        if (_monitorSettingsDrives == open) return;
+        _monitorSettingsDrives = open;
+        ApplyMonitorDemand(lingered: false);
+    }
+    private void UpdateMonitorSettingsDemand()
+    {
+        if (_monitorSettingsDrives) ApplyMonitorDemand(lingered: false);
+    }
     private ExpandedDemand PageDemand()
     {
         if (_presentingMonitor.Count > 0)
@@ -524,7 +543,7 @@ public partial class App : Application
         // the current list at once instead of "Reading processes…" until the first list comes.
         var pageDemand = PageDemand();
         bool listing = (pageDemand & ExpandedDemand.Processes) != 0;
-        bool wanted = pageDemand != ExpandedDemand.None || _stripMonitor.Count > 0;
+        bool wanted = pageDemand != ExpandedDemand.None || _stripMonitor.Count > 0 || FindDrivesForLayout;
         if (Exiting || Monitor is null && !wanted) return;
         // The sampler reads the choice of graphics adapter on its own thread, where each part is read whole.
         Monitor ??= CreateMonitor();
@@ -623,7 +642,7 @@ public partial class App : Application
         bool stripActive = _stripMonitor.Count > 0 || _heldStrip.Count > 0;
         Monitor?.SetReads(stripActive || Page(ExpandedDemand.Cpu), stripActive || Page(ExpandedDemand.Memory), stripActive || Page(ExpandedDemand.Network));
         Monitor?.SetExtras(Page(ExpandedDemand.Temperatures) || Heat(CompactMonitorItems.Cpu, held) || Heat(CompactMonitorItems.Gpu, held),
-            Page(ExpandedDemand.Storage) || stripDrives,
+            Page(ExpandedDemand.Storage) || stripDrives || FindDrivesForLayout,
             Page(ExpandedDemand.Storage) && Page(ExpandedDemand.Temperatures) || Heat(CompactMonitorItems.Storage, shown),
             // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
             // alone also for the row's charge reading.

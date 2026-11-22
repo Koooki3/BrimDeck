@@ -47,3 +47,5 @@ Full control makes KuGou open a local debugging port. Read [Data and privacy](pr
 ## Quick actions
 
 On the music page, drag with the mouse to the left, right, up or down, or swipe left or right with two fingers on a touchpad, to go to the previous or next song, switch players, play or pause, or change the volume. The action for each direction is chosen under Settings › Quick actions.
+
+There are two kinds of volume actions. Volume up and Volume down change the system volume. Player volume up and Player volume down change only the current player's volume, which is the app's volume in the Windows volume mixer; the system volume stays the same. A drag changes the volume continuously as the mouse moves; a two-finger swipe changes the player's volume by 10%. All pages in a browser share one volume. A player that has not played any sound since it started may have no volume to change yet.

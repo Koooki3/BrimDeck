@@ -12,6 +12,11 @@ namespace BrimDeck.Core;
 // authentication handshake first and is not read. From OpenMouse's Redragon M690 PRO module and notes (AGPL; facts only,
 // verified on firmware 2.95 and 2.97 through OpenMouse Bridge on Windows: the link read 00 while the mouse slept, and
 // battery then gave the receiver's last value).
+// Machenike's (机械师) M7 (精英版, 领航版), M721 and M722 use the same two ids and the same reads: their drivers' cfg.ini lists
+// 258A:002E and 002F, and the app's battery read sets 05 90 on report 5 (8 bytes, 0xFF00 / 1), gets it back 20 ms later and
+// reads 11 <percent> or 10 <state> as above; on the receiver it asks 05 80 first and goes on only on 01 01. Only the M7 领航版
+// app sends it: the others' cfg.ini switches it off (ShowPower=0), though the code is the same. The ids do not tell these mice from
+// the M690 PRO, so a product string naming Machenike is kept as the name (whether these mice give one is not known).
 [BrandFamilies]
 public static class RedragonMice
 {
@@ -35,10 +40,12 @@ public static class RedragonMice
     public static bool Takes(HidShape shape) => shape.Vendor == Vendor && shape.Product is Cable or Receiver
         && MouseShapes.Collection(shape, 0xFF00, 0x01) && shape.FeatureLength >= 8;
 
+    public static string? Name(HidShape shape) => shape.Name.Contains("machenike", StringComparison.OrdinalIgnoreCase) ? null : "Redragon M690 PRO";
+
     public static IEnumerable<BrandFamily> Families =>
     [
         new("Redragon mouse", Takes, shape => [new BrandWay("redragon.m690", WayTransport.Feature, Request(), Battery)
             { GapMs = 60, FeatureLength = 8, Gate = shape.Product == Receiver ? LinkRequest() : null, Gated = Linked }])
-        { Kind = _ => DeviceKind.Mouse, Prefix = "redragon", DisplayName = _ => "Redragon M690 PRO" },
+        { Kind = _ => DeviceKind.Mouse, Prefix = "redragon", DisplayName = Name },
     ];
 }

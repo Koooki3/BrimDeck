@@ -64,7 +64,7 @@ public static class Profiles
         nameof(DeckSettings.Page3Hotkey), nameof(DeckSettings.Page4Hotkey), nameof(DeckSettings.Page5Hotkey), nameof(DeckSettings.Page6Hotkey),
         nameof(DeckSettings.Page7Hotkey), nameof(DeckSettings.Page8Hotkey), nameof(DeckSettings.Page9Hotkey), nameof(DeckSettings.Page10Hotkey),
         nameof(DeckSettings.RefreshHotkey), nameof(DeckSettings.CycleStyleHotkey), nameof(DeckSettings.LineStyleHotkey), nameof(DeckSettings.NextProfileHotkey),
-        nameof(DeckSettings.ClickThrough), nameof(DeckSettings.ClickThroughPanel), nameof(DeckSettings.ClickThroughKeyboard),
+        nameof(DeckSettings.ClickThrough), nameof(DeckSettings.ClickThroughPanel), nameof(DeckSettings.ClickThroughKeyboard), nameof(DeckSettings.ClickThroughHold),
         nameof(DeckSettings.NeteaseFullControlEntry), nameof(DeckSettings.NeteaseAutoFullControl), nameof(DeckSettings.NeteaseFullControl),
         nameof(DeckSettings.KugouFullControl), nameof(DeckSettings.AppleMusicFullControl), nameof(DeckSettings.IgnoredMediaApps),
         nameof(DeckSettings.Display), nameof(DeckSettings.DisplayMonitors),

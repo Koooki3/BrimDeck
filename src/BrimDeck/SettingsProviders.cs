@@ -142,7 +142,6 @@ public sealed partial class SettingsWindow
     // Claude and Grok Bot need no site or key; the expanded row holds this row's own switch for reading the quota online.
     private FrameworkElement OnlineQuotaDetails(AppEntry entry)
     {
-        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, Space.S12);
         bool grokBot = entry.QuotaSource == ProviderId.GrokBot;
         string title = Loc.T("联网获取额度", "Fetch quota online");
         string help = grokBot
@@ -150,6 +149,23 @@ public sealed partial class SettingsWindow
                 "On: fetches the weekly allowance online with the Grok Bot desktop app sign-in.\nOff: no network access; shows the latest weekly allowance the Grok Bot desktop app cached on this PC.")
             : Loc.T("开启：使用 Claude Code 或桌面版的登录，联网获取额度。\n关闭：不联网，只显示 Claude 桌面版在本机记录的最新额度。",
                 "On: fetches the quota online with the Claude Code or desktop app sign-in.\nOff: no network access; shows the latest quota the Claude desktop app recorded on this PC.");
+        return SwitchDetails(entry, title, help, grokBot ? "grokbot-online-" : "claude-online-", e => e.QuotaOnline, (e, on) => e.QuotaOnline = on);
+    }
+
+    // Antigravity: this row's switch for reading the quota from the Antigravity CLI while neither the app nor the IDE runs.
+    private FrameworkElement AntigravityCliDetails(AppEntry entry)
+    {
+        string title = Loc.T("通过 CLI 读取", "Read via CLI");
+        string help = Loc.T("开启：Antigravity 应用和 IDE 都未运行时，运行 agy -p /usage 读取额度。运行 agy 较耗资源，所以每 5 分钟最多运行一次。\n关闭：只从应用或 IDE 读取。",
+            "On: while neither the Antigravity app nor the IDE runs, reads the quota by running agy -p /usage. Running agy uses a lot of resources, so it runs at most every 5 minutes.\nOff: reads only from the app or IDE.");
+        return SwitchDetails(entry, title, help, "antigravity-cli-", e => e.AntigravityCli, (e, on) => e.AntigravityCli = on);
+    }
+
+    // One labeled switch of the row's own.
+    private FrameworkElement SwitchDetails(AppEntry entry, string title, string help, string automationPrefix,
+        Func<AppEntry, bool> read, Action<AppEntry, bool> write)
+    {
+        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
         var line = new Grid();
         // The label column is shared with the off-peak lines below, so the switch starts where their controls start.
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
@@ -158,14 +174,14 @@ public sealed partial class SettingsWindow
         var caption = TextLine(title, TextSize.Body, TextSecondary);
         var heading = new HelpHeading(caption, SmallHelp(title, () => help)) { Margin = new Thickness(Space.S16, 0, Space.S16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
         line.Children.Add(heading);
-        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.QuotaOnline, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = read(entry), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title); AutomationProperties.SetHelpText(toggle, help);
-        AutomationProperties.SetAutomationId(toggle, (grokBot ? "grokbot-online-" : "claude-online-") + entry.InstanceId.ToString("N"));
+        AutomationProperties.SetAutomationId(toggle, automationPrefix + entry.InstanceId.ToString("N"));
         Grid.SetColumn(toggle, 1); line.Children.Add(toggle);
-        void Set(bool online)
+        void Set(bool on)
         {
-            if (S.Entry(entry.InstanceId) is not { } current || current.QuotaOnline == online) return;
-            Change(s => s.Entry(entry.InstanceId)!.QuotaOnline = online);
+            if (S.Entry(entry.InstanceId) is not { } current || read(current) == on) return;
+            Change(s => write(s.Entry(entry.InstanceId)!, on));
         }
         toggle.Checked += (_, _) => Set(true); toggle.Unchecked += (_, _) => Set(false);
         line.Margin = new Thickness(0, Space.S4, 0, Space.S4);
@@ -231,15 +247,95 @@ public sealed partial class SettingsWindow
         return grid;
     }
 
+    // Doubao (including DoubaoWork) and Dola read subscription quotas with a browser sign-in captured in an isolated profile (DoubaoQuotaAccount).
+    private static readonly Dictionary<ProviderId, CancellationTokenSource> _doubaoSignIns = [];
+    private FrameworkElement DoubaoQuotaDetails(AppEntry entry)
+    {
+        var id = entry.QuotaSource;
+        var edition = DoubaoQuotaUsage.For(id);
+        string name = ProviderCatalog.Name(id);
+        string title = Loc.T(name + " 账号", name + " account");
+        // Only Doubao has something to add: the account is DoubaoWork's too. Dola's label has no help.
+        string? help = edition.China ? Loc.T("豆包与豆包工作共用这个账号。", "Doubao and DoubaoWork share this account.") : null;
+        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
+        var line = new Grid();
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
+        line.ColumnDefinitions.Add(new ColumnDefinition());
+        var caption = TextLine(title, 12, TextSecondary);
+        FrameworkElement heading = help is null ? caption : new HelpHeading(caption, SmallHelp(title, () => help));
+        heading.Margin = new Thickness(16, 0, 16, 0); heading.MinWidth = 52; heading.VerticalAlignment = VerticalAlignment.Center;
+        line.Children.Add(heading);
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var state = TextLine("", 12, TextPrimary); state.VerticalAlignment = VerticalAlignment.Center; state.Margin = new Thickness(0, 0, 12, 0);
+        Button Outline(string aid)
+        {
+            var button = ActionButton("", () => { }); button.Style = (Style)FindResource("SettingsOutlineButton");
+            button.Height = 30; button.Margin = new Thickness(0, 0, 8, 0);
+            AutomationProperties.SetAutomationId(button, aid);
+            return button;
+        }
+        string prefix = edition.China ? "doubao" : "dola";
+        var signIn = Outline(prefix + "-sign-in-" + entry.InstanceId.ToString("N"));
+        var signOut = Outline(prefix + "-sign-out-" + entry.InstanceId.ToString("N"));
+        signOut.Content = Loc.T("退出登录", "Sign out");
+        controls.Children.Add(state); controls.Children.Add(signIn); controls.Children.Add(signOut);
+        var failure = TextLine("", 11.5, PanelTheme.WarningDefault); failure.TextWrapping = TextWrapping.Wrap; failure.Visibility = Visibility.Collapsed;
+        void Failed(string message) { failure.Text = message; failure.Visibility = message.Length > 0 ? Visibility.Visible : Visibility.Collapsed; }
+        void Show()
+        {
+            bool waiting = _doubaoSignIns.ContainsKey(id), signedIn = _app.DoubaoQuota.SignedIn(id);
+            // The Dola session is read once its window is closed (DoubaoQuotaAccount.ReadClosedAsync).
+            string waitingText = edition.China ? Loc.T("请在浏览器窗口中登录", "Sign in in the browser window") : Loc.T("登录后关闭浏览器窗口", "Sign in, then close the browser window");
+            state.Text = waiting ? waitingText : signedIn ? Loc.T("已登录", "Signed in") : Loc.T("未登录", "Not signed in");
+            signIn.Content = waiting ? Loc.T("取消", "Cancel") : signedIn ? Loc.T("重新登录", "Sign in again") : Loc.T("在浏览器中登录", "Sign in in the browser");
+            signOut.Visibility = signedIn && !waiting ? Visibility.Visible : Visibility.Collapsed;
+        }
+        signIn.Click += async (_, _) =>
+        {
+            if (_doubaoSignIns.TryGetValue(id, out var running)) { running.Cancel(); return; }
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token);
+            _doubaoSignIns[id] = cancellation;
+            Failed("");
+            Show();
+            try
+            {
+                await Task.Run(() => _app.DoubaoQuota.SignInAsync(id, cancellation.Token));
+                SaveStatus(Loc.T($"已登录 {name} 账号", $"Signed in to {name}"));
+                _ = _app.Deck.RefreshAsync();
+            }
+            catch (OperationCanceledException) { }
+            catch (Native.DoubaoQuotaAccount.SignInException ex) { Failed(ex.Message); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or System.Net.WebSockets.WebSocketException or System.Net.Http.HttpRequestException or System.Text.Json.JsonException)
+            { Failed(Loc.T("登录失败，请重试", "Signing in failed. Try again.")); }
+            finally { if (_doubaoSignIns.TryGetValue(id, out var current) && current == cancellation) _doubaoSignIns.Remove(id); cancellation.Dispose(); Show(); }
+        };
+        signOut.Click += (_, _) => { _app.DoubaoQuota.SignOut(id); Failed(""); Show(); _ = _app.Deck.RefreshAsync(); };
+        Show();
+        Grid.SetColumn(controls, 1); line.Children.Add(controls);
+        line.Margin = new Thickness(0, 5, 0, 5);
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetColumn(line, 1); Grid.SetColumnSpan(line, 6); grid.Children.Add(line);
+        // Why the last sign-in failed stays under the line until the next one starts.
+        var noteLine = new Grid { Margin = new Thickness(0, 0, 0, 5) };
+        noteLine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
+        noteLine.ColumnDefinitions.Add(new ColumnDefinition());
+        Grid.SetColumn(failure, 1); noteLine.Children.Add(failure);
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(noteLine, 1); Grid.SetColumn(noteLine, 1); Grid.SetColumnSpan(noteLine, 6); grid.Children.Add(noteLine);
+        return grid;
+    }
+
     // The expanded configuration starts under the quota source: a short label column, then fields that end midway
     // between the warning and critical colors. Labels share one width so every field starts at the same place.
-    // Built-in sources other than Claude and Grok Bot have no configuration of their own; their rows open on the off-peak time alone.
+    // Built-in sources without a switch, account or settings of their own open on the off-peak time alone.
     private FrameworkElement? SourceDetails(AppEntry entry)
     {
         if (ProviderCatalog.HasOnlineSwitch(entry.QuotaSource)) return OnlineQuotaDetails(entry);
+        if (entry.QuotaSource == ProviderId.Antigravity) return AntigravityCliDetails(entry);
         if (entry.QuotaSource == ProviderId.MiMo) return MiMoAccountDetails();
         if (entry.QuotaSource is ProviderId.WorkBuddy or ProviderId.WorkBuddyAi) return WorkBuddyDetails(entry);
         if (entry.QuotaSource is ProviderId.Qianwen or ProviderId.QwenCloud) return QianwenDetails(entry);
+        if (entry.QuotaSource is ProviderId.Doubao or ProviderId.Dola) return DoubaoQuotaDetails(entry);
         if (ProviderCatalog.IsBuiltIn(entry.QuotaSource)) return null;
         var grid = AppColumns();
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(Space.Tight, Space.S4, Space.Tight, Space.S4) };
@@ -351,97 +447,226 @@ public sealed partial class SettingsWindow
             Hint();
         }
 
-        var password = new PasswordBox { FontSize = TextSize.Body, MaxLength = 4096, Padding = new Thickness(0), BorderThickness = new Thickness(0),
-            Background = Brushes.Transparent, Foreground = UI.Brush(TextPrimary), CaretBrush = UI.Brush(_palette.Accent),
-            VerticalAlignment = VerticalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Space.Tight, 0) };
-        AutomationProperties.SetAutomationId(password, "secret-" + entry.InstanceId.ToString("N")); AutomationProperties.SetName(password, Loc.T("API 密钥", "API key"));
-        var visible = Plain("secret-text", Loc.T("API 密钥", "API key")); visible.MaxLength = 4096; visible.Visibility = Visibility.Collapsed;
-        string emptyHint = entry.QuotaSource switch
-        {
-            ProviderId.GlmChina or ProviderId.GlmGlobal => Loc.T("GLM 套餐密钥，加密保存在本机", "GLM plan key, stored encrypted on this PC"),
-            ProviderId.DeepSeek => Loc.T("DeepSeek API 密钥，加密保存在本机", "DeepSeek API key, stored encrypted on this PC"),
-            ProviderId.KimiApi => Loc.T("Kimi Code API 密钥（sk-kimi-…），加密保存在本机", "Kimi Code API key (sk-kimi-…), stored encrypted on this PC"),
-            ProviderId.KimiPlatform => Loc.T("Kimi 开放平台 API 密钥，加密保存在本机", "Kimi Open Platform API key, stored encrypted on this PC"),
-            ProviderId.OpenCodeGo => Loc.T("OpenCode Console API 密钥（oc_sk_…），加密保存在本机", "OpenCode Console API key (oc_sk_…), stored encrypted on this PC"),
-            ProviderId.CommandCodeApi => Loc.T("Command Code API 密钥，加密保存在本机", "Command Code API key, stored encrypted on this PC"),
-            ProviderId.MiMoApi => Loc.T("小米 MiMo 开放平台按量计费 API 密钥（sk-…），加密保存在本机", "Xiaomi MiMo Open Platform pay-as-you-go API key (sk-…), stored encrypted on this PC"),
-            ProviderId.MiMoTokenPlan => Loc.T("小米 MiMo Token Plan 密钥（tp-…），加密保存在本机", "Xiaomi MiMo Token Plan key (tp-…), stored encrypted on this PC"),
-            ProviderId.OpenRouter => Loc.T("OpenRouter API 密钥（sk-or-v1-…），加密保存在本机", "OpenRouter API key (sk-or-v1-…), stored encrypted on this PC"),
-            ProviderId.Custom => Loc.T("可选，加密保存在本机", "Optional, stored encrypted on this PC"),
-            _ => Loc.T("填写 API 密钥，加密保存在本机", "Enter the API key; it is stored encrypted on this PC")
-        };
-        string savedHint = Loc.T("已加密保存在本机，输入新密钥以更换", "Stored encrypted on this PC. Enter a new key to replace it");
-        var keyHint = TextLine(entry.SecretRevision != Guid.Empty ? savedHint : emptyHint, TextSize.Body, TextTertiary);
-        var inputs = new Grid(); inputs.Children.Add(password); inputs.Children.Add(visible);
         // The icon shows the current state: struck through while the key is dots, open while it is plain text.
         const string eye = "M 1,6 C 3.5,0.5 12.5,0.5 15,6 C 12.5,11.5 3.5,11.5 1,6 Z M 8,4 A 2,2 0 1 1 8,8 A 2,2 0 1 1 8,4 Z";
         const string eyeOff = eye + " M 2.5,0.5 L 13.5,11.5";
-        bool syncing = false, dirty = false, swapping = false;
-        Button? reveal = null;
-        reveal = GlyphButton(eyeOff, 16, 12, Loc.T("显示密钥", "Show key"), () => ToggleReveal());
-        reveal.Width = 28; reveal.Height = 28; reveal.Focusable = false; reveal.ToolTip = null; ((Shape)reveal.Content).StrokeThickness = 1.2;
-        // Only the other box is updated: writing back into the box being typed in would move its caret to the start.
-        void EditSecret(string value, bool fromPassword)
+        Func<bool> commitSecret;
+
+        if (ProviderCatalog.NeedsAkSk(entry.QuotaSource))
         {
-            if (syncing) return;
-            syncing = true; if (fromPassword) visible.Text = value; else password.Password = value; syncing = false;
-            dirty = true; keyHint.Visibility = value.Length == 0 ? Visibility.Visible : Visibility.Collapsed; InvalidateTest();
-        }
-        password.PasswordChanged += (_, _) => EditSecret(password.Password, true); visible.TextChanged += (_, _) => EditSecret(visible.Text, false);
-        void SaveSecret()
-        {
-            if (!dirty || S.Entry(entry.InstanceId) is null) return;
-            try
+            // The browser sign-in comes first; either it or the AccessKey below is enough, and with both the AccessKey is tried first.
+            var signIn = VolcengineSignIn(entry);
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(signIn, grid.RowDefinitions.Count - 1); Grid.SetColumn(signIn, 1); Grid.SetColumnSpan(signIn, 6); grid.Children.Add(signIn);
+            var akBox = Plain("ak", "AccessKey ID"); akBox.MaxLength = 1024;
+            var skPassword = new PasswordBox { FontSize = TextSize.Body, MaxLength = 4096, Padding = new Thickness(0), BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent, Foreground = UI.Brush(TextPrimary), CaretBrush = UI.Brush(_palette.Accent),
+                VerticalAlignment = VerticalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Space.Tight, 0) };
+            AutomationProperties.SetAutomationId(skPassword, "secret-" + entry.InstanceId.ToString("N")); AutomationProperties.SetName(skPassword, "Secret Access Key");
+            var skVisible = Plain("secret-text", "Secret Access Key"); skVisible.MaxLength = 4096; skVisible.Visibility = Visibility.Collapsed;
+            string emptyAkHint = Loc.T("填写 AccessKey ID，加密保存在本机", "Enter AccessKey ID; stored encrypted on this PC");
+            string emptySkHint = Loc.T("填写 Secret Access Key，加密保存在本机", "Enter Secret Access Key; stored encrypted on this PC");
+            string savedAkHint = Loc.T("已加密保存在本机，输入新值以更换", "Stored encrypted on this PC. Enter a new value to replace it");
+            string savedSkHint = Loc.T("已加密保存在本机，输入新密钥以更换", "Stored encrypted on this PC. Enter a new key to replace it");
+            var akHint = TextLine(entry.SecretRevision != Guid.Empty ? savedAkHint : emptyAkHint, TextSize.Body, TextTertiary);
+            var skHint = TextLine(entry.SecretRevision != Guid.Empty ? savedSkHint : emptySkHint, TextSize.Body, TextTertiary);
+            var skInputs = new Grid(); skInputs.Children.Add(skPassword); skInputs.Children.Add(skVisible);
+            bool syncing = false, akDirty = false, skDirty = false, swapping = false;
+            Button? reveal = null;
+            VolcengineArkUsage.Credentials? ReadSavedPair()
             {
-                var secret = password.Password.Trim();
-                _app.Secrets.Write(entry.InstanceId, secret);
-                Change(s => s.Entry(entry.InstanceId)!.SecretRevision = secret.Length == 0 ? Guid.Empty : Guid.NewGuid());
-                dirty = false;
-                syncing = true; password.Clear(); visible.Clear(); syncing = false;
-                keyHint.Text = S.Entry(entry.InstanceId)!.SecretRevision == Guid.Empty ? emptyHint : savedHint;
-                keyHint.Visibility = Visibility.Visible;
+                if (S.Entry(entry.InstanceId)?.SecretRevision is not { } rev || rev == Guid.Empty) return null;
+                try { return VolcengineArkUsage.ParseStaticSecret(_app.Secrets.Read(entry.InstanceId)); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or System.Text.Json.JsonException or FormatException) { return null; }
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or System.Text.Json.JsonException)
-            { SaveStatus(Loc.T("密钥保存失败，请检查本机设置目录。", "The key could not be saved. Check the local settings folder."), true); }
-        }
-        // Swapping the dots for plain text hides the box being typed in; that is not leaving the field, so nothing is saved.
-        void ToggleReveal()
-        {
-            bool show = visible.Visibility != Visibility.Visible, editing = password.IsKeyboardFocused || visible.IsKeyboardFocused;
-            swapping = true;
-            syncing = true;
-            // With nothing typed, revealing shows the saved key and hiding puts the saved hint back.
-            if (!dirty && show && S.Entry(entry.InstanceId)?.SecretRevision is { } revision && revision != Guid.Empty)
+            void EditAk()
             {
-                string saved = "";
-                try { saved = _app.Secrets.Read(entry.InstanceId); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or System.Text.Json.JsonException or FormatException) { }
-                password.Password = saved; visible.Text = saved;
+                if (syncing) return;
+                akDirty = true; akHint.Visibility = akBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; InvalidateTest();
             }
-            else if (!dirty && !show) { password.Clear(); visible.Clear(); }
-            syncing = false;
-            keyHint.Visibility = password.Password.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-            visible.Visibility = show ? Visibility.Visible : Visibility.Collapsed; password.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
-            if (editing)
+            void EditSk(string value, bool fromPassword)
             {
-                if (show) { visible.Focus(); visible.CaretIndex = visible.Text.Length; }
-                else
+                if (syncing) return;
+                syncing = true; if (fromPassword) skVisible.Text = value; else skPassword.Password = value; syncing = false;
+                skDirty = true; skHint.Visibility = value.Length == 0 ? Visibility.Visible : Visibility.Collapsed; InvalidateTest();
+            }
+            bool SaveAkSk(bool requireComplete)
+            {
+                if (!akDirty && !skDirty) return true;
+                if (S.Entry(entry.InstanceId) is null) return false;
+                try
                 {
-                    // PasswordBox puts the caret at the start when focused and exposes no caret property;
-                    // its internal Select(start, length) keeps the caret where it was in the plain-text box.
-                    int caret = visible.CaretIndex;
-                    password.Focus();
-                    typeof(PasswordBox).GetMethod("Select", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic, [typeof(int), typeof(int)])
-                        ?.Invoke(password, [caret, 0]);
+                    var existing = ReadSavedPair();
+                    var ak = akDirty ? akBox.Text.Trim() : (existing?.AccessKeyId ?? "");
+                    var sk = skDirty ? skPassword.Password.Trim() : (existing?.SecretAccessKey ?? "");
+                    if (ak.Length == 0 && sk.Length == 0)
+                    {
+                        _app.Secrets.Write(entry.InstanceId, "");
+                        Change(s => s.Entry(entry.InstanceId)!.SecretRevision = Guid.Empty);
+                        akDirty = false; skDirty = false;
+                        syncing = true; akBox.Clear(); skPassword.Clear(); skVisible.Clear(); syncing = false;
+                        akHint.Text = emptyAkHint; akHint.Visibility = Visibility.Visible;
+                        skHint.Text = emptySkHint; skHint.Visibility = Visibility.Visible;
+                        return true;
+                    }
+                    if (ak.Length == 0 || sk.Length == 0)
+                    {
+                        if (requireComplete) SaveStatus(Loc.T("请完整填写 AccessKey ID 和 Secret Access Key。", "Enter both AccessKey ID and Secret Access Key."), true);
+                        return false;
+                    }
+                    _app.Secrets.Write(entry.InstanceId, VolcengineArkUsage.PackStaticSecret(ak, sk));
+                    Change(s => s.Entry(entry.InstanceId)!.SecretRevision = Guid.NewGuid());
+                    akDirty = false; skDirty = false;
+                    syncing = true; akBox.Clear(); skPassword.Clear(); skVisible.Clear(); syncing = false;
+                    akHint.Text = savedAkHint; akHint.Visibility = Visibility.Visible;
+                    skHint.Text = savedSkHint; skHint.Visibility = Visibility.Visible;
+                    return true;
                 }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or System.Text.Json.JsonException)
+                { SaveStatus(Loc.T("密钥保存失败，请检查本机设置目录。", "The key could not be saved. Check the local settings folder."), true); return false; }
             }
-            swapping = false;
-            ((Shape)reveal!.Content).SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse(show ? eye : eyeOff));
-            AutomationProperties.SetName(reveal, show ? Loc.T("隐藏密钥", "Hide key") : Loc.T("显示密钥", "Show key"));
+            void ToggleReveal()
+            {
+                bool show = skVisible.Visibility != Visibility.Visible, editing = skPassword.IsKeyboardFocused || skVisible.IsKeyboardFocused;
+                swapping = true;
+                syncing = true;
+                if (!akDirty && !skDirty && show && ReadSavedPair() is { } saved)
+                {
+                    akBox.Text = saved.AccessKeyId;
+                    skPassword.Password = saved.SecretAccessKey;
+                    skVisible.Text = saved.SecretAccessKey;
+                }
+                else if (!akDirty && !skDirty && !show) { akBox.Clear(); skPassword.Clear(); skVisible.Clear(); }
+                syncing = false;
+                akHint.Visibility = akBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+                skHint.Visibility = skPassword.Password.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+                skVisible.Visibility = show ? Visibility.Visible : Visibility.Collapsed; skPassword.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+                if (editing)
+                {
+                    if (show) { skVisible.Focus(); skVisible.CaretIndex = skVisible.Text.Length; }
+                    else
+                    {
+                        int caret = skVisible.CaretIndex;
+                        skPassword.Focus();
+                        typeof(PasswordBox).GetMethod("Select", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic, [typeof(int), typeof(int)])
+                            ?.Invoke(skPassword, [caret, 0]);
+                    }
+                }
+                swapping = false;
+                ((Shape)reveal!.Content).SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse(show ? eye : eyeOff));
+                AutomationProperties.SetName(reveal, show ? Loc.T("隐藏密钥", "Hide key") : Loc.T("显示密钥", "Show key"));
+            }
+            reveal = GlyphButton(eyeOff, 16, 12, Loc.T("显示密钥", "Show key"), () => ToggleReveal());
+            reveal.Width = 28; reveal.Height = 28; reveal.Focusable = false; reveal.ToolTip = null; ((Shape)reveal.Content).StrokeThickness = 1.2;
+            akBox.TextChanged += (_, _) => EditAk();
+            skPassword.PasswordChanged += (_, _) => EditSk(skPassword.Password, true);
+            skVisible.TextChanged += (_, _) => EditSk(skVisible.Text, false);
+            akBox.LostKeyboardFocus += (_, _) => SaveAkSk(false);
+            skPassword.LostKeyboardFocus += (_, _) => { if (!swapping) SaveAkSk(false); };
+            skVisible.LostKeyboardFocus += (_, _) => { if (!swapping) SaveAkSk(false); };
+            Line("AccessKey ID", Field(akBox, akHint));
+            Line("Secret Access Key", Field(skInputs, skHint, reveal));
+            // Where the AccessKey comes from: the console's API access key page, not the API Key that calls models.
+            string keyPage = VolcengineArkUsage.For(entry.QuotaSource).China ? "https://console.volcengine.com/iam/keymanage" : "https://console.byteplus.com/iam/keymanage";
+            var where = new TextBlock { FontSize = 11.5, Foreground = UI.Brush(TextSecondary), TextWrapping = TextWrapping.Wrap };
+            where.Inlines.Add(new System.Windows.Documents.Run(Loc.T("在控制台的“API 访问密钥”页面创建，不是调用模型的 API Key。",
+                "Create one on the console's API access key page; it is not the API Key that calls models. ")));
+            where.Inlines.Add(InlineLink(Loc.T("打开密钥页面 ↗", "Open the key page ↗"), keyPage));
+            Line("", where);
+            commitSecret = () => SaveAkSk(true);
         }
-        password.LostKeyboardFocus += (_, _) => { if (!swapping) SaveSecret(); };
-        visible.LostKeyboardFocus += (_, _) => { if (!swapping) SaveSecret(); };
-        Line(entry.QuotaSource == ProviderId.Custom ? Loc.T("API 密钥（可选）", "API key (optional)") : Loc.T("API 密钥", "API key"), Field(inputs, keyHint, reveal));
+        else
+        {
+            var password = new PasswordBox { FontSize = TextSize.Body, MaxLength = 4096, Padding = new Thickness(0), BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent, Foreground = UI.Brush(TextPrimary), CaretBrush = UI.Brush(_palette.Accent),
+                VerticalAlignment = VerticalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Space.Tight, 0) };
+            AutomationProperties.SetAutomationId(password, "secret-" + entry.InstanceId.ToString("N")); AutomationProperties.SetName(password, Loc.T("API 密钥", "API key"));
+            var visible = Plain("secret-text", Loc.T("API 密钥", "API key")); visible.MaxLength = 4096; visible.Visibility = Visibility.Collapsed;
+            string emptyHint = entry.QuotaSource switch
+            {
+                ProviderId.GlmChina or ProviderId.GlmGlobal => Loc.T("GLM 套餐密钥，加密保存在本机", "GLM plan key, stored encrypted on this PC"),
+                ProviderId.DeepSeek => Loc.T("DeepSeek API 密钥，加密保存在本机", "DeepSeek API key, stored encrypted on this PC"),
+                ProviderId.KimiApi => Loc.T("Kimi Code API 密钥（sk-kimi-…），加密保存在本机", "Kimi Code API key (sk-kimi-…), stored encrypted on this PC"),
+                ProviderId.KimiPlatform => Loc.T("Kimi 开放平台 API 密钥，加密保存在本机", "Kimi Open Platform API key, stored encrypted on this PC"),
+                ProviderId.OpenCodeGo => Loc.T("OpenCode Console API 密钥（oc_sk_…），加密保存在本机", "OpenCode Console API key (oc_sk_…), stored encrypted on this PC"),
+                ProviderId.CommandCodeApi => Loc.T("Command Code API 密钥，加密保存在本机", "Command Code API key, stored encrypted on this PC"),
+                ProviderId.MiMoApi => Loc.T("小米 MiMo 开放平台按量计费 API 密钥（sk-…），加密保存在本机", "Xiaomi MiMo Open Platform pay-as-you-go API key (sk-…), stored encrypted on this PC"),
+                ProviderId.MiMoTokenPlan => Loc.T("小米 MiMo Token Plan 密钥（tp-…），加密保存在本机", "Xiaomi MiMo Token Plan key (tp-…), stored encrypted on this PC"),
+                ProviderId.OpenRouter => Loc.T("OpenRouter API 密钥（sk-or-v1-…），加密保存在本机", "OpenRouter API key (sk-or-v1-…), stored encrypted on this PC"),
+                ProviderId.Custom => Loc.T("可选，加密保存在本机", "Optional, stored encrypted on this PC"),
+                _ => Loc.T("填写 API 密钥，加密保存在本机", "Enter the API key; it is stored encrypted on this PC")
+            };
+            string savedHint = Loc.T("已加密保存在本机，输入新密钥以更换", "Stored encrypted on this PC. Enter a new key to replace it");
+            var keyHint = TextLine(entry.SecretRevision != Guid.Empty ? savedHint : emptyHint, TextSize.Body, TextTertiary);
+            var inputs = new Grid(); inputs.Children.Add(password); inputs.Children.Add(visible);
+            bool syncing = false, dirty = false, swapping = false;
+            Button? reveal = null;
+            reveal = GlyphButton(eyeOff, 16, 12, Loc.T("显示密钥", "Show key"), () => ToggleReveal());
+            reveal.Width = 28; reveal.Height = 28; reveal.Focusable = false; reveal.ToolTip = null; ((Shape)reveal.Content).StrokeThickness = 1.2;
+            // Only the other box is updated: writing back into the box being typed in would move its caret to the start.
+            void EditSecret(string value, bool fromPassword)
+            {
+                if (syncing) return;
+                syncing = true; if (fromPassword) visible.Text = value; else password.Password = value; syncing = false;
+                dirty = true; keyHint.Visibility = value.Length == 0 ? Visibility.Visible : Visibility.Collapsed; InvalidateTest();
+            }
+            password.PasswordChanged += (_, _) => EditSecret(password.Password, true); visible.TextChanged += (_, _) => EditSecret(visible.Text, false);
+            void SaveSecret()
+            {
+                if (!dirty || S.Entry(entry.InstanceId) is null) return;
+                try
+                {
+                    var secret = password.Password.Trim();
+                    _app.Secrets.Write(entry.InstanceId, secret);
+                    Change(s => s.Entry(entry.InstanceId)!.SecretRevision = secret.Length == 0 ? Guid.Empty : Guid.NewGuid());
+                    dirty = false;
+                    syncing = true; password.Clear(); visible.Clear(); syncing = false;
+                    keyHint.Text = S.Entry(entry.InstanceId)!.SecretRevision == Guid.Empty ? emptyHint : savedHint;
+                    keyHint.Visibility = Visibility.Visible;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or System.Text.Json.JsonException)
+                { SaveStatus(Loc.T("密钥保存失败，请检查本机设置目录。", "The key could not be saved. Check the local settings folder."), true); }
+            }
+            // Swapping the dots for plain text hides the box being typed in; that is not leaving the field, so nothing is saved.
+            void ToggleReveal()
+            {
+                bool show = visible.Visibility != Visibility.Visible, editing = password.IsKeyboardFocused || visible.IsKeyboardFocused;
+                swapping = true;
+                syncing = true;
+                // With nothing typed, revealing shows the saved key and hiding puts the saved hint back.
+                if (!dirty && show && S.Entry(entry.InstanceId)?.SecretRevision is { } revision && revision != Guid.Empty)
+                {
+                    string saved = "";
+                    try { saved = _app.Secrets.Read(entry.InstanceId); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or System.Text.Json.JsonException or FormatException) { }
+                    password.Password = saved; visible.Text = saved;
+                }
+                else if (!dirty && !show) { password.Clear(); visible.Clear(); }
+                syncing = false;
+                keyHint.Visibility = password.Password.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+                visible.Visibility = show ? Visibility.Visible : Visibility.Collapsed; password.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+                if (editing)
+                {
+                    if (show) { visible.Focus(); visible.CaretIndex = visible.Text.Length; }
+                    else
+                    {
+                        // PasswordBox puts the caret at the start when focused and exposes no caret property;
+                        // its internal Select(start, length) keeps the caret where it was in the plain-text box.
+                        int caret = visible.CaretIndex;
+                        password.Focus();
+                        typeof(PasswordBox).GetMethod("Select", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic, [typeof(int), typeof(int)])
+                            ?.Invoke(password, [caret, 0]);
+                    }
+                }
+                swapping = false;
+                ((Shape)reveal!.Content).SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse(show ? eye : eyeOff));
+                AutomationProperties.SetName(reveal, show ? Loc.T("隐藏密钥", "Hide key") : Loc.T("显示密钥", "Show key"));
+            }
+            password.LostKeyboardFocus += (_, _) => { if (!swapping) SaveSecret(); };
+            visible.LostKeyboardFocus += (_, _) => { if (!swapping) SaveSecret(); };
+            Line(entry.QuotaSource == ProviderId.Custom ? Loc.T("API 密钥（可选）", "API key (optional)") : Loc.T("API 密钥", "API key"), Field(inputs, keyHint, reveal));
+            commitSecret = () => { SaveSecret(); return !dirty; };
+        }
 
         if (entry.QuotaSource == ProviderId.Custom)
         {
@@ -463,8 +688,7 @@ public sealed partial class SettingsWindow
         {
             if (!commitSite()) return;
             commitScript();
-            SaveSecret();
-            if (dirty || S.Entry(entry.InstanceId) is not { } current) return;
+            if (!commitSecret() || S.Entry(entry.InstanceId) is not { } current) return;
             _sourceTestCancellation?.Cancel();
             var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token); _sourceTestCancellation = cancellation;
             var configuration = current.ConfigurationKey;

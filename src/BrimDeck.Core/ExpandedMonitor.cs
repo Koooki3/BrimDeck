@@ -26,7 +26,27 @@ public sealed record ExpandedCard(ExpandedItem Item, string? Letter = null, bool
 
 public static class ExpandedCards
 {
+    public const double VerticalPadding = 4, RowGap = 4;
+    public static double LineHeight(double body) => Math.Ceiling(body * FontMetrics.DefaultLineFactor);
+    public static double MemoryHeight(double body) => LineHeight(body) + 19;
+
     public static bool IsCard(ExpandedItem item) => item is ExpandedItem.Memory or ExpandedItem.Download or ExpandedItem.Upload or ExpandedItem.Storage;
+    public static bool IsInline(ExpandedItem item) => item is ExpandedItem.Power or ExpandedItem.Frames;
+
+    public static ExpandedItem PageSection(ExpandedItem item, bool inlinePower, bool inlineFrames)
+        => IsCard(item) || item == ExpandedItem.Power && inlinePower || item == ExpandedItem.Frames && inlineFrames
+            ? ExpandedItem.Memory : item == ExpandedItem.Gpu ? ExpandedItem.Cpu : item;
+
+    public static List<ExpandedReading> ArrangePageSections(IEnumerable<ExpandedReading> readings, IEnumerable<ExpandedItem> order,
+        bool inlinePower, bool inlineFrames)
+    {
+        var groups = ExpandedMonitor.Normalize(readings).GroupBy(reading => PageSection(reading.Item, inlinePower, inlineFrames)).ToList();
+        var bySection = groups.ToDictionary(group => group.Key);
+        var requested = order.Where(bySection.ContainsKey).Distinct().ToArray();
+        var moved = requested.ToHashSet();
+        var next = new Queue<ExpandedItem>(requested);
+        return [.. groups.SelectMany(group => moved.Contains(group.Key) ? bySection[next.Dequeue()] : group)];
+    }
 
     public static List<ExpandedCard> Normalize(IEnumerable<ExpandedCard?>? cards)
     {
@@ -34,11 +54,12 @@ public static class ExpandedCards
         var result = new List<ExpandedCard>();
         foreach (var card in (cards ?? []).OfType<ExpandedCard>())
         {
-            if (!IsCard(card.Item)) continue;
+            if (!IsCard(card.Item) && !IsInline(card.Item)) continue;
             var letter = card.Item == ExpandedItem.Storage ? card.Letter?.Trim().ToUpperInvariant() : null;
             if (card.Item == ExpandedItem.Storage && letter is not [>= 'A' and <= 'Z', ':']) continue;
             if (seen.Add((card.Item, letter)))
-                result.Add(card with { Letter = letter, CompactMemoryBar = card.Item == ExpandedItem.Memory && card.CompactMemoryBar });
+                result.Add(card with { Letter = letter, Wide = !IsInline(card.Item) && card.Wide,
+                    CompactMemoryBar = card.Item == ExpandedItem.Memory && card.CompactMemoryBar });
         }
         return result;
     }
@@ -52,27 +73,44 @@ public static class ExpandedCards
         return Normalize((cards ?? []).Concat(defaults));
     }
 
-    public static bool TwoColumns(double width, double scale) => width >= 400 * scale;
+    // Allow two usable columns after spacing and a scrollbar. The minimum-width panel stays in one column.
+    public static bool TwoColumns(double width, double scale) => width >= 430 * scale;
 
-    // Pack in reading order. A wide card starts a new row, and narrow displays give each card its own row.
+    // Pair consecutive half-width cards. Fill an unpaired row without moving a reading across an explicit row break.
     public static IReadOnlyList<(int Row, int Column, int Span)> Place(IReadOnlyList<ExpandedCard> cards, bool twoColumns)
     {
         var slots = new List<(int, int, int)>(cards.Count);
-        int row = 0, column = 0;
-        foreach (var card in cards)
+        static bool Half(ExpandedCard card) => !card.Wide && !IsInline(card.Item);
+        for (int i = 0, row = 0; i < cards.Count; i++, row++)
         {
-            if (!twoColumns || card.Wide)
+            if (twoColumns && Half(cards[i]) && i + 1 < cards.Count && Half(cards[i + 1]))
             {
-                if (column != 0) { row++; column = 0; }
-                slots.Add((row++, 0, 2));
+                slots.Add((row, 0, 1));
+                slots.Add((row, 1, 1));
+                i++;
             }
-            else
-            {
-                slots.Add((row, column++, 1));
-                if (column == 2) { row++; column = 0; }
-            }
+            else slots.Add((row, 0, 2));
         }
         return slots;
+    }
+
+    internal static (double Total, double Tallest) MeasureRows(ExpandedCardContent content, bool twoColumns, double body)
+    {
+        double line = LineHeight(body), spacing = 2 * VerticalPadding + RowGap;
+        // Leave one DIP per row for WPF layout rounding at fractional display scales.
+        double single = line + spacing + 1, memoryExtra = MemoryHeight(body) - line;
+        var slots = Place(content.Cards, twoColumns);
+        int rows = slots.Count == 0 ? 0 : slots[^1].Row + 1;
+        int memoryRows = 0, lastMemoryRow = -1;
+        for (int i = 0; i < slots.Count; i++)
+        {
+            int row = slots[i].Row;
+            if (content.Cards[i].Item != ExpandedItem.Memory || row == lastMemoryRow) continue;
+            memoryRows++;
+            lastMemoryRow = row;
+        }
+        return ((rows + (content.AwaitingDrives ? 1 : 0)) * single + memoryRows * memoryExtra,
+            single + (memoryRows > 0 ? memoryExtra : 0));
     }
 }
 

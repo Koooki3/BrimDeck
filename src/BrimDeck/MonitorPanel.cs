@@ -41,12 +41,17 @@ public partial class MainWindow
         // being read, and takes the current readings when the display is back.
         bool shown = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
         bool page = shown && !ScreenOff;
-        // A row whose only chosen reading is the battery reads the devices (UpdateDevicesDemand), not the system. A row whose
-        // chosen readings all wait for their first figures shows nothing, yet must be read for them (StripAwaits). A row only
-        // hidden for now (the panel open, or a notice in its place, which leaves no row built: RenderCompact) keeps its
-        // temperatures read while the sampler runs (App.UpdateMonitorExtras).
+        // A row whose chosen readings all wait for their first figures has no width, yet must be read for them (StripAwaits). A row
+        // only hidden for now (the panel open, or a notice in its place, which leaves no row built: RenderCompact) keeps its
+        // temperatures read while the sampler runs (App.UpdateMonitorExtras). A row whose only chosen reading is the battery reads the
+        // devices (UpdateDevicesDemand), not the system.
         bool heldStrip = (Strips.Any(reading => reading.NeedsSystem) || StripAwaits() || _alert is not null && Settings.ShowsMonitor(EffectiveStyle)) && IsVisible && !IsSuppressed && !ScreenOff && EffectiveStyle != CompactStyle.Line;
+        // A row whose readings have all faded out lets the sampler rest (StripPresence).
         bool strip = heldStrip && !_expanded && _alert is null && (Strips.Any(reading => reading.Showing(Eased.Now) && reading.NeedsSystem) || StripAwaits());
+        // The line that opens into the capsule or the notch keeps the readings that style shows current, as that style does, so they
+        // show as soon as it opens (MainWindow.Peek.cs); the line that opens the panel reads none.
+        bool ahead = StripNeedsSystem && LineIsland is { } island && Settings.ShowsMonitor(island) && EffectiveStyle == CompactStyle.Line
+            && !_expanded && _alert is null && IsVisible && !IsSuppressed && !ScreenOff;
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -57,7 +62,7 @@ public partial class MainWindow
         // The power is read for a page that shows its line (a page too small for it, or with the setting off, reads none of it).
         bool power = page && _monitorView?.ShowsPower == true;
         _powerPage = power;
-        _app.PresentMonitor(this, page, strip, power, heldStrip, PageDemand());
+        _app.PresentMonitor(this, page, strip || ahead, power, heldStrip || ahead, PageDemand());
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
@@ -101,12 +106,25 @@ public partial class MainWindow
             // The drives, a temperature, a drive letter or the battery got its first figure: the row is built again with it, and it comes
             // in with the row's own entrance while the others slide aside. Until then the row did not show it, so nothing else changes.
             if (admitted) return;
+            // A row still waiting for its first figures stops asking for readings once its sensors turn out to be missing.
+            if (!Strips.Any()) { if (EffectiveStyle != CompactStyle.Line) UpdateMonitorDemand(); return; }
             UpdateCompactStrips(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off);
             // The last reading has faded out of a row that stays as it is: the sampler may rest.
             if (_stripShowing && !Strips.Any(reading => reading.Showing(Eased.Now))) UpdateMonitorDemand();
             return;
         }
         if (!IsMonitorPage || _monitorView is null) return;
+        if (Settings.ExpandedCustomCards)
+        {
+            var (tiles, columns) = ExpandedGrid.Trim(CurrentMonitorGridTiles());
+            var gridLayout = CurrentMonitorGridLayout();
+            if (MonitorGridKey(gridLayout, tiles, columns) != _monitorKey)
+            {
+                // A seeded grid may gain volume tiles after storage discovery. Saved tiles stay put when a volume is absent.
+                RenderMonitor(); return;
+            }
+            _monitorView.Update(snapshot, MonitorMotion); return;
+        }
         // The sensors and the layout step are worked out once for each reading; the key and what the page was built for follow from them.
         var sensors = MonitorSensors();
         var layout = CurrentMonitorPlan(sensors);
@@ -133,6 +151,8 @@ public partial class MainWindow
     }
     private (CompactMonitorItems Hidden, CompactMonitorItems Arriving) UpdateStripAdmission(MonitorSnapshot? snapshot)
         => _stripAdmission.Update(snapshot, Settings.CompactReadings, StripSensors);
+    // Whether the collapsed row's chosen readings need the system sampler.
+    private bool StripNeedsSystem => CompactMonitor.Shown(Settings.CompactReadings) != 0;
 
     // The page's bottom margin for a page of this height; its sides are the header's inset.
     private static double MonitorBottom(double height) => height < 170 ? 10 : 16;
@@ -143,22 +163,13 @@ public partial class MainWindow
     {
         double height = ContentCanvas.Height;
         var shown = ExpandedMonitor.Shown(Settings.ExpandedReadings);
-        ExpandedCardContent? cards = null;
-        if (Settings.ExpandedCustomCards)
-        {
-            bool storage = shown.Contains(ExpandedItem.Storage);
-            var monitor = _app.Monitor;
-            var letters = storage ? (monitor?.Latest?.Storage ?? []).SelectMany(drive => drive.Volumes).Select(volume => volume.Letter).ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
-            var visible = ExpandedCards.Resolve(Settings.ExpandedCardOrder, shown, letters)
-                .Where(card => shown.Contains(card.Item) && (card.Letter is null || letters.Contains(card.Letter))).ToList();
-            bool waiting = storage && letters.Count == 0 && (monitor?.StorageState is null or SensorState.Unknown || monitor?.StorageCount > 0);
-            cards = new(visible, waiting, storage);
-        }
         return ExpandedLayout.For(shown, ContentCanvas.Width - 2 * _header.ContentSide, height - _header.Row - MonitorBottom(height),
-            new ExpandedContent(sensors.Drives, sensors.Power), null, Settings.MonitorMain, _monitorView is not null ? _monitorPlan : null, Settings.ExpandedCpuCores, cards);
+            new ExpandedContent(sensors.Drives, sensors.Power), null, Settings.MonitorMain, _monitorView is not null ? _monitorPlan : null);
     }
     // What the open page reads: what its layout kept, before the first one is made what the table chooses.
-    private ExpandedDemand PageDemand() => (_monitorPlan is { } plan ? plan.Demand(Settings.MonitorTemperatures) : ExpandedMonitor.Demand(ExpandedMonitor.Shown(Settings.ExpandedReadings), Settings.MonitorTemperatures));
+    private ExpandedDemand PageDemand() => Settings.ExpandedCustomCards ? GridPageDemand()
+        : _monitorPlan is { } plan ? plan.Demand(Settings.MonitorTemperatures)
+        : ExpandedMonitor.Demand(ExpandedMonitor.Shown(Settings.ExpandedReadings), Settings.MonitorTemperatures);
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
     // The sort is not part of it: a new sort reorders the list in place. The page keeps places for the volumes (as many as were
@@ -219,11 +230,17 @@ public partial class MainWindow
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
         ApplyPageHeader(PanelHeader.ForPanel(height));
         MonitorContent.Margin = new Thickness(_header.ContentSide, 0, _header.ContentSide, MonitorBottom(height));
+        bool fade = _monitorFade; _monitorFade = false;
+        if (Settings.ExpandedCustomCards)
+        {
+            _monitorPlan = null;
+            RenderMonitorGrid(shown, fade);
+            return;
+        }
         // Worked out once for each render: a drag renders the page many times a second.
         var sensors = MonitorSensors();
         var layout = CurrentMonitorPlan(sensors);
         var key = MonitorKey(layout, sensors.Small);
-        bool fade = _monitorFade; _monitorFade = false;
         if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView))
         {
             _monitorPlan = layout;

@@ -44,6 +44,8 @@ internal sealed class MediaSessions : IDisposable
         public string CoverKey = "";
         public byte[]? CoverBytes;
         public CancellationTokenSource? CoverCancellation;
+        // Every address under CoverKey was tried and none gave a picture; NetEase's song/detail may then have another.
+        public bool CoverFailed;
     }
     private sealed record Route(string Id, string ProcessName, SystemSource? System, IMediaPlayerConnection? Connection = null, bool Supplement = false, bool Departed = false);
 
@@ -388,14 +390,13 @@ internal sealed class MediaSessions : IDisposable
                             if (route.Supplement) track = MediaRouting.Merge(track, route.System?.Track);
                         }
                         // A NetEase id lets song/detail supply the artwork and the full artist list a log or CDP may omit. A known
-                        // detail is used at once; an unknown one is fetched once in the background and schedules a refresh on arrival.
-                        // The track keeps its live title/position/state: FillDetails fills only an empty artist or album.
+                        // detail is used at once. The track keeps its live title/position/state: FillDetails fills only an empty
+                        // artist or album.
                         NeteaseSongDetails? details = null;
-                        if (track.SongId.StartsWith("netease:", StringComparison.Ordinal))
+                        string? neteaseId = track.SongId.StartsWith("netease:", StringComparison.Ordinal) ? track.SongId[8..] : null;
+                        if (neteaseId is not null)
                         {
-                            string songId = track.SongId[8..];
-                            details = _songDetails.Known(songId);
-                            if (details is null) _ = FetchDetailsAsync(songId, track.SongId);
+                            details = _songDetails.Known(neteaseId);
                             track = MediaRouting.FillDetails(track, details);
                         }
                         // Artwork candidates, in priority order: the player's own URL first, the song/detail URL as a
@@ -410,12 +411,17 @@ internal sealed class MediaSessions : IDisposable
                         bool bytesChanged = native.Cover is { } bytes && (cache.CoverBytes is null || !bytes.AsSpan().SequenceEqual(cache.CoverBytes));
                         if (cache.CoverKey != key || bytesChanged)
                         {
-                            cache.CoverCancellation?.Cancel(); cache.CoverKey = key; cache.CoverBytes = native.Cover;
+                            cache.CoverCancellation?.Cancel(); cache.CoverKey = key; cache.CoverBytes = native.Cover; cache.CoverFailed = false;
                             var shown = cache.Cover ?? cache.Previous;
                             cache.Cover = DecodeCover(native.Cover ?? RecentCover(coverUrls));
                             cache.Previous = null;
                             if (cache.Cover is null && coverUrls.Length > 0) { cache.Previous = shown; _ = ReadCoverAsync(cache, key, coverUrls); }
                         }
+                        // The details are asked for only when the player left something out: the artist, the album, or artwork it
+                        // gave no picture or working address for. They are fetched once in the background and schedule a refresh.
+                        if (neteaseId is not null && details is null && (string.IsNullOrWhiteSpace(track.Artist) || string.IsNullOrWhiteSpace(track.Album)
+                            || native.Cover is null && (coverUrls.Length == 0 || cache.CoverFailed)))
+                            _ = FetchDetailsAsync(neteaseId, track.SongId);
                         // The log's cover is the full-size album picture, so it is used once the log has reached the session's song.
                         // Until then the session's thumbnail stands in; neither borrows another player's artwork.
                         if (leading is not null)
@@ -597,8 +603,9 @@ internal sealed class MediaSessions : IDisposable
         finally
         {
             if (ReferenceEquals(cache.CoverCancellation, cancellation)) cache.CoverCancellation = null;
-            // A failed download stops holding the previous song's artwork; the placeholder replaces it.
-            if (!_disposed && cache.CoverKey == key && cache.Previous is not null) { cache.Previous = null; Schedule(); }
+            // A failed download stops holding the previous song's artwork; the placeholder replaces it. The refresh it
+            // schedules may ask song/detail for another address (CoverFailed).
+            if (!_disposed && cache.CoverKey == key && cache.Cover is null) { cache.CoverFailed = true; cache.Previous = null; Schedule(); }
         }
     }
     private byte[]? RecentCover(string? url)

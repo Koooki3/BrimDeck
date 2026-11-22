@@ -69,7 +69,7 @@
   // brand that is orange; the rest are grays. Warning is the notice orange, critical the danger red.
   "apps": {
     "claude": "#A8620A", "codex": "#1F6FA3", "antigravity": "#047A7A", "cursor": "#3C3C3C", "zcode": "#6B35C9",
-    "dsh": "#4D7A1C", "grokBot": "#5C5C5C", "kimi": "#A63FCB", "opencode": "#6B6B6B", "codeagent": "#1AA298", "commandcode": "#3C1FB2", "workbuddy": "#39A460", "mimo": "#F46400", "qoder": "#157A32", "qwenwork": "#127D3C", "manual": "#3C3C3C", "other": "#5C5C5C", "warning": "#B84A00", "critical": "#C61218"
+    "dsh": "#4D7A1C", "grokBot": "#5C5C5C", "kimi": "#A63FCB", "opencode": "#6B6B6B", "codeagent": "#1AA298", "commandcode": "#3C1FB2", "workbuddy": "#39A460", "mimo": "#F46400", "qoder": "#157A32", "qwenwork": "#127D3C", "trae": "#0CA756", "doubao": "#3A91FF", "manual": "#3C3C3C", "other": "#5C5C5C", "warning": "#B84A00", "critical": "#C61218"
   },
   // The clock in the wide face, white-on-charcoal or ink-on-paper; the signal yellow is a preset, not the default.
   "clock": {

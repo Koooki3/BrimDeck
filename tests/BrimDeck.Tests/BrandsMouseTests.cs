@@ -154,8 +154,8 @@ static class BrandsMouseTests
         var hub = Shape(0x089D, 0x062F, 0xFF01, 0x10, input: 33, output: 33, outputIds: [0x00]);
         var aula = Shape(0x089D, 0x062F, 0xFF02, 0x00, input: 33, output: 33, outputIds: [0x00]);
         check("EWEADN: the 089D:062F receiver takes HaloBattery's info read on 0xFF01 / 0x10 and MouseDock's identify read on 0xFF02 / 0 (33 / 33), as does the 088D:062E cable",
-            Named(hub, "EWEADN mouse", "eweadn.info") && Named(aula, "EWEADN mouse", "eweadn.identify")
-            && Named(Shape(0x088D, 0x062E, 0xFF01, 0x10, input: 33, output: 33, outputIds: [0x00]), "EWEADN mouse", "eweadn.info"));
+            Named(hub, "EWEADN mouse", "eweadn.info", "eweadn.info10") && Named(aula, "EWEADN mouse", "eweadn.identify")
+            && Named(Shape(0x088D, 0x062E, 0xFF01, 0x10, input: 33, output: 33, outputIds: [0x00]), "EWEADN mouse", "eweadn.info", "eweadn.info10"));
         check("EWEADN: another collection of the receiver (65-byte 0xFF02, the mouse page) and another product are not asked",
             Untaken(Shape(0x089D, 0x062F, 0xFF02, 0x00, input: 65, output: 65, outputIds: [0x00])) && Untaken(Shape(0x089D, 0x062F, 0x0001, 0x02))
             && Untaken(Shape(0x089D, 0x0630, 0xFF01, 0x10, input: 33, output: 33, outputIds: [0x00])));
@@ -386,6 +386,8 @@ static class BrandsMouseTests
             && RedragonMice.Battery(Hex("05 90 10 01 00 00 00 00")) == new BatteryRead(null, true) && RedragonMice.Battery(Hex("05 90 10 02 00 00 00 00")) == new BatteryRead(100)
             && RedragonMice.Battery(RedragonMice.Request()) is null && RedragonMice.Battery(Hex("05 80 01 01 00 00 00 00")) is null
             && RedragonMice.Battery(Hex("05 90 11 00 00 00 00 00")) is null);
+        check("Redragon: named the M690 PRO unless the product string names Machenike (its M7, M721 and M722 share both ids)",
+            RedragonMice.Name(receiver) == "Redragon M690 PRO" && RedragonMice.Name(receiver with { Name = "MACHENIKE M7 Gaming Mouse" }) is null);
     }
 
     private static void Scyrox(Action<string, bool> check)

@@ -14,7 +14,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | Codex | ✓ | ✓ | 在本机登录 Codex |
 | Cursor | ✓ | ✓ | 在本机登录 Cursor |
 | Grok Bot | ✓ | | 在本机登录 Grok Bot 桌面版 |
-| Antigravity | ✓ | ✓ | 读取配额时需要 Antigravity 桌面版正在运行 |
+| Antigravity | ✓ | ✓ | 读取配额时需要 Antigravity 桌面版或 Antigravity IDE 正在运行；两者都未运行时，如果已开启“通过 CLI 读取”，改用已登录的 Antigravity CLI（`agy`）读取，最多每 5 分钟运行一次 `agy -p /usage`。该开关默认关闭，展开该行可以开启 |
 | ZCode | ✓ | ✓ | 在本机登录 ZCode |
 | DeepSeek Harness | ✓ | ✓ | 在 DeepSeek Harness 桌面版或本地 Web 版中登录 DeepSeek 账户，或在其中保存 API 密钥 |
 | Kimi Code | ✓ | ✓ | 在本机登录 Kimi Code（CLI、桌面版或 VS Code 扩展） |
@@ -27,8 +27,11 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | Xiaomi MiMo | ✓ | | 在 Xiaomi MiMo 桌面版或 MiMo Code CLI 中关联开放平台 API 密钥或 Token Plan |
 | 千问、QwenCloud | ✓ | | 在设置中通过浏览器登录千问 AI 平台或 QwenCloud 账户 |
 | 千问办公、QwenWork | ✓ | ✓ | 在本机登录千问办公或 QwenWork 桌面版 |
+| TRAE、TRAE CN | ✓ | ✓ | 在本机登录 TRAE（含 TRAE SOLO）或 TRAE CN（含 TRAE SOLO CN） |
+| 豆包、Dola | ✓ | | 在设置中通过浏览器登录豆包（含豆包工作）或 Dola 账号 |
 | Qoder、Qoder CN | ✓ | ✓ | 在本机登录 Qoder CLI 或 Qoder 桌面版，或打开已登录的 Qoder IDE（Qoder CN 同理）。CLI 与桌面版的 Token 统计需要在设置中开启 |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
+| 火山方舟、BytePlus ModelArk | ✓ | | 在设置中填写 AccessKey ID 和 Secret Access Key，或通过浏览器登录火山引擎或 BytePlus 账号 |
 | Xiaomi MiMo API | ✓ | | 在设置中填写小米 MiMo 开放平台按量计费 API 密钥 |
 | Xiaomi MiMo Token Plan | ✓ | | 在设置中填写小米 MiMo Token Plan 密钥 |
 | DeepSeek | ✓ | | 在设置中填写 API 密钥 |
@@ -49,6 +52,8 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 目录中的单价通常取自最便宜的服务商，可能与模型厂商的官方价格不同。例如 GLM-5.3 在目录中的输入与输出单价为每百万 Token 0.07 与 1.4 美元，Z.AI 官方为 1.4 与 4.4 美元。因此，对记录中用到的每个模型，BrimDeck 会查询 OpenRouter 上该模型厂商自己的渠道，并改用该渠道的单价；厂商没有渠道的模型，沿用目录单价。厂商渠道的单价每个模型每天查询一次，并保存在本机；查询失败时沿用上次保存的单价。手动添加的单价优先。
 
 DeepSeek 的记录（`deepseek-flash`、`deepseek-v4.1-flash`、`deepseek-v4-flash` 与 `deepseek-v4-pro`，包括经 MaaS 网关调用的记录）按 DeepSeek 官方的美元单价估算，并按每条记录的请求时间区分高峰与低峰时段：北京时间工作日 9:00–12:00、14:00–18:00 为高峰时段，其余为低峰时段，单价减半。法定节假日不在判断范围内，节假日的白天按高峰价估算。
+
+OpenRouter 目录中没有的两个字节跳动 Seed 模型使用内置单价：Seed 2.0 Code 按 BytePlus ModelArk 官方的美元单价估算；Seed 2.1 Pro 没有官方美元单价，它在火山方舟的人民币单价是 Seed 2.1 Turbo 的两倍，因此按 Seed 2.1 Turbo 官方美元单价的两倍估算。
 
 ## 配额环与低峰时间
 
@@ -154,7 +159,7 @@ MiMo Code CLI 与 Xiaomi MiMo 桌面版共用同一个数据库（`%USERPROFILE%
 Qoder（qoder.com）与 Qoder CN（qoder.com.cn）是两套独立的账号，在“配额来源”中分别选择。同一版本的 CLI、桌面版与 IDE 共用一份积分。
 
 - **配额**：按套餐积分、加购积分、组织资源包与专属积分（例如“SOTA 专属积分”）分别显示，并显示到期时间与套餐名称。
-- **读取方式**：Qoder 的账户接口返回加密数据，BrimDeck 依次请本机的 Qoder CLI、桌面版、IDE 读取，使用它们各自的登录。CLI 与桌面版每次读取约需 20 秒，在后台进行，不影响其他列。
+- **读取方式**：BrimDeck 依次尝试三种方式，前一种可用就不再尝试后面的：用 Qoder 桌面版的登录直接向 Qoder 查询，通常一两秒完成；请本机的 Qoder CLI 读取，每次约需 20 秒，在后台进行，不影响其他列；向正在运行的 Qoder IDE 查询。个人账户与团队（Teams）账户都可读取。企业版账户的积分暂时无法通过桌面版的登录读取。
 - **Token 用量**：读取 Qoder IDE 与 CLI、桌面版的本机记录。CLI 与桌面版默认不记录 Token 数：在设置中把统计应用选为 Qoder 后，展开这一列，点击“CLI 与桌面版 Token”一行的“开启”，再重新打开 Qoder CLI 与桌面版，新的对话开始记录。这一操作为当前用户设置环境变量 `QODER_EXPOSE_TOKEN_USAGE=1`（Qoder CN 为 `QODERCN_EXPOSE_TOKEN_USAGE=1`），“关闭”时删除。Auto、极致、快速、经济是档位，统计中按档位显示。
 
 ## 千问办公与 QwenWork
@@ -168,6 +173,17 @@ Qoder（qoder.com）与 Qoder CN（qoder.com.cn）是两套独立的账号，在
 - **Token 用量**：读取桌面版对话引擎的本机记录，每次模型回复计一次。千问办公中按档位选择的模型显示档位名称，例如“标准”“高级”；其他模型显示原名。费用为按公开单价的估算，两个版本实际都按积分扣费。
 - **安装位置**：装在哪个文件夹都可以，BrimDeck 只读取当前用户目录下的数据。
 
+## TRAE 与 TRAE CN
+
+TRAE（国际版，trae.ai）与 TRAE CN（国内版，trae.com.cn）账号与数据各自独立，在“配额来源”与“统计应用”中分别选择。
+
+- **配额**：
+  - **TRAE（国际版）**：显示当前套餐（Free、Lite、Pro、Pro+、Ultra）的美元套餐额度、赠送额度（有赠送时）、加油包以及按量计费（On-Demand Usage）消费，并显示账期重置时间。
+  - **TRAE CN（国内版）**：显示账户的全部积分（已用与总额）及重置时间；账户同时包含多个积分来源（例如套餐积分、每月登录积分、每日签到、用户福利、加购积分）时，按类别分别显示各自的已用量、总额与到期时间。
+- **登录**：直接读取 TRAE / TRAE SOLO（或 TRAE CN / TRAE SOLO CN）保存在用户目录的登录，不需要在 BrimDeck 中另外登录。BrimDeck 不续期登录，也不修改客户端文件；登录过期后状态显示“登录已失效”，打开对应的客户端即可续期。
+- **团队版与企业版**：使用 SaaS 团队或企业账号登录的客户端没有提供个人用量余额接口，暂不支持读取其配额。
+- **Token 用量**：以只读方式在内存中解密读取本机对话数据库中的每次模型请求与 Token 数量，不向磁盘写入任何解密后的数据库文件。模型名称为实际调用的模型（例如 `Dola-Seed-2.0-Code`），可能与 TRAE 界面上显示的名称不同。费用为按公开单价的估算。
+
 ## 千问与 QwenCloud
 
 千问 AI 平台（platform.qianwenai.com）与它的国际版 QwenCloud（www.qwencloud.com）是两套独立的账号，在“配额来源”中分别选择，分别登录。
@@ -178,6 +194,22 @@ Qoder（qoder.com）与 Qoder CN（qoder.com.cn）是两套独立的账号，在
 - **QwenCloud**：没有账户余额，只显示 Token Plan 与本月扣费，金额以美元计。
 - **本月扣费**：本月按量计费的消费，与两个平台的官方 CLI 一样按 UTC 的自然月统计，可能与控制台中按北京时间的账单月略有差异。
 - **登录**：在设置中展开千问或 QwenCloud 行，点击“在浏览器中登录”，在打开的授权页登录并确认授权，需在 5 分钟内完成。授权页显示的应用为 QianWen CLI 或 QwenCloud CLI，这是平台账户接口唯一提供的登录方式。BrimDeck 获得自己的登录凭据，加密保存在本机。凭据不能续期，过期后状态显示“登录已失效”，重新登录即可。点击“退出登录”删除本机保存的凭据。
+
+## 豆包与 Dola
+
+豆包与豆包工作共用同一账号、订阅与额度体系（www.doubao.com），在“配额来源”中合并为“豆包”。海外版 Dola（www.dola.com）使用独立账号，在“配额来源”中单独选择。两者均只提供配额，不提供 Token 统计。
+
+- **配额**：同时展示该账号下所有生效中的订阅与额度，包括个人订阅窗口（5 小时、7 日、每月等）、团队版与企业版订阅额度（含企业多分组明细）、创作额度包与活动奖励；账号同时拥有个人订阅与团队/企业订阅时一并显示。
+- **登录**：在设置中展开豆包或 Dola 行，点击“在浏览器中登录”。BrimDeck 会以独立的临时配置目录打开浏览器窗口，不触碰日常浏览器。豆包登录完成后自动捕获会话并关闭窗口；Dola 需要在登录完成后自行关闭窗口，BrimDeck 随后读取会话（这样 Dola 也能使用 Google 账号登录）。读取后删除临时目录。登录凭据按当前 Windows 用户加密保存在本机。
+
+## 火山方舟与 BytePlus ModelArk
+
+火山方舟（中国站）与 BytePlus ModelArk（国际站）只提供配额。在“配额来源”中选择后，该行会展开，可以填写 AK/SK，也可以通过浏览器登录，填写其中一种即可。两种都填写时，先使用 AK/SK；AK/SK 被拒绝时改用登录读取。
+
+- **为什么不能用模型 API 密钥**：方舟推理 API Key 仅用于调用模型，无法查询 Coding Plan、Agent Plan 用量或账户余额。
+- **自动识别多种套餐**：无论是浏览器登录还是 AK/SK，都会在同一列中自动探测并同时显示当前账号下全部生效的项目，包括个人 Coding Plan（5 小时、每周、每月）、个人 Agent Plan（AFP 5 小时、每周、每月）、团队/企业 Coding Plan 席位、团队/企业 Agent Plan 席位，以及账户余额（中国站为人民币，国际站为美元）。未开通或无权限的部分会自动跳过，不影响其他套餐显示。
+- **AK/SK**：填写火山引擎或 BytePlus 访问控制（IAM）的 AccessKey ID 与 Secret Access Key，加密保存在本机。AK/SK 在控制台的 API 访问密钥页面创建（火山引擎：<https://console.volcengine.com/iam/keymanage>；BytePlus：<https://console.byteplus.com/iam/keymanage>），不是调用模型用的 API Key。主账号的密钥权限较大，建议新建子用户，只授予方舟与费用中心的只读权限，再使用子用户的密钥。
+- **浏览器登录**：点击“在浏览器中登录”，在默认浏览器中完成火山引擎或 BytePlus 账号授权。BrimDeck 获取可自动续期的临时凭据并加密保存在本机。同一版本（火山方舟或 BytePlus ModelArk）的各列共用这个登录。
 
 ## 手动填写的来源
 

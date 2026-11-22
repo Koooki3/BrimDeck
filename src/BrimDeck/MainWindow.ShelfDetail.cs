@@ -96,6 +96,25 @@ public partial class MainWindow
         }
         ShelfSearchButton.Visibility = Visibility.Visible;
         ClockLabel.Visibility = Visibility.Visible;
+        if (_app.ClipboardSync.Connected(false))
+        {
+            // Drawn as the search button beside it is: a 24-unit drawing with a 2-unit pen shown at 15, in the same glyph style
+            // (dimmed at rest, brighter under the pointer), so the two weigh the same.
+            var arrow = new Path { Data = Geometry.Parse("M 4.5,15 V 19.5 H 19.5 V 15 M 12,4 V 14.5 M 7.5,10 L 12,14.5 L 16.5,10"), StrokeThickness = 2,
+                StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round };
+            arrow.SetBinding(Shape.StrokeProperty, new System.Windows.Data.Binding(nameof(Button.Foreground)) { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(Button), 1) });
+            var canvas = new Canvas { Width = 24, Height = 24 };
+            canvas.Children.Add(arrow);
+            string receiveName = Loc.T("接收微信输入法文件", "Receive files from WeType");
+            var receive = new Button { Style = (Style)FindResource("PanelGlyphButton"), Content = new Viewbox { Width = 15, Height = 15, Child = canvas }, ToolTip = receiveName };
+            AutomationProperties.SetName(receive, receiveName);
+            receive.Click += (_, e) => { e.Handled = true; _app.ClipboardSync.OpenFileInbox(); };
+            receive.MouseRightButtonUp += (_, e) => e.Handled = true;
+            receive.HorizontalAlignment = HorizontalAlignment.Right;
+            receive.VerticalAlignment = VerticalAlignment.Center;
+            receive.Margin = new Thickness(0, 0, right + ShelfSearchButton.Width, 0);
+            ShelfToolbar.Children.Add(receive);
+        }
     }
     private Button ToolbarGlyph(string data, string name, Action click)
     {
@@ -149,7 +168,6 @@ public partial class MainWindow
     // opening only when one of them was ended: a page closed as it was built opens as it is.
     private void ResetShelf()
     {
-        StopDeckHover();
         bool ended = _shelfEdit is not null || _shelfDetail is not null || _shelfSearching || _shelfQuery.Length > 0 || _picked.Count > 0;
         if (_shelfEdit is not null || _shelfSearching) EndTyping();
         _shelfEdit = null; _shelfDetail = null; _shelfSearching = false; _shelfQuery = ""; _picked.Clear();
@@ -480,6 +498,12 @@ public partial class MainWindow
         panel.Children.Add(PillButton(Loc.T("打开", "Open"), true, () => OpenFile(file.Path)));
         var show = PillButton(Loc.T("在文件夹中显示", "Show in folder"), false, () => ShowInFolder(file.Path)); show.Margin = new Thickness(6, 0, 0, 0);
         panel.Children.Add(show);
+        if (FileShareTargets([file]).Count > 0)
+        {
+            Button share = null!;
+            share = PillButton(Loc.T("分享", "Share"), false, () => ShowShareChoices(file, share)); share.Margin = new Thickness(6, 0, 0, 0);
+            panel.Children.Add(share);
+        }
         Button more = null!;
         more = PillButton("⋯", false, () =>
         {
@@ -494,6 +518,28 @@ public partial class MainWindow
         more.Margin = new Thickness(6, 0, 0, 0);
         panel.Children.Add(more);
         return panel;
+    }
+
+    // Windows' share sheet (ShareSheet) takes files: folders and files that are gone are not offered, nor shortcuts, which Windows
+    // will not hand over (access denied).
+    private static List<TransferFile> Shareable(IEnumerable<TransferFile> files) =>
+        files.Where(file => ShelfFiles.Exists(file.Path) && !ShelfFiles.IsFolder(file.Path)
+            && !string.Equals(System.IO.Path.GetExtension(file.Path), ".lnk", StringComparison.OrdinalIgnoreCase)).ToList();
+    // The panel closes as the sheet opens: it is always on top and would cover the sheet.
+    private void ShareFiles(IReadOnlyList<TransferFile> files)
+    {
+        string title = files.Count == 1 ? files[0].Name : Loc.T($"{files.Count} 个文件", $"{files.Count} files");
+        ShareSheet.Show(MonitorHandle, CapsuleScreenRect(), files.Select(file => file.Path).ToList(), title,
+            opened: () => SetExpanded(false),
+            failed: () => ShowShelfNotice(Loc.T("无法打开 Windows 分享面板", "Could not open the Windows share sheet")));
+    }
+    // Where the collapsed panel stands, in screen device pixels (as OccupiedArea): the capsule can be moved anywhere, the middle
+    // of the screen too, and stays on top of the sheet.
+    private Rect? CapsuleScreenRect()
+    {
+        if (!(_pixelsPerDip > 0) || !(Collapsed.Surface.Width > 0) || !(Collapsed.Surface.Height > 0)) return null;
+        var r = _frame.ToScreen(Collapsed.Surface);
+        return new Rect((MonitorBoundsDip.X + r.X) * _pixelsPerDip, (MonitorBoundsDip.Y + r.Y) * _pixelsPerDip, r.Width * _pixelsPerDip, r.Height * _pixelsPerDip);
     }
 
     private void DeleteClips(IReadOnlyList<ClipEntry> clips)
@@ -545,6 +591,7 @@ public partial class MainWindow
         public const string Folder = "M 2,4.5 A 1,1 0 0 1 3,3.5 H 6.2 L 7.7,5 H 13 A 1,1 0 0 1 14,6 V 12 A 1,1 0 0 1 13,13 H 3 A 1,1 0 0 1 2,12 Z";
         public const string FilePath = "M 6.5,9.5 L 9.5,6.5 M 7,4.5 L 8,3.5 A 2.8,2.8 0 0 1 12,7.5 L 11,8.5 M 9,11.5 L 8,12.5 A 2.8,2.8 0 0 1 4,8.5 L 5,7.5";
         public const string Remove = "M 2.5,8 A 5.5,5.5 0 1 1 13.5,8 A 5.5,5.5 0 1 1 2.5,8 Z M 5.5,8 H 10.5";
+        public const string Share = "M 8,2.5 V 10 M 5.5,5 L 8,2.5 L 10.5,5 M 3.5,8 V 12.5 A 1,1 0 0 0 4.5,13.5 H 11.5 A 1,1 0 0 0 12.5,12.5 V 8";
     }
     private ContextMenu NewMenu() => new() { Style = (Style)FindResource("ShelfMenu") };
     // check: null for an action; false or true for a choice, whose check column shows the one chosen.
@@ -679,6 +726,7 @@ public partial class MainWindow
         bool many = files.Count > 1;
         menu.Items.Add(Item(many ? Loc.T($"粘贴所选 {files.Count} 项", $"Paste {files.Count} files") : Loc.T("粘贴", "Paste"),
             () => PasteFiles(files), MenuIcons.Paste));
+        AddShareMenu(menu, files);
         if (!many)
         {
             menu.Items.Add(Item(Loc.T("打开", "Open"), () => OpenFile(file.Path), MenuIcons.Open));

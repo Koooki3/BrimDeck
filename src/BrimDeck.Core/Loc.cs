@@ -38,9 +38,11 @@ public static class Loc
         ["账期"] = "Billing period", ["套餐"] = "Plan", ["其他"] = "Other",
         ["Cursor 模型"] = "Cursor models", ["其他模型"] = "Other models", ["工具调用"] = "Tool calls",
         ["账户余额"] = "Account balance", ["密钥余额"] = "Key balance", ["今日扣费"] = "Charged today", ["本月扣费"] = "Charged this month", ["预算余额"] = "Budget left", ["密钥累计"] = "Key total",
-        ["赠送余额"] = "Granted balance", ["充值余额"] = "Topped-up balance", ["冻结金额"] = "Frozen", ["现金余额"] = "Cash balance", ["代金券余额"] = "Voucher balance",["累计消费"] = "Total cost", ["加油包"] = "Extra usage", ["额外积分"] = "Extra credits", ["套餐积分"] = "Plan credits", ["加购积分"] = "Add-on credits", ["全部积分"] = "All credits", ["每日积分"] = "Daily credits", ["每月积分"] = "Monthly credits", ["长期积分"] = "Long-term credits", ["即将到期积分"] = "Credits expiring soon", ["成员积分"] = "Member credits", ["企业积分"] = "Organization credits", ["组织资源包"] = "Organization credits", ["本月加油包"] = "Extra usage this month",
-        ["个人版"] = "Personal", ["团队版"] = "Team",
-        ["次"] = "calls", ["积分"] = "credits", ["令牌"] = "tokens",
+        ["赠送余额"] = "Granted balance", ["充值余额"] = "Topped-up balance", ["冻结金额"] = "Frozen", ["现金余额"] = "Cash balance", ["代金券余额"] = "Voucher balance",["累计消费"] = "Total cost", ["加油包"] = "Extra usage", ["赠送额度"] = "Bonus quota", ["按量计费"] = "On-demand", ["快速请求"] = "Fast requests", ["额外积分"] = "Extra credits", ["套餐积分"] = "Plan credits", ["加购积分"] = "Add-on credits", ["全部积分"] = "All credits", ["每日积分"] = "Daily credits", ["每月积分"] = "Monthly credits", ["每月登录积分"] = "Monthly login credits", ["每日签到"] = "Daily check-in", ["用户福利"] = "Welcome credits", ["长期积分"] = "Long-term credits", ["即将到期积分"] = "Credits expiring soon", ["成员积分"] = "Member credits", ["企业积分"] = "Organization credits", ["组织资源包"] = "Organization credits", ["本月加油包"] = "Extra usage this month",
+        ["个人版"] = "Personal", ["团队版"] = "Team", ["企业版"] = "Enterprise",
+        ["创作额度包"] = "Creation pack", ["活动奖励"] = "Activity reward",
+        ["个人 Coding"] = "Personal Coding", ["个人 Agent"] = "Personal Agent", ["团队 Coding"] = "Team Coding", ["团队 Agent"] = "Team Agent",
+        ["次"] = "calls", ["积分"] = "credits", ["令牌"] = "tokens", ["AFP"] = "AFP",
         ["网易云音乐"] = "NetEase Cloud Music", ["QQ 音乐"] = "QQ Music", ["酷狗音乐"] = "KuGou Music", ["爱奇艺"] = "iQIYI",
     };
 

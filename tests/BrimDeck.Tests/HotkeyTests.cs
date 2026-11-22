@@ -13,10 +13,15 @@ internal static class HotkeyTests
             HotkeyText.Normalize("Ctrl+Alt+K") == "Ctrl+Alt+K" && HotkeyText.Normalize("shift+control+D1") == "Ctrl+Shift+D1"
             && HotkeyText.Normalize("Win+Shift+Alt+Ctrl+Space") == "Ctrl+Alt+Shift+Win+Space" && HotkeyText.Normalize(" Ctrl + Alt + K ") == "Ctrl+Alt+K"
             && HotkeyText.Format(HotkeyModifiers.Win | HotkeyModifiers.Ctrl, "F5") == "Ctrl+Win+F5");
-        check("Only F1 to F24 stand without a modifier",
+        check("Only F1 to F24 stand without a modifier, except ClickThrough bare non-typing keys",
             HotkeyText.Normalize("F9") == "F9" && HotkeyText.Normalize("F24") == "F24" && HotkeyText.Normalize("F1") == "F1"
             && HotkeyText.Normalize("F25") == "" && HotkeyText.Normalize("F0") == "" && HotkeyText.Normalize("F01") == "" && HotkeyText.Normalize("K") == ""
-            && HotkeyText.Normalize("Escape") == "" && HotkeyText.Normalize("Shift+K") == "Shift+K");
+            && HotkeyText.Normalize("Escape") == "" && HotkeyText.Normalize("Shift+K") == "Shift+K"
+            && HotkeyText.Normalize("CapsLock", bareKeyOk: true) == "CapsLock" && HotkeyText.Normalize("Escape", bareKeyOk: true) == "Escape"
+            && HotkeyText.Normalize("K", bareKeyOk: true) == "" && HotkeyText.AllowsBareKey(HotkeyKind.ClickThrough)
+            && !HotkeyText.AllowsBareKey(HotkeyKind.Hide)
+            && Plan(HotkeyKind.ClickThrough, Key, (HotkeyKind.ClickThrough, "CapsLock")) == (null, "CapsLock")
+            && Plan(HotkeyKind.Hide, Key, (HotkeyKind.Hide, "CapsLock")).Status == HotkeyStatus.Invalid);
         check("Malformed hotkey texts are rejected",
             HotkeyText.Normalize("Ctrl+Ctrl+K") == "" && HotkeyText.Normalize("Ctrl+") == "" && HotkeyText.Normalize("Ctrl+Alt") == ""
             && HotkeyText.Normalize("K+Ctrl") == "" && HotkeyText.Normalize("Ctrl+K+L") == "" && HotkeyText.Normalize("Ctrl+Page Up") == ""

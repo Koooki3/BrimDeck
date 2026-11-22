@@ -9,7 +9,7 @@ namespace BrimDeck.Core;
 // read at all, and a Basilisk Ultimate was measured answering with Synapse 4 running. A reply to another program's request
 // fails Razer.Reply's checks and is asked again (HidBatteries.RazerQuery); Synapse can still, rarely, get our reply to one of
 // its own requests.
-public enum DeviceBrand { EndgameGear, Vaxee, Inphic }
+public enum DeviceBrand { EndgameGear, Vaxee, Inphic, Epos }
 
 public static class VendorSoftware
 {
@@ -19,6 +19,9 @@ public static class VendorSoftware
         Dongles.EndgameVendor => DeviceBrand.EndgameGear,
         Dongles.VaxeeVendor => DeviceBrand.Vaxee,
         Dongles.InphicVendor or Dongles.InphicWireless => DeviceBrand.Inphic,
+        // The GSP 370's serial port (Epos), which EPOS Gaming Suite opens too; the HID headsets are read through BrandFamilies
+        // and do not stand aside.
+        Epos.Vendor => DeviceBrand.Epos,
         _ => null
     };
 
@@ -31,6 +34,7 @@ public static class VendorSoftware
         (DeviceBrand.EndgameGear, ["EndgameGear", "Endgame Gear", "Endgame_Gear"]),
         (DeviceBrand.Vaxee, ["VAXEE"]),
         (DeviceBrand.Inphic, ["Inphic", "英菲克"]),
+        (DeviceBrand.Epos, ["EPOSGamingSuite", "EPOS Gaming Suite"]),
     ];
 
     // Adds the brand a running process's executable file name ("Razer Synapse Service.exe") belongs to, if any, to running. No

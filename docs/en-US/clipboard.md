@@ -4,7 +4,7 @@ The "Clipboard and file transfer" page of the open panel has two columns: the cl
 
 Under Settings › Page layout › Show the page can show only the clipboard or only the file transfer, which then fills the page. While only the clipboard shows, files dragged onto the panel are not added to the file transfer, and the collapsed view does not show their number. The arrangements below apply only while both columns show.
 
-Drag the divider between the columns to change their widths; double-click it to go back to 60% for the clipboard and 40% for the file transfer. Under Settings › Page layout the columns can also be stacked as two cards, the one behind showing only a side strip with its icon, name and number of entries. Click that strip, the title of the card in front, or the page's button once more to switch cards. Three more ways of switching can be turned on under Settings › Page layout: hovering the pointer over the strip, a middle click (on by default), and a two-finger sideways swipe or Shift + wheel.
+Drag the divider between the columns to change their widths; double-click it to go back to 60% for the clipboard and 40% for the file transfer. Under Settings › Page layout the columns can also be stacked as two cards, the one behind showing only a side strip with its icon, name and number of entries. Click that strip, the title of the card in front, or the page's button once more to switch cards. Three more ways of switching can be turned on under Settings › Page layout: turning the wheel over the strip (either way switches), a middle click (on by default), and a two-finger sideways swipe on a touchpad (on by default, either way switches).
 
 Each column can show its entries in several ways, chosen for each under Settings › Page layout and combined freely. By default the clipboard shows one line an entry and the file transfer two:
 
@@ -50,8 +50,9 @@ The file transfer holds files you will need shortly. It keeps only where each fi
 
 - **Put in**: drag files or folders onto the notch, the capsule or the open panel. Dragged onto the collapsed panel, it opens on this page; move away without dropping and the panel goes back to how it was. You can also drop onto a category's name.
 - **Click**: pastes the file into the current window. It becomes an attachment in a chat window, and a copy in the current folder in File Explorer.
-- **Select several**: hold Ctrl or Shift and click to select several files, then paste, drag out or remove them together.
-- **Right-click**: Paste, Open, Show in folder, Copy path, Details, Add to category, Remove from the file transfer, Delete the original.
+- **Select several**: hold Ctrl or Shift and click to select several files, then paste, share, drag out or remove them together.
+- **Right-click**: Paste, Share, Open, Show in folder, Copy path, Details, Add to category, Remove from the file transfer, Delete the original.
+- **Share**: choose "Share" in the right-click menu or in a file's details to open the Windows share sheet and send files to WeChat, mail, a nearby PC and so on. Which apps it lists depends on the installed apps that accept shares. Folders and shortcuts cannot be shared.
 - **Drag out**: drag a file to where you need it; a button in the column's title row drags out all files at once. By default the left button copies and the right button moves; Settings › File transfer › Drag files out swaps them. While you drag, a word beside the pointer says whether letting go there copies or moves.
 - A file whose original has been moved or deleted is marked "Missing".
 - The notch and capsule can show how many files the file transfer holds.

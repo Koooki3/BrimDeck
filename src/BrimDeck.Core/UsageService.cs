@@ -27,21 +27,25 @@ public interface IDesktopSources
     string? ReadMiMoSession() => null;
     // Replaces it with a renewed one.
     void SaveMiMoSession(string session) { }
-    // The folder the Qoder desktop app (Qoder CN when china) is installed in, from its uninstall entry; null when it is not installed.
-    string? FindQoderDesktop(bool china) => null;
     // The sign-in the Qoder desktop app keeps in its data folder (auth.v1.dat, encrypted with the app's os_crypt key), decrypted;
     // null when there is none or it cannot be decrypted.
     string? ReadQoderDesktopSignIn(string folder) => null;
     // The sign-in a QwenWork desktop app (either edition) keeps in its data folder (QwenWorkUsage.SignInFile, encrypted the same way), decrypted;
     // null when there is none or it cannot be decrypted.
     string? ReadQwenWorkSignIn(string folder) => null;
+    // Runs a read-only query against an encrypted local Trae database (TraeUsage.DecryptDatabase) in memory without writing plaintext to disk;
+    // null when the database cannot be decrypted or queried.
+    IReadOnlyList<string?[]>? QueryTraeDatabase(string database, string sql) => null;
+    // The Doubao (ProviderId.Doubao) or Dola (ProviderId.Dola) browser sign-in kept in BrimDeck (DoubaoQuotaUsage.Session, serialized);
+    // null when none is signed in.
+    string? ReadDoubaoQuotaSession(ProviderId id) => null;
 }
 
 // quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
 // kimiQuotaCache does the same for Kimi Code (KimiQuotaCache). cursorPriceCache keeps the readings and prices of a merged Cursor
 // plan (CursorPrices); null keeps none. jitter (0 to 1) is the share of a pause after a 429 that is added to it
 // (RateLimitBackoff); a test passes a fixed one.
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null, string? kimiQuotaCache = null, Func<double>? jitter = null, string? cursorPriceCache = null) : IDisposable
+public sealed partial class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null, string? kimiQuotaCache = null, Func<double>? jitter = null, string? cursorPriceCache = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
@@ -74,6 +78,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private (DateTimeOffset Time, IReadOnlyList<WslHome> Homes)? _wsl;
     private bool _includeWsl;
     private readonly AntigravityUsage _antigravity = new();
+    // Whether any enabled Antigravity row reads via the CLI (AppEntry.AntigravityCli); turning it off forgets the CLI reading.
+    private bool _antigravityCli;
     private DateTimeOffset? _antigravityCliAttempt;
     private (DateTimeOffset Time, List<Quota> Quotas)? _antigravityCliReading;
     private readonly DshSessions _dsh = new();
@@ -191,6 +197,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             bool claudeLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && ProviderCatalog.ReadsLocalQuota(app));
             bool grokBotOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && app.QuotaOnline);
             bool grokBotLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && ProviderCatalog.ReadsLocalQuota(app));
+            _antigravityCli = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Antigravity && app.AntigravityCli);
+            if (!_antigravityCli) { _antigravityCliAttempt = null; _antigravityCliReading = null; }
             // A stalled source ends with a timeout status instead of holding every later refresh behind this gate.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             deadline.CancelAfter(Deadline);
@@ -199,8 +207,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             if (grokBotOnline) sources = sources.Append(ProviderId.GrokBot);
             // Xiaomi MiMo's linked keys have no records of their own: their statistics are MiMo's.
             if (required.Contains(ProviderId.MiMoLinked)) sources = sources.Append(ProviderId.MiMoLinked);
-            // Qianwen and QwenCloud have no records either; they are read only for their quota rows.
-            sources = sources.Concat(new[] { ProviderId.Qianwen, ProviderId.QwenCloud }.Where(required.Contains));
+            // Quota-only built-in sources with browser sign-ins have no local usage records; they are read only for their quota rows.
+            sources = sources.Concat(new[] { ProviderId.Qianwen, ProviderId.QwenCloud, ProviderId.Doubao, ProviderId.Dola }.Where(required.Contains));
             using var publisher = progress is not null && !_published ? new SnapshotPublisher(progress, ProgressInterval) : null;
             var finished = new Dictionary<string, ProviderSnapshot>();
             void Finished(string key, ProviderSnapshot snapshot)
@@ -256,6 +264,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 StatusLabel = timedOut ? Loc.T("读取超时", "Timed out") : Loc.T("读取失败", "Read failed"),
                 Status = timedOut ? Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later.") : Loc.T("暂时无法读取数据，稍后重试", "The data cannot be read right now. Retrying later.")
             };
+            if (KeepsLastReading(id)) ShowLastReading(result, _clock(), retrying: true);
         }
         if (timer.Elapsed >= SlowProviderLog) System.Diagnostics.Trace.WriteLine($"BrimDeck usage: {id} took {(long)timer.Elapsed.TotalMilliseconds} ms");
         finished?.Invoke(result);
@@ -354,6 +363,10 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 (QoderSwitch ?? QoderUsage.UserSwitch)(QoderUsage.For(id)));
         if (id is ProviderId.QwenWorkCn or ProviderId.QwenWork)
             QwenWorkUsage.ReadTokens(snapshot, desktop, id == ProviderId.QwenWork ? _locations.QwenWorkHome : _locations.QwenWorkCnHome, _locations.Roaming, QwenWorkUsage.For(id), start, now);
+        if (id is ProviderId.Trae or ProviderId.TraeCn)
+            TraeUsage.ReadTokens(snapshot, desktop, _locations.Roaming, TraeUsage.For(id), start, now);
+        // Whether reading the quota failed, and whether trying again later can mend it (unlike a refused sign-in).
+        bool failed = false, retrying = true;
         try
         {
             switch (id)
@@ -432,10 +445,17 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 case ProviderId.QwenWorkCn or ProviderId.QwenWork:
                     await ReadQwenWorkAsync(snapshot, QwenWorkUsage.For(id), now, ct);
                     break;
+                case ProviderId.Trae or ProviderId.TraeCn:
+                    await ReadTraeAsync(snapshot, TraeUsage.For(id), now, ct);
+                    break;
+                case ProviderId.Doubao or ProviderId.Dola:
+                    await ReadDoubaoQuotaAsync(snapshot, DoubaoQuotaUsage.For(id), now, ct);
+                    break;
             }
         }
         catch (HttpRequestException ex)
         {
+            failed = true; retrying = ex.StatusCode is not (HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden);
             snapshot.StatusLabel = ex.StatusCode switch
             { HttpStatusCode.Unauthorized => Loc.T("登录已失效", "Sign-in expired"), HttpStatusCode.Forbidden => Loc.T("访问受限", "Access denied"), _ => Loc.T("暂不可用", "Unavailable") };
             snapshot.Status = ex.StatusCode switch
@@ -455,13 +475,14 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         // The overall deadline ends here too: what was read locally stays, and only the quota part is marked as not read.
         catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
-        { snapshot.StatusLabel = Loc.T("读取超时", "Timed out"); snapshot.Status = Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."); }
+        { failed = true; snapshot.StatusLabel = Loc.T("读取超时", "Timed out"); snapshot.Status = Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."); }
         catch (InvalidDataException)
-        { snapshot.StatusLabel = Loc.T("数据不可用", "Data unavailable"); snapshot.Status = Loc.T("数据格式发生变化，暂时无法读取配额", "The data format has changed, so the quota cannot be read for now."); }
+        { failed = true; snapshot.StatusLabel = Loc.T("数据不可用", "Data unavailable"); snapshot.Status = Loc.T("数据格式发生变化，暂时无法读取配额", "The data format has changed, so the quota cannot be read for now."); }
         catch (System.Runtime.InteropServices.COMException)
-        { snapshot.StatusLabel = Loc.T("检测失败", "Detection failed"); snapshot.Status = Loc.T("本地服务检测失败，稍后重试", "Detecting the local service failed. Retrying later."); }
+        { failed = true; snapshot.StatusLabel = Loc.T("检测失败", "Detection failed"); snapshot.Status = Loc.T("本地服务检测失败，稍后重试", "Detecting the local service failed. Retrying later."); }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or FormatException)
-        { snapshot.StatusLabel = Loc.T("读取失败", "Read failed"); snapshot.Status = Loc.T("暂时无法读取数据，稍后重试", "The data cannot be read right now. Retrying later."); }
+        { failed = true; snapshot.StatusLabel = Loc.T("读取失败", "Read failed"); snapshot.Status = Loc.T("暂时无法读取数据，稍后重试", "The data cannot be read right now. Retrying later."); }
+        if (failed && KeepsLastReading(id)) ShowLastReading(snapshot, now, retrying);
         if (wslRead is not null)
         {
             // This PC's statistics reach the panel before the WSL ones, which can take seconds over the network share.
@@ -1250,6 +1271,27 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException) { }
         }
         ct.ThrowIfCancellationRequested();
+        if (!_antigravityCli)
+        {
+            if (endpoints.Count == 0 && !desktop.AntigravityUnreadable)
+            { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到 Antigravity 应用或 IDE 的本地用量服务", "The local usage service of the Antigravity app or IDE was not found."); return; }
+        }
+        else if (await ReadAntigravityCliAsync(snapshot, now, ct)) return;
+        if (endpoints.Count == 0 && desktop.AntigravityUnreadable)
+        {
+            snapshot.StatusLabel = Loc.T("无法读取", "Cannot read");
+            snapshot.Status = Loc.T("Antigravity 以管理员身份运行，BrimDeck 无法读取。请以普通权限启动 Antigravity", "Antigravity runs as administrator, so BrimDeck cannot read it. Start Antigravity without administrator rights.");
+            return;
+        }
+        if (endpoints.Count == 0)
+        { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到 Antigravity 应用或 IDE 的本地服务，CLI 也未返回额度。请检查 agy 是否已安装并登录", "No local service of the Antigravity app or IDE was found, and the CLI returned no quota. Check that agy is installed and signed in."); return; }
+        snapshot.StatusLabel = Loc.T("服务暂不可用", "Service unavailable"); snapshot.Status = Loc.T("检测到 Antigravity，但本地用量服务暂不可用", "Antigravity was found, but its local usage service is unavailable.");
+    }
+
+    // The CLI is run at most every five minutes, counting runs that failed or timed out; in between, and after a failed run,
+    // the last reading is shown with the time it was read. Returns whether a reading was shown.
+    private async Task<bool> ReadAntigravityCliAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
         var attemptTime = _clock();
         if (_antigravityCliAttempt is not { } attempted || attemptTime - attempted >= TimeSpan.FromMinutes(5))
         {
@@ -1259,20 +1301,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             var quotas = QuotaParser.AntigravityCli(report);
             if (quotas.Count > 0) _antigravityCliReading = (attemptTime, quotas);
         }
-        if (_antigravityCliReading is { } reading)
-        {
-            ShowAntigravityCli(snapshot, reading, now, reading.Time != _antigravityCliAttempt);
-            return;
-        }
-        if (endpoints.Count == 0 && desktop.AntigravityUnreadable)
-        {
-            snapshot.StatusLabel = Loc.T("无法读取", "Cannot read");
-            snapshot.Status = Loc.T("Antigravity 以管理员身份运行，BrimDeck 无法读取。请以普通权限启动 Antigravity", "Antigravity runs as administrator, so BrimDeck cannot read it. Start Antigravity without administrator rights.");
-            return;
-        }
-        if (endpoints.Count == 0)
-        { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到本地服务，CLI 也未返回额度。请检查 agy 是否已安装并登录", "No local service or CLI quota. Check that agy is installed and signed in."); return; }
-        snapshot.StatusLabel = Loc.T("服务暂不可用", "Service unavailable"); snapshot.Status = Loc.T("检测到 Antigravity，但本地用量服务暂不可用", "Antigravity was found, but its local usage service is unavailable.");
+        if (_antigravityCliReading is not { } reading) return false;
+        ShowAntigravityCli(snapshot, reading, now, reading.Time != _antigravityCliAttempt);
+        return true;
     }
 
     // A ZCode column combines the signed-in account's Coding Plan (the same template as the 智谱 GLM / Z.ai GLM
@@ -1464,14 +1495,17 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
             snapshot.Status = Loc.T("小米账号的登录已失效，请在设置中重新登录", "The Xiaomi account sign-in has expired. Sign in again in Settings.");
+            ShowLastReading(snapshot, now, retrying: false);
         }
         var session = MiMoUsage.MiMoSession.Parse(desktop.ReadMiMoSession());
         if (session is null)
         {
+            ForgetReading(snapshot.Id);
             snapshot.StatusLabel = Loc.T("未连接", "Not connected");
             snapshot.Status = Loc.T("请在设置中登录小米账号", "Sign in to a Xiaomi account in Settings first.");
             return;
         }
+        ReadingFor(snapshot.Id, session.Account);
         async Task<HttpResponseMessage> Send(string cookie)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, MiMoUsage.SubscriptionAddress);
@@ -1506,12 +1540,14 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             snapshot.PlanSource = Loc.T("Xiaomi MiMo 账户", "Xiaomi MiMo account");
             if (membership.Weekly is not { } weekly)
             {
+                ForgetReading(snapshot.Id);
                 snapshot.StatusLabel = Loc.T("未订阅会员", "No membership");
                 snapshot.Status = Loc.T("这个小米账号没有生效中的 Xiaomi MiMo 桌面版会员", "This Xiaomi account has no Xiaomi MiMo desktop membership in force.");
                 return;
             }
             snapshot.Quotas = [weekly];
             Connected(snapshot, Loc.T("Xiaomi MiMo 桌面版会员", "Xiaomi MiMo desktop membership"), now);
+            KeepReading(snapshot, session.Account, now);
             if (weekly.UsedPercent >= 100) snapshot.Status = Loc.T("本周额度已用完", "This week's allowance is used up");
         }
         finally { response.Dispose(); }
@@ -1523,13 +1559,19 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     {
         if (snapshot.UsageAvailable) snapshot.UsageNote += Loc.T(" · 费用按模型公开单价估算，非 WorkBuddy 积分", " · Costs estimated at public model prices, not WorkBuddy credits");
         if (ReadWorkBuddySession(edition) is not { } session)
-        { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请在设置中登录 WorkBuddy", "Sign in to WorkBuddy in settings"); return; }
+        {
+            ForgetReading(snapshot.Id);
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请在设置中登录 WorkBuddy", "Sign in to WorkBuddy in settings");
+            return;
+        }
+        ReadingFor(snapshot.Id, session.Uid);
         WorkBuddyUsage.Reading reading;
         try { reading = await WorkBuddyUsage.ReadAsync(_http, edition, session, renewed => secrets?.Write(edition.SessionKey, renewed.Serialize()), ct); }
         catch (WorkBuddyUsage.RejectedException)
         {
             snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
             snapshot.Status = Loc.T("WorkBuddy 登录已失效，请在设置中重新登录", "The WorkBuddy sign-in has expired. Sign in again in settings.");
+            ShowLastReading(snapshot, now, retrying: false);
             return;
         }
         if (reading.Metrics.Count == 0) throw new InvalidDataException(Loc.T("WorkBuddy 没有返回积分", "WorkBuddy returned no credits"));
@@ -1538,6 +1580,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         snapshot.PlanSource = ProviderCatalog.Name(edition.Id) + Loc.T(" 账户", " account");
         snapshot.Scope = "account";
         Connected(snapshot, snapshot.PlanSource, now);
+        KeepReading(snapshot, session.Uid, now);
     }
 
     private WorkBuddyUsage.Session? ReadWorkBuddySession(WorkBuddyUsage.Edition edition)
@@ -1559,43 +1602,64 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var session = await WorkBuddyUsage.WaitForLoginAsync(_http, edition, state, ct);
         if (session is null) return false;
         secrets.Write(edition.SessionKey, session.Serialize());
+        ForgetReading(id);
         return true;
     }
 
-    public void DisconnectWorkBuddy(ProviderId id) => secrets?.Delete(WorkBuddyUsage.For(id).SessionKey);
+    public void DisconnectWorkBuddy(ProviderId id) { secrets?.Delete(WorkBuddyUsage.For(id).SessionKey); ForgetReading(id); }
 
     // Qianwen and QwenCloud (QianwenUsage), read with the sign-in BrimDeck got from the edition's account page (ConnectQianwenAsync).
     private async Task ReadQianwenAsync(ProviderSnapshot snapshot, QianwenUsage.Edition edition, DateTimeOffset now, CancellationToken ct)
     {
         var name = ProviderCatalog.Name(edition.Id);
         if (ReadQianwenSession(edition) is not { } session)
-        { snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T($"请在设置中登录 {name}", $"Sign in to {name} in settings"); return; }
+        {
+            ForgetReading(snapshot.Id);
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T($"请在设置中登录 {name}", $"Sign in to {name} in settings");
+            return;
+        }
+        ReadingFor(snapshot.Id, session.Account);
         QianwenUsage.Reading reading;
         try { reading = await QianwenUsage.ReadAsync(_http, edition, session, now, ct); }
         catch (QianwenUsage.RejectedException)
         {
             snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
             snapshot.Status = Loc.T($"{name} 登录已失效，请在设置中重新登录", $"The {name} sign-in has expired. Sign in again in settings.");
+            ShowLastReading(snapshot, now, retrying: false);
             return;
         }
         snapshot.Scope = "account";
         snapshot.PlanSource = name + Loc.T(" 账户", " account");
-        if (reading.Metrics.Count == 0 && reading.Warnings.Count > 0)
+        // A part that could not be read shows its last reading, and its warning says when that was taken.
+        var (metrics, plan, old) = FillQianwenParts(snapshot.Id, session.Account, reading, now);
+        var warnings = reading.Warnings.Select((warning, i) => i < reading.Failed.Count && old.TryGetValue(reading.Failed[i], out var time)
+            ? Loc.T($"{warning}，显示 {Clock(time, now)} 读取的数值", $"{warning}; showing the figures read at {Clock(time, now)}") : warning).ToList();
+        if (metrics.Count == 0 && reading.Warnings.Count > 0)
         {
             snapshot.StatusLabel = Loc.T("读取失败", "Read failed");
             snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
+            ShowLastReading(snapshot, now, retrying: true);
             return;
         }
-        if (reading.Metrics.Count == 0)
+        if (metrics.Count == 0)
         {
+            ForgetReading(snapshot.Id);
             snapshot.StatusLabel = Loc.T("无额度", "No quota");
             snapshot.Status = Loc.T("这个账户没有生效中的 Token Plan，也没有可读取的余额或扣费", "This account has no Token Plan in force and no balance or charges to read.");
             return;
         }
-        snapshot.Metrics = reading.Metrics;
-        snapshot.Plan = reading.Plan;
+        snapshot.Metrics = metrics;
+        snapshot.Plan = plan;
         Connected(snapshot, snapshot.PlanSource, now);
-        if (reading.Warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), reading.Warnings);
+        // When every part shown is a last reading, the whole reading is old, as of the oldest of them.
+        if (old.Count > 0 && metrics.All(metric => old.ContainsKey(QianwenUsage.PartOf(metric))))
+        {
+            snapshot.IsStale = true;
+            snapshot.QuotaTime = old.Values.Min();
+            snapshot.StatusLabel = Loc.T("稍后重试", "Retrying later");
+        }
+        KeepReading(snapshot, session.Account, snapshot.QuotaTime ?? now);
+        if (warnings.Count > 0) snapshot.Status = string.Join(Loc.T("；", "; "), warnings);
     }
 
     // QwenWork CN and QwenWork (QwenWorkUsage), read with the sign-in the edition's desktop app keeps. The app renews it while it runs;
@@ -1609,15 +1673,18 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
             snapshot.Status = Loc.T(Loc.Joined($"{name} 的登录已过期，打开 {name} 后会自动续期；如仍失效，请在 {name} 中重新登录"),
                 $"The {name} sign-in has expired. Opening {name} renews it; if it stays expired, sign in again in {name}.");
+            ShowLastReading(snapshot, now, retrying: false);
         }
         if (QwenWorkUsage.ParseSignIn(desktop.ReadQwenWorkSignIn(folder), edition) is not { } signIn)
         {
+            ForgetReading(snapshot.Id);
             snapshot.StatusLabel = Loc.T("未连接", "Not connected");
             snapshot.Status = Directory.Exists(folder) ? Loc.T(Loc.Joined($"请先在 {name} 中登录"), $"Sign in to {name} first") : Loc.T(Loc.Joined($"未找到 {name}，请先安装并登录"), $"{name} was not found. Install it and sign in first.");
             return;
         }
         if (signIn.Enterprise)
         {
+            ForgetReading(snapshot.Id);
             snapshot.StatusLabel = Loc.T("暂不支持", "Not supported");
             snapshot.Status = Loc.T(Loc.Joined($"暂不支持读取 {name} 企业专属部署的额度"), $"The credits of a dedicated {name} enterprise deployment cannot be read yet.");
             return;
@@ -1656,7 +1723,118 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         snapshot.Scope = "account";
         snapshot.PlanSource = name + Loc.T(" 账户", " account");
         Connected(snapshot, snapshot.PlanSource, now);
+        // The sign-in names no account; the reading is kept for whichever account the desktop app is signed in to.
+        KeepReading(snapshot, null, now);
     }
+
+    // TRAE (international) and TRAE CN (China), read with the sign-in kept in User\globalStorage\storage.json. The IDE renews
+    // the token while it runs; BrimDeck only reads it.
+    private async Task ReadTraeAsync(ProviderSnapshot snapshot, TraeUsage.Edition edition, DateTimeOffset now, CancellationToken ct)
+    {
+        var name = ProviderCatalog.Name(edition.Id);
+        void Expired()
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T($"{name} 的登录已过期，打开 {name} 后会自动续期；如仍失效，请在 {name} 中重新登录",
+                $"The {name} sign-in has expired. Opening {name} renews it; if it stays expired, sign in again in {name}.");
+            ShowLastReading(snapshot, now, retrying: false);
+        }
+        if (TraeUsage.ReadSignIn(_locations.Roaming, edition) is not { } signIn)
+        {
+            ForgetReading(snapshot.Id);
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            bool installed = TraeUsage.DataFolders(_locations.Roaming, edition).Any(Directory.Exists);
+            snapshot.Status = installed ? Loc.T($"请先在 {name} 中登录", $"Sign in to {name} first") : Loc.T($"未找到 {name}，请先安装并登录", $"{name} was not found. Install it and sign in first.");
+            return;
+        }
+        if (signIn.Enterprise)
+        {
+            ForgetReading(snapshot.Id);
+            snapshot.StatusLabel = Loc.T("暂不支持", "Not supported");
+            snapshot.Status = Loc.T($"暂不支持读取 {name} 团队或企业账户的额度", $"The quota of a {name} team or enterprise account cannot be read yet.");
+            return;
+        }
+        if (signIn.Expired(now)) { Expired(); return; }
+        TraeUsage.Reading reading;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, signIn.Api + edition.UsagePath);
+            request.Headers.TryAddWithoutValidation("Authorization", "Cloud-IDE-JWT " + signIn.Token);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.UserAgent.ParseAdd("BrimDeck/0.1");
+            request.Content = new StringContent(TraeUsage.RequestBody(edition), Encoding.UTF8, "application/json");
+            using var doc = await SendAsync(_http, request, ct);
+            reading = TraeUsage.Parse(doc.RootElement, edition);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) { Expired(); return; }
+        snapshot.Metrics = reading.Metrics;
+        snapshot.Plan = reading.Plan;
+        snapshot.Scope = "account";
+        snapshot.PlanSource = name + Loc.T(" 账户", " account");
+        Connected(snapshot, snapshot.PlanSource, now);
+        KeepReading(snapshot, signIn.AccountId.Length > 0 ? signIn.AccountId : null, now);
+    }
+
+    // Doubao (豆包 & 豆包工作) and Dola (international), read with the browser sign-in kept by DoubaoQuotaAccount.
+    private async Task ReadDoubaoQuotaAsync(ProviderSnapshot snapshot, DoubaoQuotaUsage.Edition edition, DateTimeOffset now, CancellationToken ct)
+    {
+        var name = ProviderCatalog.Name(edition.Id);
+        if (DoubaoQuotaUsage.Session.Parse(desktop.ReadDoubaoQuotaSession(edition.Id)) is not { } session)
+        {
+            ForgetReading(snapshot.Id);
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T($"请在设置中登录 {name}", $"Sign in to {name} in settings");
+            return;
+        }
+        DoubaoQuotaUsage.Reading reading;
+        try { reading = await DoubaoQuotaUsage.ReadAsync(_http, edition, session, ct); }
+        catch (DoubaoQuotaUsage.RejectedException)
+        {
+            snapshot.StatusLabel = Loc.T("登录已失效", "Sign-in expired");
+            snapshot.Status = Loc.T($"{name} 登录已失效，请在设置中重新登录", $"The {name} sign-in has expired. Sign in again in settings.");
+            ShowLastReading(snapshot, now, retrying: false);
+            return;
+        }
+        snapshot.Scope = "account";
+        snapshot.PlanSource = name + Loc.T(" 账户", " account");
+        if (reading.FreeWithoutQuota || reading.Metrics.Count == 0)
+        {
+            ForgetReading(snapshot.Id);
+            snapshot.Plan = reading.Plan;
+            snapshot.StatusLabel = Loc.T("无额度", "No quota");
+            snapshot.Status = Loc.T($"这个 {name} 账户当前没有生效中的订阅或额度包", $"This {name} account has no active subscription or quota package.");
+            return;
+        }
+        snapshot.Metrics = reading.Metrics;
+        snapshot.Plan = reading.Plan;
+        Connected(snapshot, snapshot.PlanSource, now);
+        KeepReading(snapshot, session.Account.Length > 0 ? session.Account : null, now);
+    }
+
+    // The Volcengine Ark and BytePlus ModelArk sign-in from settings; each row reads its quota with it in ConfiguredProviders.
+    private VolcengineArkUsage.Session? ReadVolcengineSession(VolcengineArkUsage.Edition edition)
+    {
+        try { return VolcengineArkUsage.Session.Parse(secrets?.Read(edition.SessionKey) ?? ""); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException or JsonException or FormatException) { return null; }
+    }
+
+    public bool VolcengineConnected(ProviderId id) => ReadVolcengineSession(VolcengineArkUsage.For(id)) is not null;
+
+    // The sign-in page asks for the device code (its address does not carry it), so showCode receives it before the page opens.
+    public async Task<bool> ConnectVolcengineAsync(ProviderId id, Func<string, bool> open, Action<string> showCode, CancellationToken ct)
+    {
+        if (secrets is null) throw new InvalidOperationException("No secrets store");
+        var edition = VolcengineArkUsage.For(id);
+        var login = await VolcengineArkUsage.StartLoginAsync(_http, edition, _clock(), ct);
+        if (login.UserCode.Length > 0) showCode(login.UserCode);
+        if (!open(login.Url)) throw new InvalidDataException(Loc.T("无法打开默认浏览器", "The default browser could not be opened"));
+        var session = await VolcengineArkUsage.WaitForLoginAsync(_http, edition, login, _clock, ct);
+        if (session is null) return false;
+        secrets.Write(edition.SessionKey, session.Serialize());
+        return true;
+    }
+
+    public void DisconnectVolcengine(ProviderId id) => secrets?.Delete(VolcengineArkUsage.For(id).SessionKey);
 
     private QianwenUsage.Session? ReadQianwenSession(QianwenUsage.Edition edition)
     {
@@ -1677,10 +1855,11 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var session = await QianwenUsage.WaitForLoginAsync(_http, edition, login, _clock, ct);
         if (session is null) return false;
         secrets.Write(edition.SessionKey, session.Serialize());
+        ForgetReading(id);
         return true;
     }
 
-    public void DisconnectQianwen(ProviderId id) => secrets?.Delete(QianwenUsage.For(id).SessionKey);
+    public void DisconnectQianwen(ProviderId id) { secrets?.Delete(QianwenUsage.For(id).SessionKey); ForgetReading(id); }
 
     // Xiaomi MiMo: the keys Xiaomi MiMo Desktop and MiMo Code linked (MiMoUsage.ReadLinkedKeys), read again on every refresh. A Token
     // Plan key shows the plan quota, a pay-as-you-go key the balances and this month's charges; with both, one column shows them all,
@@ -1819,27 +1998,30 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
     }
 
-    // Qoder's credits (QoderUsage), from the first of its programs that answers: the CLI, the desktop app, the IDE. Starting the
-    // daemon of the CLI or the desktop app takes about 20 seconds, so it is read in the background, apart from the refresh: a
-    // round starts a read unless one is still under way, waits for it at most QoderWait (long enough for the IDE, which answers at
-    // once) and otherwise shows the last reading, so a slow or stuck Qoder never holds up the other sources. When the read ends
-    // after its round did, BackgroundReadFinished asks for another round to show it. A program that failed is not asked again for
-    // QoderRetry, so a failing daemon is not started every minute; one whose sign-in has expired is named in the status meanwhile.
+    // Qoder's credits (QoderUsage), from the first source that answers: the desktop app's sign-in, asked of Qoder's API at once;
+    // the CLI, whose daemon takes about 20 seconds to start; the IDE. It is read in the background, apart from the refresh: a
+    // round starts a read unless one is still under way, waits for it at most QoderWait (long enough for the API and the IDE)
+    // and otherwise shows the last reading, so a slow or stuck Qoder never holds up the other sources. When the read ends
+    // after its round did, BackgroundReadFinished asks for another round to show it. A daemon that failed is not started again for
+    // QoderRetry, while the API is asked on every read, so a sign-in the desktop app renews is read at once; a source whose sign-in
+    // has expired is named in the status meanwhile.
     private sealed class QoderKept
     {
         public QoderUsage.Reading? Reading;
         public QoderUsage.Route Route;
         public DateTimeOffset Time;
         public readonly Dictionary<QoderUsage.Route, (DateTimeOffset Time, bool SignIn)> Failed = [];
-        // How the last read ended when it gave nothing: whether any program was there, whose sign-ins had expired, and whether
-        // something else failed.
-        public bool Found = true, OtherFailure;
+        // How the last read ended when it gave nothing: whether any program was there, whose sign-ins had expired, whether the
+        // account's credits are laid out in a way not read (an enterprise account), and whether something else failed.
+        public bool Found = true, Unsupported, OtherFailure;
         public List<string> Expired = [];
         public bool Ended;
         public Task? Pending;
         public DateTimeOffset Started = DateTimeOffset.MinValue;
         // The round that started the read pending now ended before it did.
         public bool Unshown;
+        // Reading is the previous run's (RestoreLastReadings) until this run reads its own: it is always shown as old.
+        public bool Restored;
     }
     private readonly System.Collections.Concurrent.ConcurrentDictionary<ProviderId, QoderKept> _qoder = new();
     public TimeSpan QoderRetry { get; init; } = TimeSpan.FromMinutes(5);
@@ -1848,8 +2030,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     public TimeSpan QoderGap { get; init; } = TimeSpan.FromSeconds(30);
     // Raised on a pool thread when a read in the background ended after its round did; true when it brought the first reading.
     public event Action<bool>? BackgroundReadFinished;
-    // Stand-ins for starting the daemon (command, arguments, electron, the desktop app's sign-in) and asking the IDE (port); tests set them.
-    internal Func<string, IReadOnlyList<string>, bool, QoderUsage.DesktopSignIn?, CancellationToken, Task<QoderUsage.Reading>>? QoderDaemon { get; init; }
+    // Stand-ins for starting the CLI's daemon (command, arguments) and asking the IDE (port); tests set them.
+    internal Func<string, IReadOnlyList<string>, CancellationToken, Task<QoderUsage.Reading>>? QoderDaemon { get; init; }
     internal Func<int, CancellationToken, Task<QoderUsage.Reading>>? QoderIde { get; init; }
     internal Func<QoderUsage.Edition, bool?>? QoderSwitch { get; init; }
 
@@ -1888,11 +2070,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             if (reading)
             {
                 snapshot.StatusLabel = Loc.T("等待更新", "Waiting for update");
-                snapshot.Status = Loc.T($"正在读取 {edition.Name} 积分，约需 20 秒", $"Reading the {edition.Name} credits; this takes about 20 seconds");
+                snapshot.Status = Loc.T($"正在读取 {edition.Name} 积分", $"Reading the {edition.Name} credits");
                 return;
             }
             snapshot.StatusLabel = !kept.Found ? Loc.T("未连接", "Not connected")
-                : kept.Expired.Count > 0 && !kept.OtherFailure ? Loc.T("登录已过期", "Sign-in expired") : Loc.T("暂不可用", "Unavailable");
+                : kept.Expired.Count > 0 && !kept.OtherFailure && !kept.Unsupported ? Loc.T("登录已过期", "Sign-in expired")
+                : kept.Unsupported && !kept.OtherFailure ? Loc.T("暂不支持", "Not supported") : Loc.T("暂不可用", "Unavailable");
             snapshot.Status = QoderReason(edition, kept) ?? "";
         }
     }
@@ -1901,58 +2084,77 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private static string? QoderReason(QoderUsage.Edition edition, QoderKept kept) =>
         !kept.Ended ? null
         : !kept.Found ? Loc.T($"请先登录 {edition.Name} CLI 或 {edition.Name} 桌面版，或打开 {edition.Name} IDE", $"Sign in to {edition.Name} CLI or the {edition.Name} desktop app, or open {edition.Name} IDE")
-        : kept.Expired.Count > 0 && !kept.OtherFailure
+        : kept.Expired.Count > 0 && !kept.OtherFailure && !kept.Unsupported
             ? Loc.T($"{string.Join("、", kept.Expired)} 的登录已过期，使用一次后自动恢复；打开 {edition.Name} IDE 也可以读取",
                 $"The sign-in of {string.Join(" and ", kept.Expired)} has expired and recovers after the next use; opening {edition.Name} IDE also lets it be read")
+        : kept.Unsupported && !kept.OtherFailure
+            ? Loc.T($"暂不支持读取 {edition.Name} 企业版账户的积分", $"The credits of a {edition.Name} enterprise account cannot be read yet")
             : Loc.T("暂时无法读取积分，稍后自动重试", "The credits cannot be read right now. Retrying automatically later.");
 
-    // Asks the CLI, then the desktop app, then the IDE, and keeps what the first one that answers gives. Runs apart from any round.
+    // Asks the API with the desktop app's sign-in, then the CLI, then the IDE, and keeps what the first one that answers gives.
+    // Runs apart from any round.
     private async Task ReadQoderInBackgroundAsync(QoderUsage.Edition edition, QoderKept kept, DateTimeOffset now, CancellationToken lifetime)
     {
         var home = edition.China ? _locations.QoderCnHome : _locations.QoderHome;
-        bool found = false, other = false, first;
+        bool found = false, other = false, unsupported = false, first;
         var expired = new List<string>();
         Dictionary<QoderUsage.Route, (DateTimeOffset Time, bool SignIn)> failed;
-        lock (kept) { failed = new(kept.Failed); first = kept.Reading is null; }
+        lock (kept) { failed = new(kept.Failed); first = kept.Reading is null || kept.Restored; }
         QoderUsage.Reading? result = null;
         var route = QoderUsage.Route.Cli;
-        Task<QoderUsage.Reading> Daemon(string command, IReadOnlyList<string> arguments, bool electron, QoderUsage.DesktopSignIn? signIn) =>
-            QoderDaemon?.Invoke(command, arguments, electron, signIn, lifetime) ?? QoderUsage.ReadDaemonAsync(command, arguments, electron, signIn, QoderTimeout, lifetime);
-        async Task<bool> Try(QoderUsage.Route at, Func<Task<QoderUsage.Reading>> read)
+        Task<QoderUsage.Reading> Daemon(string command, IReadOnlyList<string> arguments) =>
+            QoderDaemon?.Invoke(command, arguments, lifetime) ?? QoderUsage.ReadDaemonAsync(command, arguments, QoderTimeout, lifetime);
+        async Task<QoderUsage.Reading> Api(QoderUsage.DesktopSignIn signIn)
+        {
+            async Task<JsonDocument> Get(string path)
+            {
+                using var request = Bearer(HttpMethod.Get, signIn.Api + path, signIn.Token);
+                return await SendAsync(_http, request, lifetime);
+            }
+            using var usage = await Get(QoderUsage.UsagePath);
+            // The plan only names the column; without it the credits still show.
+            var plan = "";
+            try { using var answer = await Get(QoderUsage.PlanPath); plan = QoderUsage.PlanName(answer.RootElement); }
+            catch (Exception ex) when (ex is HttpRequestException { StatusCode: not HttpStatusCode.Unauthorized } or JsonException
+                or OperationCanceledException && !lifetime.IsCancellationRequested) { }
+            return QoderUsage.ParsePresentation(usage.RootElement, plan) ?? throw new NotSupportedException();
+        }
+        // remember: a failure keeps the source from being asked again for QoderRetry.
+        async Task<bool> Try(QoderUsage.Route at, Func<Task<QoderUsage.Reading>> read, bool remember = true)
         {
             found = true;
-            if (failed.TryGetValue(at, out var last) && now - last.Time < QoderRetry)
+            if (remember && failed.TryGetValue(at, out var last) && now - last.Time < QoderRetry)
             {
                 if (last.SignIn) expired.Add(QoderUsage.RouteName(edition, at));
                 return false;
             }
+            bool signIn = false;
             try
             {
                 result = await read(); route = at; failed.Remove(at);
                 return true;
             }
-            catch (QoderUsage.DaemonException ex)
-            {
-                failed[at] = (now, ex.SignIn);
-                if (ex.SignIn) expired.Add(QoderUsage.RouteName(edition, at)); else other = true;
-            }
+            catch (QoderUsage.DaemonException ex) { signIn = ex.SignIn; }
+            catch (HttpRequestException ex) { signIn = ex.StatusCode == HttpStatusCode.Unauthorized; }
+            catch (NotSupportedException) { unsupported = true; return false; }
             catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or System.ComponentModel.Win32Exception
-                or OperationCanceledException && !lifetime.IsCancellationRequested)
-            { failed[at] = (now, false); other = true; }
+                or OperationCanceledException && !lifetime.IsCancellationRequested) { }
+            if (remember) failed[at] = (now, signIn);
+            if (signIn) expired.Add(QoderUsage.RouteName(edition, at)); else other = true;
             return false;
         }
         try
         {
-            var cli = QoderUsage.CliPath(home, edition);
-            bool read = File.Exists(cli) && File.Exists(QoderUsage.CliSignIn(home))
-                && await Try(QoderUsage.Route.Cli, () => Daemon(cli, ["--sdk"], false, null));
-            if (!read && QoderUsage.ParseDesktopSignIn(desktop.ReadQoderDesktopSignIn(QoderUsage.DesktopData(_locations.Roaming, edition))) is { } signIn)
+            bool read = false;
+            if (QoderUsage.ParseDesktopSignIn(desktop.ReadQoderDesktopSignIn(QoderUsage.DesktopData(_locations.Roaming, edition)), edition) is { } signIn)
             {
                 found = true;
                 if (signIn.Expired(now)) expired.Add(QoderUsage.RouteName(edition, QoderUsage.Route.Desktop));
-                else if (desktop.FindQoderDesktop(edition.China) is { } folder && QoderUsage.FindRuntime(folder) is { } runtime)
-                    read = await Try(QoderUsage.Route.Desktop, () => Daemon(Path.Combine(folder, edition.DesktopExe), [runtime, "--sdk"], true, signIn));
+                else read = await Try(QoderUsage.Route.Desktop, () => Api(signIn), remember: false);
             }
+            var cli = QoderUsage.CliPath(home, edition);
+            if (!read && File.Exists(cli) && File.Exists(QoderUsage.CliSignIn(home)))
+                read = await Try(QoderUsage.Route.Cli, () => Daemon(cli, ["--sdk"]));
             if (!read && QoderUsage.ReadIdePort(QoderUsage.IdeInfo(_locations.Roaming, edition)) is { } port)
             {
                 try
@@ -1973,8 +2175,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             kept.Failed.Clear();
             foreach (var (at, last) in failed) kept.Failed[at] = last;
-            if (result is not null) { kept.Reading = result; kept.Route = route; kept.Time = now; }
-            kept.Found = result is not null || found; kept.Expired = expired; kept.OtherFailure = other;
+            if (result is not null) { kept.Reading = result; kept.Route = route; kept.Time = now; kept.Restored = false; }
+            kept.Found = result is not null || found; kept.Expired = expired; kept.OtherFailure = other; kept.Unsupported = unsupported;
             kept.Ended = result is null;
             notify = kept.Unshown;
         }
@@ -1985,7 +2187,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private static void ShowQoder(ProviderSnapshot snapshot, QoderUsage.Edition edition, QoderKept kept, DateTimeOffset now, string? reason)
     {
         var reading = kept.Reading!;
-        var source = QoderUsage.RouteName(edition, kept.Route);
+        // The previous run kept no route: its reading names only the edition.
+        var source = kept.Restored ? edition.Name : QoderUsage.RouteName(edition, kept.Route);
+        if (kept.Restored) reason ??= Loc.T($"正在读取 {edition.Name} 积分", $"Reading the {edition.Name} credits");
         snapshot.Metrics = reading.Metrics.ToList();
         snapshot.Scope = "account";
         if (reading.Plan.Length > 0) { snapshot.Plan = reading.Plan; snapshot.PlanSource = source; }

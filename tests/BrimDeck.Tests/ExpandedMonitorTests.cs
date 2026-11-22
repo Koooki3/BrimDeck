@@ -18,6 +18,7 @@ internal static class ExpandedMonitorTests
 
     internal static void Run(Action<string, bool> check)
     {
+        ExpandedGridTests.Run(check);
         Table(check);
         Network(check);
         SettingsFile(check);
@@ -31,16 +32,15 @@ internal static class ExpandedMonitorTests
     private static void Cards(Action<string, bool> check)
     {
         var old = SettingsMigrations.Read("""{"AppVersion":"9.0.0","MonitorStorage":false,"CoreDisplay":1}""");
-        check("Expanded customization: old files keep automatic layout and visible CPU cores",
-            old.ExpandedCpuCores && !old.ExpandedCustomCards && old.ExpandedCardOrder.Count == 0 && old.CoreDisplay == CoreDisplay.Columns &&
+        check("Expanded customization: old files keep automatic layout",
+            !old.ExpandedCustomCards && old.ExpandedCardOrder.Count == 0 && old.CoreDisplay == CoreDisplay.Columns &&
             !old.ShowsExpanded(ExpandedItem.Storage));
-        old.ExpandedCpuCores = false;
         old.ExpandedCustomCards = true;
         old.ExpandedCardOrder = [new(ExpandedItem.Storage, " d: ", true), new(ExpandedItem.Upload), new(ExpandedItem.Storage, "D:"),
-            new(ExpandedItem.Storage, "folder"), new(ExpandedItem.Power), new(ExpandedItem.Memory, "D:")];
+            new(ExpandedItem.Storage, "folder"), new(ExpandedItem.Processes), new(ExpandedItem.Memory, "D:")];
         var back = SettingsMigrations.Read(JsonSerializer.Serialize(old));
         check("Expanded customization: width and order round-trip, with invalid/duplicate entries removed and compact core mode preserved",
-            !back.ExpandedCpuCores && back.ExpandedCustomCards && back.CoreDisplay == CoreDisplay.Columns &&
+            back.ExpandedCustomCards && back.CoreDisplay == CoreDisplay.Columns &&
             back.ExpandedCardOrder.SequenceEqual([new(ExpandedItem.Storage, "D:", true), new(ExpandedItem.Upload), new(ExpandedItem.Memory)]));
         var copy = back.Copy();
         copy.ExpandedCardOrder.Clear();
@@ -50,23 +50,28 @@ internal static class ExpandedMonitorTests
         var switched = Profiles.With(back, legacyProfile);
         var restored = Profiles.With(switched, savedProfile);
         check("Expanded customization: older profiles use defaults and existing profiles restore their saved layout when switched back",
-            switched.ExpandedCpuCores && !switched.ExpandedCustomCards && switched.ExpandedCardOrder.Count == 0 && switched.CoreDisplay == CoreDisplay.Matrix &&
-            !restored.ExpandedCpuCores && restored.ExpandedCustomCards && restored.ExpandedCardOrder.SequenceEqual(back.ExpandedCardOrder));
+            !switched.ExpandedCustomCards && switched.ExpandedCardOrder.Count == 0 && switched.CoreDisplay == CoreDisplay.Matrix &&
+            restored.ExpandedCustomCards && restored.ExpandedCardOrder.SequenceEqual(back.ExpandedCardOrder));
 
         ExpandedItem[] items = [ExpandedItem.Cpu, ExpandedItem.Memory, ExpandedItem.Download, ExpandedItem.Upload, ExpandedItem.Storage, ExpandedItem.Processes];
         var cards = ExpandedCards.Resolve(back.ExpandedCardOrder, items, ["C:", "E:"]);
         check("Expanded customization: saved drive choice survives a disconnect and new drive letters append",
             cards.SequenceEqual([new(ExpandedItem.Storage, "D:", true), new(ExpandedItem.Upload), new(ExpandedItem.Memory),
                 new(ExpandedItem.Download), new(ExpandedItem.Storage, "C:"), new(ExpandedItem.Storage, "E:")]));
-        check("Expanded customization: each card gets its own grid slot and full rows do not overlap half-width cards",
-            ExpandedCards.Place([cards[1], cards[0], .. cards.Skip(2)], true).SequenceEqual([(0, 0, 1), (1, 0, 2), (2, 0, 1), (2, 1, 1), (3, 0, 1), (3, 1, 1)]) &&
+        check("Expanded customization: an unpaired half fills its row without crossing a full-width card",
+            ExpandedCards.Place([cards[1], cards[0], .. cards.Skip(2)], true).SequenceEqual([(0, 0, 2), (1, 0, 2), (2, 0, 1), (2, 1, 1), (3, 0, 1), (3, 1, 1)]) &&
             ExpandedCards.Place(cards, false).SequenceEqual(Enumerable.Range(0, cards.Count).Select(row => (row, 0, 2))));
+        var ends = new ExpandedCard[] { new(ExpandedItem.Power), new(ExpandedItem.Download), new(ExpandedItem.Upload), new(ExpandedItem.Memory) };
+        check("Expanded customization: the last half fills its row, and an unavailable reading re-pairs remaining neighbors in saved order",
+            ExpandedCards.Place(ends, true).SequenceEqual([(0, 0, 2), (1, 0, 1), (1, 1, 1), (2, 0, 2)]) &&
+            ExpandedCards.Place([ends[0], ends[2], ends[3]], true).SequenceEqual([(0, 0, 2), (1, 0, 1), (1, 1, 1)]) &&
+            !ends[3].Wide);
 
         var content = new ExpandedCardContent(cards, AwaitingDrives: false, WatchDrives: true);
-        var wide = ExpandedLayout.For(items, 1200, 320, cpuCores: false, cardContent: content);
-        var narrow = ExpandedLayout.For(items, 300, 100, cpuCores: false, cardContent: content);
+        var wide = ExpandedLayout.For(items, 1200, 320, cardContent: content);
+        var narrow = ExpandedLayout.For(items, 300, 100, cardContent: content);
         check("Expanded customization: planner keeps aggregate CPU, all cards and adaptive process list placement",
-            !wide.CpuCores && wide.CardsTwoColumns && wide.Part(ExpandedItem.Cpu) is not null && wide.CardsHeight > narrow.CardsHeight &&
+            wide.CardsTwoColumns && wide.Part(ExpandedItem.Cpu) is not null && wide.CardsHeight > narrow.CardsHeight &&
             wide.List == ExpandedList.Side && !narrow.CardsTwoColumns &&
             wide.Demand(false) == (ExpandedDemand.Cpu | ExpandedDemand.Memory | ExpandedDemand.Network | ExpandedDemand.Storage | ExpandedDemand.Processes));
         var waiting = new ExpandedCardContent([], AwaitingDrives: true, WatchDrives: true);
@@ -75,24 +80,35 @@ internal static class ExpandedMonitorTests
         check("Expanded customization: drive-only pages request storage before the first reading and after disconnecting",
             drives.Kind == ExpandedKind.Readings && drives.CardsHeight > 0 && drives.Demand(false) == ExpandedDemand.Storage &&
             detached.Kind == ExpandedKind.Unavailable && detached.Demand(false) == ExpandedDemand.Storage);
-        check("Expanded customization: hiding cores changes the page while retaining CPU demand",
-            ExpandedLayout.For([ExpandedItem.Cpu], 560, 200, cpuCores: false) is { CpuCores: false } hidden &&
-            hidden.Demand(false) == ExpandedDemand.Cpu && hidden.Signature != ExpandedLayout.For([ExpandedItem.Cpu], 560, 200).Signature);
 
         ExpandedPlan Sized(double panelWidth, double height, ExpandedPlan? previous = null)
-            => ExpandedLayout.For(items, panelWidth - 40, height, null, null, MonitorMain.Cpu, previous, false, content);
+            => ExpandedLayout.For(items, panelWidth - 40, height, null, null, MonitorMain.Cpu, previous, content);
         var initial = Sized(766, 344);
         var above = Sized(767, 344, initial);
         var below = Sized(766, 344, above);
-        var expanded = Sized(800, 344, below);
-        var narrowAgain = Sized(766, 344, expanded);
-        var contracted = Sized(730, 344, narrowAgain);
+        var expanded = Sized(850, 344, below);
+        var narrowAgain = Sized(812, 344, expanded);
+        var contracted = Sized(770, 344, narrowAgain);
         check("Expanded customization: one-DIP jitter preserves card columns, and crossing the dead band still reflows",
             initial.List == ExpandedList.Side && !initial.CardsTwoColumns && above.Signature == initial.Signature && below.Signature == initial.Signature
             && expanded.CardsTwoColumns && narrowAgain.CardsTwoColumns && !contracted.CardsTwoColumns);
         var shorter = Sized(767, 150, above);
         check("Expanded customization: column hysteresis does not freeze the scroll viewport",
             !shorter.CardsTwoColumns && shorter.CardsHeight < above.CardsHeight && shorter.Height == 150);
+        var listBelow = Sized(599, 344);
+        var nearListBoundary = Sized(600, 344, listBelow);
+        var listSide = Sized(640, 344, nearListBoundary);
+        var nearFromSide = Sized(599, 344, listSide);
+        check("Expanded customization: process list keeps its place during one-DIP jitter and still changes across the dead band",
+            listBelow.List == ExpandedList.Below && nearListBoundary.Signature == listBelow.Signature
+            && listSide.List == ExpandedList.Side && nearFromSide.Signature == listSide.Signature);
+        var listHidden = ExpandedLayout.For(items.Where(item => item != ExpandedItem.Processes), 510, 254, cardContent: content);
+        var justEnabled = Sized(550, 254, listHidden);
+        check("Expanded customization: explicitly enabling the process list is not held back by size hysteresis",
+            listHidden.List == ExpandedList.None && justEnabled.List == ExpandedList.Below);
+        var tooShortForList = Sized(550, 244, justEnabled);
+        check("Expanded customization: a process list below the cards leaves no empty region when too short for its minimum rows",
+            tooShortForList.List == ExpandedList.None && tooShortForList.ListBox == default);
 
         old.ExpandedCardOrder = [new(ExpandedItem.Memory) { CompactMemoryBar = true }, new(ExpandedItem.Download) { CompactMemoryBar = true }];
         var compact = SettingsMigrations.Read(JsonSerializer.Serialize(old));
@@ -103,6 +119,42 @@ internal static class ExpandedMonitorTests
         var compactBar = ExpandedLayout.For([ExpandedItem.Memory], 560, 200, cardContent: WithBar(true));
         check("Expanded customization: changing memory bar length refreshes the view without changing the card allocation",
             compactBar.Signature != normalBar.Signature && compactBar.Parts.SequenceEqual(normalBar.Parts));
+
+        ExpandedItem[] selected = [ExpandedItem.Cpu, ExpandedItem.Memory, ExpandedItem.Power, ExpandedItem.Storage, ExpandedItem.Frames];
+        var defaults = ExpandedCards.Resolve(null, selected, ["D:"]);
+        check("Expanded customization: power and frame rate stay in their normal bands by default",
+            defaults.SequenceEqual([new(ExpandedItem.Memory), new(ExpandedItem.Storage, "D:")]));
+        var inline = ExpandedCards.Resolve([new(ExpandedItem.Memory), new(ExpandedItem.Power), new(ExpandedItem.Storage, "D:"), new(ExpandedItem.Frames)], selected, ["D:"]);
+        var mixed = new ExpandedCardContent(inline, false, true);
+        var arranged = ExpandedLayout.For(selected, 800, 344, new(1, 1), cardContent: mixed);
+        check("Expanded customization: inserted sections use full rows between cards, without duplicate bands or lost demand",
+            ExpandedCards.Place(inline, true).SequenceEqual([(0, 0, 2), (1, 0, 2), (2, 0, 2), (3, 0, 2)])
+            && arranged.CardContent!.Cards.SequenceEqual(inline) && arranged.Parts.All(part => part.Item is not (ExpandedItem.Power or ExpandedItem.Frames))
+            && arranged.Demand(false).HasFlag(ExpandedDemand.Power | ExpandedDemand.Frames));
+        var unavailablePower = ExpandedLayout.For(selected, 800, 344, new(1, 0), cardContent: mixed);
+        check("Expanded customization: missing power is omitted without changing the saved order",
+            unavailablePower.CardContent!.Cards.All(card => card.Item != ExpandedItem.Power) && !unavailablePower.Demand(false).HasFlag(ExpandedDemand.Power)
+            && mixed.Cards.Any(card => card.Item == ExpandedItem.Power));
+        var separate = ExpandedLayout.For(selected, 800, 344, new(1, 1), cardContent: mixed with { Cards = defaults });
+        check("Expanded customization: removing inline rows restores their normal bands",
+            separate.Part(ExpandedItem.Power) is not null && separate.Part(ExpandedItem.Frames) is not null);
+
+        var readings = ExpandedMonitor.Defaults(frames: true);
+        var moved = ExpandedCards.ArrangePageSections(readings, [ExpandedItem.Memory, ExpandedItem.Frames, ExpandedItem.Cpu], inlinePower: true, inlineFrames: false);
+        var visible = ExpandedMonitor.Shown(ExpandedMonitor.Normalize(moved));
+        check("Expanded customization: page order sketch moves the cards as one band and keeps the inline power row in that band",
+            visible.Select(item => ExpandedCards.PageSection(item, true, false)).Distinct()
+                .SequenceEqual([ExpandedItem.Memory, ExpandedItem.Frames, ExpandedItem.Cpu, ExpandedItem.Processes])
+            && moved.Count == readings.Count && moved.All(item => item.Visible));
+        var minimum = ExpandedLayout.For(selected.Prepend(ExpandedItem.Gpu), 408, 102, new(1, 1), cardContent: mixed);
+        check("Expanded customization: minimum panel fits one complete memory card with both gauges",
+            !minimum.CardsTwoColumns && minimum.CardsHeight >= Math.Ceiling(minimum.Body * 1.7 + 31) + 1 && minimum.Part(ExpandedItem.Cpu) is not null);
+        var pairedRows = ExpandedLayout.For([ExpandedItem.Download, ExpandedItem.Memory, ExpandedItem.Storage, ExpandedItem.Upload], 760, 400,
+            cardContent: new([new(ExpandedItem.Download), new(ExpandedItem.Memory), new(ExpandedItem.Storage, "C:"), new(ExpandedItem.Upload)], false, true));
+        double line = ExpandedCards.LineHeight(pairedRows.Steps.Body), spacing = 2 * ExpandedCards.VerticalPadding + ExpandedCards.RowGap + 1;
+        check("Expanded customization: only the memory row gets additional height and the cards start at the top",
+            pairedRows.CardsTwoColumns && pairedRows.Parts.Single().Box.Y == 0 &&
+            Math.Abs(pairedRows.CardsHeight - (ExpandedCards.MemoryHeight(pairedRows.Steps.Body) + line + 2 * spacing)) < 1);
     }
 
     private static List<ExpandedItem> Subset(int mask) => [.. Every.Where((item, index) => (mask >> index & 1) != 0)];

@@ -25,7 +25,8 @@ internal sealed class DevicesView : FrameworkElement
     {
         public required string Key;
         public required DeviceBattery Device;
-        public Eased Presence, X, Y, Fill;
+        // Faded: 1 while the card shows the last time's reading (DeviceBattery.Earlier), easing to 0 as the reading now comes.
+        public Eased Presence, X, Y, Fill, Faded;
         public double Width, Height;
         public bool Placed, Leaving;
         // The texts as last laid out, kept while their text, width and color stay the same.
@@ -99,12 +100,13 @@ internal sealed class DevicesView : FrameworkElement
         var card = _cards.FirstOrDefault(card => card.Key == device.Key);
         if (card is null)
         {
-            card = new Card { Key = device.Key, Device = device, Presence = new Eased(animate ? 0 : 1, Eased.Seconds * .8), Fill = new Eased(0) };
+            card = new Card { Key = device.Key, Device = device, Presence = new Eased(animate ? 0 : 1, Eased.Seconds * .8), Fill = new Eased(0), Faded = new Eased(device.Earlier ? 1 : 0) };
             _cards.Add(card);
         }
         card.Device = device;
         card.Leaving = false;
         card.Presence.Set(1, animate, now);
+        card.Faded.Set(device.Earlier ? 1 : 0, animate, now);
     }
 
     // The shown cards' places; a card that arrives takes its place at once (it fades in there), the others glide to theirs. A
@@ -143,7 +145,7 @@ internal sealed class DevicesView : FrameworkElement
     }
 
     private bool Moving(double now) => _empty.Moving(now) || _looking.Moving(now)
-        || _cards.Any(card => card.Presence.Moving(now) || card.X.Moving(now) || card.Y.Moving(now) || card.Fill.Moving(now));
+        || _cards.Any(card => card.Presence.Moving(now) || card.X.Moving(now) || card.Y.Moving(now) || card.Fill.Moving(now) || card.Faded.Moving(now));
 
     private bool Step(double now)
     {
@@ -219,12 +221,17 @@ internal sealed class DevicesView : FrameworkElement
             bool partial = presence < .999;
             if (partial) drawing.PushOpacity(presence * presence);
             var r = new Rect(x, y, card.Width, card.Height);
+            // A line's divider belongs to the list, not to the reading: it is not faded with it.
+            if (list && card.Y.Target >= DevicesLayout.ListRow * .5) drawing.DrawRectangle(UI.Brush(Look.Hex("rowDivider")), null, new Rect(r.X, r.Y, r.Width, 1 / ppd));
+            double faded = Math.Clamp(card.Faded.At(now), 0, 1);
+            if (faded > .001) drawing.PushOpacity(1 - (1 - EarlierOpacity) * faded);
             switch (_layout.Form)
             {
                 case DevicesForm.Single: DrawSingle(drawing, card, r, now, ppd); break;
-                case DevicesForm.List: DrawLine(drawing, card, r, now, ppd, card.Y.Target >= DevicesLayout.ListRow * .5); break;
+                case DevicesForm.List: DrawLine(drawing, card, r, now, ppd); break;
                 default: DrawTile(drawing, card, r, now, ppd); break;
             }
+            if (faded > .001) drawing.Pop();
             if (partial) drawing.Pop();
         }
         if (fade) drawing.Pop();
@@ -326,12 +333,11 @@ internal sealed class DevicesView : FrameworkElement
     }
 
     // A line of the list: the icon, the name and the line under it, then a small ring (with a bolt in it while charging) and the
-    // figure in a column of its own, so the rings line up from line to line. divider: a hairline above it.
-    private void DrawLine(DrawingContext drawing, Card card, Rect r, double now, double ppd, bool divider)
+    // figure in a column of its own, so the rings line up from line to line. The hairline above it is drawn with the list (OnRender).
+    private void DrawLine(DrawingContext drawing, Card card, Rect r, double now, double ppd)
     {
         var device = card.Device;
         string ring = _inks.Ring(device), accent = _inks.Figure(device);
-        if (divider) drawing.DrawRectangle(UI.Brush(Look.Hex("rowDivider")), null, new Rect(r.X, r.Y, r.Width, 1 / ppd));
         double middle = r.Y + r.Height / 2;
         DeviceGlyphs.Draw(drawing, device.Kind, new Rect(r.X, Math.Round(middle - 9), 18, 18), device.Lowest is null ? Look.Tertiary : Look.Primary);
         const double figureColumn = 38, ringSize = 18;
@@ -403,6 +409,10 @@ internal sealed class DevicesView : FrameworkElement
         if (parts.Count == 0) parts.Add(Devices.SourceName(device.Source));
         return string.Join(" · ", parts);
     }
+
+    // How opaque a reading of the last time is drawn while the devices are read again (DeviceBattery.Earlier), here and in the
+    // collapsed row (DeviceStrip).
+    internal const double EarlierOpacity = .5;
 
     // The charging green, made to stand out from the theme's surface as a graphic (a lighter theme gets a darker green).
     internal static string ChargingOn(PanelLook look) => look.Readable("#6BD68A");

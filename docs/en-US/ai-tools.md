@@ -14,7 +14,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Codex | ✓ | ✓ | Sign in to Codex on this PC |
 | Cursor | ✓ | ✓ | Sign in to Cursor on this PC |
 | Grok Bot | ✓ | | Sign in to the Grok Bot desktop app on this PC |
-| Antigravity | ✓ | ✓ | The Antigravity desktop app must be running for its quota to be read |
+| Antigravity | ✓ | ✓ | The quota is read while the Antigravity desktop app or Antigravity IDE is running; when neither runs and "Read via CLI" is on, it is read from the signed-in Antigravity CLI (`agy`) by running `agy -p /usage` at most every 5 minutes. The switch is off by default; expand the row to turn it on |
 | ZCode | ✓ | ✓ | Sign in to ZCode on this PC |
 | DeepSeek Harness | ✓ | ✓ | Sign in to a DeepSeek account in the DeepSeek Harness desktop app or local web app, or save an API key there |
 | Kimi Code | ✓ | ✓ | Sign in to Kimi Code (CLI, desktop app or VS Code extension) on this PC |
@@ -27,8 +27,11 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Xiaomi MiMo | ✓ | | Link an Open Platform API key or Token Plan in the Xiaomi MiMo desktop app or MiMo Code CLI |
 | Qianwen, QwenCloud | ✓ | | Sign in to a Qianwen AI platform or QwenCloud account in the browser from settings |
 | QwenWork CN, QwenWork | ✓ | ✓ | Sign in to the QwenWork CN (千问办公) or QwenWork desktop app on this PC |
+| TRAE, TRAE CN | ✓ | ✓ | Sign in to TRAE (or TRAE SOLO) or TRAE CN (or TRAE SOLO CN) on this PC |
+| Doubao, Dola | ✓ | | Sign in to a Doubao (including DoubaoWork) or Dola account in the browser from settings |
 | Qoder, Qoder CN | ✓ | ✓ | Sign in to Qoder CLI or the Qoder desktop app on this PC, or open a signed-in Qoder IDE (likewise for Qoder CN). Token usage of the CLI and desktop app has to be switched on in settings |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
+| Volcengine Ark, BytePlus ModelArk | ✓ | | Enter an AccessKey ID and Secret Access Key, or sign in to a Volcengine or BytePlus account in the browser, in settings |
 | Xiaomi MiMo API | ✓ | | Enter a Xiaomi MiMo Open Platform pay-as-you-go API key in settings |
 | Xiaomi MiMo Token Plan | ✓ | | Enter a Xiaomi MiMo Token Plan key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
@@ -49,6 +52,8 @@ When a record carries its own amount (Cursor, OpenCode and Command Code, for exa
 A price in that list usually comes from the cheapest provider and can differ from the model maker's list price. For example, GLM-5.3 is listed at 0.07 and 1.4 USD per million input and output tokens, while Z.AI charges 1.4 and 4.4. So for each model your records use, BrimDeck looks up the model maker's own endpoint on OpenRouter and uses its prices instead; a model whose maker has no endpoint there keeps the list price. Each model's endpoint prices are looked up once a day and saved on this PC; when a lookup fails, the prices saved before are used. Prices added by hand take precedence.
 
 DeepSeek records (`deepseek-flash`, `deepseek-v4.1-flash`, `deepseek-v4-flash` and `deepseek-v4-pro`, including those through a MaaS gateway) are costed at DeepSeek's own US dollar prices, peak or off-peak by the time of each record: 9:00–12:00 and 14:00–18:00 Beijing time on weekdays are peak hours, and every other hour is off-peak at half the price. Chinese public holidays are not known here, so a holiday on a weekday is costed at the peak price during those hours.
+
+Two ByteDance Seed models that the OpenRouter catalog does not list take built-in prices: Seed 2.0 Code is costed at BytePlus ModelArk's own US dollar prices. Seed 2.1 Pro has no US dollar price of its own; its yuan prices on Volcengine Ark are twice those of Seed 2.1 Turbo, so it is costed at twice the US dollar prices of Seed 2.1 Turbo.
 
 ## Quota rings and off-peak time
 
@@ -154,7 +159,7 @@ Reads the Open Platform API key or Token Plan linked in the Xiaomi MiMo desktop 
 Qoder (qoder.com) and Qoder CN (qoder.com.cn) have separate accounts and are chosen apart under Quota source. Within one edition, the CLI, the desktop app and the IDE share one set of credits.
 
 - **Quota**: plan credits, add-on credits, the organization's package and granted credits (such as SOTA Exclusive Credits), each on its own, with when they end and the plan name.
-- **How it is read**: Qoder's account API returns encrypted data, so BrimDeck asks this PC's Qoder CLI, desktop app or IDE, in that order, each with its own sign-in. The CLI and the desktop app take about 20 seconds per read, which runs in the background and does not hold up the other columns.
+- **How it is read**: BrimDeck tries three ways in turn and stops at the first that works: it asks Qoder with the Qoder desktop app's sign-in, which usually takes a second or two; it asks this PC's Qoder CLI, which takes about 20 seconds per read, runs in the background and does not hold up the other columns; it asks a running Qoder IDE. Personal and Teams accounts can both be read. The credits of an enterprise account cannot be read with the desktop app's sign-in yet.
 - **Token usage**: reads the local records of Qoder IDE, the CLI and the desktop app. The CLI and the desktop app record no token counts by default: after choosing Qoder as a column's usage app in settings, expand the column, click "Switch on" in the "CLI and desktop tokens" line, and open Qoder CLI and the desktop app again; conversations from then on are recorded. This sets the user environment variable `QODER_EXPOSE_TOKEN_USAGE=1` (Qoder CN: `QODERCN_EXPOSE_TOKEN_USAGE=1`); "Switch off" removes it. Auto, Ultimate, Fast and Efficient are tiers and are shown as such.
 
 ## QwenWork CN and QwenWork
@@ -168,6 +173,17 @@ QwenWork CN (千问办公, qwenwork.cn) and its international edition QwenWork (
 - **Token usage**: reads the local records of the desktop app's engine, one per model reply. In QwenWork CN, models picked by level are named as it names the level, such as "标准" (Standard) and "高级" (Advanced); other models keep their own names. Costs are estimates at list prices; both editions charge credits.
 - **Install folder**: either app can be installed in any folder; BrimDeck reads only the data in the current user's folders.
 
+## TRAE and TRAE CN
+
+TRAE (international, trae.ai) and TRAE CN (China, trae.com.cn) have separate accounts and data and are chosen apart under Quota source and Usage app.
+
+- **Quota**:
+  - **TRAE**: shows the current plan's (Free, Lite, Pro, Pro+, Ultra) USD allowance, bonus quota when present, add-on packages and On-Demand usage, with the reset time.
+  - **TRAE CN**: shows all credits on the account (used against total) with the reset time; when credits come from multiple buckets (such as plan credits, monthly login credits, daily check-in, welcome credits or add-on packs), each bucket is shown with its own used/total and expiry.
+- **Sign-in**: reads the sign-in kept by TRAE / TRAE SOLO (or TRAE CN / TRAE SOLO CN) in the user folder; there is nothing to sign in to in BrimDeck. BrimDeck never renews the sign-in or modifies any client file; when it expires, open the app to renew it.
+- **Team and enterprise accounts**: SaaS team and enterprise sign-ins do not expose the personal entitlement usage endpoint and are not supported yet.
+- **Token usage**: decrypts and queries the local conversation database read-only in memory without writing any plaintext database to disk. Models are named as the model called (such as `Dola-Seed-2.0-Code`), which can differ from the name TRAE shows. Costs are estimates at list prices.
+
 ## Qianwen and QwenCloud
 
 The Qianwen AI platform (platform.qianwenai.com) and its international edition QwenCloud (www.qwencloud.com) have separate accounts. Choose each one as its own quota source and sign in to each separately.
@@ -178,6 +194,22 @@ The Qianwen AI platform (platform.qianwenai.com) and its international edition Q
 - **QwenCloud**: it has no account balance. Only the Token Plans and this month's charges are shown, in US dollars.
 - **This month's charges**: the pay-as-you-go spending of the month. Like the platforms' own CLIs, the month is the calendar month in UTC, which can differ slightly from the console's billing month in China Standard Time.
 - **Sign-in**: expand the Qianwen or QwenCloud row in settings, click "Sign in in the browser", then sign in on the authorization page that opens and allow access within 5 minutes. The page names the app QianWen CLI or QwenCloud CLI: it is the only sign-in the platforms' account API offers. BrimDeck gets a sign-in of its own and stores it encrypted on this PC. The sign-in cannot be renewed: when it expires the status shows "Sign-in expired"; sign in again. Click "Sign out" to delete the sign-in saved on this PC.
+
+## Doubao and Dola
+
+Doubao and DoubaoWork share the same account, subscription and quota backend (www.doubao.com), and are merged under "Doubao". The international edition Dola (www.dola.com) has its own account and is chosen separately. Both are quota-only sources without token statistics.
+
+- **Quota**: displays every active subscription on the account together, including personal subscription windows (5-hour, 7-day, monthly, etc.), team and enterprise subscription windows (with enterprise entitlement groups), creation quota packages and activity rewards—even when an account holds both personal and team/enterprise subscriptions.
+- **Sign-in**: expand the Doubao or Dola row in settings and click "Sign in in the browser". BrimDeck opens an isolated browser window with a temporary profile, without touching your regular browser. For Doubao it saves the session cookies once the server accepts them and closes the window; for Dola, close the window yourself after signing in and BrimDeck then reads the session (this lets Dola sign in with a Google account too). The temporary profile is then removed. The session is stored encrypted for the current Windows user.
+
+## Volcengine Ark and BytePlus ModelArk
+
+Volcengine Ark (China) and BytePlus ModelArk (international) provide quotas only. Choose one as the quota source and the row expands: enter an AK/SK, sign in in the browser, or both. With both, the AK/SK is used first, and the sign-in when the AK/SK is refused.
+
+- **Why not an inference API key**: Ark inference API keys can only call models and cannot query Coding Plan, Agent Plan quotas or account balances.
+- **Automatic multi-plan detection**: both browser sign-in and AK/SK automatically probe and display every active subscription on the account together in one column—personal Coding Plan (5-hour, weekly, monthly), personal Agent Plan (AFP 5-hour, weekly, monthly), team/enterprise Coding Plan seats, team/enterprise Agent Plan seats, and account balance (CNY for China, USD for international). Plans the account does not hold or lacks permission for are skipped without blocking the rest.
+- **AK/SK**: enter a Volcengine or BytePlus IAM AccessKey ID and Secret Access Key, stored encrypted on this PC. Create them on the console's API access key page (Volcengine: <https://console.volcengine.com/iam/keymanage>; BytePlus: <https://console.byteplus.com/iam/keymanage>); they are not the API Key that calls models. The main account's keys can do a lot, so a sub-user with read-only Ark and billing permissions, and its keys, is the safer choice.
+- **Browser sign-in**: click "Sign in in the browser" to authorize in the default browser. BrimDeck obtains auto-refreshable temporary credentials stored encrypted on this PC. All columns of the same edition (Volcengine Ark or BytePlus ModelArk) share this sign-in.
 
 ## Sources entered by hand
 

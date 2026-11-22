@@ -90,11 +90,23 @@ public sealed partial class SettingsWindow
         action.Click += async (_, _) =>
         {
             if (!connected) { await ConnectSyncAsync(kind); return; }
-            // WeType has no way for this device to take itself off the other devices' lists; the user is told before unlinking.
-            if (kind == SyncKind.WeType && !Confirm(Loc.T("解除与微信输入法的关联？", "Unlink WeType?"),
-                Loc.T($"其他设备的列表里仍会保留本机。请在那些设备的微信输入法“跨设备 → 我的设备”中删除“{(service.Accounts.WeType.DisplayName.Length > 0 ? service.Accounts.WeType.DisplayName : service.Accounts.DeviceName)}”，否则再次关联后会出现两个本机。",
-                    $"This PC stays on the other devices' lists. Delete “{(service.Accounts.WeType.DisplayName.Length > 0 ? service.Accounts.WeType.DisplayName : service.Accounts.DeviceName)}” under My devices in their WeType cross-device settings, or linking again will list this PC twice."),
-                Loc.T("解除关联", "Unlink"), danger: false)) return;
+            if (kind == SyncKind.WeType)
+            {
+                string name = service.Accounts.WeType.DisplayName.Length > 0 ? service.Accounts.WeType.DisplayName : service.Accounts.DeviceName;
+                if (!Confirm(Loc.T("解除与微信输入法的关联？", "Unlink WeType?"),
+                    Loc.T("其他设备的“我的设备”中也会删除本机。", "This PC is also removed from My devices on the other devices."),
+                    Loc.T("解除关联", "Unlink"), danger: false)) return;
+                action.IsEnabled = false;
+                // When WeType could not be told, the other devices still list this PC; the user decides whether to unlink anyway.
+                if (!await service.LeaveWeTypeGroupAsync() && !Confirm(Loc.T("无法从其他设备中删除本机", "Could not remove this PC from the other devices"),
+                    Loc.T($"仍要解除关联吗？解除后，请在其他设备的微信输入法“跨设备 → 我的设备”中删除“{name}”，否则再次关联后会出现两个本机。",
+                        $"Unlink anyway? Then delete “{name}” under My devices in WeType's cross-device settings on the other devices, or linking again will list this PC twice."),
+                    Loc.T("解除关联", "Unlink"), danger: false))
+                {
+                    action.IsEnabled = true;
+                    return;
+                }
+            }
             action.IsEnabled = false;
             try
             {

@@ -80,13 +80,12 @@ public partial class MainWindow
         double edge = Math.Min(Snap(layout.TextEdge, dpi), CompactMusicLayout.Whole(CollapsedLimits.ColumnPad * scale));
 
         var lines = new List<(FrameworkElement Element, double Height)>();
-        // After the rows, the column's own: a line carries the page its part stands for, as the row's do, so a notch on a side
-        // edge opens the same page under the pointer (CompactPageAt, MainWindow.Hover.cs).
-        void Add(FrameworkElement element, double height, object? part = null)
+        // A line carries what its part opens the panel on, as the row's parts do (HoverPartAt, MainWindow.Hover.cs). The whole line
+        // is the part, so the column is shared out by lines.
+        void Add(FrameworkElement element, double height, object part)
         {
-            if (part is not null && CompactPartPage(part) is { } opening) element.Tag = opening;
             element.HorizontalAlignment = HorizontalAlignment.Center; element.VerticalAlignment = VerticalAlignment.Center;
-            var line = new Grid { Width = column, Height = height };
+            var line = new Grid { Width = column, Height = height, Tag = HoverPartOf(part) };
             line.Children.Add(element);
             lines.Add((line, height));
         }
@@ -121,9 +120,9 @@ public partial class MainWindow
                     _compactEqualizer = new MusicEqualizer { Bars = Settings.EqualizerBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = EqualizerColor };
                     Add(_compactEqualizer, layout.EqualizerHeight, CompactPart.Equalizer); break;
                 case CompactPart.Clock when clock is not null:
-                    clock.Width = clock.ReservedWidth; Add(clock, clock.Height); _compactClock = clock; break;
+                    clock.Width = clock.ReservedWidth; Add(clock, clock.Height, CompactPart.Clock); _compactClock = clock; break;
                 case CompactPart.Transfer when transfer is not null:
-                    Add(transfer, transfer.Height); break;
+                    Add(transfer, transfer.Height, CompactPart.Transfer); break;
                 // The devices a line each; should a device's line be wider than the column, they scroll as the readings do.
                 case CompactPart.Devices when devices is not null:
                     if (devices.PreferredWidth > column + .5)

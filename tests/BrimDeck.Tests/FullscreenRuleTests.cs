@@ -137,8 +137,8 @@ internal static class FullscreenRuleTests
         check("A background window its app's rule says nothing about takes the global rule",
             browser.Behavior(ScreenContext.BackgroundFullscreen, "firefox", "", ScreenContext.Maximized) == WindowBehavior.Line
             && browser.Behavior(ScreenContext.BackgroundFullscreen, "chrome", "", ScreenContext.Borderless) == WindowBehavior.Hide);
-        // A window over the panel's place: off by default, the global choice everywhere, the app rules say nothing about it.
-        check("A window over the panel keeps the style by default", new DeckSettings().Behavior(ScreenContext.Occupied, "Any", "") == WindowBehavior.Normal);
+        // A window over the panel's place: the indicator by default, the global choice everywhere, the app rules say nothing about it.
+        check("A window over the panel shows the indicator by default", new DeckSettings().Behavior(ScreenContext.Occupied, "Any", "") == WindowBehavior.Line);
         var occupied = new DeckSettings
         {
             Occupied = WindowBehavior.Line, AlwaysOnTop = false,
@@ -151,8 +151,8 @@ internal static class FullscreenRuleTests
         var savedChoice = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { Occupied = WindowBehavior.Hide }))!;
         var broken = JsonSerializer.Deserialize<DeckSettings>("""{"Occupied":7}""")!;
         broken.Normalize();
-        check("The choice for a window over the panel is saved, and an unknown one falls back to keeping the style",
-            savedChoice.Occupied == WindowBehavior.Hide && broken.Occupied == WindowBehavior.Normal
-            && JsonSerializer.Deserialize<DeckSettings>("{}")!.Occupied == WindowBehavior.Normal);
+        check("The choice for a window over the panel is saved, and an unknown one falls back to the indicator",
+            savedChoice.Occupied == WindowBehavior.Hide && broken.Occupied == WindowBehavior.Line
+            && JsonSerializer.Deserialize<DeckSettings>("{}")!.Occupied == WindowBehavior.Line);
     }
 }

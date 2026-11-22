@@ -4,22 +4,25 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// Mouse pass-through (DeckSettings.ClickThrough). The window lets every click through to the window beneath (WS_EX_TRANSPARENT)
-// and hovering does not open the panel; only the shortcuts do. Open, the panel takes clicks only with ClickThroughPanel on, and
-// then closes by the usual rules once the pointer has been inside. Otherwise it ignores the pointer and stays open until a
-// shortcut closes it. A panel opened by a shortcut takes the keyboard and Esc only with ClickThroughKeyboard on, so that a game
-// keeps its keys. A preview from the settings window behaves as usual.
+// Mouse pass-through (DeckSettings.ClickThrough), plus momentary hold from the hotkey (App.HoldPassThrough). The window lets
+// every click through to the window beneath (WS_EX_TRANSPARENT) and hovering does not open the panel; only the shortcuts do.
+// Open, the panel takes clicks only with ClickThroughPanel on, and then closes by the usual rules once the pointer has been
+// inside. Otherwise it ignores the pointer and stays open until a shortcut closes it. A hold always forces clicks through,
+// even when ClickThroughPanel is on. A panel opened by a shortcut takes the keyboard and Esc only with ClickThroughKeyboard
+// on, so that a game keeps its keys. A preview from the settings window behaves as usual.
 public partial class MainWindow
 {
-    private bool _passingClicks;
+    private bool _passingClicks, _passingAround;
 
-    internal bool ClickThrough => Settings.ClickThrough && !_preview;
+    internal bool ClickThrough => (Settings.ClickThrough || _app.HoldPassThrough) && !_preview;
     // The open panel neither takes clicks nor closes when the pointer leaves.
-    private bool PanelIgnoresPointer => ClickThrough && _expanded && !Settings.ClickThroughPanel;
+    private bool PanelIgnoresPointer => ClickThrough && _expanded && (!Settings.ClickThroughPanel || _app.HoldPassThrough);
     // Whether a panel opened by a shortcut takes the keyboard (PanelKeyboard) and Esc.
-    private bool PanelTakesKeyboard => !ClickThrough || Settings.ClickThroughKeyboard;
+    private bool PanelTakesKeyboard => !ClickThrough || (Settings.ClickThroughKeyboard && !_app.HoldPassThrough);
     // Esc is held while the panel is open and takes the keyboard, and in move mode.
     private bool HoldsEscape => _expanded && !_preview && PanelTakesKeyboard || _moveArmed;
+    // Bare ClickThrough observe skips the key while EscapeDismissal has reserved it.
+    internal bool ReservesEscape => HoldsEscape;
 
     // From TrackPointer: true while the pointer is to be ignored. Whatever hovering had started is dropped, and the checks slow
     // down, as nothing they find is used.
@@ -39,13 +42,41 @@ public partial class MainWindow
     {
         if (!PanelTakesKeyboard) ReleaseKeyboard(giveBack: true);
         _escapeDismissal?.SetEnabled(HoldsEscape);
-        bool passing = ClickThrough && !(_expanded && Settings.ClickThroughPanel);
+        if (_expanded) _passingAround = false;
+        UpdatePassing();
+    }
+
+    // From TrackPointer: collapsed, the window lets clicks through while the pointer is outside the surface's pointer area. The
+    // shadow around the surface is drawn in this layered window, and Windows lets clicks through only fully transparent pixels,
+    // so the faint shadow below the capsule would otherwise take clicks meant for the window beneath.
+    private void PassAroundSurface(bool on)
+    {
+        if (on == _passingAround) return;
+        _passingAround = on;
+        UpdatePassing();
+    }
+
+    private void UpdatePassing()
+    {
+        bool passing = ClickThrough && !(_expanded && Settings.ClickThroughPanel && !_app.HoldPassThrough) || _passingAround;
         if (passing == _passingClicks) return;
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == IntPtr.Zero) return;
         long style = GetWindowLongPtr(handle, ExStyle).ToInt64();
         SetWindowLongPtr(handle, ExStyle, new IntPtr(passing ? style | Transparent : style & ~Transparent));
         _passingClicks = passing;
+    }
+
+    // Hold pass-through started or ended: drop a pending hover expand and refresh the window style.
+    internal void RefreshHoldPassThrough()
+    {
+        if (_app.HoldPassThrough)
+        {
+            _hover.Stop(); _leave.Stop();
+            _pointerInside = false; _cursorInCompact = false;
+            SetHoverEdge(ResizeEdges.None);
+        }
+        ApplyClickThrough();
     }
 
     private const int ExStyle = -20;
