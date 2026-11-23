@@ -647,7 +647,7 @@ public partial class MainWindow
         var members = center.Hub.Notices.Where(n => Conversation(n) == Conversation(notice)).ToList();
         string deleteName = members.Count > 1 ? Loc.T($"删除这个会话的 {members.Count} 条记录", $"Delete this conversation's {members.Count} notices") : Loc.T("删除这条记录", "Delete this notice");
         var delete = PillButton("", deleteName, () => { foreach (var member in members) center.Delete(member); _noticeFocus = null; RenderNotices(); });
-        ((Border)delete.Content).Child = new TextBlock { Text = "", FontFamily = Fonts.Icon, FontSize = TextSize.Strong, Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        ((Border)delete.Content).Child = NoticeGlyphFace.Of("", UI.Primary);
         ((Border)delete.Content).Padding = new Thickness(0); delete.Width = 32; delete.ToolTip = deleteName;
         flow.Add(delete);
         var privacy = Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
@@ -688,7 +688,7 @@ public partial class MainWindow
     {
         var button = PillButton("", name, click);
         var face = (Border)button.Content;
-        face.Child = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 13, Foreground = UI.Brush(UI.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        face.Child = NoticeGlyphFace.Of(glyph, UI.Primary);
         face.Padding = new Thickness(0); button.Width = 32; button.ToolTip = name;
         return button;
     }

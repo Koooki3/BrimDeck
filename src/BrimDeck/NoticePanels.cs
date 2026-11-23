@@ -26,6 +26,16 @@ internal static class NoticeLines
         => titleWidth + Gap + countWidth + Gap + toolsWidth <= width;
 }
 
+// The face of the focus's round glyph buttons (delete, copy): one glyph of the icon font, centred.
+internal static class NoticeGlyphFace
+{
+    public static TextBlock Of(string glyph, string color) => new()
+    {
+        Text = glyph, FontFamily = Fonts.Icon, FontSize = TextSize.Strong, Foreground = UI.Brush(color),
+        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+    };
+}
+
 // The glow in the application's color behind the notices page's focus column, and the ink of the text that lies on it.
 internal static class NoticeGlow
 {

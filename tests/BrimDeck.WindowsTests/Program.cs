@@ -73,6 +73,7 @@ internal static class Program
             NoticePanelTests.Run(Check);
             NoticeGlowTests.Run(Check);
             NoticeAppGlyphTests.Run(Check);
+            NoticeGlyphFaceTests.Run(Check);
             ThemeCardChecks.Run(Check);
             ThemeLookChecks.Run(Check);
             HoverOwnerChecks.Run(Check);
@@ -126,6 +127,7 @@ internal static class Program
         NoticePanelTests.Run(Check);
         NoticeGlowTests.Run(Check);
         NoticeAppGlyphTests.Run(Check);
+        NoticeGlyphFaceTests.Run(Check);
         NoticeRowBatchTests.Run(Check);
         NoticeFocusChecks.Run(Check);
     }
