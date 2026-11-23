@@ -496,7 +496,7 @@ public partial class MainWindow
 
     private FrameworkElement FocusColumn(Notice notice, NoticeCenter center, DateTimeOffset now)
     {
-        var accent = PanelTheme.Readable(center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
+        var (accent, glowBrush) = NoticeGlow.Of(NoticeLook.Current(), center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
         var column = new Grid { Margin = new Thickness(0, 4, 20, 0), ClipToBounds = false };
         // A faint glow in the application's color behind the column, as the music page takes its color from the cover.
         // As wide as the column (and 60 beyond it to the left), not a fixed 420: a glow wider than its column is cut at the column's
@@ -504,9 +504,9 @@ public partial class MainWindow
         var glow = new Border
         {
             Height = 300, Margin = new Thickness(-60, -64, 0, 0), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false,
-            Background = new RadialGradientBrush(Color.FromArgb(NoticeLines.GlowAlpha, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B))
+            Background = glowBrush
         };
-        column.Children.Add(glow);
+        if (glowBrush is not null) column.Children.Add(glow);
         var stack = new DockPanel { LastChildFill = true };
         column.Children.Add(stack);
 
@@ -550,7 +550,7 @@ public partial class MainWindow
         if (shown.HasCode && notice.Title.Length > 0) AutomationProperties.SetName(title, shown.SpokenTitle);
         who.Children.Add(title);
         string context = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? NoticeText.CategoryName(notice.Category) : Loc.T("来源已关闭这条通知", "Closed at the source");
-        if (context.Length > 0) { var ctx = UI.Fixed(context, 12, 17, UI.Tertiary); ctx.TextTrimming = TextTrimming.CharacterEllipsis; ctx.Margin = new Thickness(0, 2, 0, 0); who.Children.Add(ctx); }
+        if (context.Length > 0) { var ctx = UI.Fixed(context, 12, 17, NoticeGlow.Ink(PanelTheme.Current, "textTertiary", accent, glowBrush is not null)); ctx.TextTrimming = TextTrimming.CharacterEllipsis; ctx.Margin = new Thickness(0, 2, 0, 0); who.Children.Add(ctx); }
 
         // The buttons, at the foot of the column.
         var buttons = FocusButtons(notice, center);

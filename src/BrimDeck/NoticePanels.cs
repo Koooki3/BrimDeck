@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using BrimDeck.Core;
 
 namespace BrimDeck;
 
@@ -23,6 +24,31 @@ internal static class NoticeLines
     // Whether the header's title, count and tools fit on one line.
     public static bool HeadFits(double width, double titleWidth, double countWidth, double toolsWidth)
         => titleWidth + Gap + countWidth + Gap + toolsWidth <= width;
+}
+
+// The glow in the application's color behind the notices page's focus column, and the ink of the text that lies on it.
+internal static class NoticeGlow
+{
+    // The application's color as the focus draws it (its plate, its progress, its glow), and the glow itself.
+    public static (Color Accent, Brush? Glow) Of(NoticeLook look, Color app)
+    {
+        var accent = PanelTheme.Readable(app);
+        return (accent, Brush(accent));
+    }
+
+    // The glow in a color: faint at the middle (NoticeLines.GlowAlpha), clear at its edge.
+    public static Brush Brush(Color accent) => new RadialGradientBrush(Color.FromArgb(NoticeLines.GlowAlpha, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B));
+
+    // A theme color for text on the glow (the category line under the focus's title stands where it is strongest), moved just far
+    // enough to keep the body-text minimum on the glow over each stop of the surface as well as on the surface alone. A theme
+    // whose color already reads there keeps it.
+    public static string Ink(PanelPalette palette, string key, Color accent, bool glow)
+    {
+        var grounds = new List<ThemeColor>(palette.SurfaceStops);
+        var tint = new ThemeColor(NoticeLines.GlowAlpha, accent.R, accent.G, accent.B);
+        if (glow) grounds.AddRange(palette.SurfaceStops.Select(stop => tint.Over(stop)));
+        return palette[key].EnsureContrast(grounds, PanelThemes.TextContrast).ToString();
+    }
 }
 
 // The list's header: the title with its count and, at the right, the tools (pause, all / unread). On one line while they fit; when

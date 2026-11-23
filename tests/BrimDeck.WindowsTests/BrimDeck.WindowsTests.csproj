@@ -78,5 +78,7 @@
     <Compile Include="..\..\src\BrimDeck\PageToolTips.cs" Link="PageToolTips.cs" />
     <!-- The notices page's header, row and fade panels (laid out by WPF in NoticePanelTests). -->
     <Compile Include="..\..\src\BrimDeck\NoticePanels.cs" Link="NoticePanels.cs" />
+    <!-- The island's notice look, whose application color the page's focus takes (NoticeGlowTests). -->
+    <Compile Include="..\..\src\BrimDeck\NoticeVisuals.cs" Link="NoticeVisuals.cs" />
   </ItemGroup>
 </Project>
