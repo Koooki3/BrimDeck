@@ -79,7 +79,6 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
     private readonly AntigravityUsage _antigravity = new();
     // Whether any enabled Antigravity row reads via the CLI (AppEntry.AntigravityCli); turning it off forgets the CLI reading.
     private bool _antigravityCli;
-    private DateTimeOffset? _antigravityCliAttempt;
     private (DateTimeOffset Time, List<Quota> Quotas)? _antigravityCliReading;
     private readonly DshSessions _dsh = new();
     private readonly KimiSessions _kimi = new();
@@ -197,7 +196,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             bool grokBotOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && app.QuotaOnline);
             bool grokBotLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && ProviderCatalog.ReadsLocalQuota(app));
             _antigravityCli = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Antigravity && app.AntigravityCli);
-            if (!_antigravityCli) { _antigravityCliAttempt = null; _antigravityCliReading = null; }
+            if (!_antigravityCli) _antigravityCliReading = null;
             // A stalled source ends with a timeout status instead of holding every later refresh behind this gate.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             deadline.CancelAfter(Deadline);
@@ -1280,21 +1279,16 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         snapshot.StatusLabel = Loc.T("服务暂不可用", "Service unavailable"); snapshot.Status = Loc.T("检测到 Antigravity，但本地用量服务暂不可用", "Antigravity was found, but its local usage service is unavailable.");
     }
 
-    // The CLI is run at most every five minutes, counting runs that failed or timed out; in between, and after a failed run,
+    // Between attempts and after a failed run,
     // the last reading is shown with the time it was read. Returns whether a reading was shown.
     private async Task<bool> ReadAntigravityCliAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {
-        var attemptTime = _clock();
-        if (_antigravityCliAttempt is not { } attempted || attemptTime - attempted >= TimeSpan.FromMinutes(5))
-        {
-            _antigravityCliAttempt = attemptTime;
-            var report = await desktop.ReadAntigravityCliAsync(ct);
-            ct.ThrowIfCancellationRequested();
-            var quotas = QuotaParser.AntigravityCli(report);
-            if (quotas.Count > 0) _antigravityCliReading = (attemptTime, quotas);
-        }
+        var report = await desktop.ReadAntigravityCliAsync(ct);
+        ct.ThrowIfCancellationRequested();
+        var quotas = QuotaParser.AntigravityCli(report);
+        if (quotas.Count > 0) _antigravityCliReading = (_clock(), quotas);
         if (_antigravityCliReading is not { } reading) return false;
-        ShowAntigravityCli(snapshot, reading, now, reading.Time != _antigravityCliAttempt);
+        ShowAntigravityCli(snapshot, reading, now, stale: quotas.Count == 0);
         return true;
     }
 

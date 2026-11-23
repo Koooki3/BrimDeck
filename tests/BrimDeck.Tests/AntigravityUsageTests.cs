@@ -105,14 +105,10 @@ internal static class AntigravityUsageTests
         check("Without a local endpoint the CLI supplies grouped quota and reset times", first.LiveQuota && first.Source == "Antigravity CLI"
             && first.Quotas is [{ Label: "Gemini · 每周", UsedPercent: 4, Minutes: 10080 }, { UsedPercent: 100, Minutes: 300 }]
             && first.Quotas[0].ResetAt == DateTimeOffset.Parse("2026-11-25T02:00:10Z"));
-        now = now.AddMinutes(4);
-        check("CLI quota keeps the original timestamp between polls", Read().QuotaTime == first.QuotaTime && fake.Calls == 1);
-        now = now.AddMinutes(1);
+        check("Consecutive refreshes each query the CLI", Read().LiveQuota && fake.Calls == 2);
         fake.Report = null;
         var stale = Read();
-        check("CLI failure preserves the previous reading and throttles retries", stale.IsStale && stale.QuotaTime == first.QuotaTime
-            && Read().IsStale && fake.Calls == 2);
-        now = now.AddMinutes(5);
+        check("CLI failure at the same timestamp preserves the previous quota as stale", stale.IsStale && stale.QuotaTime == first.QuotaTime);
         fake.Report = "Gemini 4 Argon\tGemini 4 Argon Weekly Limit\t100%\t2026-11-27T08:28:20Z";
         var recovered = Read();
         check("A successful retry replaces stale CLI quota", !recovered.IsStale && recovered.QuotaTime == now
@@ -122,15 +118,14 @@ internal static class AntigravityUsageTests
         var timedOut = Read();
         check("The refresh deadline preserves stale CLI quotas and their timestamp", timedOut.IsStale
             && timedOut.Quotas.SequenceEqual(recovered.Quotas) && timedOut.QuotaTime == recovered.QuotaTime);
-        now = now.AddMinutes(4);
-        check("A timed-out CLI poll counts toward the five-minute interval", Read().IsStale && fake.Calls == 4);
-        now = now.AddMinutes(1);
+        fake.OnCliRead = null;
+        check("A refresh immediately after timeout queries the CLI again", !Read().IsStale && fake.Calls == 6);
         using var lifetime = new CancellationTokenSource();
         fake.OnCliRead = ct => { lifetime.Cancel(); return Task.FromCanceled(ct); };
         bool cancelled = false;
         try { service.RefreshAsync(settings, lifetime.Token).GetAwaiter().GetResult(); }
         catch (OperationCanceledException) { cancelled = true; }
-        check("Lifetime cancellation during a CLI poll propagates even with cached quota", cancelled && fake.Calls == 5);
+        check("Lifetime cancellation during a CLI poll propagates even with cached quota", cancelled && fake.Calls == 7);
     }
 
     // Antigravity adds words to model names ("claude-opus-5-5-high", "gemini-3.8-flash-control"), while the online catalog lists

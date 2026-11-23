@@ -70,6 +70,9 @@ public sealed class DesktopSources(MiMoAccount? mimo = null, DoubaoQuotaAccount?
         } };
         // The CLI updater can open its own console during an otherwise hidden quota poll.
         process.StartInfo.Environment["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
+        // agy opens OAuth URLs by looking up rundll32. A quota read needs no external tools.
+        process.StartInfo.Environment["PATH"] = "";
+        process.StartInfo.Environment["NoDefaultCurrentDirectoryInExePath"] = "1";
         try
         {
             if (!process.Start()) return null;

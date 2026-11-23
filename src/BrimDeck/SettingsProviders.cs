@@ -156,8 +156,8 @@ public sealed partial class SettingsWindow
     private FrameworkElement AntigravityCliDetails(AppEntry entry)
     {
         string title = Loc.T("通过 CLI 读取", "Read via CLI");
-        string help = Loc.T("开启：Antigravity 应用和 IDE 都未运行时，运行 agy -p /usage 读取额度。运行 agy 较耗资源，所以每 5 分钟最多运行一次。\n关闭：只从应用或 IDE 读取。",
-            "On: while neither the Antigravity app nor the IDE runs, reads the quota by running agy -p /usage. Running agy uses a lot of resources, so it runs at most every 5 minutes.\nOff: reads only from the app or IDE.");
+        string help = Loc.T("开启：Antigravity 应用和 IDE 都未运行时，运行 agy -p /usage 读取额度。每次刷新时查询一次。\n关闭：只从应用或 IDE 读取。",
+            "On: while neither the Antigravity app nor the IDE runs, reads the quota by running agy -p /usage. It runs once per refresh.\nOff: reads only from the app or IDE.");
         return SwitchDetails(entry, title, help, "antigravity-cli-", e => e.AntigravityCli, (e, on) => e.AntigravityCli = on);
     }
 
