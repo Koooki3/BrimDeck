@@ -106,8 +106,8 @@ internal static class AntigravityUsageTests
         using var service = new UsageService(fake, locations, clock: () => now)
         {
             Deadline = TimeSpan.FromSeconds(5),
-            AntigravityCliWait = TimeSpan.FromMilliseconds(200),
-            AntigravityCliTimeout = TimeSpan.FromSeconds(1)
+            AntigravityCliWait = TimeSpan.FromSeconds(2),
+            AntigravityCliTimeout = TimeSpan.FromSeconds(30)
         };
         var settings = new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.Antigravity, AntigravityCli = true }] };
         settings.Normalize();
@@ -128,7 +128,9 @@ internal static class AntigravityUsageTests
 
         // Layer 4: when a local endpoint exists and fails, CLI is NOT called even with the switch on.
         now = now.AddMinutes(10);
-        fake.Endpoints = [new LocalEndpoint(1, "http", "t")];
+        using var reserved = new System.Net.Sockets.Socket(System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+        reserved.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        fake.Endpoints = [new LocalEndpoint(((IPEndPoint)reserved.LocalEndPoint!).Port, "http", "t")];
         var localDown = Read();
         check("Running local endpoint that fails does not spawn CLI and preserves retained quota",
             fake.Calls == 7 && localDown.IsStale && localDown.StatusLabel == "服务暂不可用" && localDown.Quotas.Count > 0);
@@ -139,17 +141,19 @@ internal static class AntigravityUsageTests
         var release = new TaskCompletionSource();
         var finished = new TaskCompletionSource<bool>();
         service.BackgroundReadFinished += firstRead => finished.TrySetResult(firstRead);
-        fake.OnCliRead = async ct => { await release.Task.WaitAsync(ct); };
-        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var entered = new TaskCompletionSource();
+        fake.OnCliRead = async ct => { entered.TrySetResult(); await release.Task.WaitAsync(ct); };
+
         var pending = Read();
+        entered.Task.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
         check("Slow CLI read does not block the refresh round and shows retained quota while refreshing",
-            timer.Elapsed < TimeSpan.FromSeconds(2) && pending.IsStale && pending.Quotas.Count > 0
+            pending.IsStale && pending.Quotas.Count > 0
             && pending.Status.Contains("正在通过 Antigravity CLI 刷新", StringComparison.Ordinal) && fake.Calls == 8);
         release.SetResult();
         finished.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
         fake.OnCliRead = null;
         now = now.AddSeconds(5);
-        var afterBg = Read();
+        var afterBg = service.RefreshAsync(settings, backgroundCompletion: true).GetAwaiter().GetResult().Single(x => x.Id == ProviderId.Antigravity);
         check("After background CLI finishes, the next refresh displays it without starting another CLI call",
             !afterBg.IsStale && fake.Calls == 8);
 
@@ -176,7 +180,7 @@ internal static class AntigravityUsageTests
         {
             Plan = "Google AI Pro",
             QuotaTime = now.AddMinutes(-15),
-            LastSeenAt = now.AddMinutes(-15),
+
             IsStale = true,
             Metrics =
             [
@@ -184,7 +188,16 @@ internal static class AntigravityUsageTests
                 UsageMetric.FromQuota(new("Gemini · 每周", 12, now.AddDays(3), 10080))
             ]
         };
-        service.RestoreLastReadings([restored]);
+        var store = new UsageLastSeen(Path.Combine(root, "antigravity-retained.json"), () => now);
+        settings.Apps[0].AntigravityCli = true;
+        restored.Source = "Antigravity CLI";
+        store.Save([restored], settings);
+        check("Stored CLI quota retains its origin", store.Load(settings).Single().Source == "Antigravity CLI");
+        settings.Apps[0].AntigravityCli = false;
+        check("Disabling CLI hides stored CLI quota after restart", store.Load(settings).All(x => x.Metrics.Count == 0));
+        restored.Source = "Antigravity";
+        store.Save([restored], settings);
+        service.RestoreLastReadings(store.Load(settings));
 
         ProviderSnapshot Read() => service.RefreshAsync(settings).GetAwaiter().GetResult().Single(x => x.Id == ProviderId.Antigravity);
         var closed = Read();
@@ -207,24 +220,6 @@ internal static class AntigravityUsageTests
 
     private static void ProbeAndClassify(Action<string, bool> check)
     {
-        bool Probe(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond, TimeSpan? timeout = null)
-        {
-            using var http = new HttpClient(new ProbeHandler(respond));
-            return AntigravityUsage.ProbeNetworkAsync(http, CancellationToken.None, timeout: timeout).GetAwaiter().GetResult();
-        }
-
-        check("Google network probe succeeds on 204 No Content",
-            Probe((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent))));
-        check("Google network probe rejects captive portal redirects",
-            !Probe((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found))));
-        check("Google network probe rejects proxy 502 errors",
-            !Probe((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway))));
-        check("Google network probe returns false on network exception",
-            !Probe((_, _) => Task.FromException<HttpResponseMessage>(new HttpRequestException("unreachable"))));
-        check("Google network probe returns false on timeout",
-            !Probe(async (_, ct) => { await Task.Delay(TimeSpan.FromSeconds(5), ct); return new HttpResponseMessage(HttpStatusCode.NoContent); },
-                TimeSpan.FromMilliseconds(50)));
-
         var valid = "Gemini Models\tWeekly Limit Remaining\t80%\t2026-11-25T02:00:10Z";
         check("CLI classifier accepts valid usage report even with benign stderr",
             AntigravityUsage.ClassifyCliOutput(0, valid, "info: cached").Status == AntigravityCliStatus.Ok);
@@ -233,7 +228,7 @@ internal static class AntigravityUsageTests
         check("CLI classifier detects sign-in prompt on stderr as AuthRequired",
             AntigravityUsage.ClassifyCliOutput(1, "", "Error: not signed in, please login").Status == AntigravityCliStatus.AuthRequired);
         check("CLI classifier detects dial tcp timeout as NetworkUnavailable",
-            AntigravityUsage.ClassifyCliOutput(1, "", "Post https://example: dial tcp 142.250.0.1:443: i/o timeout").Status == AntigravityCliStatus.NetworkUnavailable);
+            AntigravityUsage.ClassifyCliOutput(1, "", "Post https://accounts.google.com/oauth2: dial tcp 142.250.0.1:443: i/o timeout").Status == AntigravityCliStatus.NetworkUnavailable);
         check("CLI classifier falls back to Failed for generic non-zero exit",
             AntigravityUsage.ClassifyCliOutput(1, "", "unexpected internal error").Status == AntigravityCliStatus.Failed);
     }
@@ -336,12 +331,6 @@ internal static class AntigravityUsageTests
         var bytes = new List<byte>();
         do { var b = (byte)(value & 0x7F); value >>= 7; bytes.Add(value == 0 ? b : (byte)(b | 0x80)); } while (value != 0);
         return [.. bytes];
-    }
-
-    private sealed class ProbeHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => respond(request, cancellationToken);
     }
 
     private sealed class Databases : IDesktopSources

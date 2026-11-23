@@ -63,7 +63,7 @@ public sealed partial class UsageService
                     {
                         var planSource = snapshot.Plan.Length > 0 ? Loc.T("Antigravity 本地账户服务", "Antigravity local account service") : "";
                         _antigravityState.Reading = new(agReadAt, snapshot.Metrics.ToList(), snapshot.Plan, planSource,
-                            Loc.T("Antigravity", "Antigravity"), FromCli: false, Restored: true);
+                            snapshot.Source == "Antigravity CLI" ? snapshot.Source : "Antigravity", FromCli: snapshot.Source == "Antigravity CLI", Restored: true);
                     }
                 continue;
             }

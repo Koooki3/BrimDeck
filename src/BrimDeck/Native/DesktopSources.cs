@@ -55,16 +55,6 @@ public sealed class DesktopSources(MiMoAccount? mimo = null, DoubaoQuotaAccount?
         finally { try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { } }
     }
 
-    // Short-lived pooled connections ensure each Google reachability preflight observes current proxy and network routing.
-    private static readonly HttpClient AntigravityProbeHttp = new(new SocketsHttpHandler
-    {
-        AllowAutoRedirect = false,
-        UseProxy = true,
-        PooledConnectionLifetime = TimeSpan.FromSeconds(10),
-        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(5),
-        ConnectTimeout = TimeSpan.FromSeconds(3)
-    }) { Timeout = TimeSpan.FromSeconds(4) };
-
     public async Task<string?> ReadAntigravityCliAsync(CancellationToken cancellation)
     {
         var result = await ReadAntigravityCliResultAsync(cancellation).ConfigureAwait(false);
@@ -78,11 +68,6 @@ public sealed class DesktopSources(MiMoAccount? mimo = null, DoubaoQuotaAccount?
         var cli = folders.Select(folder => folder.Trim().Trim('"')).Where(Path.IsPathFullyQualified)
             .Select(folder => Path.Combine(folder, "agy.exe")).FirstOrDefault(File.Exists);
         if (cli is null) return new(AntigravityCliStatus.NotInstalled);
-
-        // Layer 1: Check reachability to Google's auth host before spawning agy.exe, avoiding interactive browser fallbacks
-        // when the network or proxy cannot reach Google.
-        if (!await AntigravityUsage.ProbeNetworkAsync(AntigravityProbeHttp, cancellation).ConfigureAwait(false))
-            return new(AntigravityCliStatus.NetworkUnavailable);
 
         // Layer 2: Restrict browser launcher lookup and monitor stdout/stderr
         // so any OAuth URL or sign-in prompt aborts immediately instead of hanging or opening Chrome.
@@ -136,8 +121,10 @@ public sealed class DesktopSources(MiMoAccount? mimo = null, DoubaoQuotaAccount?
             started = process.Start();
             if (!started) return new(AntigravityCliStatus.Failed);
             process.StandardInput.Close();
-            var output = DrainAsync(process.StandardOutput, stdout, stop.Token);
-            var errors = DrainAsync(process.StandardError, stderr, stop.Token);
+            using var stdoutReader = process.StandardOutput;
+            using var stderrReader = process.StandardError;
+            var output = DrainAsync(stdoutReader, stdout, stop.Token);
+            var errors = DrainAsync(stderrReader, stderr, stop.Token);
             await Task.WhenAll(output, errors, process.WaitForExitAsync(stop.Token)).ConfigureAwait(false);
             if (Volatile.Read(ref authDetected) != 0) return new(AntigravityCliStatus.AuthRequired);
             return AntigravityUsage.ClassifyCliOutput(process.ExitCode, stdout.ToString(), stderr.ToString());

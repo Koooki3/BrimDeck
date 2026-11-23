@@ -8,7 +8,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | --- | --- | --- |
 | Claude | 读取 Claude Code 的登录（`%USERPROFILE%\.claude\.credentials.json`），不可用时改用 Claude 桌面版的登录，向 Anthropic 查询账户用量。账户同时属于多个组织（例如个人 Pro 与 Team）时，用桌面版为各组织保存的登录分别查询。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Claude 桌面版在本机记录的额度（`plan-usage-history.json`） | 读取 Claude Code 的本地会话记录（`projects\**\*.jsonl`），不含 Claude 桌面版的普通聊天 |
 | Codex | 读取 `%USERPROFILE%\.codex\auth.json` 中的登录，向 OpenAI 查询账户用量；查询失败时显示会话记录中的配额，并标明可能已过时 | 读取本地会话记录（`sessions` 与 `archived_sessions`） |
-| Antigravity | 从正在运行的 Antigravity 桌面版或 Antigravity IDE 的本机服务（仅限 127.0.0.1）读取；应用关闭后在重置前保留上次有效读数。两者都未运行且已开启“通过 CLI 读取”（默认关闭）时，先向 `accounts.google.com/generate_204` 检测连通性，连通后在后台以无头环境运行 `agy -p /usage` 读取，每轮刷新查询一次 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
+| Antigravity | 从正在运行的 Antigravity 桌面版或 Antigravity IDE 的本机服务（仅限 127.0.0.1）读取；应用关闭后在重置前保留上次有效读数。两者都未运行且已开启“通过 CLI 读取”（默认关闭）时，在后台以无头环境运行 `agy -p /usage` 读取，每轮刷新查询一次 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
 | Cursor | 以只读方式从 `%APPDATA%\Cursor\User\globalStorage\state.vscdb` 读取登录，向 Cursor 查询账户用量 | 向 Cursor 查询账户用量明细，包含该账户在其他设备上的用量 |
 | Grok Bot | 读取 Grok Bot 桌面版自己的登录（`%APPDATA%\Grok Bot\sand-secrets.json`），向 Cursor 查询该账户的每周额度。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Grok Bot 桌面版在本机缓存的每周额度（`%APPDATA%\Grok Bot\sand-client-persistence`） | 不提供 |
 | ZCode | 读取 ZCode 的登录，查询 Coding Plan、Start Plan 与 MCP 每日额度 | 读取本地请求记录（`%USERPROFILE%\.zcode\cli\db\db.sqlite`） |
@@ -65,7 +65,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 
 ## 联网与安全
 
-- 仅连接以下地址：各工具的官方接口、你在设置中填写的站点、OpenRouter 模型目录及记录中用到的模型的渠道列表（同步模型单价，只发送模型名称）、歌词服务（LRCLIB、网易云音乐、QQ 音乐、酷狗音乐）、播放器提供的封面地址、`accounts.google.com/generate_204`（仅在开启 Antigravity 的“通过 CLI 读取”时用于连通性预检），以及 GitHub Releases（检查更新；启用增强传感器时下载传感器服务与 PawnIO 官方模块）。
+- 仅连接以下地址：各工具的官方接口、你在设置中填写的站点、OpenRouter 模型目录及记录中用到的模型的渠道列表（同步模型单价，只发送模型名称）、歌词服务（LRCLIB、网易云音乐、QQ 音乐、酷狗音乐）、播放器提供的封面地址，以及 GitHub Releases（检查更新；启用增强传感器时下载传感器服务与 PawnIO 官方模块）。
 - Claude 桌面版的数据目录包括 `%APPDATA%\Claude`、商店版 `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude` 和 `%LOCALAPPDATA%\Packages\AnthropicPBC.Claude_*\LocalCache\Roaming\Claude`，以及 `%LOCALAPPDATA%\Claude-Data\<安装名>`。
 - 读取的登录令牌仅在内存中使用，不写入磁盘；Claude 桌面版与 Grok Bot 桌面版的登录缓存使用当前用户的 Windows 加密功能在内存中解密。
 - 自定义脚本在沙盒中运行，无法访问文件、进程或 .NET 对象，限制详见[支持的工具](ai-tools.md#自定义脚本)。

@@ -140,7 +140,7 @@ public partial class App : Application
         Usage.BackgroundReadFinished += first => Dispatcher.BeginInvoke(() =>
         {
             if (Exiting || Deck is not { } deck) return;
-            _ = first ? deck.RefreshAsync() : deck.RefreshAutomaticallyAsync(queueIfBusy: true);
+            if (first || deck.AutomaticSyncEnabled) _ = deck.RefreshAsync(backgroundCompletion: true);
         });
         LastSeen = new UsageLastSeen(Path.Combine(folder, UsageLastSeen.FileName));
         WindowDrags = new WindowDrags();

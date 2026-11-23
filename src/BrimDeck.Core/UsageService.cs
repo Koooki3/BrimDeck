@@ -94,7 +94,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         public bool Unshown;
         public DateTimeOffset? LastAttempt;
         public AntigravityCliStatus? LastFailure;
-        public bool ResultReady;
+        public bool CompletionRefresh;
     }
     private readonly AntigravityState _antigravityState = new();
     // Whether any enabled Antigravity row reads via the CLI (AppEntry.AntigravityCli); turning it off forgets CLI-only readings.
@@ -204,7 +204,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
     // progress, when given, receives the snapshots that have been read so far (a growing list) while the first round of this
     // service is still running, at most once per ProgressInterval, from any thread; the returned list is always the whole result.
     public async Task<List<ProviderSnapshot>> RefreshAsync(DeckSettings settings, CancellationToken cancellation = default, DateTime? usageStart = null,
-        Action<IReadOnlyList<ProviderSnapshot>>? progress = null)
+        Action<IReadOnlyList<ProviderSnapshot>>? progress = null, bool backgroundCompletion = false)
     {
         await _gate.WaitAsync(cancellation);
         try
@@ -222,6 +222,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             lock (_antigravityState)
             {
                 _antigravityCli = antigravityCli;
+                _antigravityState.CompletionRefresh = backgroundCompletion;
                 if (!antigravityCli)
                 {
                     cancelAntigravityCli = _antigravityState.CliCancel;
@@ -231,7 +232,6 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
                     if (_antigravityState.Reading is { FromCli: true }) _antigravityState.Reading = null;
                     _antigravityState.LastAttempt = null;
                     _antigravityState.LastFailure = null;
-                    _antigravityState.ResultReady = false;
                 }
             }
             try { cancelAntigravityCli?.Cancel(); } catch (ObjectDisposedException) { }
@@ -1252,7 +1252,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         bool stale, string? statusLabel = null, string? reason = null)
     {
         if (stale && !Recent(reading.Time, now)) return false;
-        var metrics = stale ? reading.Metrics.Where(m => StillHolds(m, now)).ToList() : reading.Metrics.ToList();
+        var metrics = reading.Metrics.Where(m => StillHolds(m, now)).ToList();
         if (metrics.Count == 0) return false;
         snapshot.Quotas = [.. metrics.Where(m => m.Kind == MetricKind.Percent && m.Percent is not null)
             .Select(m => new Quota(m.Label, m.Percent!.Value, m.ResetAt, m.Window))];
@@ -1291,8 +1291,8 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             Loc.T("Antigravity CLI 响应超时，稍后重试", "Antigravity CLI timed out. Retrying later.")),
         AntigravityCliStatus.NetworkUnavailable => (
             Loc.T("网络不可达", "Network unavailable"),
-            Loc.T("暂无法连接 Google 服务，已跳过 Antigravity CLI 读取",
-                "Cannot reach Google services right now; skipped Antigravity CLI read.")),
+            Loc.T("Antigravity CLI 无法连接服务",
+                "Antigravity CLI could not reach the service.")),
         AntigravityCliStatus.NotInstalled => (
             Loc.T("未安装 CLI", "CLI not installed"),
             Loc.T("未检测到 Antigravity 应用或 IDE 的本地服务，且未找到 agy CLI",
@@ -1358,7 +1358,6 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
                     _antigravityState.Unshown = false;
                     _antigravityState.Reading = new(now, metrics, plan, planSource, snapshot.Source, FromCli: false);
                     _antigravityState.LastFailure = null;
-                    _antigravityState.ResultReady = false;
                 }
                 try { running?.Cancel(); } catch (ObjectDisposedException) { }
                 return;
@@ -1408,15 +1407,16 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             }
             else
             {
-                if (_antigravityState.ResultReady)
-                    _antigravityState.ResultReady = false;
-                else
+                if (!_antigravityState.CompletionRefresh)
                 {
                     _antigravityState.LastAttempt = attemptTime;
                     _antigravityState.CliRunning = true;
                     _antigravityState.Unshown = false;
+                    var cliCts = CancellationTokenSource.CreateLinkedTokenSource(lifetime, _disposed.Token);
+                    cliCts.CancelAfter(AntigravityCliTimeout);
+                    _antigravityState.CliCancel = cliCts;
                     pending = _antigravityState.PendingCli = Task.Run(
-                        () => RunAntigravityCliInBackgroundAsync(attemptTime, lifetime), CancellationToken.None);
+                        () => RunAntigravityCliInBackgroundAsync(attemptTime, lifetime, cliCts), CancellationToken.None);
                 }
             }
         }
@@ -1454,8 +1454,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
 
         if (reading is { FromCli: true, Restored: false } && failure is null && lastAttempt is { } at && reading.Time == at)
         {
-            ShowAntigravityReading(snapshot, reading, now, stale: false);
-            return true;
+            return ShowAntigravityReading(snapshot, reading, _clock(), stale: false);
         }
 
         var (failLabel, failReason) = AntigravityCliFailureText(failure);
@@ -1472,37 +1471,17 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         return true;
     }
 
-    private async Task RunAntigravityCliInBackgroundAsync(DateTimeOffset attemptTime, CancellationToken lifetime)
+    private async Task RunAntigravityCliInBackgroundAsync(DateTimeOffset attemptTime, CancellationToken lifetime, CancellationTokenSource cliCts)
     {
-        if (Volatile.Read(ref _isDisposed) != 0) return;
-        CancellationTokenSource? cliCts = null, previousCli = null;
-        bool first;
-        lock (_antigravityState)
-        {
-            if (!_antigravityCli || Volatile.Read(ref _isDisposed) != 0)
-            {
-                _antigravityState.CliRunning = false;
-                return;
-            }
-            first = _antigravityState.Reading is null || _antigravityState.Reading.Restored;
-            previousCli = _antigravityState.CliCancel;
-            try
-            {
-                cliCts = CancellationTokenSource.CreateLinkedTokenSource(lifetime, _disposed.Token);
-                cliCts.CancelAfter(AntigravityCliTimeout);
-                _antigravityState.CliCancel = cliCts;
-            }
-            catch (ObjectDisposedException)
-            {
-                _antigravityState.CliRunning = false;
-                return;
-            }
-        }
-        try { previousCli?.Cancel(); } catch (ObjectDisposedException) { }
-
         AntigravityCliResult result;
         try
         {
+            bool first;
+            lock (_antigravityState)
+            {
+                if (!ReferenceEquals(_antigravityState.CliCancel, cliCts) || cliCts.IsCancellationRequested) return;
+                first = _antigravityState.Reading is null || _antigravityState.Reading.Restored;
+            }
             try
             {
                 result = await desktop.ReadAntigravityCliResultAsync(cliCts.Token).ConfigureAwait(false);
@@ -1549,7 +1528,6 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
 
                 }
                 notify = _antigravityState.Unshown;
-                _antigravityState.ResultReady = notify;
                 _antigravityState.Unshown = false;
             }
             if (notify) BackgroundReadFinished?.Invoke(first && succeeded);

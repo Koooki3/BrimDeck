@@ -39,27 +39,6 @@ public sealed class AntigravityUsage
     public sealed record LanguageServer(int ProcessId, int HttpsPort, int HttpPort, string Token);
     public static string DaemonFolder(string home) => Path.Combine(home, ".gemini", "antigravity", "daemon");
 
-    // Lightweight connectivity probe against Google's auth host before spawning `agy -p /usage`.
-    // Returns true only on a direct 204/200 response so captive-portal redirects and proxy 5xx errors are rejected.
-    public const string NetworkProbeUrl = "https://accounts.google.com/generate_204";
-    public static readonly TimeSpan NetworkProbeTimeout = TimeSpan.FromSeconds(3);
-
-    public static async Task<bool> ProbeNetworkAsync(HttpClient http, CancellationToken cancellation,
-        string url = NetworkProbeUrl, TimeSpan? timeout = null)
-    {
-        using var probeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        probeTimeout.CancelAfter(timeout ?? NetworkProbeTimeout);
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, probeTimeout.Token).ConfigureAwait(false);
-            return response.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.OK;
-        }
-        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested) { return false; }
-        catch (Exception ex) when (ex is HttpRequestException or IOException) { return false; }
-    }
-
     // Detects interactive OAuth URLs or sign-in prompts emitted by `agy` when tokens are missing/expired.
     public static bool LooksLikeAuthPrompt(string? text)
     {
@@ -107,10 +86,10 @@ public sealed class AntigravityUsage
     {
         if (exitCode == 0 && QuotaParser.AntigravityCli(stdout).Count > 0)
             return new(AntigravityCliStatus.Ok, stdout);
-        if (LooksLikeAuthPrompt(stderr) || LooksLikeAuthPrompt(stdout))
-            return new(AntigravityCliStatus.AuthRequired);
         if (LooksLikeNetworkError(stderr) || LooksLikeNetworkError(stdout))
             return new(AntigravityCliStatus.NetworkUnavailable);
+        if (LooksLikeAuthPrompt(stderr) || LooksLikeAuthPrompt(stdout))
+            return new(AntigravityCliStatus.AuthRequired);
         return new(AntigravityCliStatus.Failed);
     }
 
