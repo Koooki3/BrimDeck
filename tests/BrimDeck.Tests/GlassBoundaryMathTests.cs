@@ -10,6 +10,21 @@ internal static class GlassBoundaryMathTests
         Extremes(check);
         Clips(check);
         Profile(check);
+        LightStops(check);
+    }
+
+    // The light around the island is held within LightLeast of its brightest, in the theme's order, its mean the theme's.
+    private static void LightStops(Action<string, bool> check)
+    {
+        double[] theme = [1, .39, .18, .23, .70], even = [1, 1], dark = [0, 1, 0];
+        foreach (var relative in new[] { theme, even, dark })
+        {
+            var shown = new double[relative.Length];
+            GlassBoundaryMath.LightStops(relative, shown);
+            bool order = Enumerable.Range(0, relative.Length).All(i => Enumerable.Range(0, relative.Length).All(j => relative[i] <= relative[j] || shown[i] >= shown[j]));
+            check($"The edge's light ({string.Join("/", relative)}) spans at most 1/{GlassBoundaryMath.LightLeast} ({string.Join("/", shown.Select(s => s.ToString("0.000")))}), in order, no brighter on average",
+                shown.Max() <= shown.Min() / GlassBoundaryMath.LightLeast + 1e-12 && order && Math.Abs(shown.Average() - relative.Average()) < 1e-12);
+        }
     }
 
     private static (double X, double Y) Bezier((double X, double Y) p0, (double X, double Y) p1, (double X, double Y) p2, (double X, double Y) p3, double t)

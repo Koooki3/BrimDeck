@@ -385,8 +385,8 @@ internal sealed class GlassEdge
         return changed;
     }
 
-    // The light's shape around the island: the theme's rim gradient, each stop's alpha relative to the brightest (the edge's
-    // strength is the profile's, not the theme's).
+    // The light's shape around the island: the theme's rim gradient, each stop's alpha relative to the brightest and held within
+    // GlassBoundaryMath.LightStops' range (the edge's strength is the profile's, not the theme's).
     public void Stops(IReadOnlyList<Color> colors)
     {
         double brightest = 0;
@@ -397,10 +397,14 @@ internal sealed class GlassEdge
             _stops.Clear();
             for (int i = 0; i < colors.Count; i++) _stops.Add(new GradientStop(Colors.Transparent, (double)i / (colors.Count - 1)));
         }
+        var relative = new double[colors.Count];
+        for (int i = 0; i < colors.Count; i++) relative[i] = colors[i].A / brightest;
+        var shown = new double[colors.Count];
+        GlassBoundaryMath.LightStops(relative, shown);
         for (int i = 0; i < colors.Count; i++)
         {
             var c = colors[i];
-            var color = Color.FromArgb((byte)Math.Round(c.A / brightest * 255), c.R, c.G, c.B);
+            var color = Color.FromArgb((byte)Math.Round(shown[i] * 255), c.R, c.G, c.B);
             if (_stops[i].Color != color) _stops[i].Color = color;
         }
     }

@@ -21,6 +21,27 @@ internal static class EdgeRingChecks
     {
         Rings(check);
         OnePass(check);
+        LightRange(check);
+    }
+
+    // The light around the island from each liquid glass theme's rim gradient, as the edge's brushes carry it: one side may be
+    // brighter than the other, but not five times (until V4-2 the dimmest stop was 0.18 of the brightest, so the bottom's middle
+    // all but vanished and one side read as a drawn line), and no brighter overall than the theme's own gradient.
+    private static void LightRange(Action<string, bool> check)
+    {
+        foreach (string id in new[] { PanelThemes.GlassLight, PanelThemes.GlassDark })
+        {
+            var stops = PanelThemes.Resolve(PanelThemes.BuiltIn(id)!).Effects.RimGradient;
+            var edge = new GlassEdge();
+            edge.Stops([.. stops.Select(PanelTheme.ToColor)]);
+            var shown = edge.Brushes[0].GradientStops.Select(s => s.Color.A / 255d).ToArray();
+            double brightest = stops.Max(s => (double)PanelTheme.ToColor(s).A);
+            var theme = stops.Select(s => PanelTheme.ToColor(s).A / brightest).ToArray();
+            double ratio = shown.Max() / Math.Max(shown.Min(), 1e-9);
+            bool order = Enumerable.Range(0, theme.Length).All(i => Enumerable.Range(0, theme.Length).All(j => theme[i] <= theme[j] || shown[i] >= shown[j]));
+            check($"{id}: the edge's light around the island spans at most {1 / GlassBoundaryMath.LightLeast:0.00}x (now {ratio:0.00}x), brightest side kept, no brighter on average ({shown.Average():0.000} for the theme's {theme.Average():0.000})",
+                ratio <= 1 / GlassBoundaryMath.LightLeast + .02 && order && shown.Average() <= theme.Average() + 1 / 255d);
+        }
     }
 
     private static void Rings(Action<string, bool> check)

@@ -208,6 +208,26 @@ public static class GlassBoundaryMath
     public const double CollapsedBevel = 2.0, ExpandedBevel = 3.2;
     public static double BevelWidth(double openness) => CollapsedBevel + (ExpandedBevel - CollapsedBevel) * Smootherstep(openness);
 
+    // The light's share around the island: the theme's rim gradient, each stop relative to the brightest, held within
+    // [LightLeast, 1] of the brightest.
+    public const double LightLeast = .6;
+
+    // The stops' alphas shown (shown[i], 0..1) for the theme's (relative[i], 0..1 of the brightest): moved into [LightLeast, 1]
+    // in the same order, then scaled so their mean stays the theme's, so the light is flatter around the island without being
+    // brighter overall (the dim side gains what the bright side gives up).
+    public static void LightStops(ReadOnlySpan<double> relative, Span<double> shown)
+    {
+        double theme = 0, flat = 0;
+        for (int i = 0; i < relative.Length; i++)
+        {
+            double a = Math.Clamp(double.IsFinite(relative[i]) ? relative[i] : 0, 0, 1);
+            shown[i] = LightLeast + (1 - LightLeast) * a;
+            theme += a; flat += shown[i];
+        }
+        double scale = flat > 0 ? theme / flat : 0;
+        for (int i = 0; i < relative.Length; i++) shown[i] *= scale;
+    }
+
     // The bevel's light and contour for a palette (0 dark, 1 light; a turn passes through the values between).
     public const double DarkPeak = .22, LightPeak = .16, DarkBaseline = .05, LightBaseline = .045;
     public static (double Peak, double Baseline) Light(double palette)
