@@ -1051,7 +1051,7 @@ public partial class MainWindow
         var image = _app.Notices.Icons.Get(notice.IconRef, out _);
         if (image is null)
         {
-            var accent = PanelTheme.Readable(_app.Notices.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
+            var accent = NoticeLook.Current().AppColor(_app.Notices.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
             plate.Children.Add(NoticeLetter.Plate(notice.AppName, size, accent, icon: NoticeBadges.AppGlyph(notice, size, accent)));
             // The state and source badges on the plate's corners (NoticeBadges).
             NoticeBadges.Decorate(plate, notice, size, NoticeLook.Current().Glow, NoticeGlyphs.Plate(notice));
