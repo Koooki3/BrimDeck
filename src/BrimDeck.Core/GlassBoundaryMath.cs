@@ -38,8 +38,61 @@ public static class GlassBoundaryMath
         => ((w - shoulder * .28, 0), (w - shoulder * .64, 0), (w - shoulder * .82, depth * .18),
             (w - shoulder, depth * .36), (w - shoulder, depth * .72), (w - shoulder, depth));
 
+    // Whether the panel's origin in the glass window's pixels lies on whole pixels (within float noise). The layout rounds the
+    // panel's place, so its straight edges fall on pixel boundaries; one off by a fraction is antialiased along every edge.
+    public static bool OnWholePixels((double X, double Y) at)
+    {
+        const double Noise = 1d / 512;
+        return double.IsFinite(at.X) && double.IsFinite(at.Y)
+            && Math.Abs(at.X - Math.Round(at.X)) <= Noise && Math.Abs(at.Y - Math.Round(at.Y)) <= Noise;
+    }
+
     // The cubic handle factor for a quarter circle.
     public const double Kappa = .5522847498307936;
+
+    // Where an outline is written: WPF's geometry for the island and its edge, Direct2D's path for the glass layer's clip.
+    public interface IOutlineSink
+    {
+        void Begin(double x, double y);
+        void Line(double x, double y);
+        void Curve(double x1, double y1, double x2, double y2, double x3, double y3);
+    }
+
+    // One outline as a closed figure, clockwise from the top left: the top edge, the right shoulder (or corner), the right side,
+    // the bottom corners and edge, the left side and the left shoulder (or corner). Placed: moved by the inset (o.Inset, o.Top)
+    // in its points (otherwise a caller moves it as a whole). Every drawing of the island's outline is this one.
+    public static void WriteOutline<T>(Layout o, bool placed, ref T sink) where T : struct, IOutlineSink
+    {
+        double dx = placed && o.Inset > 0 ? o.Inset : 0, dy = placed && o.Inset > 0 ? o.Top : 0;
+        double shoulder = o.Shoulder, shoulderDepth = o.ShoulderDepth, left = o.Left, right = o.Right;
+        double tl = o.TopLeft, tr = o.TopRight, br = o.BottomRight, bl = o.BottomLeft;
+        double w = o.Width, h = o.Height;
+        const double k = Kappa;
+        sink.Begin((shoulder > 0 ? 0 : tl) + dx, dy);
+        sink.Line((shoulder > 0 ? w : w - tr) + dx, dy);
+        if (shoulder > 0)
+        {
+            var s = RightShoulder(w, shoulder, shoulderDepth);
+            sink.Curve(s.A1.X + dx, s.A1.Y + dy, s.A2.X + dx, s.A2.Y + dy, s.Mid.X + dx, s.Mid.Y + dy);
+            sink.Curve(s.B1.X + dx, s.B1.Y + dy, s.B2.X + dx, s.B2.Y + dy, s.End.X + dx, s.End.Y + dy);
+        }
+        else
+            sink.Curve(w - tr * (1 - k) + dx, dy, w + dx, tr * (1 - k) + dy, w + dx, tr + dy);
+        sink.Line(right + dx, h - br + dy);
+        sink.Curve(right + dx, h - br * (1 - k) + dy, right - br * (1 - k) + dx, h + dy, right - br + dx, h + dy);
+        sink.Line(left + bl + dx, h + dy);
+        sink.Curve(left + bl * (1 - k) + dx, h + dy, left + dx, h - bl * (1 - k) + dy, left + dx, h - bl + dy);
+        sink.Line(left + dx, (shoulder > 0 ? shoulderDepth : tl) + dy);
+        if (shoulder > 0)
+        {
+            // The right shoulder mirrored, run backwards.
+            var s = RightShoulder(w, shoulder, shoulderDepth);
+            sink.Curve(w - s.B2.X + dx, s.B2.Y + dy, w - s.B1.X + dx, s.B1.Y + dy, w - s.Mid.X + dx, s.Mid.Y + dy);
+            sink.Curve(w - s.A2.X + dx, s.A2.Y + dy, w - s.A1.X + dx, s.A1.Y + dy, dx, dy);
+        }
+        else
+            sink.Curve(dx, tl * (1 - k) + dy, tl * (1 - k) + dx, dy, tl + dx, dy);
+    }
 
     // The glass layer's clip as a rounded rectangle in the window's pixels: X, Y, Width, Height and one Radius. Square corners
     // on one side are met by carrying the rectangle a radius past that side. Shapes with other corners have none (the window
@@ -163,6 +216,26 @@ public static class GlassBoundaryMath
     // at either end than in the middle.
     public const double CollapsedBevel = 2.0, ExpandedBevel = 3.2;
     public static double BevelWidth(double openness) => CollapsedBevel + (ExpandedBevel - CollapsedBevel) * Smootherstep(openness);
+
+    // The light's share around the island: the theme's rim gradient, each stop relative to the brightest, held within
+    // [LightLeast, 1] of the brightest.
+    public const double LightLeast = .6;
+
+    // The stops' alphas shown (shown[i], 0..1) for the theme's (relative[i], 0..1 of the brightest): moved into [LightLeast, 1]
+    // in the same order, then scaled so their mean stays the theme's, so the light is flatter around the island without being
+    // brighter overall (the dim side gains what the bright side gives up).
+    public static void LightStops(ReadOnlySpan<double> relative, Span<double> shown)
+    {
+        double theme = 0, flat = 0;
+        for (int i = 0; i < relative.Length; i++)
+        {
+            double a = Math.Clamp(double.IsFinite(relative[i]) ? relative[i] : 0, 0, 1);
+            shown[i] = LightLeast + (1 - LightLeast) * a;
+            theme += a; flat += shown[i];
+        }
+        double scale = flat > 0 ? theme / flat : 0;
+        for (int i = 0; i < relative.Length; i++) shown[i] *= scale;
+    }
 
     // The bevel's light and contour for a palette (0 dark, 1 light; a turn passes through the values between).
     public const double DarkPeak = .22, LightPeak = .16, DarkBaseline = .05, LightBaseline = .045;

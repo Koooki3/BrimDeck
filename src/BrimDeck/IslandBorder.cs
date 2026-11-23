@@ -416,43 +416,20 @@ public sealed class IslandBorder : Border
         return geometry;
     }
 
-    // One outline as a closed figure; placed: moved by the inset (o.Inset, o.Top) in its points, where BuildOutline gives the
-    // geometry that move as its transform instead.
+    // One outline as a closed figure (GlassBoundaryMath.WriteOutline, which the glass layer's clip is written from too); placed:
+    // moved by the inset in its points, where BuildOutline gives the geometry that move as its transform instead.
     private static void WriteOutline(StreamGeometryContext path, GlassBoundaryMath.Layout o, bool placed)
     {
-        double dx = placed && o.Inset > 0 ? o.Inset : 0, dy = placed && o.Inset > 0 ? o.Top : 0;
-        double shoulder = o.Shoulder, shoulderDepth = o.ShoulderDepth, left = o.Left, right = o.Right;
-        double tl = o.TopLeft, tr = o.TopRight, br = o.BottomRight, bl = o.BottomLeft;
-        double w = o.Width, h = o.Height;
-        const double k = GlassBoundaryMath.Kappa;
-        path.BeginFigure(Q(shoulder > 0 ? 0 : tl, 0), true, true);
-        path.LineTo(Q(shoulder > 0 ? w : w - tr, 0), true, false);
-        if (shoulder > 0)
-        {
-            var s = GlassBoundaryMath.RightShoulder(w, shoulder, shoulderDepth);
-            path.BezierTo(P(s.A1), P(s.A2), P(s.Mid), true, true);
-            path.BezierTo(P(s.B1), P(s.B2), P(s.End), true, true);
-        }
-        else
-            path.BezierTo(Q(w - tr * (1 - k), 0), Q(w, tr * (1 - k)), Q(w, tr), true, true);
-        path.LineTo(Q(right, h - br), true, false);
-        path.BezierTo(Q(right, h - br * (1 - k)), Q(right - br * (1 - k), h), Q(right - br, h), true, true);
-        path.LineTo(Q(left + bl, h), true, false);
-        path.BezierTo(Q(left + bl * (1 - k), h), Q(left, h - bl * (1 - k)), Q(left, h - bl), true, true);
-        path.LineTo(Q(left, shoulder > 0 ? shoulderDepth : tl), true, false);
-        if (shoulder > 0)
-        {
-            // The right shoulder mirrored, run backwards.
-            var s = GlassBoundaryMath.RightShoulder(w, shoulder, shoulderDepth);
-            path.BezierTo(M(s.B2), M(s.B1), M(s.Mid), true, true);
-            path.BezierTo(M(s.A2), M(s.A1), Q(0, 0), true, true);
-        }
-        else
-            path.BezierTo(Q(0, tl * (1 - k)), Q(tl * (1 - k), 0), Q(tl, 0), true, true);
+        var sink = new StreamSink(path);
+        GlassBoundaryMath.WriteOutline(o, placed, ref sink);
+    }
 
-        Point Q(double x, double y) => new(x + dx, y + dy);
-        Point P((double X, double Y) p) => Q(p.X, p.Y);
-        Point M((double X, double Y) p) => Q(w - p.X, p.Y);
+    private readonly struct StreamSink(StreamGeometryContext path) : GlassBoundaryMath.IOutlineSink
+    {
+        public void Begin(double x, double y) => path.BeginFigure(new(x, y), true, true);
+        public void Line(double x, double y) => path.LineTo(new(x, y), true, false);
+        public void Curve(double x1, double y1, double x2, double y2, double x3, double y3)
+            => path.BezierTo(new(x1, y1), new(x2, y2), new(x3, y3), true, true);
     }
 }
 
@@ -496,8 +473,8 @@ internal sealed class GlassEdge
         return changed;
     }
 
-    // The light's shape around the island: the theme's rim gradient, each stop's alpha relative to the brightest (the edge's
-    // strength is the profile's, not the theme's).
+    // The light's shape around the island: the theme's rim gradient, each stop's alpha relative to the brightest and held within
+    // GlassBoundaryMath.LightStops' range (the edge's strength is the profile's, not the theme's).
     public void Stops(IReadOnlyList<Color> colors)
     {
         double brightest = 0;
@@ -508,10 +485,14 @@ internal sealed class GlassEdge
             _stops.Clear();
             for (int i = 0; i < colors.Count; i++) _stops.Add(new GradientStop(Colors.Transparent, (double)i / (colors.Count - 1)));
         }
+        var relative = new double[colors.Count];
+        for (int i = 0; i < colors.Count; i++) relative[i] = colors[i].A / brightest;
+        var shown = new double[colors.Count];
+        GlassBoundaryMath.LightStops(relative, shown);
         for (int i = 0; i < colors.Count; i++)
         {
             var c = colors[i];
-            var color = Color.FromArgb((byte)Math.Round(c.A / brightest * 255), c.R, c.G, c.B);
+            var color = Color.FromArgb((byte)Math.Round(shown[i] * 255), c.R, c.G, c.B);
             if (_stops[i].Color != color) _stops[i].Color = color;
         }
     }

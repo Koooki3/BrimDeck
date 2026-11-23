@@ -21,10 +21,24 @@ internal static class GlassMaterialTests
                 <= GlassMaterial.LuminosityOpacity(.25, .35, level) + 1e-12));
         check("Glass clarity: the text's own limits do not move with the slider",
             GlassRecipe.DarkMost == .26 && GlassRecipe.LightLeast == .82);
-        check("Glass transparency: clearer glass retains the rim", GlassMaterial.RimStrength(100, 0) > 1);
-        check("Glass transparency: the rim softens through expansion and stays visible",
-            GlassMaterial.RimStrength(50, 0) == 1 && GlassMaterial.RimStrength(50, 1) == .8
-            && GlassMaterial.RimStrength(0, 1) > 0);
+        // The rim against the veil the clarity really gives (GlassMaterial.LuminosityOpacity) for a backdrop that asks for nothing,
+        // some or much of the text's veil, closed and open: 0/50/100 and every step between.
+        foreach (double openness in new[] { 0d, .5, 1d })
+            foreach (double required in new[] { 0d, .5, .87 })
+            {
+                double Rim(int clarity) => GlassMaterial.RimStrength(clarity, openness, GlassMaterial.LuminosityOpacity(required, openness, clarity));
+                double[] s = [Rim(0), Rim(50), Rim(100)];
+                double open = 1 - .2 * openness;
+                check($"Glass clarity: the rim never brightens as the glass clears (0/50/100, openness {openness}, text asks {required}: {s[0]:0.000}/{s[1]:0.000}/{s[2]:0.000})",
+                    s[1] <= s[0] + 1e-12 && s[2] <= s[1] + 1e-12 && Enumerable.Range(0, 100).All(c => Rim(c + 1) <= Rim(c) + 1e-12));
+                check($"Glass clarity: clear glass keeps the rim's floor and no more (openness {openness}, text asks {required}: {s[2]:0.000})",
+                    Math.Abs(s[2] - GlassMaterial.RimFloor * open) < 1e-9);
+            }
+        check("Glass clarity: the default glass keeps its rim, softened through the opening",
+            GlassMaterial.RimStrength(50, 0, GlassMaterial.DefaultCollapsedVeil) == 1 && Near(GlassMaterial.RimStrength(50, 1, GlassMaterial.DefaultExpandedVeil), .8));
+        check("Glass clarity: a thinner body dims the rim with it, down to the floor",
+            GlassMaterial.RimStrength(50, 0, .15) < 1 && GlassMaterial.RimStrength(50, 0, .15) > GlassMaterial.RimStrength(50, 0, .05)
+            && Near(GlassMaterial.RimStrength(50, 0, 0), GlassMaterial.RimFloor) && GlassMaterial.RimStrength(50, 0, double.NaN) == 1);
         check("A reading that needs more thickens the floor to it at once",
             GlassMaterial.Settle(.90, .40, .40) == .90 && GlassMaterial.Settle(.60, .90, .40) == .60);
         check("One calmer reading does not clear the glass; two in a row release it to the higher of the two",

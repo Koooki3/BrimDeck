@@ -14,20 +14,25 @@ internal sealed class GlassSurface : IDisposable
 {
     private HwndSource? _window;
     private DesktopWindowTarget? _target;
-    // The glass: a sprite clipped to the outline, in a container that carries its place in the window.
+    // The glass: a sprite clipped to the outline, in a container that carries its place in the window. The clip is the sprite's
+    // own (a clip on the container does not reach the backdrop): a rounded rectangle, or the outline's path (shoulders).
     private ContainerVisual? _frame;
     private SpriteVisual? _sprite;
     private CompositionRoundedRectangleGeometry? _outline;
+    private CompositionGeometricClip? _roundedClip, _pathClip;
+    private CompositionPathGeometry? _pathGeometry;
     // Where the window is (_placed), where the outline asks to be (_need, the bounds of the latest Show), the outline's clip
-    // within _need, the clip as set on the geometry (within _placed), and the region now set, if any.
+    // within _need and the clip as set on the geometry; or the outline's shape and place for a path, and the shape the path
+    // geometry now holds.
     private Int32Rect _placed, _need;
     private GlassBoundaryMath.GlassClip _clip, _shown;
-    private PixelPoint[]? _contour;
-    private (PixelPoint[] Contour, int Dx, int Dy)? _region;
+    private Outline? _shape;
+    private GlassBoundaryMath.Layout? _pathLayout;
     private IntPtr _owner;
 
-    [StructLayout(LayoutKind.Sequential)]
-    internal readonly record struct PixelPoint(int X, int Y);
+    // An outline drawn as a path: its layout (GlassBoundaryMath.Measure, in the island's own units) and where those units fall in
+    // the bounds' pixels (x' = x M11 + y M21 + M31, y' = x M12 + y M22 + M32), a fraction of a pixel kept.
+    internal readonly record struct Outline(GlassBoundaryMath.Layout Layout, Matrix3x2 Place);
     // The material asked for: each look's luminosity opacity and the light look's share (GlassEffect.Graph's weights).
     // Tint and Saturation: the clarity's (GlassClarityPolicy), the same for both looks.
     internal readonly record struct Material(double DarkVeil, double LightVeil, double Palette,
@@ -59,8 +64,9 @@ internal sealed class GlassSurface : IDisposable
     private bool _visible, _disposed;
     internal bool Visible => _visible;
     internal AppliedMaterial Applied => _visible ? _applied : default;
-    // Diagnostics and tests: the brush the glass draws with now.
+    // Diagnostics and tests: the brush the glass draws with now, and the clip it is cut by.
     internal CompositionBrush? Brush => _sprite?.Brush;
+    internal CompositionClip? Clip => _sprite?.Clip;
     // Diagnostics and tests: whether the surface's own timer will look again (something it waits for is pending).
     internal bool Waking => _poll is { IsEnabled: true };
 
@@ -243,18 +249,18 @@ internal sealed class GlassSurface : IDisposable
         catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException) { Dispose(); }
     }
 
-    // A rounded rectangle filling the bounds (the glass checks), or the given contour as the window's region.
-    public bool Show(IntPtr owner, Int32Rect bounds, int radius, double opacity, Material material, out AppliedMaterial applied, PixelPoint[]? contour = null)
-        => Show(owner, bounds, contour is null ? new GlassBoundaryMath.GlassClip(new(0, 0, bounds.Width, bounds.Height, radius)) : null, contour, opacity, material, out applied);
+    // A rounded rectangle filling the bounds (the glass checks).
+    public bool Show(IntPtr owner, Int32Rect bounds, int radius, double opacity, Material material, out AppliedMaterial applied)
+        => Show(owner, bounds, new GlassBoundaryMath.GlassClip(new(0, 0, bounds.Width, bounds.Height, radius)), null, opacity, material, out applied);
 
-    // The outline is drawn one of two ways. A rounded clip (GlassBoundaryMath.TryRoundedClip) is the composition's own antialiased
-    // geometry, and the window keeps no region: the backdrop is drawn inside the clip only, so its edge is the same curve as the
-    // WPF outline's, and a move or a new size sets a few numbers on the geometry. Any other outline (shoulders) is the window's
-    // region, a polygon of whole pixels, set only when the contour is a new one (a move by whole pixels keeps it).
-    public bool Show(IntPtr owner, Int32Rect bounds, GlassBoundaryMath.GlassClip? clip, PixelPoint[]? contour, double opacity, Material material, out AppliedMaterial applied)
+    // The outline is the sprite's own clip, the composition's antialiased geometry, either way; the window never has a region.
+    // A rounded clip (GlassBoundaryMath.TryRoundedClip) is a rounded rectangle, a move or a new size a few numbers on it. Any
+    // other outline (shoulders) is its path (GlassPath, written as the WPF outline is), made anew only for a new shape; a move
+    // changes only the clip's transform. The backdrop is drawn inside the clip only, so its edge is the WPF outline's curve.
+    public bool Show(IntPtr owner, Int32Rect bounds, GlassBoundaryMath.GlassClip? clip, Outline? outline, double opacity, Material material, out AppliedMaterial applied)
     {
         applied = default;
-        if (_disposed || owner == IntPtr.Zero || bounds.Width < 2 || bounds.Height < 2 || opacity <= 0 || clip is null && contour is not { Length: >= 3 })
+        if (_disposed || owner == IntPtr.Zero || bounds.Width < 2 || bounds.Height < 2 || opacity <= 0 || clip is null && outline is null)
         {
             Hide();
             return false;
@@ -278,7 +284,7 @@ internal sealed class GlassSurface : IDisposable
                 _frame = compositor.CreateContainerVisual();
                 _sprite = compositor.CreateSpriteVisual();
                 _outline = compositor.CreateRoundedRectangleGeometry();
-                _sprite.Clip = compositor.CreateGeometricClip(_outline);
+                _sprite.Clip = _roundedClip = compositor.CreateGeometricClip(_outline);
                 _frame.Children.InsertAtTop(_sprite);
                 _target.Root = _frame;
             }
@@ -293,7 +299,7 @@ internal sealed class GlassSurface : IDisposable
             _owner = owner;
             _need = bounds;
             _clip = clip ?? new GlassBoundaryMath.GlassClip(new(0, 0, bounds.Width, bounds.Height, 0));
-            _contour = clip is null ? contour : null;
+            _shape = clip is null ? outline : null;
             if (!Place(Frame(owner, bounds))) { Hide(); return false; }
             return true;
         }
@@ -305,8 +311,8 @@ internal sealed class GlassSurface : IDisposable
         }
     }
 
-    // Puts the window at place, the visual and its clip (or the window's region) where the outline asked for (_need) falls in
-    // it, and keeps the window right behind the owner. Each part is touched only when it changed.
+    // Puts the window at place, the visual and its clip where the outline asked for (_need) falls in it, and keeps the window
+    // right behind the owner. Each part is touched only when it changed.
     private bool Place(Int32Rect place)
     {
         var handle = _window!.Handle;
@@ -314,34 +320,37 @@ internal sealed class GlassSurface : IDisposable
         var frame = _frame!;
         var offset = new Vector3(dx, dy, 0);
         if (frame.Offset != offset) frame.Offset = offset;
+        var sprite = _sprite!;
         var extent = new Vector2(_need.Width, _need.Height);
-        if (_sprite!.Size != extent) _sprite.Size = extent;
-        var shown = _contour is null ? _clip : new GlassBoundaryMath.GlassClip(new(0, 0, _need.Width, _need.Height, 0));
-        if (shown != _shown)
+        if (sprite.Size != extent) sprite.Size = extent;
+        CompositionClip wanted;
+        if (_shape is { } shape)
         {
-            _shown = shown;
-            Set(_outline!, shown.First);
-        }
-        if (_contour is null)
-        {
-            if (_region is not null)
+            if (_pathLayout != shape.Layout)
             {
-                SetWindowRgn(handle, IntPtr.Zero, true);
-                _region = null;
+                if (GlassPath.Create(shape.Layout) is not { } path) return false;
+                if (_pathGeometry is null)
+                {
+                    var compositor = sprite.Compositor;
+                    _pathGeometry = compositor.CreatePathGeometry(path);
+                    _pathClip = compositor.CreateGeometricClip(_pathGeometry);
+                }
+                else _pathGeometry.Path = path;
+                _pathLayout = shape.Layout;
             }
+            if (_pathClip!.TransformMatrix != shape.Place) _pathClip.TransformMatrix = shape.Place;
+            wanted = _pathClip;
         }
-        else if (_region is not { } set || !ReferenceEquals(set.Contour, _contour) || set.Dx != dx || set.Dy != dy)
+        else
         {
-            var region = CreatePolygonRgn(_contour, _contour.Length, 1);
-            if (region == IntPtr.Zero) return false;
-            if (dx != 0 || dy != 0) OffsetRgn(region, dx, dy);
-            if (SetWindowRgn(handle, region, true) == 0)
+            if (_clip != _shown)
             {
-                DeleteObject(region);
-                return false;
+                _shown = _clip;
+                Set(_outline!, _clip.First);
             }
-            _region = (_contour, dx, dy);
+            wanted = _roundedClip!;
         }
+        if (!ReferenceEquals(sprite.Clip, wanted)) sprite.Clip = wanted;
         const uint NoSize = 0x01, NoMove = 0x02, NoActivate = 0x10, ShowWindowFlag = 0x40, NoOwnerZOrder = 0x200;
         const uint PositionOnly = NoSize | NoMove | NoActivate | NoOwnerZOrder;
         var owner = _owner;
@@ -430,10 +439,11 @@ internal sealed class GlassSurface : IDisposable
         if (_target is not null) { _target.Root = null; _target.Dispose(); }
         if (_sprite is not null)
         {
-            var clip = _sprite.Clip;
             _sprite.Brush = null;
             _sprite.Clip = null;
-            clip?.Dispose();
+            _roundedClip?.Dispose();
+            _pathClip?.Dispose();
+            _pathGeometry?.Dispose();
             _sprite.Dispose();
         }
         _frame?.Dispose();
@@ -453,11 +463,7 @@ internal sealed class GlassSurface : IDisposable
     [DllImport("user32", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32", EntryPoint = "SetWindowLongW")] private static extern int SetWindowLong(IntPtr window, int index, int value);
     [DllImport("user32")] private static extern bool SetLayeredWindowAttributes(IntPtr window, uint key, byte alpha, uint flags);
-    [DllImport("user32")] private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
     [DllImport("user32")] private static extern bool ShowWindow(IntPtr window, int command);
-    [DllImport("gdi32")] private static extern IntPtr CreatePolygonRgn([In] PixelPoint[] points, int count, int fillMode);
-    [DllImport("gdi32")] private static extern bool DeleteObject(IntPtr value);
-    [DllImport("gdi32")] private static extern int OffsetRgn(IntPtr region, int x, int y);
     [StructLayout(LayoutKind.Sequential)] private struct Rect32 { public int Left, Top, Right, Bottom; }
     [DllImport("user32")] private static extern bool GetWindowRect(IntPtr window, out Rect32 rect);
 }
