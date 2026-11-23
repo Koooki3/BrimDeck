@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using BrimDeck.Core;
 
@@ -53,41 +55,109 @@ public sealed class DesktopSources(MiMoAccount? mimo = null, DoubaoQuotaAccount?
         finally { try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { } }
     }
 
+    // Short-lived pooled connections ensure each Google reachability preflight observes current proxy and network routing.
+    private static readonly HttpClient AntigravityProbeHttp = new(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        UseProxy = true,
+        PooledConnectionLifetime = TimeSpan.FromSeconds(10),
+        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(5),
+        ConnectTimeout = TimeSpan.FromSeconds(3)
+    }) { Timeout = TimeSpan.FromSeconds(4) };
+
     public async Task<string?> ReadAntigravityCliAsync(CancellationToken cancellation)
+    {
+        var result = await ReadAntigravityCliResultAsync(cancellation).ConfigureAwait(false);
+        return result.Status == AntigravityCliStatus.Ok ? result.Report : null;
+    }
+
+    public async Task<AntigravityCliResult> ReadAntigravityCliResultAsync(CancellationToken cancellation)
     {
         var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "agy", "bin");
         var folders = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Prepend(installed);
         var cli = folders.Select(folder => folder.Trim().Trim('"')).Where(Path.IsPathFullyQualified)
             .Select(folder => Path.Combine(folder, "agy.exe")).FirstOrDefault(File.Exists);
-        if (cli is null) return null;
+        if (cli is null) return new(AntigravityCliStatus.NotInstalled);
 
+        // Layer 1: Check reachability to Google's auth host before spawning agy.exe, avoiding interactive browser fallbacks
+        // when the network or proxy cannot reach Google.
+        if (!await AntigravityUsage.ProbeNetworkAsync(AntigravityProbeHttp, cancellation).ConfigureAwait(false))
+            return new(AntigravityCliStatus.NetworkUnavailable);
+
+        // Layer 2: Restrict browser launcher lookup and monitor stdout/stderr
+        // so any OAuth URL or sign-in prompt aborts immediately instead of hanging or opening Chrome.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
-        using var process = new Process { StartInfo = new ProcessStartInfo(cli, "-p /usage")
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        var startInfo = new ProcessStartInfo(cli)
         {
             UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetTempPath(),
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
-        } };
+        };
+        startInfo.ArgumentList.Add("-p");
+        startInfo.ArgumentList.Add("/usage");
         // The CLI updater can open its own console during an otherwise hidden quota poll.
-        process.StartInfo.Environment["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
-        // agy opens OAuth URLs by looking up rundll32. A quota read needs no external tools.
-        process.StartInfo.Environment["PATH"] = "";
-        process.StartInfo.Environment["NoDefaultCurrentDirectoryInExePath"] = "1";
+        startInfo.Environment["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
+        // agy opens OAuth URLs by looking up rundll32 on Windows.
+        startInfo.Environment["PATH"] = "";
+        startInfo.Environment["NoDefaultCurrentDirectoryInExePath"] = "1";
+
+        using var process = new Process { StartInfo = startInfo };
+        bool started = false;
+        int authDetected = 0;
+        var stdout = new StringBuilder();
+        var stderr = new StringBuilder();
+
+        async Task DrainAsync(StreamReader reader, StringBuilder buffer, CancellationToken ct)
+        {
+            const int MaxChars = 65_536;
+            while (true)
+            {
+                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                if (line is null) break;
+                if (buffer.Length < MaxChars)
+                {
+                    if (buffer.Length > 0) buffer.Append('\n');
+                    int take = Math.Min(line.Length, MaxChars - buffer.Length);
+                    if (take > 0) buffer.Append(line, 0, take);
+                }
+                // Startup diagnostics can mention missing auth before silent refresh succeeds.
+                if (line.Contains("Authentication required. Please visit the URL", StringComparison.OrdinalIgnoreCase))
+                {
+                    Interlocked.Exchange(ref authDetected, 1);
+                    try { stop.Cancel(); } catch (ObjectDisposedException) { }
+                    break;
+                }
+            }
+        }
+
         try
         {
-            if (!process.Start()) return null;
+            started = process.Start();
+            if (!started) return new(AntigravityCliStatus.Failed);
             process.StandardInput.Close();
-            var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var errors = process.StandardError.BaseStream.CopyToAsync(Stream.Null, timeout.Token);
-            await Task.WhenAll(output, errors, process.WaitForExitAsync(timeout.Token)).ConfigureAwait(false);
-            return process.ExitCode == 0 ? await output : null;
+            var output = DrainAsync(process.StandardOutput, stdout, stop.Token);
+            var errors = DrainAsync(process.StandardError, stderr, stop.Token);
+            await Task.WhenAll(output, errors, process.WaitForExitAsync(stop.Token)).ConfigureAwait(false);
+            if (Volatile.Read(ref authDetected) != 0) return new(AntigravityCliStatus.AuthRequired);
+            return AntigravityUsage.ClassifyCliOutput(process.ExitCode, stdout.ToString(), stderr.ToString());
         }
-        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested) { return null; }
-        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception) { return null; }
+        catch (OperationCanceledException) when (Volatile.Read(ref authDetected) != 0 && !cancellation.IsCancellationRequested)
+        {
+            return new(AntigravityCliStatus.AuthRequired);
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            return new(AntigravityCliStatus.TimedOut);
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
+        {
+            return new(AntigravityCliStatus.Failed);
+        }
         finally
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            try { if (started && !process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) { }
         }
     }
 

@@ -14,7 +14,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | Codex | ✓ | ✓ | 在本机登录 Codex |
 | Cursor | ✓ | ✓ | 在本机登录 Cursor |
 | Grok Bot | ✓ | | 在本机登录 Grok Bot 桌面版 |
-| Antigravity | ✓ | ✓ | 读取配额时需要 Antigravity 桌面版或 Antigravity IDE 正在运行；两者都未运行时，如果已开启“通过 CLI 读取”，改用已登录的 Antigravity CLI（`agy`）读取，每次刷新运行一次 `agy -p /usage`。该开关默认关闭，展开该行可以开启 |
+| Antigravity | ✓ | ✓ | 优先从正在运行的 Antigravity 桌面版或 Antigravity IDE 读取，关闭后在配额重置前保留上次有效读数；两者都未运行时，如果已开启“通过 CLI 读取”，在确认可连通 Google 后于后台用已登录的 Antigravity CLI（`agy -p /usage`）读取，每轮刷新查询一次。该开关默认关闭，展开该行可以开启 |
 | ZCode | ✓ | ✓ | 在本机登录 ZCode |
 | DeepSeek Harness | ✓ | ✓ | 在 DeepSeek Harness 桌面版或本地 Web 版中登录 DeepSeek 账户，或在其中保存 API 密钥 |
 | Kimi Code | ✓ | ✓ | 在本机登录 Kimi Code（CLI、桌面版或 VS Code 扩展） |

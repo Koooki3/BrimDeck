@@ -1,7 +1,21 @@
+using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace BrimDeck.Core;
+
+public enum AntigravityCliStatus
+{
+    Ok,
+    NotInstalled,
+    NetworkUnavailable,
+    AuthRequired,
+    TimedOut,
+    Failed
+}
+
+public sealed record AntigravityCliResult(AntigravityCliStatus Status, string? Report = null);
 
 // Antigravity 2.x and the Antigravity CLI (agy) keep one SQLite database per conversation, in
 // ~/.gemini/antigravity/conversations and ~/.gemini/antigravity-cli/conversations. Reading them directly
@@ -24,6 +38,81 @@ public sealed class AntigravityUsage
     // works when Antigravity runs as administrator, whose command line a normal process cannot read.
     public sealed record LanguageServer(int ProcessId, int HttpsPort, int HttpPort, string Token);
     public static string DaemonFolder(string home) => Path.Combine(home, ".gemini", "antigravity", "daemon");
+
+    // Lightweight connectivity probe against Google's auth host before spawning `agy -p /usage`.
+    // Returns true only on a direct 204/200 response so captive-portal redirects and proxy 5xx errors are rejected.
+    public const string NetworkProbeUrl = "https://accounts.google.com/generate_204";
+    public static readonly TimeSpan NetworkProbeTimeout = TimeSpan.FromSeconds(3);
+
+    public static async Task<bool> ProbeNetworkAsync(HttpClient http, CancellationToken cancellation,
+        string url = NetworkProbeUrl, TimeSpan? timeout = null)
+    {
+        using var probeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        probeTimeout.CancelAfter(timeout ?? NetworkProbeTimeout);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, probeTimeout.Token).ConfigureAwait(false);
+            return response.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.OK;
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested) { return false; }
+        catch (Exception ex) when (ex is HttpRequestException or IOException) { return false; }
+    }
+
+    // Detects interactive OAuth URLs or sign-in prompts emitted by `agy` when tokens are missing/expired.
+    public static bool LooksLikeAuthPrompt(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        return text.Contains("accounts.google.com", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("oauth2", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("not signed in", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("not logged in", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("not authenticated", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("unauthenticated", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("authentication required", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("please sign in", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("please log in", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("please login", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("login required", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("sign in required", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("open this url", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("open the following url", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("visit this url", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("authorization code", StringComparison.OrdinalIgnoreCase)
+            || (text.Contains("authorize", StringComparison.OrdinalIgnoreCase) && text.Contains("http", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static bool LooksLikeNetworkError(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        return text.Contains("dial tcp", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("no such host", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("connection refused", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("connection reset", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("network is unreachable", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("i/o timeout", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("context deadline exceeded", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("tls handshake timeout", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("proxyconnect", StringComparison.OrdinalIgnoreCase)
+            || (text.Contains("eof", StringComparison.OrdinalIgnoreCase) && text.Contains("http", StringComparison.OrdinalIgnoreCase))
+            || text.Contains("unable to connect", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("could not resolve host", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("etimedout", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("econnrefused", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("enotfound", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static AntigravityCliResult ClassifyCliOutput(int exitCode, string stdout, string stderr)
+    {
+        if (exitCode == 0 && QuotaParser.AntigravityCli(stdout).Count > 0)
+            return new(AntigravityCliStatus.Ok, stdout);
+        if (LooksLikeAuthPrompt(stderr) || LooksLikeAuthPrompt(stdout))
+            return new(AntigravityCliStatus.AuthRequired);
+        if (LooksLikeNetworkError(stderr) || LooksLikeNetworkError(stdout))
+            return new(AntigravityCliStatus.NetworkUnavailable);
+        return new(AntigravityCliStatus.Failed);
+    }
 
     public static List<LanguageServer> ReadLanguageServers(string folder)
     {
