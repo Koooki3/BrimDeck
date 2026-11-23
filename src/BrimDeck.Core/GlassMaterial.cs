@@ -11,10 +11,18 @@ public static class GlassMaterial
 
     public static int NormalizeTransparency(int percent) => Math.Clamp(percent, 0, 100);
 
-    public static double RimStrength(int transparency, double openness)
+    // The optical edge's strength (0..1) for the clarity, the opening and the veil shown (the body's luminosity opacity, the
+    // look's own: GlassRecipe's mix of the two looks). The edge bounds the body, so it never stands out more than the body
+    // does: it is whole up to the default clarity and its default veil, and as the glass clears (the clarity past the default, or
+    // a thinner veil) it fades with the body, never below RimFloor of itself, so the shape still reads on clear glass.
+    // Until V4-2 the edge brightened as the glass cleared, leaving a bright line around an all but invisible body.
+    public const double RimFloor = .4;
+    public static double RimStrength(int transparency, double openness, double veil)
     {
-        double amount = NormalizeTransparency(transparency) / 100d;
-        return (.85 + .30 * amount) * (1 - .20 * Math.Clamp(openness, 0, 1));
+        double opening = 1 - .20 * Math.Clamp(openness, 0, 1);
+        double clarity = Math.Clamp(1 - (NormalizeTransparency(transparency) - 50) / 50d * (1 - RimFloor), RimFloor, 1);
+        double body = RimFloor + (1 - RimFloor) * Math.Clamp(double.IsFinite(veil) ? veil / DefaultCollapsedVeil : 1, 0, 1);
+        return opening * Math.Min(clarity, body);
     }
 
 

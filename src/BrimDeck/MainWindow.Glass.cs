@@ -356,6 +356,8 @@ public partial class MainWindow
         long now = Environment.TickCount64;
         var material = GlassMaterialNow(now);
         if (!_glassSurface.Present(material, out var applied)) { CloseGlass(); return; }
+        // The edge follows the veil (its brushes' strengths, in place; the same height keeps its rings).
+        if (_glassEdge is { } edge && ShapeGlassEdge(edge, Island.ActualHeight)) Island.InvalidateVisual();
         GlassTurnStep(applied.Material, now);
         GlassRenderingNeeded();
     }
@@ -745,13 +747,16 @@ public partial class MainWindow
         else if (rings) Island.InvalidateVisual();
     }
 
-    // The edge's rings and strengths for the island at this height (the opening it shows) and the palette now; true when the
-    // rings changed.
+    // The edge's rings and strengths for the island at this height (the opening it shows), the palette and the veil now (the
+    // edge fades with the body as it clears); true when the rings changed.
     private bool ShapeGlassEdge(GlassEdge edge, double height)
     {
         double openness = GlassOpenness(height);
-        double strength = Math.Min(1, GlassMaterial.RimStrength(Settings.GlassTransparency, openness));
-        var (peak, baseline) = GlassBoundaryMath.Light(_glassPalette.Evaluate(Environment.TickCount64).Position);
+        long now = Environment.TickCount64;
+        double palette = _glassPalette.Evaluate(now).Position, dark = _glassDarkVeil.Evaluate(now).Position;
+        double veil = dark + (_glassLightVeil.Evaluate(now).Position - dark) * Math.Clamp(palette, 0, 1);
+        double strength = GlassMaterial.RimStrength(Settings.GlassTransparency, openness, veil);
+        var (peak, baseline) = GlassBoundaryMath.Light(palette);
         return edge.Shape(GlassBoundaryMath.BevelWidth(openness), 1 / VisualTreeHelper.GetDpi(Island).PixelsPerDip, peak, baseline, strength);
     }
 
