@@ -14,6 +14,7 @@
     <Compile Include="..\..\src\BrimDeck\GlassComposition.cs" Link="GlassComposition.cs" />
     <Compile Include="..\..\src\BrimDeck\GlassEffect.cs" Link="GlassEffect.cs" />
     <Compile Include="..\..\src\BrimDeck\GlassSurface.cs" Link="GlassSurface.cs" />
+    <Compile Include="..\..\src\BrimDeck\GlassPath.cs" Link="GlassPath.cs" />
     <Compile Include="..\..\src\BrimDeck\LiquidGlass\AcrylicProbe.cs" Link="AcrylicProbe.cs" />
     <Compile Include="..\..\src\BrimDeck\LiquidGlass\GlassHintBroker.cs" Link="GlassHintBroker.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PdhQuery.cs" Link="PdhQuery.cs" />

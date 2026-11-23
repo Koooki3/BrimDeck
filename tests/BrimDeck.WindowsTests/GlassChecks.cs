@@ -44,8 +44,77 @@ internal static class GlassChecks
         check($"Releasing the brushes leaves only the graph's own native effects ({released.Live} alive)", released.Live <= 4);
 
         PassesClicks(check);
+        ShoulderClip(check);
         Faults(check, compositor);
     }
+
+    // The collapsed notch (shoulders) is cut by the glass layer's own antialiased path, the WPF outline's curve, at the panel's
+    // fraction of a pixel, and the glass window has no region: until V4-2 the shoulders were a polygon region of whole pixels,
+    // stepped against the smooth edge drawn on it and set again on almost every frame of a closing.
+    private static void ShoulderClip(Action<string, bool> check)
+    {
+        var owner = new HwndSource(new HwndSourceParameters("BrimDeck glass shoulder checks")
+        {
+            WindowStyle = unchecked((int)0x80000000), PositionX = -20000, PositionY = -20000, Width = 300, Height = 80
+        });
+        var surface = new GlassSurface();
+        try
+        {
+            // A notch at 125 % placed a third of a pixel in.
+            var layout = GlassBoundaryMath.Measure(160, 30, 14, 0, 0, 12, 12, 0);
+            var place = new System.Numerics.Matrix3x2(1.25f, 0, 0, 1.25f, 20.33f, 0);
+            var bounds = new Int32Rect(-20000, -20000, 240, 40);
+            bool shown = surface.Show(owner.Handle, bounds, null, new GlassSurface.Outline(layout, place), 1, new GlassSurface.Material(.4, .3, .5), out _);
+            Pump();
+            var glass = GlassWindow();
+            int region = glass == IntPtr.Zero ? -1 : GetWindowRgnBox(glass, out _);
+            check($"A notch's glass window has no window region (region box type {region}; 0: none)", shown && glass != IntPtr.Zero && region == 0);
+            bool path = surface.Clip is CompositionGeometricClip { Geometry: CompositionPathGeometry { Path: not null } } clip && clip.TransformMatrix == place;
+            check("A notch's glass is cut by its own path clip, placed at the panel's fraction of a pixel", path);
+
+            // The path is the WPF outline: the same area and the same inside at points on a fine grid away from the line.
+            var wpf = IslandBorder.BuildOutline(160, 30, 14, new CornerRadius(0, 0, 12, 12), 0);
+            if (GlassPath.Geometry(layout) is not { } geometry) { check("Direct2D builds the notch's path", false); return; }
+            try
+            {
+                double area = GlassPath.Area(geometry), wpfArea = wpf.GetArea(.001, System.Windows.Media.ToleranceType.Absolute);
+                int differ = 0, tried = 0;
+                var flat = wpf.GetFlattenedPathGeometry(.001, System.Windows.Media.ToleranceType.Absolute);
+                var near = new System.Windows.Media.Pen(System.Windows.Media.Brushes.Black, .02);
+                for (double y = -1; y <= 31; y += .37)
+                    for (double x = -1; x <= 161; x += .41)
+                    {
+                        var at = new Point(x, y);
+                        if (flat.StrokeContains(near, at)) continue;
+                        tried++;
+                        if (GlassPath.Fills(geometry, x, y) != flat.FillContains(at)) differ++;
+                    }
+                check($"The notch's clip path is the WPF outline (area {area:0.00} against {wpfArea:0.00}; {differ} of {tried} points differ)",
+                    Math.Abs(area - wpfArea) < .001 * wpfArea && differ == 0 && tried > 20_000);
+            }
+            finally { Marshal.Release(geometry); }
+        }
+        finally
+        {
+            surface.Dispose();
+            owner.Dispose();
+        }
+    }
+
+    private static IntPtr GlassWindow()
+    {
+        IntPtr glass = IntPtr.Zero;
+        EnumThreadWindows(GetCurrentThreadId(), (window, _) =>
+        {
+            var title = new System.Text.StringBuilder(64);
+            GetWindowText(window, title, 64);
+            if (IsWindowVisible(window) && title.ToString() == "BrimDeck glass") glass = window;
+            return glass == IntPtr.Zero;
+        }, IntPtr.Zero);
+        return glass;
+    }
+
+    [DllImport("user32")] private static extern int GetWindowRgnBox(IntPtr window, out Rect32 rect);
 
     // The glass window covers the whole panel window behind it, which lets clicks through where it draws nothing: another
     // process's hit test must pass over the glass window everywhere, beside the outline and on it, as it passes over the panel's
