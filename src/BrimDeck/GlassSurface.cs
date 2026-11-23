@@ -271,6 +271,7 @@ internal sealed class GlassSurface : IDisposable
                     PositionX = bounds.X, PositionY = bounds.Y, Width = bounds.Width, Height = bounds.Height
                 });
                 _window.AddHook(PassPointer);
+                PassOver(_window.Handle);
                 int enabled = 1;
                 Marshal.ThrowExceptionForHR(DwmSetWindowAttribute(_window.Handle, 17, ref enabled, sizeof(int)));
                 _target = GlassComposition.Target(_window.Handle);
@@ -380,16 +381,36 @@ internal sealed class GlassSurface : IDisposable
 
     private static bool IsTopmost(IntPtr window) => (GetWindowLong(window, -20) & 0x08) != 0;
 
+    // The window covers the panel's whole window (Frame), so it must never take the pointer. WS_EX_TRANSPARENT alone does not
+    // take a top-level window out of the system's hit test, and HTTRANSPARENT hands the mouse on only to windows of the same
+    // thread: the apps beneath the panel's clear parts would take no clicks while the glass shows. Layered and transparent
+    // (fully opaque, so what it composes shows as before), it is passed over everywhere. HwndSource takes WS_EX_LAYERED off a
+    // window without per-pixel opacity again when it is shown, so PassPointer keeps it on every change of the extended style.
+    private static void PassOver(IntPtr handle)
+    {
+        SetWindowLong(handle, -20, GetWindowLong(handle, -20) | PassingStyle);
+        SetLayeredWindowAttributes(handle, 0, 255, 0x2); // LWA_ALPHA
+    }
+
+    private const int PassingStyle = 0x80000 | 0x20; // WS_EX_LAYERED | WS_EX_TRANSPARENT
+
     private static IntPtr PassPointer(IntPtr handle, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (message == 0x0021) // WM_MOUSEACTIVATE
+        switch (message)
         {
-            handled = true;
-            return new IntPtr(3); // MA_NOACTIVATE
+            case 0x0021: // WM_MOUSEACTIVATE
+                handled = true;
+                return new IntPtr(3); // MA_NOACTIVATE
+            case 0x0084: // WM_NCHITTEST
+                handled = true;
+                return new IntPtr(-1); // HTTRANSPARENT
+            case 0x007C when wParam.ToInt64() == -20: // WM_STYLECHANGING, GWL_EXSTYLE: STYLESTRUCT { styleOld, styleNew }
+                Marshal.WriteInt32(lParam, 4, Marshal.ReadInt32(lParam, 4) | PassingStyle);
+                handled = true;
+                return IntPtr.Zero;
+            default:
+                return IntPtr.Zero;
         }
-        if (message != 0x0084) return IntPtr.Zero; // WM_NCHITTEST
-        handled = true;
-        return new IntPtr(-1); // HTTRANSPARENT
     }
 
     public void Hide()
@@ -430,6 +451,8 @@ internal sealed class GlassSurface : IDisposable
     [DllImport("user32")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32")] private static extern IntPtr GetWindow(IntPtr window, uint relation);
     [DllImport("user32", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
+    [DllImport("user32", EntryPoint = "SetWindowLongW")] private static extern int SetWindowLong(IntPtr window, int index, int value);
+    [DllImport("user32")] private static extern bool SetLayeredWindowAttributes(IntPtr window, uint key, byte alpha, uint flags);
     [DllImport("user32")] private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
     [DllImport("user32")] private static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("gdi32")] private static extern IntPtr CreatePolygonRgn([In] PixelPoint[] points, int count, int fillMode);

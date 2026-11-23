@@ -43,8 +43,73 @@ internal static class GlassChecks
         var released = GlassEffect.Stats;
         check($"Releasing the brushes leaves only the graph's own native effects ({released.Live} alive)", released.Live <= 4);
 
+        PassesClicks(check);
         Faults(check, compositor);
     }
+
+    // The glass window covers the whole panel window behind it, which lets clicks through where it draws nothing: another
+    // process's hit test must pass over the glass window everywhere, beside the outline and on it, as it passes over the panel's
+    // clear pixels. Until 11-23 the whole top of the panel's display took no clicks while the glass showed. WindowFromPoint is
+    // asked from another thread: on its own thread a window's HTTRANSPARENT is honoured, which the apps beneath never see.
+    private static void PassesClicks(Action<string, bool> check)
+    {
+        var area = SystemParameters.WorkArea;
+        double dpi = System.Windows.Media.VisualTreeHelper.GetDpi(new System.Windows.Controls.Border()).DpiScaleX;
+        int right = (int)(area.Right * dpi), bottom = (int)(area.Bottom * dpi);
+        // A small panel window in the corner of the work area, topmost and passing clicks (layered, transparent and empty), as
+        // the panel's window is where it draws nothing; the glass is nearly invisible (opacity 0.01) and shown for a moment.
+        var owner = new HwndSource(new HwndSourceParameters("BrimDeck glass click checks")
+        {
+            WindowStyle = unchecked((int)0x90000000), ExtendedWindowStyle = 0x08 | 0x80 | 0x08000000 | 0x20, UsesPerPixelOpacity = true,
+            PositionX = right - 160, PositionY = bottom - 80, Width = 160, Height = 80
+        });
+        var surface = new GlassSurface();
+        try
+        {
+            var bounds = new Int32Rect(right - 120, bottom - 60, 80, 40);
+            bool shown = surface.Show(owner.Handle, bounds, 8, .01, new GlassSurface.Material(.4, .3, .5), out _);
+            Pump();
+            IntPtr glass = IntPtr.Zero;
+            EnumThreadWindows(GetCurrentThreadId(), (window, _) =>
+            {
+                var title = new System.Text.StringBuilder(64);
+                GetWindowText(window, title, 64);
+                if (IsWindowVisible(window) && title.ToString() == "BrimDeck glass") glass = window;
+                return glass == IntPtr.Zero;
+            }, IntPtr.Zero);
+            GetWindowRect(glass, out var frame);
+            var points = new[] { (X: right - 150, Y: bottom - 70, Where: "beside the outline"), (X: right - 80, Y: bottom - 40, Where: "on the outline") };
+            var found = new List<string>();
+            bool covered = true, passed = true;
+            foreach (var (x, y, where) in points)
+            {
+                covered &= x >= frame.Left && x < frame.Right && y >= frame.Top && y < frame.Bottom;
+                IntPtr hit = IntPtr.Zero;
+                var asking = new Thread(() => hit = GetAncestor(WindowFromPoint(new Point32 { X = x, Y = y }), 2));
+                asking.Start(); asking.Join();
+                passed &= hit != glass && hit != owner.Handle;
+                found.Add($"{where}: {(hit == glass ? "the glass window" : hit == owner.Handle ? "the panel window" : "beneath")}");
+            }
+            check($"The glass window lets clicks through to what lies beneath, beside the outline and on it ({string.Join("; ", found)})",
+                shown && glass != IntPtr.Zero && covered && passed);
+        }
+        finally
+        {
+            surface.Dispose();
+            owner.Dispose();
+        }
+    }
+
+    private delegate bool ThreadWindows(IntPtr window, IntPtr data);
+    [StructLayout(LayoutKind.Sequential)] private struct Point32 { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct Rect32 { public int Left, Top, Right, Bottom; }
+    [DllImport("user32")] private static extern bool EnumThreadWindows(uint thread, ThreadWindows callback, IntPtr data);
+    [DllImport("kernel32")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int length);
+    [DllImport("user32")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32")] private static extern bool GetWindowRect(IntPtr window, out Rect32 rect);
+    [DllImport("user32")] private static extern IntPtr WindowFromPoint(Point32 point);
+    [DllImport("user32")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
 
     private static void Pump()
     {
