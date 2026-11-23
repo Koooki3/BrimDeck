@@ -71,6 +71,7 @@ internal static class Program
             RingLetterChecks.Run(Check);
             SettingsFocusTests.Run(Check);
             NoticePanelTests.Run(Check);
+            NoticeGlowTests.Run(Check);
             ThemeCardChecks.Run(Check);
             ThemeLookChecks.Run(Check);
             HoverOwnerChecks.Run(Check);
@@ -122,6 +123,7 @@ internal static class Program
         try { NoticeBannerRegistryTests.Run(bannerRoot, Check); NoticeBannerKeeperTests.Run(System.IO.Path.Combine(bannerRoot, "keeper"), Check); }
         finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
         NoticePanelTests.Run(Check);
+        NoticeGlowTests.Run(Check);
         NoticeRowBatchTests.Run(Check);
         NoticeFocusChecks.Run(Check);
     }

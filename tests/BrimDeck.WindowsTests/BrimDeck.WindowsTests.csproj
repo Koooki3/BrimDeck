@@ -97,5 +97,7 @@
     <Compile Include="..\..\src\BrimDeck\Feedback.cs" Link="Feedback.cs" />
     <Compile Include="..\..\src\BrimDeck\MusicControls.cs" Link="MusicControls.cs" />
     <Page Include="..\..\src\BrimDeck\MusicResources.xaml" Link="MusicResources.xaml" />
+    <!-- The island's notice look, whose application color the page's focus takes (NoticeGlowTests). -->
+    <Compile Include="..\..\src\BrimDeck\NoticeVisuals.cs" Link="NoticeVisuals.cs" />
   </ItemGroup>
 </Project>
