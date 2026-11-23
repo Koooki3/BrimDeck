@@ -82,6 +82,9 @@ public partial class MainWindow
     private long _glassIntentAt, _glassIntentStamp, _glassIntentFrameAt; // _glassIntentStamp, _glassIntentFrameAt: Stopwatch timestamps
     // Diagnostics for the isolated harness (one line per cover read's outcome); null in normal use.
     internal static Action<string>? GlassCoverTrace { get; set; }
+    // How many times the glass was placed with the panel's origin off whole pixels (GlassBoundaryMath.OnWholePixels): the
+    // straight edges' guard, read by the isolated harness; 0 in a healthy layout.
+    internal static long GlassOffPixelPlacements { get; private set; }
     private (double Bright, double Dark) _glassTails = (1, 0);
     private readonly record struct GlassSampleArea(nint Monitor, Rect Screen, Int32Rect Bounds, double Scale, PanelLook Look);
     // The light's direction shown (moved toward the target on the display's frames, GlassOpticsFrame) and the one the latest
@@ -253,6 +256,8 @@ public partial class MainWindow
         (double X, double Y) at = (origin.X - left, origin.Y - top);
         GlassBoundaryMath.GlassClip? clip = GlassBoundaryMath.TryRoundedClip(layout, at, (along.X - left, along.Y - top), (depth.X - left, depth.Y - top), out var rounded)
             ? rounded : null;
+        // Guard: the layout keeps the panel on whole pixels; a place off them is counted for the harness and the checks.
+        if (!GlassBoundaryMath.OnWholePixels(at)) GlassOffPixelPlacements++;
         GlassSurface.Outline? outline = null;
         if (clip is null)
         {

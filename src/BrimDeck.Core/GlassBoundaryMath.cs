@@ -38,6 +38,15 @@ public static class GlassBoundaryMath
         => ((w - shoulder * .28, 0), (w - shoulder * .64, 0), (w - shoulder * .82, depth * .18),
             (w - shoulder, depth * .36), (w - shoulder, depth * .72), (w - shoulder, depth));
 
+    // Whether the panel's origin in the glass window's pixels lies on whole pixels (within float noise). The layout rounds the
+    // panel's place, so its straight edges fall on pixel boundaries; one off by a fraction is antialiased along every edge.
+    public static bool OnWholePixels((double X, double Y) at)
+    {
+        const double Noise = 1d / 512;
+        return double.IsFinite(at.X) && double.IsFinite(at.Y)
+            && Math.Abs(at.X - Math.Round(at.X)) <= Noise && Math.Abs(at.Y - Math.Round(at.Y)) <= Noise;
+    }
+
     // The cubic handle factor for a quarter circle.
     public const double Kappa = .5522847498307936;
 

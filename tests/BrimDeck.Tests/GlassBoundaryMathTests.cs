@@ -11,6 +11,7 @@ internal static class GlassBoundaryMathTests
         Clips(check);
         Profile(check);
         LightStops(check);
+        Origins(check);
     }
 
     // The light around the island is held within LightLeast of its brightest, in the theme's order, its mean the theme's.
@@ -25,6 +26,16 @@ internal static class GlassBoundaryMathTests
             check($"The edge's light ({string.Join("/", relative)}) spans at most 1/{GlassBoundaryMath.LightLeast} ({string.Join("/", shown.Select(s => s.ToString("0.000")))}), in order, no brighter on average",
                 shown.Max() <= shown.Min() / GlassBoundaryMath.LightLeast + 1e-12 && order && Math.Abs(shown.Average() - relative.Average()) < 1e-12);
         }
+    }
+
+    // The panel's origin on the screen is on whole pixels (the window's layout rounds), so the glass's straight edges fall on
+    // pixel boundaries with no antialiased line; a fraction left by a transform is told apart from float noise.
+    private static void Origins(Action<string, bool> check)
+    {
+        check("A panel origin on whole pixels, float noise included, is on whole pixels",
+            GlassBoundaryMath.OnWholePixels((240, 0)) && GlassBoundaryMath.OnWholePixels((239.9999, 1e-5)) && GlassBoundaryMath.OnWholePixels((-1, -0.00001)));
+        check("A panel origin a fraction of a pixel off is not",
+            !GlassBoundaryMath.OnWholePixels((240.25, 0)) && !GlassBoundaryMath.OnWholePixels((240, .5)) && !GlassBoundaryMath.OnWholePixels((double.NaN, 0)));
     }
 
     private static (double X, double Y) Bezier((double X, double Y) p0, (double X, double Y) p1, (double X, double Y) p2, (double X, double Y) p3, double t)
