@@ -72,6 +72,7 @@ internal static class Program
             SettingsFocusTests.Run(Check);
             NoticePanelTests.Run(Check);
             NoticeGlowTests.Run(Check);
+            NoticeAppGlyphTests.Run(Check);
             ThemeCardChecks.Run(Check);
             ThemeLookChecks.Run(Check);
             HoverOwnerChecks.Run(Check);
@@ -124,6 +125,7 @@ internal static class Program
         finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
         NoticePanelTests.Run(Check);
         NoticeGlowTests.Run(Check);
+        NoticeAppGlyphTests.Run(Check);
         NoticeRowBatchTests.Run(Check);
         NoticeFocusChecks.Run(Check);
     }

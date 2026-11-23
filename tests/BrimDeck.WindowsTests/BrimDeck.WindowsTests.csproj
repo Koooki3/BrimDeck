@@ -99,5 +99,9 @@
     <Page Include="..\..\src\BrimDeck\MusicResources.xaml" Link="MusicResources.xaml" />
     <!-- The island's notice look, whose application color the page's focus takes (NoticeGlowTests). -->
     <Compile Include="..\..\src\BrimDeck\NoticeVisuals.cs" Link="NoticeVisuals.cs" />
+    <!-- A notice's plate and the glyph on it, drawn by WPF in NoticeAppGlyphTests. -->
+    <Compile Include="..\..\src\BrimDeck\NoticeLetter.cs" Link="NoticeLetter.cs" />
+    <Compile Include="..\..\src\BrimDeck\NoticeBadges.cs" Link="NoticeBadges.cs" />
+    <Compile Include="..\..\src\BrimDeck\IconStyle.cs" Link="IconStyle.cs" />
   </ItemGroup>
 </Project>

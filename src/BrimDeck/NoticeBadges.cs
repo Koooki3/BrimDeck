@@ -88,10 +88,11 @@ internal static class NoticeBadges
 
     // The glyph for a notice without an icon: BrimDeck's own (a device's), else the application's type; null when neither is
     // known (the initial is shown).
-    public static FrameworkElement? AppGlyph(Notice notice, double plateSize, Color appColor)
+    public static FrameworkElement? AppGlyph(Notice notice, double plateSize, Color appColor, PanelPalette? palette = null)
     {
         if (NoticeGlyphs.Plate(notice) is not { } glyph) return null;
-        var color = PanelTheme.ToColor(Colors.OnPlate(Theme(appColor)));
+        // On the application's tinted plate, as the initial is (NoticeLetter.Ink); high contrast draws it in the text color.
+        var color = Colors.HighContrast ? PanelTheme.ToColor(Colors.Primary) : PanelTheme.ToColor(NoticeLetter.Ink(palette ?? PanelTheme.Current, appColor, PanelThemes.GraphicContrast));
         var element = Glyph(glyph, Math.Round(plateSize * .66), color);
         element.HorizontalAlignment = HorizontalAlignment.Center; element.VerticalAlignment = VerticalAlignment.Center;
         return element;

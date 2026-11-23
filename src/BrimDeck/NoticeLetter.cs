@@ -20,16 +20,31 @@ internal static class NoticeLetter
     // Whether a notice may show its picture: not when the user keeps it to the application's name.
     public static bool ShowsPicture(Notice notice, DeckSettings settings) => notice.Picture is not null && (settings.NoticeRule(notice.AppKey)?.Privacy ?? settings.NoticePrivacy) != NoticePrivacy.AppOnly;
 
+    // The opacity (0 to 255) of the application's color on the plate.
+    private const byte Tint = 40;
+
+    // The application's color for what is drawn on its plate (the initial, or the application's glyph), held to a minimum against
+    // the plate on each ground it lies on, which the application's color alone does not reach on a light theme: the surface, a list
+    // row in any of its states and, as the focus's cover, the glow behind the focus.
+    public static ThemeColor Ink(PanelPalette palette, Color accent, double minimum)
+    {
+        var glow = new ThemeColor(NoticeLines.GlowAlpha, accent.R, accent.G, accent.B);
+        var grounds = new List<ThemeColor>(palette.SurfaceStops);
+        grounds.AddRange(new[] { "fill", "fillSelected", "hover", "pressed" }.Select(key => palette[key].Over(palette.Surface)));
+        grounds.AddRange(palette.SurfaceStops.Select(stop => glow.Over(stop)));
+        var plateOver = grounds.Select(ground => new ThemeColor(Tint, accent.R, accent.G, accent.B).Over(ground)).ToList();
+        return new ThemeColor(255, accent.R, accent.G, accent.B).EnsureContrast(plateOver, minimum);
+    }
+
     // bell: a summary of notices, which has no application. icon: BrimDeck's own glyph (a device's) or one for the kind of application
     // (NoticeBadges.AppGlyph), shown instead of the initial.
     public static FrameworkElement Plate(string? appName, double size, Color accent, bool bell = false, FrameworkElement? icon = null)
     {
         var plate = new Grid { Width = size, Height = size };
-        const byte tint = 40;
         plate.Children.Add(new Border
         {
             CornerRadius = new CornerRadius(PanelTheme.Corner(Math.Round(size * .28))),
-            Background = new SolidColorBrush(Color.FromArgb(tint, accent.R, accent.G, accent.B)),
+            Background = new SolidColorBrush(Color.FromArgb(Tint, accent.R, accent.G, accent.B)),
             BorderBrush = new SolidColorBrush(Color.FromArgb(46, accent.R, accent.G, accent.B)),
             BorderThickness = new Thickness(size >= 40 ? 1 : 0)
         });
@@ -43,17 +58,9 @@ internal static class NoticeLetter
         if (icon is not null) { plate.Children.Add(icon); return plate; }
         var name = appName?.Trim() ?? "";
         string letter = name.Length == 0 ? "?" : char.IsSurrogate(name[0]) && name.Length > 1 ? name[..2] : name[..1].ToUpper(Loc.Culture);
-        // The letter is text on the tinted plate, not on the panel: it is held to the text minimum (3:1 once it is large) against the
-        // plate on each ground below, which the application's color alone does not reach on a light theme.
+        // The letter is text on the tinted plate, not on the panel: it is held to the text minimum (3:1 once it is large).
         double fontSize = Math.Round(size * .45);
-        // The plate lies on the surface, on a list row in any of its states and, as the focus's cover, on the glow behind the focus.
-        var palette = PanelTheme.Current;
-        var glow = new ThemeColor(NoticeLines.GlowAlpha, accent.R, accent.G, accent.B);
-        var grounds = new List<ThemeColor>(palette.SurfaceStops);
-        grounds.AddRange(new[] { "fill", "fillSelected", "hover", "pressed" }.Select(key => palette[key].Over(palette.Surface)));
-        grounds.AddRange(palette.SurfaceStops.Select(stop => glow.Over(stop)));
-        var plateOver = grounds.Select(ground => new ThemeColor(tint, accent.R, accent.G, accent.B).Over(ground)).ToList();
-        var ink = new ThemeColor(255, accent.R, accent.G, accent.B).EnsureContrast(plateOver, fontSize >= 24 ? PanelThemes.GraphicContrast : PanelThemes.TextContrast);
+        var ink = Ink(PanelTheme.Current, accent, fontSize >= 24 ? PanelThemes.GraphicContrast : PanelThemes.TextContrast);
         plate.Children.Add(new TextBlock
         {
             Text = letter, FontFamily = UI.DisplayFont, FontSize = fontSize, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(PanelTheme.ToColor(ink)),
