@@ -82,6 +82,7 @@ internal static class Program
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
             BrimDeck.MainWindow.CheckPageCapsuleStretch(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
+            DeviceChecks.PushedNames(Check);
             if (hosted)
             {
                 if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, maximized settings window, frame rate, temperature, device battery and power readings, and the application identity the shell resolves (they read this machine or its shell).");

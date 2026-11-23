@@ -9,6 +9,20 @@ using BrimDeck.Native;
 // read is printed.
 internal static class DeviceChecks
 {
+    public static void PushedNames(Action<string, bool> check)
+    {
+        var receiver = new HidInfo { Path = "vt7-receiver", Vendor = 0x24AE, Product = 0x1413 };
+        var cable = new HidInfo { Path = "vt7-cable", Vendor = 0x24AE, Product = 0x4613 };
+        var battery = new BatteryRead(44);
+
+        check("devices: pushed Rapoo VT7 receiver reading names the mouse",
+            HidBatteries.Pushed(receiver, Pushes.Kind.Rapoo, battery, name: null) is { Name: "Rapoo VT7", Kind: DeviceKind.Mouse, Lowest: 44 });
+        check("devices: pushed Rapoo VT7 cable reading names the mouse",
+            HidBatteries.Pushed(cable, Pushes.Kind.Rapoo, battery, name: null) is { Name: "Rapoo VT7", Kind: DeviceKind.Mouse, Lowest: 44 });
+        check("devices: a name supplied with the pushed reading takes precedence",
+            HidBatteries.Pushed(receiver, Pushes.Kind.Rapoo, battery, name: "Reported name").Name == "Reported name");
+    }
+
     public static void Run(Action<string, bool> check)
     {
         PathFilters(check);
