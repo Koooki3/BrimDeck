@@ -1043,7 +1043,7 @@ public partial class MainWindow
         var image = _app.Notices.Icons.Get(notice.IconRef, out _);
         if (image is null)
         {
-            plate.Children.Add(NoticeLetter.Plate(notice.AppName, size, PanelTheme.Readable(_app.Notices.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)))));
+            plate.Children.Add(NoticeLetter.Plate(notice.AppName, size, NoticeLook.Current().AppColor(_app.Notices.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)))));
             return false;
         }
         // The icon itself at the plate's size, with nothing behind it: on a plate of its own it read as an icon boxed into another.

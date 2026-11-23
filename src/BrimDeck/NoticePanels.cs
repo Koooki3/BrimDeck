@@ -29,11 +29,12 @@ internal static class NoticeLines
 // The glow in the application's color behind the notices page's focus column, and the ink of the text that lies on it.
 internal static class NoticeGlow
 {
-    // The application's color as the focus draws it (its plate, its progress, its glow), and the glow itself.
+    // The application's color as the focus draws it (its plate, its progress, its glow), and the glow itself. Under high contrast
+    // the page keeps to the system's colors as the island's notice does (NoticeLook): the highlight color, and no glow.
     public static (Color Accent, Brush? Glow) Of(NoticeLook look, Color app)
     {
-        var accent = PanelTheme.Readable(app);
-        return (accent, Brush(accent));
+        var accent = look.AppColor(app);
+        return (accent, look.HighContrast ? null : Brush(accent));
     }
 
     // The glow in a color: faint at the middle (NoticeLines.GlowAlpha), clear at its edge.

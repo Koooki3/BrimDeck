@@ -43,6 +43,17 @@ internal static class NoticeGlowTests
         check("notice glow: the category line under the focus's title keeps 4.5:1 on the drawn glow in every built-in theme"
             + (failures.Count > 0 ? $" ({failures.Count} short: {string.Join(", ", shortThemes)})" : ""), failures.Count == 0);
         check($"notice glow: a theme whose tertiary text already reads on the glow keeps its own color ({kept} kept, {moved} moved)", kept > 0 && moved == 0);
+
+        // Under high contrast the focus takes the system's colors as the island's notice does (NoticeLook): the application's color
+        // becomes the highlight color, and no glow is drawn behind the column. Without it the focus keeps the application's color.
+        var look = NoticeLook.Current();
+        var orange = Color.FromRgb(0xD9, 0x77, 0x57);
+        var (highAccent, highGlow) = NoticeGlow.Of(look with { HighContrast = true, Glow = false }, orange);
+        check("notice glow: under high contrast the focus draws the application in the system highlight color", highAccent == SystemColors.HighlightColor);
+        check("notice glow: under high contrast no glow is drawn behind the focus", highGlow is null);
+        var (plainAccent, plainGlow) = NoticeGlow.Of(look with { HighContrast = false }, orange);
+        check("notice glow: without high contrast the focus keeps the application's color and its glow",
+            plainAccent == PanelTheme.Readable(orange) && plainGlow is RadialGradientBrush { GradientStops: [{ Color.A: NoticeLines.GlowAlpha }, { Color.A: 0 }] });
     }
 
     // The colour WPF draws at the centre of the focus's glow (NoticeGlow.Brush) over a surface of one colour.
