@@ -156,8 +156,8 @@ public sealed partial class SettingsWindow
     private FrameworkElement AntigravityCliDetails(AppEntry entry)
     {
         string title = Loc.T("通过 CLI 读取", "Read via CLI");
-        string help = Loc.T("开启：Antigravity 应用和 IDE 都未运行时，在后台运行 agy -p /usage 读取额度。下次刷新可以重试。\n关闭：本行不请求 CLI 查询。如果其他 Antigravity 行开启此选项，本行也会显示共享的 CLI 读数。上次读数最多保留 24 小时，已重置的额度窗口会移除。",
-            "On: while neither the Antigravity app nor the IDE runs, reads the quota in the background via agy -p /usage. Can retry on the next refresh.\nOff: this row does not request a CLI query. If another Antigravity row enables it, this row also shows the shared CLI reading. Readings are kept for up to 24 hours. Each quota window is removed when it resets.");
+        string help = Loc.T("开启：未找到可访问的 Antigravity 本地服务端点时（包括因管理员权限无法读取端点时），在后台运行 agy -p /usage 读取额度。下次刷新可以重试。\n关闭：本行不请求 CLI 查询。如果其他 Antigravity 行开启此选项，本行也会显示共享的 CLI 读数。上次读数最多保留 24 小时，已重置的额度窗口会移除。",
+            "On: when no local Antigravity endpoint is accessible, including when administrator privileges prevent discovery, reads the quota in the background via agy -p /usage. Can retry on the next refresh.\nOff: this row does not request a CLI query. If another Antigravity row enables it, this row also shows the shared CLI reading. Readings are kept for up to 24 hours. Each quota window is removed when it resets.");
         return SwitchDetails(entry, title, help, "antigravity-cli-", e => e.AntigravityCli, (e, on) => e.AntigravityCli = on);
     }
 

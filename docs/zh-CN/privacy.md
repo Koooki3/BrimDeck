@@ -8,7 +8,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | --- | --- | --- |
 | Claude | 读取 Claude Code 的登录（`%USERPROFILE%\.claude\.credentials.json`），不可用时改用 Claude 桌面版的登录，向 Anthropic 查询账户用量。账户同时属于多个组织（例如个人 Pro 与 Team）时，用桌面版为各组织保存的登录分别查询。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Claude 桌面版在本机记录的额度（`plan-usage-history.json`） | 读取 Claude Code 的本地会话记录（`projects\**\*.jsonl`），不含 Claude 桌面版的普通聊天 |
 | Codex | 读取 `%USERPROFILE%\.codex\auth.json` 中的登录，向 OpenAI 查询账户用量；查询失败时显示会话记录中的配额，并标明可能已过时 | 读取本地会话记录（`sessions` 与 `archived_sessions`） |
-| Antigravity | 从正在运行的 Antigravity 桌面版或 Antigravity IDE 的本机服务（仅限 127.0.0.1）读取；上次读数最多保留 24 小时，已重置的额度窗口会移除。两者都未运行且已开启“通过 CLI 读取”（默认关闭）时，在后台以无头环境运行 `agy -p /usage` 读取，每轮刷新查询一次 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
+| Antigravity | 从正在运行的 Antigravity 桌面版或 Antigravity IDE 的本机服务（仅限 127.0.0.1）读取；读数超过 24 小时或额度窗口已重置时停止显示，过期数据在下次保存时从缓存文件移除。未发现可访问的本地服务端点且已开启“通过 CLI 读取”（默认关闭）时，在后台以无头环境运行 `agy -p /usage` 读取，每轮刷新查询一次 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
 | Cursor | 以只读方式从 `%APPDATA%\Cursor\User\globalStorage\state.vscdb` 读取登录，向 Cursor 查询账户用量 | 向 Cursor 查询账户用量明细，包含该账户在其他设备上的用量 |
 | Grok Bot | 读取 Grok Bot 桌面版自己的登录（`%APPDATA%\Grok Bot\sand-secrets.json`），向 Cursor 查询该账户的每周额度。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Grok Bot 桌面版在本机缓存的每周额度（`%APPDATA%\Grok Bot\sand-client-persistence`） | 不提供 |
 | ZCode | 读取 ZCode 的登录，查询 Coding Plan、Start Plan 与 MCP 每日额度 | 读取本地请求记录（`%USERPROFILE%\.zcode\cli\db\db.sqlite`） |

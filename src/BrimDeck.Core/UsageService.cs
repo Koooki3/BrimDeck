@@ -94,8 +94,9 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         public bool Unshown;
         public DateTimeOffset? LastAttempt;
         public AntigravityCliStatus? LastFailure;
-        public bool CompletionRefresh;
+
     }
+    private bool _backgroundCompletion;
     private readonly AntigravityState _antigravityState = new();
     // Whether any enabled Antigravity row reads via the CLI (AppEntry.AntigravityCli); turning it off forgets CLI-only readings.
     private volatile bool _antigravityCli;
@@ -210,6 +211,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         try
         {
             // Each underlying source is read once, even when several columns reuse it.
+            _backgroundCompletion = backgroundCompletion;
             var required = settings.RequiredProviders;
             _includeWsl = settings.IncludeWsl;
             // The Claude and Grok Bot account APIs are asked only for rows that read online; rows that do not share one local snapshot.
@@ -222,7 +224,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             lock (_antigravityState)
             {
                 _antigravityCli = antigravityCli;
-                _antigravityState.CompletionRefresh = backgroundCompletion;
+
                 if (!antigravityCli)
                 {
                     cancelAntigravityCli = _antigravityState.CliCancel;
@@ -1407,7 +1409,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             }
             else
             {
-                if (!_antigravityState.CompletionRefresh)
+                if (!_backgroundCompletion)
                 {
                     _antigravityState.LastAttempt = attemptTime;
                     _antigravityState.CliRunning = true;
@@ -1452,9 +1454,10 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             return true;
         }
 
-        if (reading is { FromCli: true, Restored: false } && failure is null && lastAttempt is { } at && reading.Time == at)
+        now = _clock();
+        if (reading is { FromCli: true, Restored: false } && failure is null && lastAttempt == reading.Time && Recent(reading.Time, now))
         {
-            return ShowAntigravityReading(snapshot, reading, _clock(), stale: false);
+            if (ShowAntigravityReading(snapshot, reading, now, stale: false)) return true;
         }
 
         var (failLabel, failReason) = AntigravityCliFailureText(failure);
@@ -2275,7 +2278,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         lock (kept)
         {
             // The round a finished read asks for only shows it, without starting the next read at once.
-            if (kept.Pending is not { IsCompleted: false } && now - kept.Started >= QoderGap)
+            if (!_backgroundCompletion && kept.Pending is not { IsCompleted: false } && now - kept.Started >= QoderGap)
             {
                 kept.Started = now;
                 kept.Unshown = false;
