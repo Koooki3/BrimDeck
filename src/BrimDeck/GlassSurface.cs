@@ -62,6 +62,7 @@ internal sealed class GlassSurface : IDisposable
     private int _stepPolls, _retryWakes;
     private long _wokenFor;
     private bool _visible, _disposed;
+    private Dispatcher? _dispatcher;
     internal bool Visible => _visible;
     internal AppliedMaterial Applied => _visible ? _applied : default;
     // Diagnostics and tests: the brush the glass draws with now, and the clip it is cut by.
@@ -100,7 +101,7 @@ internal sealed class GlassSurface : IDisposable
         {
             _graphReady = false;
             _graphSince = GlassEffect.Clock();
-            _polls = 0;
+            _polls = _retryWakes = 0;
             StopPoll();
         }
         if (_graph is { } graph)
@@ -118,7 +119,7 @@ internal sealed class GlassSurface : IDisposable
                 {
                     GlassEffect.Present(graph, material.DarkVeil, material.LightVeil, material.Palette, material.Tint, material.Saturation);
                     // Only a brush that presented has worked: a load alone ends no backoff.
-                    if (!ReferenceEquals(sprite.Brush, graph)) { sprite.Brush = graph; GlassEffect.Succeeded(); }
+                    if (!ReferenceEquals(sprite.Brush, graph)) { sprite.Brush = graph; GlassEffect.Succeeded(graph); }
                     ReleaseFallback();
                     return _applied = new(Backend.Graph, material);
                 }
@@ -222,8 +223,10 @@ internal sealed class GlassSurface : IDisposable
             long now = GlassEffect.Clock(), retryAt = GlassEffect.RetryAt;
             if (retryAt != _wokenFor) { _wokenFor = retryAt; _retryWakes = 0; }
             int? step = _pendingLook is not null && _stepPolls < PollMs.Length && GlassEffect.FallbackAvailable(compositor) ? PollMs[_stepPolls] : null;
-            // A timer may tick a little early: a few wakes for each backoff, the first just after it ends.
-            int? retry = GlassEffect.GraphAvailable && retryAt > now && _retryWakes < 3 ? (int)Math.Min(retryAt - now + 16, 60_000) : null;
+            // No graph, yet not refused: it waits for a backoff, which may have ended since this frame asked (or been ended by
+            // another surface), so the look comes just after its end or at once. A timer may tick a little early: a few wakes for
+            // each backoff.
+            int? retry = GlassEffect.GraphAvailable && _retryWakes < 3 ? (int)Math.Clamp(retryAt - now + 16, 16, 60_000) : null;
             if (step is { } s && (retry is not { } r || s <= r)) { _stepPolls++; due = s; }
             else if (retry is { } wait) { _retryWakes++; due = wait; }
         }
@@ -238,7 +241,9 @@ internal sealed class GlassSurface : IDisposable
     }
 
     private void StopPoll() => _poll?.Stop();
-    private void PollTick(object? sender, EventArgs e) { StopPoll(); Poll(); }
+    private void PollTick(object? sender, EventArgs e) => Tick();
+    // The timer's tick (or a test's, in its place).
+    internal void Tick() { StopPoll(); Poll(); }
 
     // Looks again at what the surface waits for (the timer, or a test with its own clock).
     internal void Poll()
@@ -248,6 +253,16 @@ internal sealed class GlassSurface : IDisposable
         try { Apply(material); }
         catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException) { Dispose(); }
     }
+
+    // What was refused may work now (GlassComposition.Renew, from any thread): looked at again on the surface's own thread, a
+    // graph that backs off or was refused as well as a path, each with its looks to come anew.
+    private void Renewed() => _dispatcher?.BeginInvoke(DispatcherPriority.Background, () =>
+    {
+        if (_disposed || !_visible) return;
+        _polls = _stepPolls = _retryWakes = 0;
+        Tick();
+        TryPath();
+    });
 
     // A rounded rectangle filling the bounds (the glass checks).
     public bool Show(IntPtr owner, Int32Rect bounds, int radius, double opacity, Material material, out AppliedMaterial applied)
@@ -288,6 +303,8 @@ internal sealed class GlassSurface : IDisposable
                 _sprite.Clip = _roundedClip = compositor.CreateGeometricClip(_outline);
                 _frame.Children.InsertAtTop(_sprite);
                 _target.Root = _frame;
+                _dispatcher = Dispatcher.CurrentDispatcher;
+                GlassComposition.Renewed += Renewed;
             }
 
             applied = Apply(material);
@@ -425,9 +442,11 @@ internal sealed class GlassSurface : IDisposable
         _pathWait.Start();
     }
 
-    private void PathWaitTick(object? sender, EventArgs e)
+    private void PathWaitTick(object? sender, EventArgs e) => TryPath();
+
+    private void TryPath()
     {
-        _pathWait!.Stop();
+        _pathWait?.Stop();
         if (_disposed || !_visible || _shape is null) return;
         try { Place(Frame(_owner, _need)); }
         catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException) { Dispose(); }
@@ -490,6 +509,8 @@ internal sealed class GlassSurface : IDisposable
         if (!_visible) return;
         _visible = false;
         StopPoll();
+        // Shown again, it looks again as often as the first time: the looks it never came to were not had.
+        _polls = _stepPolls = _retryWakes = 0;
         _pathWait?.Stop();
         if (_window is { } window) ShowWindow(window.Handle, 0);
     }
@@ -498,6 +519,7 @@ internal sealed class GlassSurface : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        GlassComposition.Renewed -= Renewed;
         Hide();
         if (_poll is not null) { _poll.Stop(); _poll.Tick -= PollTick; }
         if (_pathWait is not null) { _pathWait.Stop(); _pathWait.Tick -= PathWaitTick; }

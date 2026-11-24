@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Interop;
 using BrimDeck;
 using BrimDeck.Core;
+using BrimDeck.Native;
 using Windows.UI.Composition;
 
 // Liquid glass on the real compositor: the persistent graph compiles once, takes its two amounts on any number of brushes and
@@ -125,9 +126,26 @@ internal static class GlassChecks
     // With a notch: its path refused, so the glass is cut by the rounded approximation (V5 N02).
     private static void PassesClicks(Action<string, bool> check, bool notch)
     {
-        var area = SystemParameters.WorkArea;
-        double dpi = System.Windows.Media.VisualTreeHelper.GetDpi(new System.Windows.Controls.Border()).DpiScaleX;
-        int right = (int)(area.Right * dpi), bottom = (int)(area.Bottom * dpi);
+        var (right, bottom) = Corner();
+        var points = new[] { (X: right - 150, Y: bottom - 70, Where: "beside the outline"), (X: right - 80, Y: bottom - 40, Where: "on the outline") };
+        // The window root at each point, asked from another thread.
+        IntPtr[] Hits()
+        {
+            var hits = new IntPtr[points.Length];
+            var asking = new Thread(() =>
+            {
+                for (int i = 0; i < hits.Length; i++) hits[i] = GetAncestor(WindowFromPoint(new Point32 { X = points[i].X, Y = points[i].Y }), 2);
+            });
+            asking.Start();
+            asking.Join();
+            return hits;
+        }
+        // What lies beneath: a window of this check's own, taking clicks, above whatever else is there and never activated.
+        var beneath = new HwndSource(new HwndSourceParameters("BrimDeck glass click target")
+        {
+            WindowStyle = unchecked((int)0x90000000), ExtendedWindowStyle = 0x08 | 0x80 | 0x08000000,
+            PositionX = right - 160, PositionY = bottom - 80, Width = 160, Height = 80
+        });
         // A small panel window in the corner of the work area, topmost and passing clicks (layered, transparent and empty), as
         // the panel's window is where it draws nothing; the glass is nearly invisible (opacity 0.01) and shown for a moment.
         var owner = new HwndSource(new HwndSourceParameters("BrimDeck glass click checks")
@@ -138,6 +156,8 @@ internal static class GlassChecks
         var surface = new GlassSurface();
         try
         {
+            Pump();
+            bool ready = Hits().All(hit => hit == beneath.Handle);
             var bounds = new Int32Rect(right - 120, bottom - 60, 80, 40);
             if (notch) GlassPath.Inject = step => { if (step == "CreatePathGeometry") throw new COMException("refused", unchecked((int)0x887A0005)); };
             bool shown = notch
@@ -145,29 +165,14 @@ internal static class GlassChecks
                     new GlassSurface.Material(.4, .3, .5), out _)
                 : surface.Show(owner.Handle, bounds, 8, .01, new GlassSurface.Material(.4, .3, .5), out _);
             Pump();
-            IntPtr glass = IntPtr.Zero;
-            EnumThreadWindows(GetCurrentThreadId(), (window, _) =>
-            {
-                var title = new System.Text.StringBuilder(64);
-                GetWindowText(window, title, 64);
-                if (IsWindowVisible(window) && title.ToString() == "BrimDeck glass") glass = window;
-                return glass == IntPtr.Zero;
-            }, IntPtr.Zero);
+            var glass = GlassWindow();
             GetWindowRect(glass, out var frame);
-            var points = new[] { (X: right - 150, Y: bottom - 70, Where: "beside the outline"), (X: right - 80, Y: bottom - 40, Where: "on the outline") };
-            var found = new List<string>();
-            bool covered = true, passed = true;
-            foreach (var (x, y, where) in points)
-            {
-                covered &= x >= frame.Left && x < frame.Right && y >= frame.Top && y < frame.Bottom;
-                IntPtr hit = IntPtr.Zero;
-                var asking = new Thread(() => hit = GetAncestor(WindowFromPoint(new Point32 { X = x, Y = y }), 2));
-                asking.Start(); asking.Join();
-                passed &= hit != glass && hit != owner.Handle;
-                found.Add($"{where}: {(hit == glass ? "the glass window" : hit == owner.Handle ? "the panel window" : "beneath")}");
-            }
-            check($"The glass window{(notch ? " of a notch without its path" : "")} lets clicks through to what lies beneath, beside the outline and on it ({string.Join("; ", found)})",
-                shown && glass != IntPtr.Zero && covered && passed);
+            bool covered = points.All(p => p.X >= frame.Left && p.X < frame.Right && p.Y >= frame.Top && p.Y < frame.Bottom) && Above(glass, beneath.Handle);
+            string Name(IntPtr hit) => hit == beneath.Handle ? "the window beneath" : hit == IntPtr.Zero ? "nothing" : hit == glass ? "the glass window"
+                : hit == owner.Handle ? "the panel window" : "another window";
+            var hits = Hits();
+            check($"The glass window{(notch ? " of a notch without its path" : "")} lets clicks through to what lies beneath, beside the outline and on it ({string.Join("; ", points.Zip(hits, (p, hit) => $"{p.Where}: {Name(hit)}"))})",
+                ready && shown && glass != IntPtr.Zero && covered && hits.All(hit => hit == beneath.Handle));
         }
         finally
         {
@@ -175,9 +180,27 @@ internal static class GlassChecks
             GlassPath.Renew();
             surface.Dispose();
             owner.Dispose();
+            beneath.Dispose();
         }
     }
 
+    // The bottom right of the work area of a display, one that is not the main one where there is one (physical pixels).
+    private static (int Right, int Bottom) Corner()
+    {
+        var displays = Displays.Current();
+        var work = WindowsHost.MonitorScreen((displays.FirstOrDefault(d => !d.Primary) ?? displays[0]).Handle)!.Value.Work;
+        return ((int)work.Right, (int)work.Bottom);
+    }
+
+    // Whether a window is above another one in the z-order.
+    private static bool Above(IntPtr upper, IntPtr lower)
+    {
+        for (var window = lower; window != IntPtr.Zero; window = GetWindow(window, 3)) // GW_HWNDPREV
+            if (window == upper) return true;
+        return false;
+    }
+
+    [DllImport("user32")] private static extern IntPtr GetWindow(IntPtr window, uint relation);
     private delegate bool ThreadWindows(IntPtr window, IntPtr data);
     [StructLayout(LayoutKind.Sequential)] private struct Point32 { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct Rect32 { public int Left, Top, Right, Bottom; }
@@ -364,6 +387,51 @@ internal static class GlassChecks
             Present(e, asked);
             check("After the backoff the refused surface is back on the graph", Settle(e, GlassSurface.Backend.Graph));
 
+            // Two surfaces loading the same factory: the first one's first frame is refused, so the factory is let go and the
+            // backoff starts; the second presents its brush of it all the same, and ends neither the backoff nor the streak.
+            void Two(out GlassSurface one, out GlassSurface two, out bool drawn)
+            {
+                GlassEffect.Inject = null;
+                GlassEffect.Renew();
+                if (GlassEffect.Graph(compositor) is { } made) { GlassEffect.Failed(made, permanent: false); GlassEffect.Release(made); }
+                GlassEffect.Renew();
+                bool held = true;
+                var actual = CompositionEffectFactoryLoadStatus.Pending;
+                GlassEffect.InjectStatus = (graph, status) =>
+                {
+                    if (!graph) return status;
+                    actual = status;
+                    return held ? CompositionEffectFactoryLoadStatus.Pending : status;
+                };
+                one = Open(asked, out _);
+                two = Open(asked, out _);
+                var loads = System.Diagnostics.Stopwatch.StartNew();
+                while (actual != CompositionEffectFactoryLoadStatus.Success && loads.ElapsedMilliseconds < 2000) { Pump(); one.Poll(); }
+                held = false;
+                bool refuse = true;
+                GlassEffect.Inject = step =>
+                {
+                    if (step == "Present" && refuse) { refuse = false; throw new COMException("frame refused", unchecked((int)0x8899000C)); }
+                };
+                one.Poll();
+                two.Poll();
+                GlassEffect.InjectStatus = null;
+                drawn = !refuse && two.Applied.Backend == GlassSurface.Backend.Graph && one.Applied.Backend == GlassSurface.Backend.Fallback;
+            }
+            Two(out var one, out var two, out bool twoDrawn);
+            bool backing = GlassEffect.GraphState == GlassBackendState.Recovering && GlassEffect.RetryAt == clock + 100 && !GlassEffect.CanTryGraph(compositor);
+            clock += 99;
+            bool waits = !GlassEffect.CanTryGraph(compositor);
+            check($"A brush of a factory let go presents, but ends no backoff of the one after it ({two.Applied.Backend}, {GlassEffect.GraphState})",
+                twoDrawn && backing && waits && GlassEffect.FactoryLive(two.Brush));
+            clock += 1;
+            one.Poll();
+            check($"The factory made after the backoff ends it once it presents ({GlassEffect.GraphState})",
+                Settle(one, GlassSurface.Backend.Graph) && GlassEffect.GraphState == GlassBackendState.Ready && GlassEffect.RetryAt == 0);
+            one.Hide();
+            two.Hide();
+            GlassEffect.Inject = null;
+
             // Pending for good: the loading limit turns it into a transient failure (no endless wait).
             GlassEffect.Inject = null;
             GlassEffect.Renew();
@@ -438,6 +506,154 @@ internal static class GlassChecks
                 kReady && kFellBack && Idle(() => k.Applied.Backend == GlassSurface.Backend.Graph) && k.Applied.Material == refusedFrame && !k.Waking);
             k.Hide();
             GlassEffect.Inject = null;
+
+            // Hidden before its timer ticked, again and again: shown for good it still looks again (a loading graph, a loading
+            // fallback step, a graph backing off), a bounded number of times, and shows what then loads.
+            int Ticks(GlassSurface surface)
+            {
+                int ticks = 0;
+                for (; surface.Waking && ticks < 50; ticks++) surface.Tick();
+                return ticks;
+            }
+            bool Again(GlassSurface surface, GlassSurface.Material material)
+            {
+                for (int i = 0; i < 12; i++) { surface.Hide(); if (surface.Waking || !surface.Show(owner.Handle, bounds, 8, 1, material, out _)) return false; }
+                return surface.Waking;
+            }
+            GlassEffect.Renew();
+            GlassEffect.InjectStatus = (graph, status) => graph ? CompositionEffectFactoryLoadStatus.Pending : status;
+            var m = Open(asked, out _);
+            bool graphLooks = Again(m, asked);
+            int graphTicks = Ticks(m);
+            bool graphAgain = Again(m, asked);
+            GlassEffect.InjectStatus = null;
+            check($"A surface hidden before it looked again at its loading graph, again and again, still looks ({graphTicks} times), and shows the graph without another frame",
+                graphLooks && graphTicks == 4 && graphAgain && Idle(() => m.Applied.Backend == GlassSurface.Backend.Graph) && !m.Waking);
+            m.Hide();
+            GlassEffect.Renew();
+            GlassEffect.CanTryGraph(compositor);
+            GlassEffect.RefuseGraph();
+            GlassEffect.InjectStatus = (graph, status) => graph ? status : CompositionEffectFactoryLoadStatus.Pending;
+            var late = new GlassSurface.Material(.71, .12, .42);
+            var n = Open(late, out _);
+            bool stepLooks = Again(n, late);
+            int stepTicks = Ticks(n);
+            bool stepAgain = Again(n, late);
+            GlassEffect.InjectStatus = null;
+            check($"A surface hidden before it looked again at its fallback step, again and again, still looks ({stepTicks} times), and shows the step without another frame",
+                stepLooks && stepTicks == 4 && stepAgain && Idle(() => n.Applied.Backend == GlassSurface.Backend.Fallback) && !n.Waking);
+            n.Hide();
+            GlassEffect.Renew();
+            GlassEffect.Inject = step => { if (step == "CreateBrush") throw new COMException("device removed", unchecked((int)0x887A0005)); };
+            var o = Open(asked, out _);
+            bool retryLooks = Again(o, asked) && GlassEffect.GraphState == GlassBackendState.Recovering;
+            int retryTicks = Ticks(o);
+            bool retryAgain = Again(o, asked);
+            GlassEffect.Inject = null;
+            check($"A surface hidden before its graph's backoff passed, again and again, still looks ({retryTicks} times), and shows the graph without another frame",
+                retryLooks && retryTicks == 3 && retryAgain && Idle(() => o.Applied.Backend == GlassSurface.Backend.Graph) && !o.Waking);
+            o.Hide();
+
+            // The backoff ends while the frame is worked out (the graph refused it, then the clock passed the deadline): the last
+            // frame's fallback is looked at again all the same; a graph refused for good is not.
+            GlassEffect.Renew();
+            GlassEffect.Inject = step => { if (step == "CreateBrush") throw new COMException("device removed", unchecked((int)0x887A0005)); };
+            var q = Open(asked, out _);
+            bool waitsBackoff = q.Waking && GlassEffect.GraphState == GlassBackendState.Recovering;
+            clock = GlassEffect.RetryAt - 1;
+            int reads = 0;
+            GlassEffect.Clock = () => reads++ == 0 ? clock : clock + 1;
+            q.Tick();
+            bool passed = reads > 1 && q.Waking && q.Applied.Backend == GlassSurface.Backend.Fallback;
+            GlassEffect.Clock = () => clock;
+            clock++;
+            GlassEffect.Inject = null;
+            check($"A backoff that ends while a frame is worked out is still looked at again ({reads} reads of the clock), and shows the graph without another frame",
+                waitsBackoff && passed && Idle(() => q.Applied.Backend == GlassSurface.Backend.Graph) && !q.Waking);
+            q.Hide();
+            GlassEffect.Renew();
+            int refusals = 0;
+            GlassEffect.Inject = step => { if (step == "CreateBrush") { refusals++; throw new COMException("device removed", unchecked((int)0x887A0005)); } };
+            var s = Open(asked, out _);
+            // Every look past the backoff: the tries are the same four, then no timer.
+            int looks = 0;
+            for (; s.Waking && looks < 50; looks++) { clock += 1000; s.Tick(); }
+            check($"The looks end with the tries ({refusals} tries, {looks} looks)", refusals == GlassEffect.GraphTries && looks == GlassEffect.GraphTries - 1 && !s.Waking);
+            GlassEffect.Renew();
+            GlassEffect.Inject = step => { if (step == "CreateBrush") throw new NotSupportedException("refused"); };
+            var t = Open(asked, out _);
+            check($"A graph refused for good sets no timer ({GlassEffect.GraphState})", t.Applied.Backend == GlassSurface.Backend.Fallback && !t.Waking);
+            s.Hide();
+            t.Hide();
+            GlassEffect.Inject = null;
+
+            // A surface still on a brush of a factory let go, whose backoff another surface already ended: losing that brush, it
+            // looks again too, though nothing backs off.
+            Two(out one, out two, out twoDrawn);
+            clock += 100;
+            one.Poll();
+            bool ended = Settle(one, GlassSurface.Backend.Graph) && GlassEffect.RetryAt == 0;
+            bool twoArmed = true;
+            GlassEffect.Inject = step => { if (step == "Present" && twoArmed) { twoArmed = false; throw new COMException("frame refused", unchecked((int)0x8899000C)); } };
+            bool twoFell = two.Present(refusedFrame, out var twoShown) && twoShown.Backend == GlassSurface.Backend.Fallback;
+            check("A surface that loses a brush of a factory let go, nothing backing off, shows the new graph without another frame",
+                twoDrawn && ended && twoFell && Idle(() => two.Applied.Backend == GlassSurface.Backend.Graph) && !two.Waking);
+            one.Hide();
+            two.Hide();
+            GlassEffect.Inject = null;
+
+            // A display change or a resume (told on another thread, as the system may): a surface at rest with its graph and path
+            // refused for good is back on both without a frame or a timer; a hidden or disposed one is left alone.
+            foreach (var shownBefore in surfaces) shownBefore.Hide();
+            GlassEffect.Renew();
+            GlassPath.Renew();
+            int uiThread = Environment.CurrentManagedThreadId, asks = 0, elsewhere = 0;
+            void Refuse(string step, bool refuses)
+            {
+                if (step is not ("CreateBrush" or "CreatePathGeometry")) return;
+                asks++;
+                if (Environment.CurrentManagedThreadId != uiThread) elsewhere++;
+                if (refuses) throw new NotSupportedException("refused");
+            }
+            GlassEffect.Inject = GlassPath.Inject = step => Refuse(step, refuses: true);
+            var outline = new GlassSurface.Outline(GlassBoundaryMath.Measure(140, 30, 14, 0, 0, 12, 12, 0), System.Numerics.Matrix3x2.Identity);
+            int watching = GlassComposition.RenewedCount;
+            GlassSurface[] notches = [new(), new(), new()];
+            surfaces.AddRange(notches);
+            foreach (var notch in notches) notch.Show(owner.Handle, bounds, null, outline, 1, asked, out _);
+            bool OnPath(GlassSurface surface) => surface.Clip is CompositionGeometricClip { Geometry: CompositionPathGeometry { Path: not null } };
+            var (resting, away, gone) = (notches[0], notches[1], notches[2]);
+            bool refusedBoth = resting.Applied.Backend == GlassSurface.Backend.Fallback && !OnPath(resting) && !resting.Waking && GlassComposition.RenewedCount == watching + 3;
+            away.Hide();
+            gone.Dispose();
+            bool left = GlassComposition.RenewedCount == watching + 2;
+            void Told()
+            {
+                var telling = new Thread(GlassComposition.Renew);
+                telling.Start();
+                telling.Join();
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            }
+            // Still refused: one look each, and no timer after it.
+            asks = 0;
+            Told();
+            bool bounded2 = asks == 2 && !resting.Waking && resting.Visible;
+            GlassEffect.Inject = GlassPath.Inject = step => Refuse(step, refuses: false);
+            asks = 0;
+            Told();
+            bool lookedAgain = asks == 2 && OnPath(resting) && !OnPath(away) && elsewhere == 0;
+            check($"A display change or a resume brings a surface at rest back on its graph and path, on its own thread, without another frame ({asks} asked)",
+                refusedBoth && bounded2 && lookedAgain && Idle(() => resting.Applied.Backend == GlassSurface.Backend.Graph) && !resting.Waking);
+            asks = 0;
+            Told();
+            check($"A surface with its graph and path, a hidden one and a disposed one are left alone ({asks} asked), and none stays subscribed once disposed",
+                left && asks == 0 && Unwatched());
+            bool Unwatched()
+            {
+                foreach (var notch in notches) notch.Dispose();
+                return GlassComposition.RenewedCount == watching;
+            }
+            GlassEffect.Inject = GlassPath.Inject = null;
 
             // V4 F03: the graph refused, the stepped fallback still follows the clarity: at 0, 50 and 100 it shows (and reports)
             // the clarity's tint opacity and saturation, not the defaults, so the slider's ends keep their meaning after the

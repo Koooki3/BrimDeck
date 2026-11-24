@@ -14,7 +14,7 @@ internal static class GlassPath
     private static IntPtr _factory;
 
     // Test-only fault injection, as GlassEffect.Inject: called before each step that can fail ("CreateFactory",
-    // "CreatePathGeometry", "Open", "Close", "CompositionPath"; "CompositionPathGeometry", "CompositionGeometricClip" and "Path"
+    // "CreatePathGeometry", "Open", "Close", "Interop", "CompositionPath"; "CompositionPathGeometry", "CompositionGeometricClip" and "Path"
     // in GlassSurface) and may throw what the step's HRESULT would.
     internal static Action<string>? Inject { get; set; }
 
@@ -26,6 +26,8 @@ internal static class GlassPath
     private static int _generation, _seenGeneration, _failures;
     private static bool _refused;
     private static long _retryAt;
+    // Since when paths are made again after a failure; null while none was.
+    private static long? _backAt;
 
     // The display, a resume or the capabilities changed: what was refused may work now.
     public static void Renew() => Interlocked.Increment(ref _generation);
@@ -38,6 +40,7 @@ internal static class GlassPath
         _failures = 0;
         _refused = false;
         _retryAt = 0;
+        _backAt = null;
     }
 
     // Whether a path may be made now. Cheap enough for every frame.
@@ -52,11 +55,12 @@ internal static class GlassPath
         get { Sync(); return _refused || _failures == 0 ? null : (int)Math.Clamp(_retryAt - GlassEffect.Clock(), 0, 60_000); }
     }
 
-    // A path made ends a streak of failures only once it has stayed away a while: a step that fails on every other path (new
-    // objects accepted, the replacement refused) still runs out of tries.
+    // A path made ends a streak of failures only once none failed for a while after it (Failed, at the next one: a still panel
+    // makes no path meanwhile): a step that fails on every other path (new objects accepted, the replacement refused) still
+    // runs out of tries.
     public static void Succeeded()
     {
-        if (_failures > 0 && GlassEffect.Clock() - _retryAt >= StreakMs) _failures = 0;
+        if (_failures > 0) _backAt ??= GlassEffect.Clock();
     }
 
     // A step failed, however its HRESULT was mapped to an exception. The next try starts with a new factory (the paths made by
@@ -66,11 +70,14 @@ internal static class GlassPath
         var factory = _factory;
         _factory = IntPtr.Zero;
         if (factory != IntPtr.Zero) Marshal.Release(factory);
+        long now = GlassEffect.Clock();
+        if (_backAt is { } back && now - back >= StreakMs) _failures = 0;
+        _backAt = null;
         _failures++;
         if (_failures > Backoff.Length || error is DllNotFoundException or EntryPointNotFoundException or InvalidCastException
                 or NotImplementedException or NotSupportedException)
             _refused = true;
-        else _retryAt = GlassEffect.Clock() + Backoff[_failures - 1];
+        else _retryAt = now + Backoff[_failures - 1];
     }
 
     // The outline of a layout (in the island's own units) as a composition path. Throws where a step fails (Failed takes it).
@@ -212,15 +219,20 @@ internal static class GlassPath
 
         public Source(IntPtr geometry)
         {
-            Marshal.AddRef(geometry);
+            // Whatever may fail comes before the memory, and the geometry's reference after it: a source that could not be made
+            // holds nothing, and its finalizer, which runs all the same, finds no memory to read.
+            var table = Table.Pointer;
+            Inject?.Invoke("Interop");
             _interop = Marshal.AllocHGlobal(3 * IntPtr.Size);
-            Marshal.WriteIntPtr(_interop, Table.Pointer);
+            Marshal.AddRef(geometry);
+            Marshal.WriteIntPtr(_interop, table);
             Marshal.WriteIntPtr(_interop, IntPtr.Size, IntPtr.Zero);
             Marshal.WriteIntPtr(_interop, 2 * IntPtr.Size, geometry);
         }
 
         ~Source()
         {
+            if (_interop == IntPtr.Zero) return;
             var geometry = Marshal.ReadIntPtr(_interop, 2 * IntPtr.Size);
             if (geometry != IntPtr.Zero) Marshal.Release(geometry);
             Marshal.FreeHGlobal(_interop);
