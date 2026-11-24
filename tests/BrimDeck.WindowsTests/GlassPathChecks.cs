@@ -31,11 +31,13 @@ internal static class GlassPathChecks
     // no geometry, as Microsoft's own sources do (HelloVectors, XAML's CGeometrySource), and takes no reference on anything.
     private static void Contract(Action<string, bool> check, object source)
     {
-        var interop = InteropOf(source);
+        var interop = InteropOf(source, out int found);
+        if (!Got(check, "the interop object of a source", found, interop)) return;
         IntPtr geometry = IntPtr.Zero, own = IntPtr.Zero, other = IntPtr.Zero;
         try
         {
             int got = Get(interop, out geometry);
+            if (!Got(check, "the geometry of a source", got, geometry)) return;
             int references = References(geometry);
             int again = Get(interop, out var second);
             bool counted = second == geometry && References(geometry) == references + 1;
@@ -43,18 +45,21 @@ internal static class GlassPathChecks
             check($"GetGeometry hands out the geometry with a reference of its own (0x{got:X8}, 0x{again:X8})",
                 got == 0 && again == 0 && geometry != IntPtr.Zero && counted && References(geometry) == references);
 
-            Marshal.QueryInterface(interop, in Unknown, out var inside);
+            int asked = Marshal.QueryInterface(interop, in Unknown, out var inside);
             var outer = WinRT.MarshalInspectable<object>.FromManaged(source);
-            Marshal.QueryInterface(outer, in Unknown, out var outside);
-            check("The interop object and the geometry source are one COM object (the same IUnknown)", inside != IntPtr.Zero && inside == outside);
-            Marshal.Release(inside); Marshal.Release(outside); Marshal.Release(outer);
+            int outerAsked = Marshal.QueryInterface(outer, in Unknown, out var outside);
+            check($"The interop object and the geometry source are one COM object (the same IUnknown; 0x{asked:X8}, 0x{outerAsked:X8})",
+                asked == 0 && outerAsked == 0 && inside != IntPtr.Zero && inside == outside);
+            foreach (var held in new[] { inside, outside, outer }) if (held != IntPtr.Zero) Marshal.Release(held);
 
             GetFactory(geometry, out own);
+            if (!Got(check, "the geometry's factory", 0, own)) return;
             int mine = TryGet(interop, own, out var same);
             check($"TryGetGeometryUsingFactory answers its own factory with the geometry (0x{mine:X8})", mine == 0 && same == geometry);
-            if (same != IntPtr.Zero) Marshal.Release(same);
+            if (mine == 0 && same != IntPtr.Zero) Marshal.Release(same);
 
-            D2D1CreateFactory(1, new Guid("06152247-6f50-465a-9245-118bfd3b6007"), IntPtr.Zero, out other);
+            int created = D2D1CreateFactory(1, new Guid("06152247-6f50-465a-9245-118bfd3b6007"), IntPtr.Zero, out other);
+            if (!Got(check, "another factory", created, other)) return;
             int before = References(geometry), factoryBefore = References(other), selfBefore = References(interop);
             int refused = TryGet(interop, other, out var foreign), none = TryGet(interop, IntPtr.Zero, out var nothing);
             check($"TryGetGeometryUsingFactory refuses another factory with E_NOTIMPL and no geometry (0x{refused:X8}, {(foreign == IntPtr.Zero ? "null" : "a geometry")})",
@@ -78,20 +83,24 @@ internal static class GlassPathChecks
     private static void Replacement(Action<string, bool> check, GlassBoundaryMath.Layout layout)
     {
         var old = GlassPath.GeometrySource(layout);
-        var interop = InteropOf(old);
+        var interop = InteropOf(old, out int found);
+        if (!Got(check, "the interop object of a source whose factory is replaced", found, interop)) return;
         IntPtr geometry = IntPtr.Zero, first = IntPtr.Zero, next = IntPtr.Zero, second = IntPtr.Zero;
         try
         {
-            Get(interop, out geometry);
+            int got = Get(interop, out geometry);
+            if (!Got(check, "the geometry of a source whose factory is replaced", got, geometry)) return;
             GetFactory(geometry, out first);
+            if (!Got(check, "the factory that is replaced", 0, first)) return;
             GlassPath.Failed(new COMException("test"));
             next = GlassPath.Geometry(layout);
             GetFactory(next, out second);
+            if (!Got(check, "the factory that replaces it", 0, second)) return;
             int mine = TryGet(interop, first, out var kept), foreign = TryGet(interop, second, out var other);
             check($"A source made before its factory was replaced answers its own factory only (0x{mine:X8}, 0x{foreign:X8})",
                 first != second && mine == 0 && kept == geometry && foreign == NotImplemented && other == IntPtr.Zero);
-            if (kept != IntPtr.Zero) Marshal.Release(kept);
-            if (other != IntPtr.Zero) Marshal.Release(other);
+            if (mine == 0 && kept != IntPtr.Zero) Marshal.Release(kept);
+            if (foreign == 0 && other != IntPtr.Zero) Marshal.Release(other);
         }
         finally
         {
@@ -104,27 +113,31 @@ internal static class GlassPathChecks
     // A reference on the interop object alone keeps all of it alive; the last one gone, the source lets its geometry go.
     private static void Outlives(Action<string, bool> check, GlassBoundaryMath.Layout layout)
     {
-        var interop = Alone(layout);
+        var interop = Alone(layout, out int found);
+        if (!Got(check, "the interop object of a source nothing else holds", found, interop)) return;
         Collect();
         int got = Get(interop, out var geometry);
-        double area = got == 0 ? GlassPath.Area(geometry) : 0;
-        check($"The interop object outlives its managed source while a reference is held (0x{got:X8}, area {area:0.0})", got == 0 && area > 3000);
+        if (!Got(check, "the geometry of a source held by its interop object alone", got, geometry)) { Marshal.Release(interop); return; }
+        double area = GlassPath.Area(geometry);
+        check($"The interop object outlives its managed source while a reference is held (area {area:0.0})", area > 3000);
         int held = References(geometry);
         Marshal.Release(interop);
         Collect();
         int left = References(geometry);
         check($"The last reference gone, the source lets its geometry go ({held} references before, {left} after)", held == 2 && left == 1);
-        if (geometry != IntPtr.Zero) Marshal.Release(geometry);
+        Marshal.Release(geometry);
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        static IntPtr Alone(GlassBoundaryMath.Layout layout) => InteropOf(GlassPath.GeometrySource(layout));
+        static IntPtr Alone(GlassBoundaryMath.Layout layout, out int result) => InteropOf(GlassPath.GeometrySource(layout), out result);
     }
 
     // The compositor may ask from its own threads: queries, requests and releases at once leave the counts as they were.
     private static void Concurrent(Action<string, bool> check, object source)
     {
-        var interop = InteropOf(source);
-        Get(interop, out var geometry);
+        var interop = InteropOf(source, out int found);
+        if (!Got(check, "the interop object of a source asked from several threads", found, interop)) return;
+        int first = Get(interop, out var geometry);
+        if (!Got(check, "the geometry of a source asked from several threads", first, geometry)) { Marshal.Release(interop); return; }
         int before = References(interop), geometryBefore = References(geometry), wrong = 0;
         var threads = Enumerable.Range(0, 8).Select(_ => new Thread(() =>
         {
@@ -318,6 +331,7 @@ internal static class GlassPathChecks
             Fresh();
             var sample = GlassPath.Geometry(Notch(160));
             GetFactory(sample, out var factory);
+            if (!Got(check, "the factory of the paths that fail", 0, factory)) { Marshal.Release(sample); return; }
             Pump(); Collect(); Pump(); Collect();
             int alone = References(factory);
             var second = GlassPath.Geometry(Notch(161));
@@ -362,6 +376,7 @@ internal static class GlassPathChecks
         {
             var sample = GlassPath.Geometry(GlassBoundaryMath.Measure(150, 30, 14, 0, 0, 12, 12, 0));
             GetFactory(sample, out var factory);
+            if (!Got(check, "the factory of the paths that are replaced", 0, factory)) { Marshal.Release(sample); return; }
             Collect();
             int alone = References(factory);
             bool shown = true;
@@ -404,12 +419,21 @@ internal static class GlassPathChecks
     }
 
     // The source's IGeometrySource2DInterop, with a reference the caller releases.
-    private static IntPtr InteropOf(object source)
+    private static IntPtr InteropOf(object source, out int result)
     {
         var outer = WinRT.MarshalInspectable<object>.FromManaged(source);
-        Marshal.ThrowExceptionForHR(Marshal.QueryInterface(outer, in Interop, out var interop));
+        result = Marshal.QueryInterface(outer, in Interop, out var interop);
         Marshal.Release(outer);
         return interop;
+    }
+
+    // What a check goes on from: where a call failed or left nothing, that is a failed check with its HRESULT, and what depends
+    // on it is left out (nothing is called through it).
+    private static bool Got(Action<string, bool> check, string what, int result, IntPtr value)
+    {
+        if (result == 0 && value != IntPtr.Zero) return true;
+        check($"Asking for {what} answers (0x{result:X8}, {(value == IntPtr.Zero ? "nothing" : "a pointer")})", false);
+        return false;
     }
 
     private static int References(IntPtr instance)
