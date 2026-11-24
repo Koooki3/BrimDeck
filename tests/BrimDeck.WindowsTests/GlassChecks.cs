@@ -484,6 +484,53 @@ internal static class GlassChecks
             k.Hide();
             GlassEffect.Inject = null;
 
+            // Hidden before its timer ticked, again and again: shown for good it still looks again (a loading graph, a loading
+            // fallback step, a graph backing off), a bounded number of times, and shows what then loads.
+            int Ticks(GlassSurface surface)
+            {
+                int ticks = 0;
+                for (; surface.Waking && ticks < 50; ticks++) surface.Tick();
+                return ticks;
+            }
+            bool Again(GlassSurface surface, GlassSurface.Material material)
+            {
+                for (int i = 0; i < 12; i++) { surface.Hide(); if (surface.Waking || !surface.Show(owner.Handle, bounds, 8, 1, material, out _)) return false; }
+                return surface.Waking;
+            }
+            GlassEffect.Renew();
+            GlassEffect.InjectStatus = (graph, status) => graph ? CompositionEffectFactoryLoadStatus.Pending : status;
+            var m = Open(asked, out _);
+            bool graphLooks = Again(m, asked);
+            int graphTicks = Ticks(m);
+            bool graphAgain = Again(m, asked);
+            GlassEffect.InjectStatus = null;
+            check($"A surface hidden before it looked again at its loading graph, again and again, still looks ({graphTicks} times), and shows the graph without another frame",
+                graphLooks && graphTicks == 4 && graphAgain && Idle(() => m.Applied.Backend == GlassSurface.Backend.Graph) && !m.Waking);
+            m.Hide();
+            GlassEffect.Renew();
+            GlassEffect.CanTryGraph(compositor);
+            GlassEffect.RefuseGraph();
+            GlassEffect.InjectStatus = (graph, status) => graph ? status : CompositionEffectFactoryLoadStatus.Pending;
+            var late = new GlassSurface.Material(.71, .12, .42);
+            var n = Open(late, out _);
+            bool stepLooks = Again(n, late);
+            int stepTicks = Ticks(n);
+            bool stepAgain = Again(n, late);
+            GlassEffect.InjectStatus = null;
+            check($"A surface hidden before it looked again at its fallback step, again and again, still looks ({stepTicks} times), and shows the step without another frame",
+                stepLooks && stepTicks == 4 && stepAgain && Idle(() => n.Applied.Backend == GlassSurface.Backend.Fallback) && !n.Waking);
+            n.Hide();
+            GlassEffect.Renew();
+            GlassEffect.Inject = step => { if (step == "CreateBrush") throw new COMException("device removed", unchecked((int)0x887A0005)); };
+            var o = Open(asked, out _);
+            bool retryLooks = Again(o, asked) && GlassEffect.GraphState == GlassBackendState.Recovering;
+            int retryTicks = Ticks(o);
+            bool retryAgain = Again(o, asked);
+            GlassEffect.Inject = null;
+            check($"A surface hidden before its graph's backoff passed, again and again, still looks ({retryTicks} times), and shows the graph without another frame",
+                retryLooks && retryTicks == 3 && retryAgain && Idle(() => o.Applied.Backend == GlassSurface.Backend.Graph) && !o.Waking);
+            o.Hide();
+
             // V4 F03: the graph refused, the stepped fallback still follows the clarity: at 0, 50 and 100 it shows (and reports)
             // the clarity's tint opacity and saturation, not the defaults, so the slider's ends keep their meaning after the
             // glass degrades; each weight within its step of what was asked.

@@ -238,7 +238,9 @@ internal sealed class GlassSurface : IDisposable
     }
 
     private void StopPoll() => _poll?.Stop();
-    private void PollTick(object? sender, EventArgs e) { StopPoll(); Poll(); }
+    private void PollTick(object? sender, EventArgs e) => Tick();
+    // The timer's tick (or a test's, in its place).
+    internal void Tick() { StopPoll(); Poll(); }
 
     // Looks again at what the surface waits for (the timer, or a test with its own clock).
     internal void Poll()
@@ -490,6 +492,8 @@ internal sealed class GlassSurface : IDisposable
         if (!_visible) return;
         _visible = false;
         StopPoll();
+        // Shown again, it looks again as often as the first time: the looks it never came to were not had.
+        _polls = _stepPolls = _retryWakes = 0;
         _pathWait?.Stop();
         if (_window is { } window) ShowWindow(window.Handle, 0);
     }
