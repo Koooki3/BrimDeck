@@ -265,6 +265,36 @@ internal static class GlassPathChecks
             while (!Path(resting) && watch.ElapsedMilliseconds < 3000) { Pump(); clock = from + watch.ElapsedMilliseconds; }
             check($"A path that failed once is back without another frame ({watch.ElapsedMilliseconds} ms), and the timer stops", waiting && Path(resting) && !resting.Waking);
 
+            // A path that came back and stayed (nothing made meanwhile) ends the streak: failures minutes apart never add up to
+            // a refusal. The same failures with less than ten seconds between them, each path accepted in between, do.
+            (int Failed, bool Ready) Streak(int stayed, bool others)
+            {
+                Fresh();
+                var surface = New();
+                int failed = 0, width = 300;
+                for (int i = 0; i < 8; i++)
+                {
+                    bool fail = true;
+                    GlassPath.Inject = at => { if (at == "Close" && fail) { fail = false; failed++; throw new COMException("once", unchecked((int)0x88990011)); } };
+                    Show(surface, ++width, out _);
+                    clock += 1000;
+                    Show(surface, width, out _);
+                    clock += stayed;
+                    // Another panel's path made just then neither starts the stay over nor ends the streak early.
+                    if (others) { clock--; Show(New(), 150, out _); clock++; }
+                }
+                return (failed, Path(surface));
+            }
+            var far = Streak(120_000, others: false);
+            check($"8 failures minutes apart, the path back each time, never refuse the path ({far})", far == (8, true));
+            var near = Streak(10_000, others: true);
+            check($"8 failures, the path back for ten seconds each time, never refuse the path ({near})", near == (8, true));
+            var soon = Streak(9_999, others: true);
+            check($"8 failures, the path back for less each time, run out of tries ({soon})", soon == (4, false));
+            var often = Streak(0, others: false);
+            check($"Failures right after each other, the path back in between, run out of tries ({often})", often == (4, false));
+            GlassPath.Inject = null;
+
             // Refused for good: no timer, no try.
             Fresh();
             var refused = New();
