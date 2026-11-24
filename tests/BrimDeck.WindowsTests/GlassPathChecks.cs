@@ -200,6 +200,7 @@ internal static class GlassPathChecks
             ("Open", new COMException("wrong state", unchecked((int)0x88990001)), false),
             ("Close", new COMException("bad number", unchecked((int)0x88990011)), false),
             ("Close", new OutOfMemoryException(), false),
+            ("Interop", new OutOfMemoryException(), false),
             ("CompositionPath", new COMException("refused", unchecked((int)0x80004005)), false),
             ("CompositionPath", new NotSupportedException("refused"), true),
             ("CompositionPathGeometry", new OutOfMemoryException(), false),
@@ -287,18 +288,21 @@ internal static class GlassPathChecks
             Fresh();
             var sample = GlassPath.Geometry(Notch(160));
             GetFactory(sample, out var factory);
+            Pump(); Collect(); Pump(); Collect();
             int alone = References(factory);
             var second = GlassPath.Geometry(Notch(161));
             int withOne = References(factory);
             Marshal.Release(second);
             int after = References(factory);
-            foreach (string step in new[] { "Open", "Close" })
+            foreach (string step in new[] { "Open", "Close", "Interop" })
             {
                 GlassPath.Inject = at => { if (at == step) throw new COMException("refused", unchecked((int)0x88990001)); };
-                for (int i = 0; i < 1000; i++) try { GlassPath.Geometry(Notch(160 + i % 40)); } catch (COMException) { }
+                for (int i = 0; i < 1000; i++) try { GlassPath.GeometrySource(Notch(160 + i % 40)); } catch (COMException) { }
             }
+            // The sources that could not be made are finalized too (one reading memory it never got would end the process here).
+            Collect();
             int left = References(factory);
-            check($"1000 paths failed at Open and 1000 at Close leave nothing holding the factory ({alone} references, {withOne} with a path more, {after} without, {left} after)",
+            check($"1000 paths failed at Open, 1000 at Close and 1000 at their source's memory leave nothing holding the factory ({alone} references, {withOne} with a path more, {after} without, {left} after)",
                 withOne > alone && after == alone && left == alone);
             Marshal.Release(sample);
             Marshal.Release(factory);

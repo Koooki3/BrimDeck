@@ -14,7 +14,7 @@ internal static class GlassPath
     private static IntPtr _factory;
 
     // Test-only fault injection, as GlassEffect.Inject: called before each step that can fail ("CreateFactory",
-    // "CreatePathGeometry", "Open", "Close", "CompositionPath"; "CompositionPathGeometry", "CompositionGeometricClip" and "Path"
+    // "CreatePathGeometry", "Open", "Close", "Interop", "CompositionPath"; "CompositionPathGeometry", "CompositionGeometricClip" and "Path"
     // in GlassSurface) and may throw what the step's HRESULT would.
     internal static Action<string>? Inject { get; set; }
 
@@ -212,15 +212,20 @@ internal static class GlassPath
 
         public Source(IntPtr geometry)
         {
-            Marshal.AddRef(geometry);
+            // Whatever may fail comes before the memory, and the geometry's reference after it: a source that could not be made
+            // holds nothing, and its finalizer, which runs all the same, finds no memory to read.
+            var table = Table.Pointer;
+            Inject?.Invoke("Interop");
             _interop = Marshal.AllocHGlobal(3 * IntPtr.Size);
-            Marshal.WriteIntPtr(_interop, Table.Pointer);
+            Marshal.AddRef(geometry);
+            Marshal.WriteIntPtr(_interop, table);
             Marshal.WriteIntPtr(_interop, IntPtr.Size, IntPtr.Zero);
             Marshal.WriteIntPtr(_interop, 2 * IntPtr.Size, geometry);
         }
 
         ~Source()
         {
+            if (_interop == IntPtr.Zero) return;
             var geometry = Marshal.ReadIntPtr(_interop, 2 * IntPtr.Size);
             if (geometry != IntPtr.Zero) Marshal.Release(geometry);
             Marshal.FreeHGlobal(_interop);
