@@ -54,6 +54,19 @@ public sealed partial class UsageService
                     if (qoder.Reading is null) { qoder.Reading = new(snapshot.Metrics.ToList(), snapshot.Plan, false); qoder.Time = readAt; qoder.Restored = true; }
                 continue;
             }
+            // Antigravity keeps its last valid reading across desktop closures and restarts until windows reset or expire.
+            if (snapshot.Id == ProviderId.Antigravity && !snapshot.Configurations.Contains(ProviderCatalog.LocalQuota)
+                && snapshot.Metrics.Count > 0 && snapshot.QuotaTime is { } agReadAt)
+            {
+                lock (_antigravityState)
+                    if (_antigravityState.Reading is null)
+                    {
+                        var planSource = snapshot.Plan.Length > 0 ? Loc.T("Antigravity 本地账户服务", "Antigravity local account service") : "";
+                        _antigravityState.Reading = new(agReadAt, snapshot.Metrics.ToList(), snapshot.Plan, planSource,
+                            snapshot.Source == "Antigravity CLI" ? snapshot.Source : "Antigravity", FromCli: snapshot.Source == "Antigravity CLI", Restored: true);
+                    }
+                continue;
+            }
             if (KeepsLastReading(snapshot.Id) && !snapshot.Configurations.Contains(ProviderCatalog.LocalQuota) && snapshot.Metrics.Count > 0 && snapshot.QuotaTime is { } time)
             {
                 var source = ProviderCatalog.Name(snapshot.Id) + Loc.T(" 账户", " account");

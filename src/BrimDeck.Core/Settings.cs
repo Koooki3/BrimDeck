@@ -152,8 +152,8 @@ public sealed class AppEntry
     // Claude and Grok Bot rows only: read the quota from the account API. When off, the row sends no request and shows the
     // quota the desktop app (Claude or Grok Bot) recorded on this PC. Each row has its own choice.
     public bool QuotaOnline { get; set; } = true;
-    // Antigravity rows only: when neither the Antigravity app nor Antigravity IDE gives the quota, run "agy -p /usage" at most
-    // every five minutes and show what the signed-in Antigravity CLI reports. Antigravity is read once for all its rows, so
+    // Antigravity rows only: when neither the Antigravity app nor Antigravity IDE gives the quota, run "agy -p /usage" once
+    // per refresh and show what the signed-in Antigravity CLI reports. Antigravity is read once for all its rows, so
     // the CLI is run while any enabled row has this on. Off by default.
     public bool AntigravityCli { get; set; }
     // New API, Sub2API and custom rows: also send requests, and so the API key, over plain HTTP to any address, such as a
