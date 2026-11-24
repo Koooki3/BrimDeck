@@ -187,9 +187,11 @@ internal static class GlassEffect
         catch (Exception error) when (Expected(error)) { return CompositionEffectFactoryLoadStatus.Other; }
     }
 
-    // A graph brush presented (its factory loaded and its first weights were taken): the failure streak starts again.
-    public static void Succeeded()
+    // A graph brush presented (its factory loaded and its first weights were taken): the failure streak starts again. A brush of
+    // a factory let go since still draws, but says nothing of the factory in use or of the backoff before the next one.
+    public static void Succeeded(CompositionBrush brush)
     {
+        if (!Owners.TryGetValue(brush, out var factory) || !ReferenceEquals(factory, _graph)) return;
         _graphFailures = 0;
         _retryAt = 0;
         if (!_graphRefused) GraphState = GlassBackendState.Ready;

@@ -364,6 +364,51 @@ internal static class GlassChecks
             Present(e, asked);
             check("After the backoff the refused surface is back on the graph", Settle(e, GlassSurface.Backend.Graph));
 
+            // Two surfaces loading the same factory: the first one's first frame is refused, so the factory is let go and the
+            // backoff starts; the second presents its brush of it all the same, and ends neither the backoff nor the streak.
+            void Two(out GlassSurface one, out GlassSurface two, out bool drawn)
+            {
+                GlassEffect.Inject = null;
+                GlassEffect.Renew();
+                if (GlassEffect.Graph(compositor) is { } made) { GlassEffect.Failed(made, permanent: false); GlassEffect.Release(made); }
+                GlassEffect.Renew();
+                bool held = true;
+                var actual = CompositionEffectFactoryLoadStatus.Pending;
+                GlassEffect.InjectStatus = (graph, status) =>
+                {
+                    if (!graph) return status;
+                    actual = status;
+                    return held ? CompositionEffectFactoryLoadStatus.Pending : status;
+                };
+                one = Open(asked, out _);
+                two = Open(asked, out _);
+                var loads = System.Diagnostics.Stopwatch.StartNew();
+                while (actual != CompositionEffectFactoryLoadStatus.Success && loads.ElapsedMilliseconds < 2000) { Pump(); one.Poll(); }
+                held = false;
+                bool refuse = true;
+                GlassEffect.Inject = step =>
+                {
+                    if (step == "Present" && refuse) { refuse = false; throw new COMException("frame refused", unchecked((int)0x8899000C)); }
+                };
+                one.Poll();
+                two.Poll();
+                GlassEffect.InjectStatus = null;
+                drawn = !refuse && two.Applied.Backend == GlassSurface.Backend.Graph && one.Applied.Backend == GlassSurface.Backend.Fallback;
+            }
+            Two(out var one, out var two, out bool twoDrawn);
+            bool backing = GlassEffect.GraphState == GlassBackendState.Recovering && GlassEffect.RetryAt == clock + 100 && !GlassEffect.CanTryGraph(compositor);
+            clock += 99;
+            bool waits = !GlassEffect.CanTryGraph(compositor);
+            check($"A brush of a factory let go presents, but ends no backoff of the one after it ({two.Applied.Backend}, {GlassEffect.GraphState})",
+                twoDrawn && backing && waits && GlassEffect.FactoryLive(two.Brush));
+            clock += 1;
+            one.Poll();
+            check($"The factory made after the backoff ends it once it presents ({GlassEffect.GraphState})",
+                Settle(one, GlassSurface.Backend.Graph) && GlassEffect.GraphState == GlassBackendState.Ready && GlassEffect.RetryAt == 0);
+            one.Hide();
+            two.Hide();
+            GlassEffect.Inject = null;
+
             // Pending for good: the loading limit turns it into a transient failure (no endless wait).
             GlassEffect.Inject = null;
             GlassEffect.Renew();

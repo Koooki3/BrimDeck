@@ -118,7 +118,7 @@ internal sealed class GlassSurface : IDisposable
                 {
                     GlassEffect.Present(graph, material.DarkVeil, material.LightVeil, material.Palette, material.Tint, material.Saturation);
                     // Only a brush that presented has worked: a load alone ends no backoff.
-                    if (!ReferenceEquals(sprite.Brush, graph)) { sprite.Brush = graph; GlassEffect.Succeeded(); }
+                    if (!ReferenceEquals(sprite.Brush, graph)) { sprite.Brush = graph; GlassEffect.Succeeded(graph); }
                     ReleaseFallback();
                     return _applied = new(Backend.Graph, material);
                 }
