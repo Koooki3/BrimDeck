@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Interop;
 using BrimDeck;
 using BrimDeck.Core;
+using BrimDeck.Native;
 using Windows.UI.Composition;
 
 // Liquid glass on the real compositor: the persistent graph compiles once, takes its two amounts on any number of brushes and
@@ -125,9 +126,26 @@ internal static class GlassChecks
     // With a notch: its path refused, so the glass is cut by the rounded approximation (V5 N02).
     private static void PassesClicks(Action<string, bool> check, bool notch)
     {
-        var area = SystemParameters.WorkArea;
-        double dpi = System.Windows.Media.VisualTreeHelper.GetDpi(new System.Windows.Controls.Border()).DpiScaleX;
-        int right = (int)(area.Right * dpi), bottom = (int)(area.Bottom * dpi);
+        var (right, bottom) = Corner();
+        var points = new[] { (X: right - 150, Y: bottom - 70, Where: "beside the outline"), (X: right - 80, Y: bottom - 40, Where: "on the outline") };
+        // The window root at each point, asked from another thread.
+        IntPtr[] Hits()
+        {
+            var hits = new IntPtr[points.Length];
+            var asking = new Thread(() =>
+            {
+                for (int i = 0; i < hits.Length; i++) hits[i] = GetAncestor(WindowFromPoint(new Point32 { X = points[i].X, Y = points[i].Y }), 2);
+            });
+            asking.Start();
+            asking.Join();
+            return hits;
+        }
+        // What lies beneath: a window of this check's own, taking clicks, above whatever else is there and never activated.
+        var beneath = new HwndSource(new HwndSourceParameters("BrimDeck glass click target")
+        {
+            WindowStyle = unchecked((int)0x90000000), ExtendedWindowStyle = 0x08 | 0x80 | 0x08000000,
+            PositionX = right - 160, PositionY = bottom - 80, Width = 160, Height = 80
+        });
         // A small panel window in the corner of the work area, topmost and passing clicks (layered, transparent and empty), as
         // the panel's window is where it draws nothing; the glass is nearly invisible (opacity 0.01) and shown for a moment.
         var owner = new HwndSource(new HwndSourceParameters("BrimDeck glass click checks")
@@ -138,6 +156,8 @@ internal static class GlassChecks
         var surface = new GlassSurface();
         try
         {
+            Pump();
+            bool ready = Hits().All(hit => hit == beneath.Handle);
             var bounds = new Int32Rect(right - 120, bottom - 60, 80, 40);
             if (notch) GlassPath.Inject = step => { if (step == "CreatePathGeometry") throw new COMException("refused", unchecked((int)0x887A0005)); };
             bool shown = notch
@@ -145,29 +165,14 @@ internal static class GlassChecks
                     new GlassSurface.Material(.4, .3, .5), out _)
                 : surface.Show(owner.Handle, bounds, 8, .01, new GlassSurface.Material(.4, .3, .5), out _);
             Pump();
-            IntPtr glass = IntPtr.Zero;
-            EnumThreadWindows(GetCurrentThreadId(), (window, _) =>
-            {
-                var title = new System.Text.StringBuilder(64);
-                GetWindowText(window, title, 64);
-                if (IsWindowVisible(window) && title.ToString() == "BrimDeck glass") glass = window;
-                return glass == IntPtr.Zero;
-            }, IntPtr.Zero);
+            var glass = GlassWindow();
             GetWindowRect(glass, out var frame);
-            var points = new[] { (X: right - 150, Y: bottom - 70, Where: "beside the outline"), (X: right - 80, Y: bottom - 40, Where: "on the outline") };
-            var found = new List<string>();
-            bool covered = true, passed = true;
-            foreach (var (x, y, where) in points)
-            {
-                covered &= x >= frame.Left && x < frame.Right && y >= frame.Top && y < frame.Bottom;
-                IntPtr hit = IntPtr.Zero;
-                var asking = new Thread(() => hit = GetAncestor(WindowFromPoint(new Point32 { X = x, Y = y }), 2));
-                asking.Start(); asking.Join();
-                passed &= hit != glass && hit != owner.Handle;
-                found.Add($"{where}: {(hit == glass ? "the glass window" : hit == owner.Handle ? "the panel window" : "beneath")}");
-            }
-            check($"The glass window{(notch ? " of a notch without its path" : "")} lets clicks through to what lies beneath, beside the outline and on it ({string.Join("; ", found)})",
-                shown && glass != IntPtr.Zero && covered && passed);
+            bool covered = points.All(p => p.X >= frame.Left && p.X < frame.Right && p.Y >= frame.Top && p.Y < frame.Bottom) && Above(glass, beneath.Handle);
+            string Name(IntPtr hit) => hit == beneath.Handle ? "the window beneath" : hit == IntPtr.Zero ? "nothing" : hit == glass ? "the glass window"
+                : hit == owner.Handle ? "the panel window" : "another window";
+            var hits = Hits();
+            check($"The glass window{(notch ? " of a notch without its path" : "")} lets clicks through to what lies beneath, beside the outline and on it ({string.Join("; ", points.Zip(hits, (p, hit) => $"{p.Where}: {Name(hit)}"))})",
+                ready && shown && glass != IntPtr.Zero && covered && hits.All(hit => hit == beneath.Handle));
         }
         finally
         {
@@ -175,9 +180,27 @@ internal static class GlassChecks
             GlassPath.Renew();
             surface.Dispose();
             owner.Dispose();
+            beneath.Dispose();
         }
     }
 
+    // The bottom right of the work area of a display, one that is not the main one where there is one (physical pixels).
+    private static (int Right, int Bottom) Corner()
+    {
+        var displays = Displays.Current();
+        var work = WindowsHost.MonitorScreen((displays.FirstOrDefault(d => !d.Primary) ?? displays[0]).Handle)!.Value.Work;
+        return ((int)work.Right, (int)work.Bottom);
+    }
+
+    // Whether a window is above another one in the z-order.
+    private static bool Above(IntPtr upper, IntPtr lower)
+    {
+        for (var window = lower; window != IntPtr.Zero; window = GetWindow(window, 3)) // GW_HWNDPREV
+            if (window == upper) return true;
+        return false;
+    }
+
+    [DllImport("user32")] private static extern IntPtr GetWindow(IntPtr window, uint relation);
     private delegate bool ThreadWindows(IntPtr window, IntPtr data);
     [StructLayout(LayoutKind.Sequential)] private struct Point32 { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct Rect32 { public int Left, Top, Right, Bottom; }
