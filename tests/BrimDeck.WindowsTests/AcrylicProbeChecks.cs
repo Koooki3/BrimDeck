@@ -27,6 +27,16 @@ internal static class AcrylicProbeChecks
         check($"The glass probe reuses its GDI objects across readings and releases them ({before} -> {afterFirst} -> {afterMany} -> {afterDispose}, {read} readings)",
             read == 201 && afterMany == afterFirst && afterFirst - before <= 2 && afterDispose <= before && disposedReadsNothing);
 
+        // V5 S02: an area read tells when the screen was read, inside the call; its area's grid comes with it.
+        using (var areaProbe = new AcrylicProbe())
+        {
+            long called = Stopwatch.GetTimestamp();
+            var area = areaProbe.ReadArea(island, display);
+            long answered = Stopwatch.GetTimestamp();
+            check("The glass probe's area read tells when it began and ended reading the screen",
+                area is { Scene: not null } timed && called <= timed.Started && timed.Started < timed.Ended && timed.Ended <= answered);
+        }
+
         Action one = () => { }, two = () => { };
         bool hookedBefore = GlassHintBroker.Hooked;
         GlassHintBroker.Subscribe(one);

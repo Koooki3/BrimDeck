@@ -18,7 +18,7 @@ internal sealed class AcrylicProbe : IDisposable
 {
     // Sides: the mean luma of the left, right, top and bottom strips (NaN for a strip off the display), for the rim's light.
     public readonly record struct Reading(double Mean, double Bright, double Dark, double Changed, double Median, double MiddleMean,
-        (double Left, double Right, double Top, double Bottom) Sides = default, GlassSceneSnapshot? Scene = null, long Started = 0)
+        (double Left, double Right, double Top, double Bottom) Sides = default, GlassSceneSnapshot? Scene = null, long Started = 0, long Ended = 0)
     {
         // The brightest and darkest the glass has to answer for, by its openness: the collapsed island's ring is small, so one
         // bright neighbour would hold its 90th percentile up; the capsule answers to the ring's middle, the open panel (a
@@ -85,8 +85,8 @@ internal sealed class AcrylicProbe : IDisposable
     }
 
     // The area itself (the part of the desktop an opening panel is about to cover, read before it does), shrunk to at most Cells a
-    // side; its Changed is 0 and its Sides NaN but the first; its Scene the area's grid (GlassSceneSnapshot), Started when the
-    // screen was read (Stopwatch.GetTimestamp, finer than the 15.6 ms tick so a read and a frame are ordered). Nothing is read once cancelled (an opening that has ended).
+    // side; its Changed is 0 and its Sides NaN but the first; its Scene the area's grid (GlassSceneSnapshot), Started and Ended
+    // around the reading of the screen (Stopwatch.GetTimestamp, finer than the 15.6 ms tick so a read and a layout are ordered). Nothing is read once cancelled (an opening that has ended).
     public Reading? ReadArea(Int32Rect area, Int32Rect display, CancellationToken cancel = default)
     {
         if (cancel.IsCancellationRequested || Interlocked.CompareExchange(ref _state, 1, 0) != 0) return null;
@@ -116,7 +116,7 @@ internal sealed class AcrylicProbe : IDisposable
     {
         var (island, display, gap, band) = key;
         int valid = 0, count = 0, moved = 0, gridWidth = 0, gridHeight = 0;
-        long started = 0;
+        long started = 0, ended = 0;
         var buffers = _buffers ??= new Buffers();
         var sideSum = buffers.SideSum;
         var sideCount = buffers.SideCount;
@@ -159,6 +159,7 @@ internal sealed class AcrylicProbe : IDisposable
                     sideSum[i] += luma; sideCount[i]++;
                 }
             }
+            ended = System.Diagnostics.Stopwatch.GetTimestamp();
         }
         finally { ReleaseDC(IntPtr.Zero, screen); }
         if (count == 0) { _lastCount = 0; return null; }
@@ -175,7 +176,7 @@ internal sealed class AcrylicProbe : IDisposable
         for (int i = 0; i < count; i++) sum += lumas[i];
         double Side(int i) => sideCount[i] > 0 ? sideSum[i] / sideCount[i] : double.NaN;
         return new Reading(sum / count, lumas[(int)(count * Tail)], lumas[(int)(count * (1 - Tail))],
-            changed, lumas[count / 2], GlassAppearance.SortedRangeMean(lumas.AsSpan(0, count)), (Side(0), Side(1), Side(2), Side(3)), scene, started);
+            changed, lumas[count / 2], GlassAppearance.SortedRangeMean(lumas.AsSpan(0, count)), (Side(0), Side(1), Side(2), Side(3)), scene, started, ended);
     }
 
     // The memory DC with the DIB section selected, made once; false (and nothing kept) when any step fails.
