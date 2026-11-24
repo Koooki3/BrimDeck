@@ -579,6 +579,59 @@ internal static class GlassChecks
             two.Hide();
             GlassEffect.Inject = null;
 
+            // A display change or a resume (told on another thread, as the system may): a surface at rest with its graph and path
+            // refused for good is back on both without a frame or a timer; a hidden or disposed one is left alone.
+            foreach (var shownBefore in surfaces) shownBefore.Hide();
+            GlassEffect.Renew();
+            GlassPath.Renew();
+            int uiThread = Environment.CurrentManagedThreadId, asks = 0, elsewhere = 0;
+            void Refuse(string step, bool refuses)
+            {
+                if (step is not ("CreateBrush" or "CreatePathGeometry")) return;
+                asks++;
+                if (Environment.CurrentManagedThreadId != uiThread) elsewhere++;
+                if (refuses) throw new NotSupportedException("refused");
+            }
+            GlassEffect.Inject = GlassPath.Inject = step => Refuse(step, refuses: true);
+            var outline = new GlassSurface.Outline(GlassBoundaryMath.Measure(140, 30, 14, 0, 0, 12, 12, 0), System.Numerics.Matrix3x2.Identity);
+            int watching = GlassComposition.RenewedCount;
+            GlassSurface[] notches = [new(), new(), new()];
+            surfaces.AddRange(notches);
+            foreach (var notch in notches) notch.Show(owner.Handle, bounds, null, outline, 1, asked, out _);
+            bool OnPath(GlassSurface surface) => surface.Clip is CompositionGeometricClip { Geometry: CompositionPathGeometry { Path: not null } };
+            var (resting, away, gone) = (notches[0], notches[1], notches[2]);
+            bool refusedBoth = resting.Applied.Backend == GlassSurface.Backend.Fallback && !OnPath(resting) && !resting.Waking && GlassComposition.RenewedCount == watching + 3;
+            away.Hide();
+            gone.Dispose();
+            bool left = GlassComposition.RenewedCount == watching + 2;
+            void Told()
+            {
+                var telling = new Thread(GlassComposition.Renew);
+                telling.Start();
+                telling.Join();
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            }
+            // Still refused: one look each, and no timer after it.
+            asks = 0;
+            Told();
+            bool bounded2 = asks == 2 && !resting.Waking && resting.Visible;
+            GlassEffect.Inject = GlassPath.Inject = step => Refuse(step, refuses: false);
+            asks = 0;
+            Told();
+            bool lookedAgain = asks == 2 && OnPath(resting) && !OnPath(away) && elsewhere == 0;
+            check($"A display change or a resume brings a surface at rest back on its graph and path, on its own thread, without another frame ({asks} asked)",
+                refusedBoth && bounded2 && lookedAgain && Idle(() => resting.Applied.Backend == GlassSurface.Backend.Graph) && !resting.Waking);
+            asks = 0;
+            Told();
+            check($"A surface with its graph and path, a hidden one and a disposed one are left alone ({asks} asked), and none stays subscribed once disposed",
+                left && asks == 0 && Unwatched());
+            bool Unwatched()
+            {
+                foreach (var notch in notches) notch.Dispose();
+                return GlassComposition.RenewedCount == watching;
+            }
+            GlassEffect.Inject = GlassPath.Inject = null;
+
             // V4 F03: the graph refused, the stepped fallback still follows the clarity: at 0, 50 and 100 it shows (and reports)
             // the clarity's tint opacity and saturation, not the defaults, so the slider's ends keep their meaning after the
             // glass degrades; each weight within its step of what was asked.

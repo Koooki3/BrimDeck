@@ -62,6 +62,7 @@ internal sealed class GlassSurface : IDisposable
     private int _stepPolls, _retryWakes;
     private long _wokenFor;
     private bool _visible, _disposed;
+    private Dispatcher? _dispatcher;
     internal bool Visible => _visible;
     internal AppliedMaterial Applied => _visible ? _applied : default;
     // Diagnostics and tests: the brush the glass draws with now, and the clip it is cut by.
@@ -253,6 +254,16 @@ internal sealed class GlassSurface : IDisposable
         catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException) { Dispose(); }
     }
 
+    // What was refused may work now (GlassComposition.Renew, from any thread): looked at again on the surface's own thread, a
+    // graph that backs off or was refused as well as a path, each with its looks to come anew.
+    private void Renewed() => _dispatcher?.BeginInvoke(DispatcherPriority.Background, () =>
+    {
+        if (_disposed || !_visible) return;
+        _polls = _stepPolls = _retryWakes = 0;
+        Tick();
+        TryPath();
+    });
+
     // A rounded rectangle filling the bounds (the glass checks).
     public bool Show(IntPtr owner, Int32Rect bounds, int radius, double opacity, Material material, out AppliedMaterial applied)
         => Show(owner, bounds, new GlassBoundaryMath.GlassClip(new(0, 0, bounds.Width, bounds.Height, radius)), null, opacity, material, out applied);
@@ -292,6 +303,8 @@ internal sealed class GlassSurface : IDisposable
                 _sprite.Clip = _roundedClip = compositor.CreateGeometricClip(_outline);
                 _frame.Children.InsertAtTop(_sprite);
                 _target.Root = _frame;
+                _dispatcher = Dispatcher.CurrentDispatcher;
+                GlassComposition.Renewed += Renewed;
             }
 
             applied = Apply(material);
@@ -429,9 +442,11 @@ internal sealed class GlassSurface : IDisposable
         _pathWait.Start();
     }
 
-    private void PathWaitTick(object? sender, EventArgs e)
+    private void PathWaitTick(object? sender, EventArgs e) => TryPath();
+
+    private void TryPath()
     {
-        _pathWait!.Stop();
+        _pathWait?.Stop();
         if (_disposed || !_visible || _shape is null) return;
         try { Place(Frame(_owner, _need)); }
         catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException) { Dispose(); }
@@ -504,6 +519,7 @@ internal sealed class GlassSurface : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        GlassComposition.Renewed -= Renewed;
         Hide();
         if (_poll is not null) { _poll.Stop(); _poll.Tick -= PollTick; }
         if (_pathWait is not null) { _pathWait.Stop(); _pathWait.Tick -= PathWaitTick; }

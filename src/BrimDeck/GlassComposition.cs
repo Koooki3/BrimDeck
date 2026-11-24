@@ -15,6 +15,18 @@ internal static class GlassComposition
     public static Compositor? Compositor => Ready ? _compositor : null;
     public static void Fail() => _failed = true;
 
+    // A display change or a resume may bring back what the device refused: the glass graph and path may be tried again, and the
+    // surfaces shown look again (no frame asks for a panel at rest). From any thread; a surface stays subscribed only until it
+    // is disposed.
+    internal static event Action? Renewed;
+    internal static int RenewedCount => Renewed?.GetInvocationList().Length ?? 0;
+    internal static void Renew()
+    {
+        GlassEffect.Renew();
+        GlassPath.Renew();
+        Renewed?.Invoke();
+    }
+
     private static bool Start()
     {
         try
@@ -22,9 +34,8 @@ internal static class GlassComposition
             var options = new DispatcherQueueOptions { Size = Marshal.SizeOf<DispatcherQueueOptions>(), Type = 2, Apartment = 2 }; // current thread, STA
             if (Windows.System.DispatcherQueue.GetForCurrentThread() is null && CreateDispatcherQueueController(options, out _queue) != 0) { _failed = true; return false; }
             _compositor = new Compositor();
-            // A display change or a resume may bring back what the device refused: the glass graph and path may be tried again.
-            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => { GlassEffect.Renew(); GlassPath.Renew(); };
-            Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.Resume) { GlassEffect.Renew(); GlassPath.Renew(); } };
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => Renew();
+            Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.Resume) Renew(); };
             return true;
         }
         catch (Exception ex) when (ex is COMException or EntryPointNotFoundException or DllNotFoundException or TypeLoadException or InvalidOperationException)
