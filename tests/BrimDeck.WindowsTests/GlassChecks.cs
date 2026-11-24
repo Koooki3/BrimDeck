@@ -531,6 +531,54 @@ internal static class GlassChecks
                 retryLooks && retryTicks == 3 && retryAgain && Idle(() => o.Applied.Backend == GlassSurface.Backend.Graph) && !o.Waking);
             o.Hide();
 
+            // The backoff ends while the frame is worked out (the graph refused it, then the clock passed the deadline): the last
+            // frame's fallback is looked at again all the same; a graph refused for good is not.
+            GlassEffect.Renew();
+            GlassEffect.Inject = step => { if (step == "CreateBrush") throw new COMException("device removed", unchecked((int)0x887A0005)); };
+            var q = Open(asked, out _);
+            bool waitsBackoff = q.Waking && GlassEffect.GraphState == GlassBackendState.Recovering;
+            clock = GlassEffect.RetryAt - 1;
+            int reads = 0;
+            GlassEffect.Clock = () => reads++ == 0 ? clock : clock + 1;
+            q.Tick();
+            bool passed = reads > 1 && q.Waking && q.Applied.Backend == GlassSurface.Backend.Fallback;
+            GlassEffect.Clock = () => clock;
+            clock++;
+            GlassEffect.Inject = null;
+            check($"A backoff that ends while a frame is worked out is still looked at again ({reads} reads of the clock), and shows the graph without another frame",
+                waitsBackoff && passed && Idle(() => q.Applied.Backend == GlassSurface.Backend.Graph) && !q.Waking);
+            q.Hide();
+            GlassEffect.Renew();
+            int refusals = 0;
+            GlassEffect.Inject = step => { if (step == "CreateBrush") { refusals++; throw new COMException("device removed", unchecked((int)0x887A0005)); } };
+            var s = Open(asked, out _);
+            // Every look past the backoff: the tries are the same four, then no timer.
+            int looks = 0;
+            for (; s.Waking && looks < 50; looks++) { clock += 1000; s.Tick(); }
+            check($"The looks end with the tries ({refusals} tries, {looks} looks)", refusals == GlassEffect.GraphTries && looks == GlassEffect.GraphTries - 1 && !s.Waking);
+            GlassEffect.Renew();
+            GlassEffect.Inject = step => { if (step == "CreateBrush") throw new NotSupportedException("refused"); };
+            var t = Open(asked, out _);
+            check($"A graph refused for good sets no timer ({GlassEffect.GraphState})", t.Applied.Backend == GlassSurface.Backend.Fallback && !t.Waking);
+            s.Hide();
+            t.Hide();
+            GlassEffect.Inject = null;
+
+            // A surface still on a brush of a factory let go, whose backoff another surface already ended: losing that brush, it
+            // looks again too, though nothing backs off.
+            Two(out one, out two, out twoDrawn);
+            clock += 100;
+            one.Poll();
+            bool ended = Settle(one, GlassSurface.Backend.Graph) && GlassEffect.RetryAt == 0;
+            bool twoArmed = true;
+            GlassEffect.Inject = step => { if (step == "Present" && twoArmed) { twoArmed = false; throw new COMException("frame refused", unchecked((int)0x8899000C)); } };
+            bool twoFell = two.Present(refusedFrame, out var twoShown) && twoShown.Backend == GlassSurface.Backend.Fallback;
+            check("A surface that loses a brush of a factory let go, nothing backing off, shows the new graph without another frame",
+                twoDrawn && ended && twoFell && Idle(() => two.Applied.Backend == GlassSurface.Backend.Graph) && !two.Waking);
+            one.Hide();
+            two.Hide();
+            GlassEffect.Inject = null;
+
             // V4 F03: the graph refused, the stepped fallback still follows the clarity: at 0, 50 and 100 it shows (and reports)
             // the clarity's tint opacity and saturation, not the defaults, so the slider's ends keep their meaning after the
             // glass degrades; each weight within its step of what was asked.

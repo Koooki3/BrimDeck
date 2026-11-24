@@ -100,7 +100,7 @@ internal sealed class GlassSurface : IDisposable
         {
             _graphReady = false;
             _graphSince = GlassEffect.Clock();
-            _polls = 0;
+            _polls = _retryWakes = 0;
             StopPoll();
         }
         if (_graph is { } graph)
@@ -222,8 +222,10 @@ internal sealed class GlassSurface : IDisposable
             long now = GlassEffect.Clock(), retryAt = GlassEffect.RetryAt;
             if (retryAt != _wokenFor) { _wokenFor = retryAt; _retryWakes = 0; }
             int? step = _pendingLook is not null && _stepPolls < PollMs.Length && GlassEffect.FallbackAvailable(compositor) ? PollMs[_stepPolls] : null;
-            // A timer may tick a little early: a few wakes for each backoff, the first just after it ends.
-            int? retry = GlassEffect.GraphAvailable && retryAt > now && _retryWakes < 3 ? (int)Math.Min(retryAt - now + 16, 60_000) : null;
+            // No graph, yet not refused: it waits for a backoff, which may have ended since this frame asked (or been ended by
+            // another surface), so the look comes just after its end or at once. A timer may tick a little early: a few wakes for
+            // each backoff.
+            int? retry = GlassEffect.GraphAvailable && _retryWakes < 3 ? (int)Math.Clamp(retryAt - now + 16, 16, 60_000) : null;
             if (step is { } s && (retry is not { } r || s <= r)) { _stepPolls++; due = s; }
             else if (retry is { } wait) { _retryWakes++; due = wait; }
         }
