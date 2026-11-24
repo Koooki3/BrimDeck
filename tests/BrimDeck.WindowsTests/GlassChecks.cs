@@ -45,6 +45,7 @@ internal static class GlassChecks
 
         PassesClicks(check);
         ShoulderClip(check);
+        GlassPathChecks.Run(check);
         Faults(check, compositor);
     }
 

@@ -16,9 +16,13 @@ internal static class GlassPath
 
     // The outline of a layout (in the island's own units) as a composition path; null where Direct2D is not to be had.
     public static CompositionPath? Create(GlassBoundaryMath.Layout layout)
+        => GeometrySource(layout) is { } source ? new CompositionPath(source) : null;
+
+    // The outline of a layout as the geometry source Composition is given.
+    internal static Windows.Graphics.IGeometrySource2D? GeometrySource(GlassBoundaryMath.Layout layout)
     {
         if (Geometry(layout) is not { } geometry || geometry == IntPtr.Zero) return null;
-        try { return new CompositionPath(new Source(geometry)); }
+        try { return new Source(geometry); }
         finally { Marshal.Release(geometry); }
     }
 
@@ -190,11 +194,12 @@ internal static class GlassPath
             Marshal.AddRef(geometry);
             return 0;
         };
-        // Only the geometry it has, from its own factory; Composition then asks GetGeometry.
+        // Only the geometry it has, from its own factory; any other is refused outright, as Microsoft's sources do (HelloVectors,
+        // XAML), rather than answered with a successful nothing. (Composition asks GetGeometry.)
         private static readonly TryGet TryGetMethod = (IntPtr self, IntPtr factory, out IntPtr geometry) =>
         {
             geometry = IntPtr.Zero;
-            if (factory != _factory) return 0;
+            if (factory == IntPtr.Zero || factory != _factory) return unchecked((int)0x80004001); // E_NOTIMPL
             return GetMethod(self, out geometry);
         };
         public static readonly IntPtr Pointer = Build();
