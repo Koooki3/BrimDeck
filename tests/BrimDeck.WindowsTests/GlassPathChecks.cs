@@ -23,6 +23,7 @@ internal static class GlassPathChecks
         Concurrent(check, source);
         GC.KeepAlive(source);
         Faults(check);
+        Replaced(check);
     }
 
     // TryGetGeometryUsingFactory hands out the geometry to its own factory only; for another (or none) it answers E_NOTIMPL and
@@ -280,6 +281,49 @@ internal static class GlassPathChecks
             foreach (var surface in surfaces) surface.Dispose();
             owner.Dispose();
             GlassEffect.Clock = clockBefore;
+        }
+    }
+
+    // V5 P01: a move makes no path; a thousand replaced ones are let go (each holds its factory, so the factory's references
+    // tell: the surface's own path at most while it shows, none once it is gone).
+    private static void Replaced(Action<string, bool> check)
+    {
+        var owner = new HwndSource(new HwndSourceParameters("BrimDeck glass path checks")
+        {
+            WindowStyle = unchecked((int)0x80000000), PositionX = -20000, PositionY = -20000, Width = 400, Height = 200
+        });
+        var surface = new GlassSurface();
+        int made = 0;
+        GlassPath.Inject = step => { if (step == "CreatePathGeometry") made++; };
+        try
+        {
+            var sample = GlassPath.Geometry(GlassBoundaryMath.Measure(150, 30, 14, 0, 0, 12, 12, 0));
+            GetFactory(sample, out var factory);
+            Collect();
+            int alone = References(factory);
+            bool shown = true;
+            void Show(double width, float at)
+                => shown &= surface.Show(owner.Handle, new Int32Rect(-20000 + (int)at, -20000, 240, 40), null, new GlassSurface.Outline(
+                    GlassBoundaryMath.Measure(width, 30, 14, 0, 0, 12, 12, 0), new System.Numerics.Matrix3x2(1.25f, 0, 0, 1.25f, at % 1, 0)), 1, new GlassSurface.Material(.4, .3, .5), out _);
+            Show(160, 0);
+            made = 0;
+            for (int i = 0; i < 1000; i++) Show(160, i * .37f % 100);
+            check($"A notch moved 1000 times makes no path ({made})", shown && made == 0);
+            for (int i = 0; i < 1000; i++) { Show(160 + i % 2, 0); if (i % 100 == 0) Pump(); }
+            Pump(); Collect(); Pump(); Collect();
+            int showing = References(factory);
+            check($"1000 replaced paths are let go ({made} made, {alone} references before, {showing} after)", shown && made == 1000 - 1 && showing <= alone + 1);
+            surface.Dispose();
+            Pump(); Collect(); Pump(); Collect();
+            check($"A surface gone leaves no path behind ({References(factory)} references)", References(factory) == alone);
+            Marshal.Release(sample);
+            Marshal.Release(factory);
+        }
+        finally
+        {
+            GlassPath.Inject = null;
+            surface.Dispose();
+            owner.Dispose();
         }
     }
 
