@@ -9,6 +9,7 @@ internal static class GlassBoundaryMathTests
         Shoulders(check);
         Extremes(check);
         Clips(check);
+        Inside(check);
         Profile(check);
         LightStops(check);
         Origins(check);
@@ -36,6 +37,44 @@ internal static class GlassBoundaryMathTests
             GlassBoundaryMath.OnWholePixels((240, 0)) && GlassBoundaryMath.OnWholePixels((239.9999, 1e-5)) && GlassBoundaryMath.OnWholePixels((-1, -0.00001)));
         check("A panel origin a fraction of a pixel off is not",
             !GlassBoundaryMath.OnWholePixels((240.25, 0)) && !GlassBoundaryMath.OnWholePixels((240, .5)) && !GlassBoundaryMath.OnWholePixels((double.NaN, 0)));
+    }
+
+    // What the glass is cut by while a notch's path is not to be had: a rounded rectangle that stays inside the outline on the
+    // surface, at every dock's turn, and covers the body to its corners.
+    private static void Inside(Action<string, bool> check)
+    {
+        var notch = GlassBoundaryMath.Measure(160, 30, 14, 0, 0, 12, 12, 0);
+        // Top, right, bottom and left docks at 125 %: the surface's pixels run from 0 to its size.
+        (string Name, System.Numerics.Matrix3x2 Place, double W, double H, GlassBoundaryMath.RoundedClip Want)[] docks =
+        [
+            ("top", new(1.25f, 0, 0, 1.25f, 0, 0), 200, 37.5, new(17.5, -15, 165, 52.5, 15)),
+            ("bottom", new(1.25f, 0, 0, -1.25f, 0, 37.5f), 200, 37.5, new(17.5, 0, 165, 52.5, 15)),
+            ("left", new(0, 1.25f, 1.25f, 0, 0, 0), 37.5, 200, new(-15, 17.5, 52.5, 165, 15)),
+            ("right", new(0, 1.25f, -1.25f, 0, 37.5f, 0), 37.5, 200, new(0, 17.5, 52.5, 165, 15)),
+        ];
+        foreach (var (name, place, w, h, want) in docks)
+        {
+            var clip = GlassBoundaryMath.RoundedInside(notch, place);
+            check($"A notch docked {name} without its path is its body, the edge's corners square ({clip})",
+                Math.Abs(clip.X - want.X) < .01 && Math.Abs(clip.Y - want.Y) < .01 && Math.Abs(clip.Width - want.Width) < .01
+                && Math.Abs(clip.Height - want.Height) < .01 && Math.Abs(clip.Radius - want.Radius) < .01);
+        }
+        // Unequal corners: the largest radius, so it never passes the outline; none: a plain rectangle.
+        var uneven = GlassBoundaryMath.RoundedInside(GlassBoundaryMath.Measure(160, 40, 0, 4, 8, 12, 2, 0), System.Numerics.Matrix3x2.Identity);
+        var plain = GlassBoundaryMath.RoundedInside(GlassBoundaryMath.Measure(160, 40, 0, 0, 0, 0, 0, 0), System.Numerics.Matrix3x2.Identity);
+        check($"Unequal corners take the largest radius, no corners none ({uneven}; {plain})",
+            uneven == new GlassBoundaryMath.RoundedClip(0, 0, 160, 40, 12) && plain == new GlassBoundaryMath.RoundedClip(0, 0, 160, 40, 0));
+        // An opening's frames, the shoulders and corners shrinking: always of a size, its radius within half of it.
+        bool sound = true;
+        for (int i = 0; i <= 200; i++)
+        {
+            double u = i / 200d;
+            var o = GlassBoundaryMath.Measure(160 + 400 * u, 30 + 300 * u, 14 * (1 - u), 20 * u, 20 * u, 12 + 8 * u, 12 + 8 * u, 0);
+            var clip = GlassBoundaryMath.RoundedInside(o, System.Numerics.Matrix3x2.CreateScale(1.25f));
+            sound &= clip.Width > 0 && clip.Height > 0 && clip.Radius >= 0 && 2 * clip.Radius <= Math.Min(clip.Width, clip.Height) + .01
+                && clip.X >= -.01 && clip.X + clip.Width <= 1.25 * o.Width + .01;
+        }
+        check("Through an opening it keeps within the outline's width with a radius of at most half its size", sound);
     }
 
     private static (double X, double Y) Bezier((double X, double Y) p0, (double X, double Y) p1, (double X, double Y) p2, (double X, double Y) p3, double t)

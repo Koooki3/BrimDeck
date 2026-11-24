@@ -43,7 +43,8 @@ internal static class GlassChecks
         var released = GlassEffect.Stats;
         check($"Releasing the brushes leaves only the graph's own native effects ({released.Live} alive)", released.Live <= 4);
 
-        PassesClicks(check);
+        PassesClicks(check, notch: false);
+        PassesClicks(check, notch: true);
         ShoulderClip(check);
         GlassPathChecks.Run(check);
         Faults(check, compositor);
@@ -75,7 +76,7 @@ internal static class GlassChecks
 
             // The path is the WPF outline: the same area and the same inside at points on a fine grid away from the line.
             var wpf = IslandBorder.BuildOutline(160, 30, 14, new CornerRadius(0, 0, 12, 12), 0);
-            if (GlassPath.Geometry(layout) is not { } geometry) { check("Direct2D builds the notch's path", false); return; }
+            var geometry = GlassPath.Geometry(layout);
             try
             {
                 double area = GlassPath.Area(geometry), wpfArea = wpf.GetArea(.001, System.Windows.Media.ToleranceType.Absolute);
@@ -121,7 +122,8 @@ internal static class GlassChecks
     // process's hit test must pass over the glass window everywhere, beside the outline and on it, as it passes over the panel's
     // clear pixels. Until 11-23 the whole top of the panel's display took no clicks while the glass showed. WindowFromPoint is
     // asked from another thread: on its own thread a window's HTTRANSPARENT is honoured, which the apps beneath never see.
-    private static void PassesClicks(Action<string, bool> check)
+    // With a notch: its path refused, so the glass is cut by the rounded approximation (V5 N02).
+    private static void PassesClicks(Action<string, bool> check, bool notch)
     {
         var area = SystemParameters.WorkArea;
         double dpi = System.Windows.Media.VisualTreeHelper.GetDpi(new System.Windows.Controls.Border()).DpiScaleX;
@@ -137,7 +139,11 @@ internal static class GlassChecks
         try
         {
             var bounds = new Int32Rect(right - 120, bottom - 60, 80, 40);
-            bool shown = surface.Show(owner.Handle, bounds, 8, .01, new GlassSurface.Material(.4, .3, .5), out _);
+            if (notch) GlassPath.Inject = step => { if (step == "CreatePathGeometry") throw new COMException("refused", unchecked((int)0x887A0005)); };
+            bool shown = notch
+                ? surface.Show(owner.Handle, bounds, null, new GlassSurface.Outline(GlassBoundaryMath.Measure(80, 40, 14, 0, 0, 8, 8, 0), System.Numerics.Matrix3x2.Identity), .01,
+                    new GlassSurface.Material(.4, .3, .5), out _)
+                : surface.Show(owner.Handle, bounds, 8, .01, new GlassSurface.Material(.4, .3, .5), out _);
             Pump();
             IntPtr glass = IntPtr.Zero;
             EnumThreadWindows(GetCurrentThreadId(), (window, _) =>
@@ -160,11 +166,13 @@ internal static class GlassChecks
                 passed &= hit != glass && hit != owner.Handle;
                 found.Add($"{where}: {(hit == glass ? "the glass window" : hit == owner.Handle ? "the panel window" : "beneath")}");
             }
-            check($"The glass window lets clicks through to what lies beneath, beside the outline and on it ({string.Join("; ", found)})",
+            check($"The glass window{(notch ? " of a notch without its path" : "")} lets clicks through to what lies beneath, beside the outline and on it ({string.Join("; ", found)})",
                 shown && glass != IntPtr.Zero && covered && passed);
         }
         finally
         {
+            GlassPath.Inject = null;
+            GlassPath.Renew();
             surface.Dispose();
             owner.Dispose();
         }

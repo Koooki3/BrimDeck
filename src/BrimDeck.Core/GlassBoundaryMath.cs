@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace BrimDeck.Core;
 
 // The island's boundary as numbers: the outline's layout (corners and shoulders clamped to the size), the shoulder curves, the
@@ -169,6 +171,30 @@ public static class GlassBoundaryMath
             return true;
         }
         return false;
+    }
+
+    // A rounded rectangle inside the outline, in the pixels place puts it in (x' = x M11 + y M21 + M31, y' = x M12 + y M22 + M32,
+    // a quarter turn or mirror allowed): the body between the shoulders with its largest corner radius, carried that radius past
+    // a side whose corners are square. What the glass is cut by while the outline's own path is not to be had: it lacks the
+    // shoulders' wedges (and what a smaller corner would keep), and reaches past the outline only over the square side's end.
+    public static RoundedClip RoundedInside(Layout o, Matrix3x2 place)
+    {
+        const double Same = .01;
+        bool shoulders = o.Shoulder > 0;
+        double tl = shoulders ? 0 : o.TopLeft, tr = shoulders ? 0 : o.TopRight, br = o.BottomRight, bl = o.BottomLeft;
+        double r = Math.Max(Math.Max(tl, tr), Math.Max(br, bl));
+        double x0 = o.Left + o.Inset, y0 = o.Top, x1 = o.Right + o.Inset, y1 = o.Top + o.Height;
+        r = Math.Min(r, Math.Min(x1 - x0, y1 - y0) / 2);
+        if (r > Same)
+        {
+            if (tl <= Same && tr <= Same) y0 -= r;
+            else if (bl <= Same && br <= Same) y1 += r;
+            else if (tl <= Same && bl <= Same) x0 -= r;
+            else if (tr <= Same && br <= Same) x1 += r;
+        }
+        Vector2 a = Vector2.Transform(new((float)x0, (float)y0), place), b = Vector2.Transform(new((float)x1, (float)y1), place);
+        double scale = Math.Min(new Vector2(place.M11, place.M12).Length(), new Vector2(place.M21, place.M22).Length());
+        return new(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Abs(b.X - a.X), Math.Abs(b.Y - a.Y), r * scale);
     }
 
     // Liquid glass's optical edge. A bevel of height h(t) = 6t^5 - 15t^4 + 10t^3 (t = distance inward over the bevel width) lifts
