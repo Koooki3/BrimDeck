@@ -66,7 +66,8 @@ public sealed class WindowsNoticeRun
 // is under way, and hands it over at once. The whole list is read, one reading at a time and off the loop thread, for the
 // baseline after starting, being granted access or waking, every EventSafetyInterval, ReconcileInterval after a clear (only a
 // full reading shows what went), and at once (1 s apart) when an entry or a lookup could not be trusted or the id it named
-// could not be read yet, unless a clear is already waiting for its interval. When the log cannot be used the list is read on a
+// could not be read yet, unless a clear is already waiting for its interval; an id that could not be read yet is also looked
+// up again, twice at most (WindowsNoticeLogBatch.CompleteMissing). When the log cannot be used the list is read on a
 // timer: every ProbeInterval only the id after the newest one is looked up (WindowsNoticePace.ProbeIds), and the whole list is
 // read every FullInterval and whenever the probe finds a new notice. Until a reading has confirmed the newest id, the list is
 // read every 3 s at first and less often after a quiet stretch (WindowsNoticeList.UnknownWait). Access is checked before
@@ -173,12 +174,21 @@ public sealed class WindowsNoticeLoop
         run.HasListener = false;
     }
 
+    // How long the loop may wait for a wake before its next step: until a missing id is due to be looked up again, or
+    // ProbeInterval. Never less than Coalesce, so it cannot spin.
+    public TimeSpan NextStep(WindowsNoticeRun run, DateTimeOffset now)
+    {
+        if (!run.HasListener || run.Batch.MissingDue is not { } due || due - now >= ProbeInterval) return ProbeInterval;
+        return due - now > WindowsNoticeTriggers.Coalesce ? due - now : WindowsNoticeTriggers.Coalesce;
+    }
+
     // One turn of the loop. True when a full reading was applied (the run's failures start over).
     public bool Step(WindowsNoticeRun run, IWindowsNoticeHost host, CancellationToken token)
     {
         var now = host.Now;
         // First a notification the log named, whether or not a full reading is under way: one per turn, the oldest first, so
         // a burst is shown in order and each is handed over as soon as it is read.
+        if (run.HasListener) run.Batch.QueueMissing(now);
         if (run.HasListener && run.Batch.TryNext(out uint id, out string? app))
         {
             var access = host.Access();
@@ -213,10 +223,17 @@ public sealed class WindowsNoticeLoop
                 if (changes.Arrived.Count + changes.Missed.Count > 0) _lastActivity = host.Now;
                 if (_list.SkippedProbe) run.WideUntil = host.Now + WindowsNoticePace.WideFor;
             }
-            run.Batch.CompleteIds(id);
-            // Reconcile without ImmediateReconcile is the id Windows could not return (WindowsNoticeLogReader).
-            if (result is { Reconcile: true, ImmediateReconcile: false }) run.Batch.RequestReconcileForMissing();
-            else if (result.Reconcile) run.Batch.RequestReconcile(result.ImmediateReconcile);
+            // Reconcile without ImmediateReconcile is the id Windows could not return (WindowsNoticeLogReader). The reading asked
+            // for may start at once and list it no more than the lookup did: the id is also looked up again a little later.
+            if (result is { Reconcile: true, ImmediateReconcile: false })
+            {
+                if (run.Batch.CompleteMissing(id, host.Now)) run.Batch.RequestReconcileForMissing();
+            }
+            else
+            {
+                run.Batch.CompleteIds(id);
+                if (result.Reconcile) run.Batch.RequestReconcile(result.ImmediateReconcile);
+            }
             host.Publish(changes);
             if (run.Batch.HasIds) host.Wake();
         }

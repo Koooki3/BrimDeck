@@ -252,7 +252,7 @@ internal sealed class WindowsNoticeSource : IDisposable
                     SetState(NoticeSourceState.Failed, ex.Message, run);
                 }
                 // A Refresh (access granted, waking, unlocking) still tries again at once.
-                try { await run.Signal.WaitAsync(run.Failures > 0 ? WindowsNoticePace.Retry(run.Failures) : WindowsNoticeLoop.ProbeInterval, token); }
+                try { await run.Signal.WaitAsync(run.Failures > 0 ? WindowsNoticePace.Retry(run.Failures) : _loop.NextStep(run.Core, DateTimeOffset.UtcNow), token); }
                 catch (OperationCanceledException) { return; }
             }
         }
@@ -290,7 +290,7 @@ internal sealed class WindowsNoticeSource : IDisposable
         // Windows writes the log entry a little before the listener can return the notification. Left to the full reading that
         // follows a miss (WindowsNoticeLogBatch.FailedReadReconcileInterval), every notice reached BrimDeck about 1.2 s after it
         // was made (measured 2026-11-17: thirteen notices, 0.6 to 1.4 s). A few short looks catch it sooner; one that is still
-        // missing after them is left to that reading as before.
+        // missing after them is left to that reading and to the looks the loop takes a second or so later.
         for (int attempt = 0; notification is null && attempt < MissedLooks; attempt++)
         {
             Thread.Sleep(MissedLookWait);

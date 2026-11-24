@@ -18,12 +18,16 @@ public readonly record struct WindowsNoticeLogBatchSnapshot(int Ids, bool Reconc
 public sealed class WindowsNoticeLogBatch
 {
     public const int MaximumIds = 256;
+    // How many missing ids are looked up again (CompleteMissing), and how often each: a toast that has gone for good costs no more.
+    public const int MaximumMissing = 8, MissingLookups = 2;
     public static readonly TimeSpan FailedReadReconcileInterval = TimeSpan.FromSeconds(1);
     private readonly object _gate = new();
     private readonly Dictionary<uint, string?> _ids = [];
     // Ids the log named for two different applications: neither is trusted, and later entries for them wait for the full
     // reading that settles them.
     private readonly HashSet<uint> _ambiguous = [];
+    // Ids Windows could not return yet (CompleteMissing).
+    private readonly Dictionary<uint, (string? App, DateTimeOffset Due, int Left)> _missing = [];
     private long _nextVersion, _reconcileVersion, _immediateVersion;
 
     public bool Add(WindowsNoticeLogEvent entry)
@@ -48,6 +52,7 @@ public sealed class WindowsNoticeLogBatch
                 if (!string.Equals(knownApp, entry.AppUserModelId, StringComparison.OrdinalIgnoreCase))
                 {
                     _ids.Remove(id);
+                    _missing.Remove(id);
                     _ambiguous.Add(id);
                     RequestReconcileLocked(immediate: true);
                 }
@@ -59,7 +64,36 @@ public sealed class WindowsNoticeLogBatch
                 return true;
             }
             _ids.Add(id, entry.AppUserModelId);
+            _missing.Remove(id);
             return true;
+        }
+    }
+
+    // When the next missing id is due to be looked up again; null when none is waiting.
+    public DateTimeOffset? MissingDue
+    {
+        get { lock (_gate) return _missing.Where(pair => !_ids.ContainsKey(pair.Key)).Select(pair => (DateTimeOffset?)pair.Value.Due).Min(); }
+    }
+
+    // Queues the missing ids that are due again.
+    public void QueueMissing(DateTimeOffset now)
+    {
+        lock (_gate)
+            foreach (var (id, missing) in _missing)
+                if (missing.Due <= now) _ids.TryAdd(id, missing.App);
+    }
+
+    // An id the log named that Windows could not return: looked up again FailedReadReconcileInterval later, MissingLookups times
+    // at most. True the first time, when a full reading is wanted too.
+    public bool CompleteMissing(uint id, DateTimeOffset now)
+    {
+        lock (_gate)
+        {
+            if (!_ids.Remove(id, out var app)) return false;
+            bool first = !_missing.TryGetValue(id, out var missing);
+            if (first ? _missing.Count >= MaximumMissing : missing.Left <= 1) _missing.Remove(id);
+            else _missing[id] = (app, now + FailedReadReconcileInterval, first ? MissingLookups : missing.Left - 1);
+            return first;
         }
     }
 
@@ -89,7 +123,7 @@ public sealed class WindowsNoticeLogBatch
 
     public void CompleteIds(params uint[] ids)
     {
-        lock (_gate) foreach (var id in ids) _ids.Remove(id);
+        lock (_gate) foreach (var id in ids) { _ids.Remove(id); _missing.Remove(id); }
     }
 
     // A full read only clears reconciliation work that began before it. Events arriving during that read stay pending.
@@ -122,7 +156,7 @@ public sealed class WindowsNoticeLogBatch
     // C: access was lost; what is queued came before the Start baseline that follows, which takes in what is listed.
     public void Reset()
     {
-        lock (_gate) { _ids.Clear(); _ambiguous.Clear(); _reconcileVersion = _immediateVersion = 0; }
+        lock (_gate) { _ids.Clear(); _missing.Clear(); _ambiguous.Clear(); _reconcileVersion = _immediateVersion = 0; }
     }
 
     private void RequestReconcileLocked(bool immediate)

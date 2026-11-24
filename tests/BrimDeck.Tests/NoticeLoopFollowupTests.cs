@@ -16,6 +16,7 @@ internal static class NoticeLoopFollowupTests
         LateLogLookupFails(check);
         StopStartBetweenApplyAndPublish(check);
         MissingNotificationReconciliation(check);
+        MissingNotificationLookedUpAgain(check);
         AccessRevokedWithQueuedIds(check);
     }
 
@@ -241,6 +242,111 @@ internal static class NoticeLoopFollowupTests
         check("Loop followup B: a notification that is found reads no list", found.ListReads == foundReads && Keys(found.Arrived).SequenceEqual([Key(82)]));
     }
 
+    // B, when the full reading cannot list the notification yet either. The last reading being long ago, it starts right after the
+    // miss and can be as early as the lookup was; the notification then waited for EventSafetyInterval. The loop is driven as
+    // WindowsNoticeSource drives it: a step on a wake, otherwise after NextStep.
+    private static void MissingNotificationLookedUpAgain(Action<string, bool> check)
+    {
+        foreach (double sinceFull in new[] { 0.2, 2, 20, 40 })
+        {
+            var early = DriveMissing(sinceFull, readable: 0.7, limit: 120);
+            check($"Loop followup B (again): readable 0.7 s after its entry, {sinceFull} s after a reading, it is shown within 2 s, once ({string.Join(' ', early.Shown.Select(s => s.ToString("0.0")))})", early.Shown.Count == 1 && early.Shown[0] < 2);
+            var late = DriveMissing(sinceFull, readable: 1.5, limit: 120);
+            check($"Loop followup B (again): readable 1.5 s after its entry, {sinceFull} s after a reading, it is shown within 3.5 s, once ({string.Join(' ', late.Shown.Select(s => s.ToString("0.0")))})", late.Shown.Count == 1 && late.Shown[0] < 3.5);
+        }
+
+        // A toast gone before it could be read: the looks and steps it costs are bounded, and it costs one full reading.
+        var gone = DriveMissing(40, readable: double.MaxValue, limit: 50);
+        var idle = DriveMissing(40, readable: double.MaxValue, limit: 50, logged: false);
+        check("Loop followup B (again): a toast that never becomes readable is looked up three times, then left alone", gone.Lookups == 3 && gone.Shown.Count == 0);
+        check("Loop followup B (again): it costs no full reading beyond the one that follows the miss", gone.Reads <= idle.Reads + 1);
+        check("Loop followup B (again): and only a few steps more than an idle loop takes", gone.Steps <= idle.Steps + 6);
+
+        // Many at once: only a few are looked up again, the rest are left to the full reading.
+        var (loop, run, host) = Settled(10);
+        host.Lookup = _ => WindowsNoticeNotificationRead.Missing;
+        for (uint id = 100; id < 140; id++) Log(loop, run, id);
+        for (int i = 0; i < 400; i++) { loop.Step(run, host, default); if (!run.Batch.HasIds) host.Now += TimeSpan.FromMilliseconds(100); }
+        check("Loop followup B (again): a burst of missing ids is looked up again within a bound",
+            host.Lookups == 40 + WindowsNoticeLogBatch.MissingLookups * WindowsNoticeLogBatch.MaximumMissing && loop.NextStep(run, host.Now) == WindowsNoticeLoop.ProbeInterval);
+
+        // Found by the full reading first: the second look is not taken and it is not shown twice.
+        var (readLoop, readRun, read) = Settled(10);
+        read.Now += TimeSpan.FromSeconds(5);
+        read.Lookup = _ => WindowsNoticeNotificationRead.Missing;
+        Log(readLoop, readRun, 85);
+        readLoop.Step(readRun, read, default);
+        read.Listed[85] = Input(85);
+        read.Lookup = null;
+        read.Finish();
+        readLoop.Step(readRun, read, default);
+        read.Now += TimeSpan.FromSeconds(5);
+        readLoop.Step(readRun, read, default);
+        check("Loop followup B (again): one the full reading showed is not looked up or shown again", Keys(read.Arrived).SequenceEqual([Key(85)]) && read.Lookups == 1);
+
+        // Access is lost while a second look is waiting: it is dropped with the queue (C).
+        var (lostLoop, lostRun, lost) = Settled(10);
+        lost.Now += TimeSpan.FromSeconds(5);
+        lost.Lookup = _ => WindowsNoticeNotificationRead.Missing;
+        Log(lostLoop, lostRun, 86);
+        lostLoop.Step(lostRun, lost, default);
+        lost.Finish();
+        lost.Access = WindowsNoticeAccess.Denied;
+        lostLoop.Step(lostRun, lost, default);
+        lost.Access = WindowsNoticeAccess.Allowed;
+        lost.Lookup = null;
+        lost.Listed[86] = Input(86);
+        lostLoop.Refresh(WindowsNoticeBaseline.Start, lost.Now);
+        lost.Now += TimeSpan.FromSeconds(5);
+        lostLoop.Step(lostRun, lost, default);
+        lost.Finish();
+        lostLoop.Step(lostRun, lost, default);
+        lost.Now += TimeSpan.FromSeconds(5);
+        lostLoop.Step(lostRun, lost, default);
+        check("Loop followup B (again): a second look waiting when access is lost is dropped", lost.Arrived.Count == 0 && lost.Lookups == 1);
+    }
+
+    private static (List<double> Shown, int Steps, int Reads, int Lookups) DriveMissing(double sinceFull, double readable, double limit, bool logged = true)
+    {
+        var (loop, run, host) = Settled(10);
+        var settled = host.Now;
+        var entry = settled.AddSeconds(sinceFull);
+        bool Readable() => (host.Now - entry).TotalSeconds >= readable;
+        // WindowsNoticeSource looks up to five more times, 0.1 s apart, before it calls the notification missing.
+        host.Lookup = _ =>
+        {
+            for (int look = 0; !Readable() && look < 5; look++) host.Now = host.Now.AddSeconds(0.1);
+            return Readable() ? new(true, App, Input(80)) : WindowsNoticeNotificationRead.Missing;
+        };
+        host.Now = entry.AddSeconds(0.1);
+        if (logged) Log(loop, run, 80);
+        var shown = new List<double>();
+        int steps = 0, reads = host.ListReads;
+        DateTimeOffset? ends = null;
+        uint[] listed = [];
+        while ((host.Now - entry).TotalSeconds < limit)
+        {
+            int readsBefore = host.ListReads, shownBefore = host.Arrived.Count;
+            host.Woken = false;
+            loop.Step(run, host, default);
+            steps++;
+            if (host.Arrived.Count > shownBefore) shown.Add((host.Now - entry).TotalSeconds);
+            // A reading lists what is readable when it starts, and takes half a second.
+            if (host.ListReads > readsBefore) { listed = logged && Readable() ? [10u, 80u] : [10u]; ends = host.Now.AddSeconds(0.5); }
+            if (host.Woken) continue;
+            var next = host.Now + loop.NextStep(run, host.Now);
+            if (ends is { } end && end <= next)
+            {
+                if (end > host.Now) host.Now = end;
+                ends = null;
+                if (listed.Contains(80u)) host.Listed[80] = Input(80);
+                host.Finish(listed);
+            }
+            else host.Now = next;
+        }
+        return (shown, steps, host.ListReads - reads, host.Lookups);
+    }
+
     // C. Access was revoked while ids the log named were still queued. After access is granted again the reading is a Start
     // baseline, which takes in what is listed without showing it: the queued ids must not be read and shown as new then.
     private static void AccessRevokedWithQueuedIds(Action<string, bool> check)
@@ -320,7 +426,7 @@ internal static class NoticeLoopFollowupTests
         public Func<uint, WindowsNoticeNotificationRead>? Lookup;
         // Runs when the loop hands changes over, before they are taken: where the interleaving of another thread is put.
         public Action? OnPublish;
-        public bool Listening, LogOpen;
+        public bool Listening, LogOpen, Woken;
         public int Lookups, ListReads;
         public readonly List<WindowsNoticeLoopState> States = [];
         public readonly List<NoticeInput> Arrived = [], Missed = [];
@@ -362,7 +468,7 @@ internal static class NoticeLoopFollowupTests
         public bool LogEnabled() => true;
         public bool OpenLog() { LogOpen = true; return true; }
         public void CloseLog() => LogOpen = false;
-        public void Wake() { }
+        public void Wake() => Woken = true;
         public void Report(WindowsNoticeLoopState state) => States.Add(state);
 
         public void Publish(WindowsNoticeList.Changes changes)
