@@ -19,6 +19,7 @@ internal static class GlassPathChecks
         var layout = GlassBoundaryMath.Measure(160, 30, 14, 0, 0, 12, 12, 0);
         var source = GlassPath.GeometrySource(layout);
         Contract(check, source);
+        Replacement(check, layout);
         Outlives(check, layout);
         Concurrent(check, source);
         GC.KeepAlive(source);
@@ -69,6 +70,34 @@ internal static class GlassPathChecks
         finally
         {
             foreach (var held in new[] { geometry, own, other, interop }) if (held != IntPtr.Zero) Marshal.Release(held);
+        }
+    }
+
+    // A failure replaces the shared factory: a source made before it belongs to the factory its geometry was made by, not to the
+    // one in use now.
+    private static void Replacement(Action<string, bool> check, GlassBoundaryMath.Layout layout)
+    {
+        var old = GlassPath.GeometrySource(layout);
+        var interop = InteropOf(old);
+        IntPtr geometry = IntPtr.Zero, first = IntPtr.Zero, next = IntPtr.Zero, second = IntPtr.Zero;
+        try
+        {
+            Get(interop, out geometry);
+            GetFactory(geometry, out first);
+            GlassPath.Failed(new COMException("test"));
+            next = GlassPath.Geometry(layout);
+            GetFactory(next, out second);
+            int mine = TryGet(interop, first, out var kept), foreign = TryGet(interop, second, out var other);
+            check($"A source made before its factory was replaced answers its own factory only (0x{mine:X8}, 0x{foreign:X8})",
+                first != second && mine == 0 && kept == geometry && foreign == NotImplemented && other == IntPtr.Zero);
+            if (kept != IntPtr.Zero) Marshal.Release(kept);
+            if (other != IntPtr.Zero) Marshal.Release(other);
+        }
+        finally
+        {
+            GlassPath.Renew();
+            foreach (var held in new[] { geometry, first, next, second, interop }) if (held != IntPtr.Zero) Marshal.Release(held);
+            GC.KeepAlive(old);
         }
     }
 

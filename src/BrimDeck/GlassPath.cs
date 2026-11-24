@@ -140,6 +140,14 @@ internal static class GlassPath
         return _factory = factory;
     }
 
+    // The factory a geometry was made by (ID2D1Resource::GetFactory); it lives as long as the geometry.
+    private static IntPtr FactoryOf(IntPtr geometry)
+    {
+        Slot<GetFactory>(geometry, 3)(geometry, out var factory);
+        if (factory != IntPtr.Zero) Marshal.Release(factory);
+        return factory;
+    }
+
     private static void Check(int result) => Marshal.ThrowExceptionForHR(result);
 
     // A COM method through the object's vtable; delegates kept per function, as every path shares its type's vtable.
@@ -159,6 +167,7 @@ internal static class GlassPath
     [StructLayout(LayoutKind.Sequential)] private readonly record struct Point2F(float X, float Y);
     [StructLayout(LayoutKind.Sequential)] private readonly record struct Bezier(Point2F A, Point2F B, Point2F C);
 
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void GetFactory(IntPtr self, out IntPtr factory);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int CreatePath(IntPtr self, out IntPtr path);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int OpenPath(IntPtr self, out IntPtr sink);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void SetFill(IntPtr self, int mode);
@@ -251,12 +260,13 @@ internal static class GlassPath
             Marshal.AddRef(geometry);
             return 0;
         };
-        // Only the geometry it has, from its own factory; any other is refused outright, as Microsoft's sources do (HelloVectors,
+        // Only the geometry it has, from that geometry's own factory (a failure replaces the shared one); any other is refused outright, as Microsoft's sources do (HelloVectors,
         // XAML), rather than answered with a successful nothing. (Composition asks GetGeometry.)
         private static readonly TryGet TryGetMethod = (IntPtr self, IntPtr factory, out IntPtr geometry) =>
         {
             geometry = IntPtr.Zero;
-            if (factory == IntPtr.Zero || factory != _factory) return unchecked((int)0x80004001); // E_NOTIMPL
+            var held = Marshal.ReadIntPtr(self, 2 * IntPtr.Size);
+            if (factory == IntPtr.Zero || held == IntPtr.Zero || factory != FactoryOf(held)) return unchecked((int)0x80004001); // E_NOTIMPL
             return GetMethod(self, out geometry);
         };
         public static readonly IntPtr Pointer = Build();
