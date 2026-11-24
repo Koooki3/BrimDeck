@@ -22,9 +22,9 @@ internal static class GlassComposition
             var options = new DispatcherQueueOptions { Size = Marshal.SizeOf<DispatcherQueueOptions>(), Type = 2, Apartment = 2 }; // current thread, STA
             if (Windows.System.DispatcherQueue.GetForCurrentThread() is null && CreateDispatcherQueueController(options, out _queue) != 0) { _failed = true; return false; }
             _compositor = new Compositor();
-            // A display change or a resume may bring back what the device refused: the glass graph may be tried again.
-            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => GlassEffect.Renew();
-            Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.Resume) GlassEffect.Renew(); };
+            // A display change or a resume may bring back what the device refused: the glass graph and path may be tried again.
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => { GlassEffect.Renew(); GlassPath.Renew(); };
+            Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.Resume) { GlassEffect.Renew(); GlassPath.Renew(); } };
             return true;
         }
         catch (Exception ex) when (ex is COMException or EntryPointNotFoundException or DllNotFoundException or TypeLoadException or InvalidOperationException)

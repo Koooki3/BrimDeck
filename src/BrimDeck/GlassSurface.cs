@@ -54,7 +54,7 @@ internal sealed class GlassSurface : IDisposable
     private GlassRecipe.Look? _fallbackLook;
     private Material _fallbackShown;
     private CompositionColorBrush? _ground;
-    private DispatcherTimer? _poll;
+    private DispatcherTimer? _poll, _pathWait;
     private int _polls;
     // The fallback step asked for that is not shown yet (loading, or its device backing off) and the reads it had; the graph's
     // next try (GlassEffect.RetryAt) the timer was set for and how often.
@@ -68,7 +68,7 @@ internal sealed class GlassSurface : IDisposable
     internal CompositionBrush? Brush => _sprite?.Brush;
     internal CompositionClip? Clip => _sprite?.Clip;
     // Diagnostics and tests: whether the surface's own timer will look again (something it waits for is pending).
-    internal bool Waking => _poll is { IsEnabled: true };
+    internal bool Waking => _poll is { IsEnabled: true } || _pathWait is { IsEnabled: true };
 
     // How long a loading graph may stay Pending (a factory loads while the UI thread pumps, about 70 ms here), and when the
     // surface looks again without a frame asking: four reads, the last past the limit.
@@ -256,7 +256,8 @@ internal sealed class GlassSurface : IDisposable
     // The outline is the sprite's own clip, the composition's antialiased geometry, either way; the window never has a region.
     // A rounded clip (GlassBoundaryMath.TryRoundedClip) is a rounded rectangle, a move or a new size a few numbers on it. Any
     // other outline (shoulders) is its path (GlassPath, written as the WPF outline is), made anew only for a new shape; a move
-    // changes only the clip's transform. The backdrop is drawn inside the clip only, so its edge is the WPF outline's curve.
+    // changes only the clip's transform. The backdrop is drawn inside the clip only, so its edge is the WPF outline's curve. A
+    // path that cannot be made leaves the glass shown, cut by a rounded rectangle inside the outline, until it can (PathClip).
     public bool Show(IntPtr owner, Int32Rect bounds, GlassBoundaryMath.GlassClip? clip, Outline? outline, double opacity, Material material, out AppliedMaterial applied)
     {
         applied = default;
@@ -326,30 +327,18 @@ internal sealed class GlassSurface : IDisposable
         CompositionClip wanted;
         if (_shape is { } shape)
         {
-            if (_pathLayout != shape.Layout)
+            if (PathClip(sprite, shape) is { } path)
             {
-                if (GlassPath.Create(shape.Layout) is not { } path) return false;
-                if (_pathGeometry is null)
-                {
-                    var compositor = sprite.Compositor;
-                    _pathGeometry = compositor.CreatePathGeometry(path);
-                    _pathClip = compositor.CreateGeometricClip(_pathGeometry);
-                }
-                else _pathGeometry.Path = path;
-                _pathLayout = shape.Layout;
+                _pathWait?.Stop();
+                wanted = path;
             }
-            if (_pathClip!.TransformMatrix != shape.Place) _pathClip.TransformMatrix = shape.Place;
-            wanted = _pathClip;
-        }
-        else
-        {
-            if (_clip != _shown)
+            else
             {
-                _shown = _clip;
-                Set(_outline!, _clip.First);
+                wanted = Rounded(new(GlassBoundaryMath.RoundedInside(shape.Layout, shape.Place)));
+                WaitForPath();
             }
-            wanted = _roundedClip!;
         }
+        else wanted = Rounded(_clip);
         if (!ReferenceEquals(sprite.Clip, wanted)) sprite.Clip = wanted;
         const uint NoSize = 0x01, NoMove = 0x02, NoActivate = 0x10, ShowWindowFlag = 0x40, NoOwnerZOrder = 0x200;
         const uint PositionOnly = NoSize | NoMove | NoActivate | NoOwnerZOrder;
@@ -368,6 +357,80 @@ internal sealed class GlassSurface : IDisposable
             _placed = place;
         }
         return true;
+    }
+
+    private CompositionGeometricClip Rounded(GlassBoundaryMath.GlassClip clip)
+    {
+        if (clip != _shown)
+        {
+            _shown = clip;
+            Set(_outline!, clip.First);
+        }
+        return _roundedClip!;
+    }
+
+    // The outline's path as the clip; null where it cannot be had now (GlassPath: backing off, or refused). A step that fails
+    // starts over with new objects at the next try.
+    private CompositionGeometricClip? PathClip(SpriteVisual sprite, Outline shape)
+    {
+        if (_pathClip is null || _pathLayout != shape.Layout)
+        {
+            if (!GlassPath.CanTry) return null;
+            try
+            {
+                var path = GlassPath.Create(shape.Layout);
+                if (_pathClip is null)
+                {
+                    GlassPath.Inject?.Invoke("CompositionPathGeometry");
+                    _pathGeometry = sprite.Compositor.CreatePathGeometry(path);
+                    GlassPath.Inject?.Invoke("CompositionGeometricClip");
+                    _pathClip = sprite.Compositor.CreateGeometricClip(_pathGeometry);
+                }
+                else
+                {
+                    GlassPath.Inject?.Invoke("Path");
+                    _pathGeometry!.Path = path;
+                }
+                _pathLayout = shape.Layout;
+                GlassPath.Succeeded();
+            }
+            // Every step's HRESULT may come as any of the types it maps to (E_OUTOFMEMORY, E_ACCESSDENIED, E_NOTIMPL, ...).
+            catch (Exception error)
+            {
+                GlassPath.Failed(error);
+                if (_pathClip is not null && ReferenceEquals(sprite.Clip, _pathClip)) sprite.Clip = _roundedClip;
+                _pathClip?.Dispose();
+                _pathGeometry?.Dispose();
+                _pathClip = null;
+                _pathGeometry = null;
+                _pathLayout = null;
+                return null;
+            }
+        }
+        if (_pathClip.TransformMatrix != shape.Place) _pathClip.TransformMatrix = shape.Place;
+        return _pathClip;
+    }
+
+    // Tries the path again once its backoff has passed, without a frame asking (GlassPath bounds the tries; none left, no timer).
+    private void WaitForPath()
+    {
+        if (_pathWait is { IsEnabled: true } || GlassPath.RetryIn is not { } ms) return;
+        if (_pathWait is null)
+        {
+            _pathWait = new DispatcherTimer(DispatcherPriority.Background);
+            _pathWait.Tick += PathWaitTick;
+        }
+        // A timer may tick a little early.
+        _pathWait.Interval = TimeSpan.FromMilliseconds(ms + 16);
+        _pathWait.Start();
+    }
+
+    private void PathWaitTick(object? sender, EventArgs e)
+    {
+        _pathWait!.Stop();
+        if (_disposed || !_visible || _shape is null) return;
+        try { Place(Frame(_owner, _need)); }
+        catch (Exception error) when (error is COMException or InvalidOperationException or ArgumentException) { Dispose(); }
     }
 
     private static void Set(CompositionRoundedRectangleGeometry geometry, GlassBoundaryMath.RoundedClip clip)
@@ -427,6 +490,7 @@ internal sealed class GlassSurface : IDisposable
         if (!_visible) return;
         _visible = false;
         StopPoll();
+        _pathWait?.Stop();
         if (_window is { } window) ShowWindow(window.Handle, 0);
     }
 
@@ -436,6 +500,7 @@ internal sealed class GlassSurface : IDisposable
         _disposed = true;
         Hide();
         if (_poll is not null) { _poll.Stop(); _poll.Tick -= PollTick; }
+        if (_pathWait is not null) { _pathWait.Stop(); _pathWait.Tick -= PathWaitTick; }
         if (_target is not null) { _target.Root = null; _target.Dispose(); }
         if (_sprite is not null)
         {

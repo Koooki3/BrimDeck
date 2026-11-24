@@ -12,23 +12,92 @@ namespace BrimDeck;
 internal static class GlassPath
 {
     private static IntPtr _factory;
-    private static bool _failed;
 
-    // The outline of a layout (in the island's own units) as a composition path; null where Direct2D is not to be had.
-    public static CompositionPath? Create(GlassBoundaryMath.Layout layout)
+    // Test-only fault injection, as GlassEffect.Inject: called before each step that can fail ("CreateFactory",
+    // "CreatePathGeometry", "Open", "Close", "CompositionPath"; "CompositionPathGeometry", "CompositionGeometricClip" and "Path"
+    // in GlassSurface) and may throw what the step's HRESULT would.
+    internal static Action<string>? Inject { get; set; }
+
+    // A path that could not be made (a surface then cuts its glass by a rounded rectangle): tried again after 100, 300 and
+    // 1000 ms, then no more; a refusal that will not pass is not tried again at all. Either way a new generation (Renew) starts
+    // over. Used on the UI thread only; only Renew may come from another thread. The clock is GlassEffect's.
+    private static readonly int[] Backoff = [100, 300, 1000];
+    private const int StreakMs = 10_000;
+    private static int _generation, _seenGeneration, _failures;
+    private static bool _refused;
+    private static long _retryAt;
+
+    // The display, a resume or the capabilities changed: what was refused may work now.
+    public static void Renew() => Interlocked.Increment(ref _generation);
+
+    private static void Sync()
     {
-        if (Geometry(layout) is not { } geometry || geometry == IntPtr.Zero) return null;
-        try { return new CompositionPath(new Source(geometry)); }
+        int generation = Volatile.Read(ref _generation);
+        if (generation == _seenGeneration) return;
+        _seenGeneration = generation;
+        _failures = 0;
+        _refused = false;
+        _retryAt = 0;
+    }
+
+    // Whether a path may be made now. Cheap enough for every frame.
+    public static bool CanTry
+    {
+        get { Sync(); return !_refused && GlassEffect.Clock() >= _retryAt; }
+    }
+
+    // How long until a path that failed may be tried again (ms); null where nothing failed or it will not be tried again.
+    public static int? RetryIn
+    {
+        get { Sync(); return _refused || _failures == 0 ? null : (int)Math.Clamp(_retryAt - GlassEffect.Clock(), 0, 60_000); }
+    }
+
+    // A path made ends a streak of failures only once it has stayed away a while: a step that fails on every other path (new
+    // objects accepted, the replacement refused) still runs out of tries.
+    public static void Succeeded()
+    {
+        if (_failures > 0 && GlassEffect.Clock() - _retryAt >= StreakMs) _failures = 0;
+    }
+
+    // A step failed, however its HRESULT was mapped to an exception. The next try starts with a new factory (the paths made by
+    // the old one hold it themselves).
+    public static void Failed(Exception error)
+    {
+        var factory = _factory;
+        _factory = IntPtr.Zero;
+        if (factory != IntPtr.Zero) Marshal.Release(factory);
+        _failures++;
+        if (_failures > Backoff.Length || error is DllNotFoundException or EntryPointNotFoundException or InvalidCastException
+                or NotImplementedException or NotSupportedException)
+            _refused = true;
+        else _retryAt = GlassEffect.Clock() + Backoff[_failures - 1];
+    }
+
+    // The outline of a layout (in the island's own units) as a composition path. Throws where a step fails (Failed takes it).
+    public static CompositionPath Create(GlassBoundaryMath.Layout layout)
+    {
+        var source = GeometrySource(layout);
+        Inject?.Invoke("CompositionPath");
+        return new CompositionPath(source);
+    }
+
+    // The outline of a layout as the geometry source Composition is given.
+    internal static Windows.Graphics.IGeometrySource2D GeometrySource(GlassBoundaryMath.Layout layout)
+    {
+        var geometry = Geometry(layout);
+        try { return new Source(geometry); }
         finally { Marshal.Release(geometry); }
     }
 
-    // The outline of a layout as a Direct2D path geometry (a reference the caller releases); null where Direct2D is not to be had.
-    internal static IntPtr? Geometry(GlassBoundaryMath.Layout layout)
+    // The outline of a layout as a Direct2D path geometry (a reference the caller releases).
+    internal static IntPtr Geometry(GlassBoundaryMath.Layout layout)
     {
-        if (Factory() is not { } factory) return null;
+        var factory = Factory();
+        Inject?.Invoke("CreatePathGeometry");
         Check(Slot<CreatePath>(factory, 10)(factory, out var path));
         try
         {
+            Inject?.Invoke("Open");
             Check(Slot<OpenPath>(path, 17)(path, out var sink));
             try
             {
@@ -36,6 +105,7 @@ internal static class GlassPath
                 var writer = new SinkWriter(sink);
                 GlassBoundaryMath.WriteOutline(layout, placed: true, ref writer);
                 writer.End();
+                Inject?.Invoke("Close");
                 Check(Slot<CloseSink>(sink, 9)(sink));
             }
             finally { Marshal.Release(sink); }
@@ -60,23 +130,22 @@ internal static class GlassPath
         return contains != 0;
     }
 
-    private static IntPtr? Factory()
+    private static IntPtr Factory()
     {
         if (_factory != IntPtr.Zero) return _factory;
-        if (_failed) return null;
-        try
-        {
-            // Multithreaded: the compositor reads the geometry on its own thread.
-            var iid = new Guid("06152247-6f50-465a-9245-118bfd3b6007"); // ID2D1Factory
-            Check(D2D1CreateFactory(1, in iid, IntPtr.Zero, out _factory));
-            return _factory;
-        }
-        catch (Exception error) when (error is COMException or DllNotFoundException or EntryPointNotFoundException)
-        {
-            _failed = true;
-            _factory = IntPtr.Zero;
-            return null;
-        }
+        Inject?.Invoke("CreateFactory");
+        // Multithreaded: the compositor reads the geometry on its own thread.
+        var iid = new Guid("06152247-6f50-465a-9245-118bfd3b6007"); // ID2D1Factory
+        Check(D2D1CreateFactory(1, in iid, IntPtr.Zero, out var factory));
+        return _factory = factory;
+    }
+
+    // The factory a geometry was made by (ID2D1Resource::GetFactory); it lives as long as the geometry.
+    private static IntPtr FactoryOf(IntPtr geometry)
+    {
+        Slot<GetFactory>(geometry, 3)(geometry, out var factory);
+        if (factory != IntPtr.Zero) Marshal.Release(factory);
+        return factory;
     }
 
     private static void Check(int result) => Marshal.ThrowExceptionForHR(result);
@@ -98,6 +167,7 @@ internal static class GlassPath
     [StructLayout(LayoutKind.Sequential)] private readonly record struct Point2F(float X, float Y);
     [StructLayout(LayoutKind.Sequential)] private readonly record struct Bezier(Point2F A, Point2F B, Point2F C);
 
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void GetFactory(IntPtr self, out IntPtr factory);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int CreatePath(IntPtr self, out IntPtr path);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int OpenPath(IntPtr self, out IntPtr sink);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void SetFill(IntPtr self, int mode);
@@ -190,11 +260,13 @@ internal static class GlassPath
             Marshal.AddRef(geometry);
             return 0;
         };
-        // Only the geometry it has, from its own factory; Composition then asks GetGeometry.
+        // Only the geometry it has, from that geometry's own factory (a failure replaces the shared one); any other is refused outright, as Microsoft's sources do (HelloVectors,
+        // XAML), rather than answered with a successful nothing. (Composition asks GetGeometry.)
         private static readonly TryGet TryGetMethod = (IntPtr self, IntPtr factory, out IntPtr geometry) =>
         {
             geometry = IntPtr.Zero;
-            if (factory != _factory) return 0;
+            var held = Marshal.ReadIntPtr(self, 2 * IntPtr.Size);
+            if (factory == IntPtr.Zero || held == IntPtr.Zero || factory != FactoryOf(held)) return unchecked((int)0x80004001); // E_NOTIMPL
             return GetMethod(self, out geometry);
         };
         public static readonly IntPtr Pointer = Build();
