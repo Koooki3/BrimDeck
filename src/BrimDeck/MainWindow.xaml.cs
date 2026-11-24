@@ -64,6 +64,7 @@ public partial class MainWindow : Window
     private double _themeDpi;
     private VirtualDesktopPresence? _virtualDesktops;
     private EscapeDismissal? _escapeDismissal;
+    private bool _queuedCompletionOnly = true;
     private bool _expanded, _refreshing, _syncAsked, _preview, _refreshRequested, _pointerInside;
     // A preview from the settings window either holds the panel open or keeps it collapsed while a collapsed size is adjusted.
     private bool _previewExpanded;
@@ -1279,11 +1280,11 @@ public partial class MainWindow : Window
         if (Snapshots.Count == 0 || !_firstReadEnded) return;
         _usageBuilt = null; RenderUsage();
     }
-    private Task<List<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart, Action<IReadOnlyList<ProviderSnapshot>> progress)
+    private Task<List<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart, bool backgroundCompletion, Action<IReadOnlyList<ProviderSnapshot>> progress)
     {
         var settings = _app.DataSettings();
         RefreshPrices();
-        return Task.Run(() => _app.Usage.RefreshAsync(settings, _app.Lifetime.Token, historyStart, progress));
+        return Task.Run(() => _app.Usage.RefreshAsync(settings, _app.Lifetime.Token, historyStart, progress, backgroundCompletion));
     }
     // The finished round is kept for the next start, off the UI thread; the snapshots are not changed once published.
     private void KeepLastSeen(IReadOnlyList<ProviderSnapshot> round)
@@ -1294,12 +1295,12 @@ public partial class MainWindow : Window
         _app.KeepUsage(() => store.Save(round, settings));
     }
     // Only the main panel reads; every panel shows the result. The history goes back as far as any panel's model details need.
-    public async Task RefreshAsync(bool queueIfBusy = true)
+    public async Task RefreshAsync(bool queueIfBusy = true, bool backgroundCompletion = false)
     {
-        if (_lead is { } lead) { await lead.RefreshAsync(queueIfBusy); return; }
+        if (_lead is { } lead) { await lead.RefreshAsync(queueIfBusy, backgroundCompletion); return; }
         // Timer requests reuse the current read. Changed settings or a wider
         // date range still require one follow-up, and automatic requests must not clear it.
-        if (_refreshing) { if (queueIfBusy) _refreshRequested = true; return; }
+        if (_refreshing) { if (queueIfBusy) { _refreshRequested = true; _queuedCompletionOnly &= backgroundCompletion; } return; }
         _refreshing = true;
         int round = ++_round; bool whole = false;
         var decks = _app.Decks.ToList();
@@ -1307,7 +1308,7 @@ public partial class MainWindow : Window
         try
         {
             // The first read hands over what each source has as it ends (UsageService.RefreshAsync throttles this); the whole result follows.
-            var result = await LoadSnapshotsAsync(decks.Min(deck => deck._historyStart), partial =>
+            var result = await LoadSnapshotsAsync(decks.Min(deck => deck._historyStart), backgroundCompletion, partial =>
                 // Background priority keeps input and animation ahead of the partial renders; one that runs after the whole result, or
                 // after the next read began, is of an older round and does nothing.
                 Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
@@ -1329,7 +1330,9 @@ public partial class MainWindow : Window
             foreach (var deck in _app.Decks) { deck.RenderUsage(); deck.RenderSyncButton(); }
             if (_refreshRequested)
             {
-                _refreshRequested = false; _ = RefreshAsync();
+                var completionOnly = _queuedCompletionOnly;
+                _queuedCompletionOnly = true; _refreshRequested = false;
+                _ = RefreshAsync(backgroundCompletion: completionOnly);
             }
         }
     }

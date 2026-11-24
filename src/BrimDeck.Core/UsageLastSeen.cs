@@ -34,6 +34,7 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
         bool UsageAvailable, bool UsageComplete, DateTime? UsageStart, List<StoredDay>? Days)
     {
         // When the quotas were read, where that is not when the rest was (a quota that failed this round keeps its earlier reading); null: ReadAt.
+        public bool AntigravityCli { get; init; }
         public DateTimeOffset? QuotaAt { get; init; }
     }
     private sealed record StoredFile(int Version, List<StoredProvider?>? Providers);
@@ -58,7 +59,7 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
         var now = _clock();
         lock (_sync)
         {
-            var kept = Read(now).Select(stored => Live(stored, now)).OfType<StoredProvider>().Where(stored => Relevant(settings, stored)).ToList();
+            var kept = Read(now).Select(stored => Live(FilterCli(stored, settings), now)).OfType<StoredProvider>().Where(stored => Relevant(settings, stored)).ToList();
             // The first round of a run always writes, so the read time of what was read again moves on even when the values are the same.
             _current = kept; _written = Serialize(kept, true); _writtenAt = default;
             return kept.Select(stored => Restore(stored, now)).ToList();
@@ -112,6 +113,7 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
                 var have = fresh.Select(KeyOf).ToHashSet();
                 all = new List<StoredProvider>(fresh);
                 all.AddRange(_current.Where(old => !have.Contains(KeyOf(old)) && Relevant(settings, old)).Select(old => Live(old, now)).OfType<StoredProvider>());
+                all = [.. all.Select(stored => FilterCli(stored, settings))];
                 same = Serialize(all, true);
                 text = Serialize(all, false);
                 // Over the size limit the token totals go first, and the sources then show no totals rather than zero ones.
@@ -140,12 +142,16 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
         }
     }
 
+    private static StoredProvider FilterCli(StoredProvider stored, DeckSettings settings)
+        => stored.AntigravityCli && !settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Antigravity && app.AntigravityCli)
+            ? stored with { Metrics = [], Plan = "", AntigravityCli = false } : stored;
+
     private static StoredProvider Merge(StoredProvider fresh, StoredProvider old, DateTimeOffset now)
     {
         var merged = fresh;
         var quotaAt = old.QuotaAt ?? old.ReadAt;
         if ((fresh.Metrics ?? []).Count == 0 && (old.Metrics ?? []).Count > 0 && InRange(quotaAt, now))
-            merged = merged with { Metrics = old.Metrics, Plan = string.IsNullOrEmpty(fresh.Plan) ? old.Plan : fresh.Plan, QuotaAt = quotaAt };
+            merged = merged with { Metrics = old.Metrics, AntigravityCli = old.AntigravityCli, Plan = string.IsNullOrEmpty(fresh.Plan) ? old.Plan : fresh.Plan, QuotaAt = quotaAt };
         if (!fresh.UsageAvailable && old.UsageAvailable && InRange(old.ReadAt, now))
             merged = merged with { UsageAvailable = true, UsageComplete = old.UsageComplete, UsageStart = old.UsageStart, Days = old.Days, ReadAt = old.ReadAt };
         return merged;
@@ -221,7 +227,7 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
         // The plan comes with the quotas; the time is when they were read (a quota kept from earlier keeps its own time).
         var quotaAt = snapshot.IsStale && snapshot.QuotaTime is { } quotaTime ? quotaTime : now;
         return new StoredProvider(snapshot.Id, Local(snapshot.Configurations) ? [ProviderCatalog.LocalQuota] : [], usage ? now : quotaAt, Text(snapshot.Plan), metrics,
-            usage, snapshot.UsageComplete, usageStart, days) { QuotaAt = quotaAt };
+            usage, snapshot.UsageComplete, usageStart, days) { QuotaAt = quotaAt, AntigravityCli = snapshot.Id == ProviderId.Antigravity && snapshot.Source == "Antigravity CLI" };
     }
 
     private static ProviderSnapshot Restore(StoredProvider stored, DateTimeOffset now)
@@ -243,7 +249,7 @@ public sealed class UsageLastSeen(string path, Func<DateTimeOffset>? clock = nul
         return new ProviderSnapshot(stored.Id)
         {
             Configurations = [.. stored.Configurations ?? []],
-            Metrics = metrics, Quotas = [], Plan = Text(stored.Plan), Entries = entries,
+            Source = stored.AntigravityCli ? "Antigravity CLI" : "", Metrics = metrics, Quotas = [], Plan = Text(stored.Plan), Entries = entries,
             UsageAvailable = stored.UsageAvailable, UsageComplete = stored.UsageComplete, UsageStart = stored.UsageStart,
             LastSeenAt = shown, IsStale = true, LiveQuota = false, QuotaTime = stored.QuotaAt ?? read,
             StatusLabel = label, Status = Loc.T($"显示 {Clock(shown, now)} 读取的数据，新数据到达后会替换。", $"Showing the data read at {Clock(shown, now)}. New data replaces it when it arrives."),

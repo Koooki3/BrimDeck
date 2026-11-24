@@ -13,6 +13,11 @@ public interface IDesktopSources
     string? ReadCursorToken(string database);
     Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation);
     Task<string?> ReadAntigravityCliAsync(CancellationToken cancellation) => Task.FromResult<string?>(null);
+    async Task<AntigravityCliResult> ReadAntigravityCliResultAsync(CancellationToken cancellation)
+    {
+        var report = await ReadAntigravityCliAsync(cancellation).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(report) ? new(AntigravityCliStatus.Failed) : new(AntigravityCliStatus.Ok, report);
+    }
     // Whether the last FindAntigravityAsync found Antigravity's language server without endpoints because its command line
     // could not be read (Antigravity runs as administrator) and it wrote no service file.
     bool AntigravityUnreadable => false;
@@ -77,10 +82,27 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
     private (DateTimeOffset Time, IReadOnlyList<WslHome> Homes)? _wsl;
     private bool _includeWsl;
     private readonly AntigravityUsage _antigravity = new();
-    // Whether any enabled Antigravity row reads via the CLI (AppEntry.AntigravityCli); turning it off forgets the CLI reading.
-    private bool _antigravityCli;
-    private DateTimeOffset? _antigravityCliAttempt;
-    private (DateTimeOffset Time, List<Quota> Quotas)? _antigravityCliReading;
+    private readonly CancellationTokenSource _disposed = new();
+    private int _isDisposed;
+    private sealed record AntigravityReading(DateTimeOffset Time, List<UsageMetric> Metrics, string Plan, string PlanSource, string Source, bool FromCli, bool Restored = false);
+    private sealed class AntigravityState
+    {
+        public AntigravityReading? Reading;
+        public Task? PendingCli;
+        public CancellationTokenSource? CliCancel;
+        public bool CliRunning;
+        public bool Unshown;
+        public DateTimeOffset? LastAttempt;
+        public AntigravityCliStatus? LastFailure;
+
+    }
+    private bool _backgroundCompletion;
+    private readonly AntigravityState _antigravityState = new();
+    // Whether any enabled Antigravity row reads via the CLI (AppEntry.AntigravityCli); turning it off forgets CLI-only readings.
+    private volatile bool _antigravityCli;
+    public TimeSpan AntigravityCliWait { get; init; } = TimeSpan.FromSeconds(3);
+    public TimeSpan AntigravityCliTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
     private readonly DshSessions _dsh = new();
     private readonly KimiSessions _kimi = new();
     // The Kimi Code membership level, read from /me at most every few hours, for the hash of the token it was read with.
@@ -183,12 +205,13 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
     // progress, when given, receives the snapshots that have been read so far (a growing list) while the first round of this
     // service is still running, at most once per ProgressInterval, from any thread; the returned list is always the whole result.
     public async Task<List<ProviderSnapshot>> RefreshAsync(DeckSettings settings, CancellationToken cancellation = default, DateTime? usageStart = null,
-        Action<IReadOnlyList<ProviderSnapshot>>? progress = null)
+        Action<IReadOnlyList<ProviderSnapshot>>? progress = null, bool backgroundCompletion = false)
     {
         await _gate.WaitAsync(cancellation);
         try
         {
             // Each underlying source is read once, even when several columns reuse it.
+            _backgroundCompletion = backgroundCompletion;
             var required = settings.RequiredProviders;
             _includeWsl = settings.IncludeWsl;
             // The Claude and Grok Bot account APIs are asked only for rows that read online; rows that do not share one local snapshot.
@@ -196,8 +219,24 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             bool claudeLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && ProviderCatalog.ReadsLocalQuota(app));
             bool grokBotOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && app.QuotaOnline);
             bool grokBotLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && ProviderCatalog.ReadsLocalQuota(app));
-            _antigravityCli = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Antigravity && app.AntigravityCli);
-            if (!_antigravityCli) { _antigravityCliAttempt = null; _antigravityCliReading = null; }
+            var antigravityCli = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Antigravity && app.AntigravityCli);
+            CancellationTokenSource? cancelAntigravityCli = null;
+            lock (_antigravityState)
+            {
+                _antigravityCli = antigravityCli;
+
+                if (!antigravityCli)
+                {
+                    cancelAntigravityCli = _antigravityState.CliCancel;
+                    _antigravityState.CliCancel = null;
+                    _antigravityState.CliRunning = false;
+                    _antigravityState.Unshown = false;
+                    if (_antigravityState.Reading is { FromCli: true }) _antigravityState.Reading = null;
+                    _antigravityState.LastAttempt = null;
+                    _antigravityState.LastFailure = null;
+                }
+            }
+            try { cancelAntigravityCli?.Cancel(); } catch (ObjectDisposedException) { }
             // A stalled source ends with a timeout status instead of holding every later refresh behind this gate.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             deadline.CancelAfter(Deadline);
@@ -405,7 +444,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
                     await ReadCursorAsync(snapshot, now, start, ct);
                     break;
                 case ProviderId.Antigravity:
-                    await ReadAntigravityAsync(snapshot, now, start, ct);
+                    await ReadAntigravityAsync(snapshot, now, start, ct, lifetime);
                     break;
                 case ProviderId.ZCode:
                     await ReadZCodeAsync(snapshot, now, ct);
@@ -460,13 +499,8 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
                 _ => Loc.T("账户接口暂时不可用", "The account API is temporarily unavailable.")
             };
         }
-        catch (OperationCanceledException) when (id == ProviderId.Antigravity && ct.IsCancellationRequested
-            && !lifetime.IsCancellationRequested && _antigravityCliReading is { } reading)
-        {
-            ShowAntigravityCli(snapshot, reading, now, stale: true);
-        }
-        // The overall deadline ends here too: what was read locally stays, and only the quota part is marked as not read.
-        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
+        // The overall deadline (or WMI timeout) ends here too: what was read locally stays, and only the quota part is marked as not read.
+        catch (Exception ex) when (ex is OperationCanceledException or TimeoutException && !lifetime.IsCancellationRequested)
         { failed = true; snapshot.StatusLabel = Loc.T("读取超时", "Timed out"); snapshot.Status = Loc.T("读取超时，稍后重试", "Reading timed out. Retrying later."); }
         catch (InvalidDataException)
         { failed = true; snapshot.StatusLabel = Loc.T("数据不可用", "Data unavailable"); snapshot.Status = Loc.T("数据格式发生变化，暂时无法读取配额", "The data format has changed, so the quota cannot be read for now."); }
@@ -475,6 +509,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or FormatException)
         { failed = true; snapshot.StatusLabel = Loc.T("读取失败", "Read failed"); snapshot.Status = Loc.T("暂时无法读取数据，稍后重试", "The data cannot be read right now. Retrying later."); }
         if (failed && KeepsLastReading(id)) ShowLastReading(snapshot, now, retrying);
+        else if (failed && id == ProviderId.Antigravity) TryShowRetainedAntigravity(snapshot, now, snapshot.StatusLabel, snapshot.Status);
         if (wslRead is not null)
         {
             // This PC's statistics reach the panel before the WSL ones, which can take seconds over the network share.
@@ -1215,22 +1250,76 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         return new("cursor:" + identity, time, model.Length > 0 ? model : "Cursor", input, cacheRead, cacheWrite, 0, output, cost);
     }
 
-    private static void ShowAntigravityCli(ProviderSnapshot snapshot, (DateTimeOffset Time, List<Quota> Quotas) reading,
-        DateTimeOffset now, bool stale)
+    private static bool ShowAntigravityReading(ProviderSnapshot snapshot, AntigravityReading reading, DateTimeOffset now,
+        bool stale, string? statusLabel = null, string? reason = null)
     {
-        snapshot.Quotas = [.. reading.Quotas];
-        snapshot.Plan = snapshot.PlanSource = "";
-        Connected(snapshot, "Antigravity CLI", reading.Time);
+        if (stale && !Recent(reading.Time, now)) return false;
+        var metrics = reading.Metrics.Where(m => StillHolds(m, now)).ToList();
+        if (metrics.Count == 0) return false;
+        snapshot.Quotas = [.. metrics.Where(m => m.Kind == MetricKind.Percent && m.Percent is not null)
+            .Select(m => new Quota(m.Label, m.Percent!.Value, m.ResetAt, m.Window))];
+        snapshot.Metrics = metrics;
+        snapshot.Plan = reading.Plan;
+        snapshot.PlanSource = reading.PlanSource;
+        Connected(snapshot, reading.Source, reading.Time);
         if (stale)
         {
             snapshot.IsStale = true;
-            snapshot.StatusLabel = Loc.T("上次读取", "Last reading");
+            snapshot.StatusLabel = statusLabel ?? Loc.T("上次读取", "Last reading");
             var time = Clock(reading.Time, now);
-            snapshot.Status = Loc.T($"CLI 刷新失败，显示 {time} 读取的额度", $"CLI refresh failed, showing quota read at {time}");
+            var prefix = (reason ?? "").TrimEnd('。', '.', ' ');
+            snapshot.Status = prefix.Length > 0
+                ? Loc.T($"{prefix}；显示 {time} 读取的额度", $"{prefix}; showing quota read at {time}")
+                : Loc.T($"显示 {time} 读取的额度", $"Showing quota read at {time}");
         }
+        return true;
     }
 
-    private async Task ReadAntigravityAsync(ProviderSnapshot snapshot, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
+    private bool TryShowRetainedAntigravity(ProviderSnapshot snapshot, DateTimeOffset now, string statusLabel, string reason)
+    {
+        AntigravityReading? reading;
+        lock (_antigravityState) reading = _antigravityState.Reading;
+        return reading is not null && ShowAntigravityReading(snapshot, reading, now, stale: true, statusLabel, reason);
+    }
+
+    private static (string Label, string Reason) AntigravityCliFailureText(AntigravityCliStatus? failure) => failure switch
+    {
+        AntigravityCliStatus.AuthRequired => (
+            Loc.T("需要登录", "Sign in required"),
+            Loc.T("Antigravity CLI 需要重新登录，请在终端运行 agy 登录",
+                "Antigravity CLI needs sign-in. Sign in with agy in a terminal.")),
+        AntigravityCliStatus.TimedOut => (
+            Loc.T("读取超时", "Timed out"),
+            Loc.T("Antigravity CLI 响应超时，稍后重试", "Antigravity CLI timed out. Retrying later.")),
+        AntigravityCliStatus.NetworkUnavailable => (
+            Loc.T("网络不可达", "Network unavailable"),
+            Loc.T("Antigravity CLI 无法连接服务",
+                "Antigravity CLI could not reach the service.")),
+        AntigravityCliStatus.NotInstalled => (
+            Loc.T("未安装 CLI", "CLI not installed"),
+            Loc.T("未检测到 Antigravity 应用或 IDE 的本地服务，且未找到 agy CLI",
+                "No local service of the Antigravity app or IDE was found, and agy CLI was not found.")),
+        _ => (
+            Loc.T("服务未就绪", "Service not ready"),
+            Loc.T("未检测到 Antigravity 应用或 IDE 的本地服务，CLI 也未返回额度。请检查 agy 是否已安装并登录",
+                "No local service of the Antigravity app or IDE was found, and the CLI returned no quota. Check that agy is installed and signed in."))
+    };
+
+    private void CleanupAntigravityCliCancel(CancellationTokenSource cliCts)
+    {
+        lock (_antigravityState)
+        {
+            if (ReferenceEquals(_antigravityState.CliCancel, cliCts))
+            {
+                _antigravityState.CliCancel = null;
+                _antigravityState.CliRunning = false;
+                _antigravityState.Unshown = false;
+            }
+        }
+        cliCts.Dispose();
+    }
+
+    private async Task ReadAntigravityAsync(ProviderSnapshot snapshot, DateTimeOffset now, DateTimeOffset start, CancellationToken ct, CancellationToken lifetime)
     {
         var endpoints = await desktop.FindAntigravityAsync(ct);
         foreach (var endpoint in endpoints)
@@ -1246,56 +1335,210 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
             try
             {
                 using var status = await LocalCall(local, endpoint, "GetUserStatus", new { }, ct);
-                snapshot.Plan = PlanParser.Antigravity(status.RootElement);
-                if (snapshot.Plan.Length > 0) snapshot.PlanSource = Loc.T("Antigravity 本地账户服务", "Antigravity local account service");
-                snapshot.Quotas = QuotaParser.Antigravity(status.RootElement);
+                var plan = PlanParser.Antigravity(status.RootElement);
+                var planSource = plan.Length > 0 ? Loc.T("Antigravity 本地账户服务", "Antigravity local account service") : "";
+                var quotas = QuotaParser.Antigravity(status.RootElement);
                 try
                 {
                     using var summary = await LocalCall(local, endpoint, "RetrieveUserQuotaSummary", new { }, ct);
                     var authoritative = QuotaParser.Antigravity(summary.RootElement);
-                    if (authoritative.Count > 0) snapshot.Quotas = authoritative;
+                    if (authoritative.Count > 0) quotas = authoritative;
                 }
                 catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException) { }
-                if (snapshot.Quotas.Count == 0) continue;
+                if (quotas.Count == 0) continue;
+                snapshot.Plan = plan;
+                snapshot.PlanSource = planSource;
+                snapshot.Quotas = quotas;
                 Connected(snapshot, Loc.T("Antigravity 本地服务", "Antigravity local service"), now);
+                var metrics = snapshot.Metrics.ToList();
+                CancellationTokenSource? running;
+                lock (_antigravityState)
+                {
+                    running = _antigravityState.CliCancel;
+                    _antigravityState.CliCancel = null;
+                    _antigravityState.CliRunning = false;
+                    _antigravityState.Unshown = false;
+                    _antigravityState.Reading = new(now, metrics, plan, planSource, snapshot.Source, FromCli: false);
+                    _antigravityState.LastFailure = null;
+                }
+                try { running?.Cancel(); } catch (ObjectDisposedException) { }
                 return;
             }
             catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException) { }
         }
         ct.ThrowIfCancellationRequested();
-        if (!_antigravityCli)
+
+        // Layer 4: Only fall back to the CLI when no local Antigravity app or IDE endpoint is running.
+        // When a local endpoint exists but temporarily fails (e.g. poor network), keep the last reading instead of spawning agy.exe.
+        if (endpoints.Count > 0)
         {
-            if (endpoints.Count == 0 && !desktop.AntigravityUnreadable)
-            { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到 Antigravity 应用或 IDE 的本地用量服务", "The local usage service of the Antigravity app or IDE was not found."); return; }
-        }
-        else if (await ReadAntigravityCliAsync(snapshot, now, ct)) return;
-        if (endpoints.Count == 0 && desktop.AntigravityUnreadable)
-        {
-            snapshot.StatusLabel = Loc.T("无法读取", "Cannot read");
-            snapshot.Status = Loc.T("Antigravity 以管理员身份运行，BrimDeck 无法读取。请以普通权限启动 Antigravity", "Antigravity runs as administrator, so BrimDeck cannot read it. Start Antigravity without administrator rights.");
+            var label = Loc.T("服务暂不可用", "Service unavailable");
+            var reason = Loc.T("检测到 Antigravity，但本地用量服务暂不可用", "Antigravity was found, but its local usage service is unavailable.");
+            if (!TryShowRetainedAntigravity(snapshot, now, label, reason))
+            { snapshot.StatusLabel = label; snapshot.Status = reason; }
             return;
         }
-        if (endpoints.Count == 0)
-        { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = Loc.T("未检测到 Antigravity 应用或 IDE 的本地服务，CLI 也未返回额度。请检查 agy 是否已安装并登录", "No local service of the Antigravity app or IDE was found, and the CLI returned no quota. Check that agy is installed and signed in."); return; }
-        snapshot.StatusLabel = Loc.T("服务暂不可用", "Service unavailable"); snapshot.Status = Loc.T("检测到 Antigravity，但本地用量服务暂不可用", "Antigravity was found, but its local usage service is unavailable.");
+
+        if (_antigravityCli && await ReadAntigravityCliAsync(snapshot, now, ct, lifetime)) return;
+
+        if (desktop.AntigravityUnreadable)
+        {
+            var label = Loc.T("无法读取", "Cannot read");
+            var reason = Loc.T("Antigravity 以管理员身份运行，BrimDeck 无法读取。请以普通权限启动 Antigravity", "Antigravity runs as administrator, so BrimDeck cannot read it. Start Antigravity without administrator rights.");
+            if (!TryShowRetainedAntigravity(snapshot, now, label, reason))
+            { snapshot.StatusLabel = label; snapshot.Status = reason; }
+            return;
+        }
+
+        var missing = Loc.T("未检测到 Antigravity 应用或 IDE 的本地用量服务", "The local usage service of the Antigravity app or IDE was not found.");
+        if (!TryShowRetainedAntigravity(snapshot, now, Loc.T("上次读取", "Last reading"), missing))
+        { snapshot.StatusLabel = Loc.T("服务未就绪", "Service not ready"); snapshot.Status = missing; }
     }
 
-    // The CLI is run at most every five minutes, counting runs that failed or timed out; in between, and after a failed run,
-    // the last reading is shown with the time it was read. Returns whether a reading was shown.
-    private async Task<bool> ReadAntigravityCliAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    // Runs `agy -p /usage` in the background (waiting at most AntigravityCliWait in this round so other sources are never
+    // stalled). The completion refresh consumes the pending result once before another poll starts.
+    private async Task<bool> ReadAntigravityCliAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct, CancellationToken lifetime)
     {
         var attemptTime = _clock();
-        if (_antigravityCliAttempt is not { } attempted || attemptTime - attempted >= TimeSpan.FromMinutes(5))
+        Task? pending = null;
+        lock (_antigravityState)
         {
-            _antigravityCliAttempt = attemptTime;
-            var report = await desktop.ReadAntigravityCliAsync(ct);
-            ct.ThrowIfCancellationRequested();
-            var quotas = QuotaParser.AntigravityCli(report);
-            if (quotas.Count > 0) _antigravityCliReading = (attemptTime, quotas);
+            if (_antigravityState.CliRunning && _antigravityState.PendingCli is { IsCompleted: false } running)
+            {
+                pending = running;
+            }
+            else
+            {
+                if (!_backgroundCompletion)
+                {
+                    _antigravityState.LastAttempt = attemptTime;
+                    _antigravityState.CliRunning = true;
+                    _antigravityState.Unshown = false;
+                    var cliCts = CancellationTokenSource.CreateLinkedTokenSource(lifetime, _disposed.Token);
+                    cliCts.CancelAfter(AntigravityCliTimeout);
+                    _antigravityState.CliCancel = cliCts;
+                    pending = _antigravityState.PendingCli = Task.Run(
+                        () => RunAntigravityCliInBackgroundAsync(attemptTime, lifetime, cliCts), CancellationToken.None);
+                }
+            }
         }
-        if (_antigravityCliReading is not { } reading) return false;
-        ShowAntigravityCli(snapshot, reading, now, reading.Time != _antigravityCliAttempt);
+
+        if (pending is not null && !pending.IsCompleted)
+        {
+            try { await pending.WaitAsync(AntigravityCliWait, ct); }
+            catch (TimeoutException) { }
+            catch (OperationCanceledException) when (!lifetime.IsCancellationRequested) { }
+        }
+        lifetime.ThrowIfCancellationRequested();
+
+        bool inFlight;
+        AntigravityReading? reading;
+        AntigravityCliStatus? failure;
+        DateTimeOffset? lastAttempt;
+        lock (_antigravityState)
+        {
+            inFlight = _antigravityState.CliRunning;
+            if (inFlight) _antigravityState.Unshown = true;
+            reading = _antigravityState.Reading;
+            failure = _antigravityState.LastFailure;
+            lastAttempt = _antigravityState.LastAttempt;
+        }
+
+        if (inFlight)
+        {
+            var reason = Loc.T("正在通过 Antigravity CLI 刷新额度", "Refreshing quota via Antigravity CLI");
+            if (reading is not null && ShowAntigravityReading(snapshot, reading, now, stale: true, Loc.T("上次读取", "Last reading"), reason))
+                return true;
+            snapshot.StatusLabel = Loc.T("等待更新", "Waiting for update");
+            snapshot.Status = Loc.T("正在通过 Antigravity CLI 读取额度", "Reading quota via Antigravity CLI");
+            return true;
+        }
+
+        now = _clock();
+        if (reading is { FromCli: true, Restored: false } && failure is null && lastAttempt == reading.Time && Recent(reading.Time, now))
+        {
+            if (ShowAntigravityReading(snapshot, reading, now, stale: false)) return true;
+        }
+
+        var (failLabel, failReason) = AntigravityCliFailureText(failure);
+        var retainedLabel = failure is AntigravityCliStatus.AuthRequired or AntigravityCliStatus.TimedOut or AntigravityCliStatus.NetworkUnavailable
+            ? failLabel : Loc.T("上次读取", "Last reading");
+        if (reading is not null && ShowAntigravityReading(snapshot, reading, now, stale: true, retainedLabel, failReason))
+            return true;
+
+        if (desktop.AntigravityUnreadable && failure is null or AntigravityCliStatus.NotInstalled or AntigravityCliStatus.Failed)
+            return false;
+
+        snapshot.StatusLabel = failLabel;
+        snapshot.Status = failReason;
         return true;
+    }
+
+    private async Task RunAntigravityCliInBackgroundAsync(DateTimeOffset attemptTime, CancellationToken lifetime, CancellationTokenSource cliCts)
+    {
+        AntigravityCliResult result;
+        try
+        {
+            bool first;
+            lock (_antigravityState)
+            {
+                if (!ReferenceEquals(_antigravityState.CliCancel, cliCts) || cliCts.IsCancellationRequested) return;
+                first = _antigravityState.Reading is null || _antigravityState.Reading.Restored;
+            }
+            try
+            {
+                result = await desktop.ReadAntigravityCliResultAsync(cliCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!lifetime.IsCancellationRequested && Volatile.Read(ref _isDisposed) == 0)
+            {
+                bool stillWanted;
+                lock (_antigravityState) stillWanted = _antigravityCli && ReferenceEquals(_antigravityState.CliCancel, cliCts);
+                if (!stillWanted) return;
+                result = new(AntigravityCliStatus.TimedOut);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or InvalidOperationException or AggregateException or HttpRequestException)
+            {
+                result = new(AntigravityCliStatus.Failed);
+            }
+
+            bool notify = false, succeeded = false;
+            lock (_antigravityState)
+            {
+                if (!ReferenceEquals(_antigravityState.CliCancel, cliCts)) return;
+                _antigravityState.CliCancel = null;
+                _antigravityState.CliRunning = false;
+                if (!_antigravityCli || Volatile.Read(ref _isDisposed) != 0)
+                {
+                    _antigravityState.Unshown = false;
+                    return;
+                }
+                var quotas = result.Status == AntigravityCliStatus.Ok ? QuotaParser.AntigravityCli(result.Report) : [];
+                if (quotas.Count > 0)
+                {
+                    var metrics = quotas.Select(UsageMetric.FromQuota).ToList();
+                    _antigravityState.Reading = new(attemptTime, metrics, "", "", "Antigravity CLI", FromCli: true);
+                    _antigravityState.LastFailure = null;
+                    succeeded = true;
+                }
+                else
+                {
+                    var status = result.Status == AntigravityCliStatus.Ok ? AntigravityCliStatus.Failed : result.Status;
+                    _antigravityState.LastFailure = status;
+
+                }
+                notify = _antigravityState.Unshown;
+                _antigravityState.Unshown = false;
+            }
+            if (notify) BackgroundReadFinished?.Invoke(first && succeeded);
+        }
+        finally
+        {
+            CleanupAntigravityCliCancel(cliCts);
+        }
     }
 
     // A ZCode column combines the signed-in account's Coding Plan (the same template as the 智谱 GLM / Z.ai GLM
@@ -2035,7 +2278,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         lock (kept)
         {
             // The round a finished read asks for only shows it, without starting the next read at once.
-            if (kept.Pending is not { IsCompleted: false } && now - kept.Started >= QoderGap)
+            if (!_backgroundCompletion && kept.Pending is not { IsCompleted: false } && now - kept.Started >= QoderGap)
             {
                 kept.Started = now;
                 kept.Unshown = false;
@@ -2391,5 +2634,22 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
     private static JsonDocument? ReadJson(string path) => SharedFile.ReadJson(path);
     private static void Connected(ProviderSnapshot snapshot, string source, DateTimeOffset now)
     { snapshot.LiveQuota = true; snapshot.QuotaTime = now; snapshot.Source = source; snapshot.Status = Loc.T("已连接", "Connected"); snapshot.StatusLabel = Loc.T("已连接", "Connected"); }
-    public void Dispose() { _configured.Dispose(); if (http is null) { _http.Dispose(); _zcodeHttp.Dispose(); } _gate.Dispose(); }
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0) return;
+        try { _disposed.Cancel(); } catch (ObjectDisposedException) { }
+        CancellationTokenSource? running;
+        lock (_antigravityState)
+        {
+            running = _antigravityState.CliCancel;
+            _antigravityState.CliCancel = null;
+            _antigravityState.CliRunning = false;
+            _antigravityState.Unshown = false;
+        }
+        try { running?.Cancel(); } catch (ObjectDisposedException) { }
+        _disposed.Dispose();
+        _configured.Dispose();
+        if (http is null) { _http.Dispose(); _zcodeHttp.Dispose(); }
+        _gate.Dispose();
+    }
 }

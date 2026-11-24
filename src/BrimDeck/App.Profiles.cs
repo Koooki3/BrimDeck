@@ -69,7 +69,8 @@ public partial class App
     private string DataKey()
     {
         var settings = DataSettings();
-        return string.Join("|", settings.IncludeWsl, string.Join(",", settings.RequiredProviders.Order()), string.Join(",", settings.EnabledApps.Select(e => e.ConfigurationKey).Order()));
+        bool antigravityCli = settings.EnabledApps.Any(e => e.QuotaSource == ProviderId.Antigravity && e.AntigravityCli);
+        return string.Join("|", settings.IncludeWsl, antigravityCli, string.Join(",", settings.RequiredProviders.Order()), string.Join(",", settings.EnabledApps.Select(e => e.ConfigurationKey).Order()));
     }
 
     // Makes another profile current, by the user's choice (the profiles page, the tray, the hotkey). A rule that holds no longer
