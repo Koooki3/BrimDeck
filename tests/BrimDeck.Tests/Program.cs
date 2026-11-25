@@ -170,6 +170,7 @@ try
     await InstallerUpdateTests.Run(root, Check);
     await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
+    SettingsUnavailableTests.Run(root, Check);
     ConfigBackupTests.Run(root, Check);
     MemoryModeTests.Run(Check);
     OffPeakTests.Run(root, Check);
