@@ -31,7 +31,8 @@ public sealed class DshSessions
     private readonly Dictionary<string, CacheItem> _cache = new(StringComparer.OrdinalIgnoreCase);
     // The merged entries of the latest read, kept while no file changed and the start date stayed, as LogReader keeps its own:
     // most refreshes find nothing new.
-    private (DateTimeOffset Start, List<TokenEntry> Entries)? _merged;
+    // Next is the earliest record left out for being in the future, which joins once its time has come.
+    private (DateTimeOffset Start, DateTimeOffset? Next, List<TokenEntry> Entries)? _merged;
     // A line longer than this (a huge tool result) is dropped and counted as unreadable instead of growing the buffer without
     // end, as LogReader does (C03).
     private readonly int _maxLine;
@@ -52,7 +53,7 @@ public sealed class DshSessions
             .Select(group => group.OrderByDescending(f => f.Match.Groups[1].Success ? int.Parse(f.Match.Groups[1].Value) : 0)
                 .ThenByDescending(f => File.GetLastWriteTimeUtc(f.File)).First().File);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        bool changed = _merged is not { } kept || kept.Start != start;
+        bool changed = _merged is not { } kept || kept.Start != start || kept.Next <= now;
         int count = 0, errors = 0;
         foreach (var file in current)
         {
@@ -73,10 +74,14 @@ public sealed class DshSessions
         if (changed || _merged is null)
         {
             var entries = new Dictionary<string, TokenEntry>();
+            DateTimeOffset? next = null;
             foreach (var cached in _cache.Values)
                 foreach (var entry in cached.Entries)
+                {
+                    if (entry.Time > now && entry.Total > 0 && (next is null || entry.Time < next)) next = entry.Time;
                     if (entry.Time >= start && entry.Time <= now && entry.Total > 0) entries.TryAdd(entry.Key, entry);
-            _merged = (start, entries.Values.OrderBy(e => e.Time).ToList());
+                }
+            _merged = (start, next, entries.Values.OrderBy(e => e.Time).ToList());
         }
         snapshot.Entries = _merged.Value.Entries;
         snapshot.UsageComplete = errors == 0;
