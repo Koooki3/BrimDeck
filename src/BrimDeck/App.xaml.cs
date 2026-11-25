@@ -103,7 +103,7 @@ public partial class App : Application
         SetCurrentProcessExplicitAppUserModelID("BrimDeck.Desktop");
         RecordCrashes();
         var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
-        Store = new SettingsStore(folder); Settings = Store.Load();
+        if (!LoadSettings(folder)) { Shutdown(); return; }
         ReturnFromRule(); Profiles.Keep(Settings);
         // Before anything is read: a reading left unanswered when the last run ended stops now (SensorGuard).
         SensorGuard.Start(folder);
@@ -625,6 +625,23 @@ public partial class App : Application
         }));
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
+    // Reads the settings. While the file cannot be opened, starting with defaults would replace it at the first save and act on them
+    // (a clipboard history that is not to be kept is deleted), so the user is asked instead: try again, or exit with nothing changed.
+    private bool LoadSettings(string folder)
+    {
+        var store = new SettingsStore(folder);
+        while (true)
+        {
+            try { Settings = store.Load(); Store = store; return true; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Loc.Use(Loc.SystemLanguage());
+                string text = Loc.T($"无法打开设置文件：\n{store.FilePath}\n\n{ex.Message}\n\n文件可能正被其他程序占用，或当前用户没有读取权限。设置没有改动。取消将退出 BrimDeck。",
+                    $"The settings file cannot be opened:\n{store.FilePath}\n\n{ex.Message}\n\nAnother program may be using it, or you may not have permission to read it. Your settings have not been changed. Cancel exits BrimDeck.");
+                if (MessageBox.Show(text, "BrimDeck", MessageBoxButton.RetryCancel, MessageBoxImage.Warning, MessageBoxResult.Retry) != MessageBoxResult.Retry) return false;
+            }
+        }
+    }
     public void QueueSave() { _save.Stop(); _save.Start(); }
     // The settings are turned into text here, where they live, and written on the thread pool: writing the file (and the virus
     // scan that follows a write) took 60 ms and more, which showed as a stall after every page switch. Writes run one after

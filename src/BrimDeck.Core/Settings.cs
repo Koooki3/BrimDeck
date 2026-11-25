@@ -1109,7 +1109,7 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
     // Worded when shown, in the language the loaded settings choose.
     private Func<string>? _loadWarning;
     public string? LoadWarning => _loadWarning?.Invoke();
-    // True when the last Load found no settings file, or none it could read, and returned defaults.
+    // True when the last Load found no settings file, or none it could understand, and returned defaults.
     public bool IsFirstStart { get; private set; }
     // Without saved settings the interface follows the Windows display language; saved settings keep their language.
     // Normalized as read settings are: the start relies on what Normalize ensures, such as one current profile (Profiles.Keep).
@@ -1120,13 +1120,26 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
         settings.Normalize();
         return settings;
     }
+    // How long Load waits for a file that another program has open, or that cannot be read for another reason.
+    internal static TimeSpan ReadPatience { get; set; } = TimeSpan.FromSeconds(3);
+    // The file's text, or null when there is no file. A file that is there and cannot be opened says nothing about the settings
+    // in it, so it is never taken for a missing one: after ReadPatience the error is thrown and the file stays as it is.
+    private string? ReadFile()
+    {
+        for (long start = Environment.TickCount64; ;)
+        {
+            try { return File.ReadAllText(FilePath); }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return null; }
+            catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && Environment.TickCount64 - start < ReadPatience.TotalMilliseconds) { Thread.Sleep(50); }
+        }
+    }
+    // Throws IOException or UnauthorizedAccessException when the file cannot be opened (ReadFile).
     public DeckSettings Load()
     {
         _snapshots = []; _newerFile = null; _unknown = []; IsFirstStart = false; _loadWarning = null;
+        if (ReadFile() is not { } text) return FirstStart();
         try
         {
-            if (!File.Exists(FilePath)) return FirstStart();
-            var text = File.ReadAllText(FilePath);
             var root = SettingsMigrations.Parse(text);
             var running = ApplicationVersion.Parse(_appVersion);
             var saved = SettingsMigrations.VersionOf(root);
