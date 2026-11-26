@@ -46,9 +46,33 @@ internal static class GlassChecks
 
         PassesClicks(check, notch: false);
         PassesClicks(check, notch: true);
+        ZeroOpacity(check);
         ShoulderClip(check);
         GlassPathChecks.Run(check);
         Faults(check, compositor);
+    }
+
+    internal static void ZeroOpacity(Action<string, bool> check)
+    {
+        if (GlassComposition.Compositor is null)
+        {
+            Console.WriteLine("SKIPPED: Composition is not available here, so zero glass opacity cannot be checked.");
+            return;
+        }
+        using var owner = new HwndSource(new HwndSourceParameters("BrimDeck glass opacity checks")
+        {
+            WindowStyle = unchecked((int)0x80000000), PositionX = -20000, PositionY = -20000, Width = 200, Height = 80
+        });
+        using var surface = new GlassSurface();
+        var bounds = new Int32Rect(-20000, -20000, 160, 48);
+        var material = new GlassSurface.Material(.4, .3, .5);
+        bool hidden = surface.Show(owner.Handle, bounds, 8, 0, material, out _);
+        var clip = surface.Clip;
+        bool reopened = surface.Show(owner.Handle, bounds, 8, .65, material, out var applied);
+        check("Glass starting at zero opacity can open with the same composition surface",
+            hidden && reopened && clip is not null && ReferenceEquals(clip, surface.Clip) && applied.Backend != GlassSurface.Backend.None);
+        bool closed = surface.Show(owner.Handle, bounds, 8, 0, material, out _);
+        check("Closing to zero opacity keeps the glass composition surface", closed && clip is not null && ReferenceEquals(clip, surface.Clip));
     }
 
     // The collapsed notch (shoulders) is cut by the glass layer's own antialiased path, the WPF outline's curve, at the panel's

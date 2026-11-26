@@ -36,9 +36,12 @@ public sealed partial class SettingsWindow
 
     private void ThemesPage()
     {
-        WatchThemeFolder(true);
-        // The stamp is taken just before the read, so a write during the read still differs from it.
-        if (!_themesFresh) { _themeStamp = ThemeFolderStamp(); _app.ApplyPanelTheme(reload: true); }
+        if (!_app.Offscreen)
+        {
+            WatchThemeFolder(true);
+            // The stamp is taken just before the read, so a write during the read still differs from it.
+            if (!_themesFresh) { _themeStamp = ThemeFolderStamp(); _app.ApplyPanelTheme(reload: true); }
+        }
         _themesFresh = false;
         var chosen = PanelThemes.NormalizeId(S.PanelTheme);
         var users = PanelTheme.UserThemes;
@@ -202,8 +205,28 @@ public sealed partial class SettingsWindow
         // it would be saved.
         rows.AddRange(ReadabilityRows(PanelTheme.PaletteOf(theme).Adjustments));
         Group([.. rows]);
+        PanelTransparencyRows(theme.BuiltIn && PanelThemes.Resolve(theme).Effects.Glass is not null && MainWindow.GlassAvailable);
         // A theme shown in place of a missing or broken one is not the one chosen, so it is not offered for editing.
         if (!missing && !kept) ThemeEditor(theme);
+    }
+
+    private void PanelTransparencyRows(bool glass)
+    {
+        SectionTitle(Loc.T("面板透明度", "Panel transparency"));
+        FrameworkElement Slider(string label, int value, Action<DeckSettings, int> apply)
+            => SliderRow(label, value, 0, DeckSettings.MaxPanelTransparency, 1, "%",
+                percent => Change(settings => apply(settings, (int)percent)));
+        Group(
+            Slider(Loc.T("收起背景", "Collapsed background"), S.PanelBackgroundTransparency(false, glass),
+                (settings, value) => settings.CollapsedBackgroundTransparency = value),
+            Slider(Loc.T("展开背景", "Expanded background"), S.PanelBackgroundTransparency(true, glass),
+                (settings, value) => settings.ExpandedBackgroundTransparency = value),
+            Slider(Loc.T("收起边框", "Collapsed border"), S.PanelRimTransparency(false),
+                (settings, value) => settings.CollapsedRimTransparency = value),
+            Slider(Loc.T("展开边框", "Expanded border"), S.PanelRimTransparency(true),
+                (settings, value) => settings.ExpandedRimTransparency = value),
+            Wrapped(Loc.T("100% 隐藏对应背景或边框。玻璃清透度只改变可见的玻璃材质。Windows 高对比度下使用系统外观。",
+                "100% hides the selected background or border. Glass clarity only changes visible glass. Windows high contrast uses the system appearance."), false));
     }
 
     // A theme with a night look: whether it follows Windows' dark and light mode, and otherwise when its day begins and ends, in

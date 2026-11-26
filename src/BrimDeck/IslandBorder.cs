@@ -16,11 +16,18 @@ public sealed class IslandBorder : Border
     public static readonly DependencyProperty MaterialOpacityProperty = DependencyProperty.Register(
         nameof(MaterialOpacity), typeof(double), typeof(IslandBorder),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender));
-    // The surface's own opacity (DeckSettings.SurfaceTransparency): the base color and the theme's layers are drawn this opaque,
-    // the rim and the content as they are.
     public static readonly DependencyProperty SurfaceOpacityProperty = DependencyProperty.Register(
         nameof(SurfaceOpacity), typeof(double), typeof(IslandBorder),
+        new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender,
+            (owner, _) => ((IslandBorder)owner).SurfaceOpacityChanged?.Invoke()));
+    public static readonly DependencyProperty RimOpacityProperty = DependencyProperty.Register(
+        nameof(RimOpacity), typeof(double), typeof(IslandBorder),
         new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty CompositionBackdropProperty = DependencyProperty.Register(
+        nameof(CompositionBackdrop), typeof(bool), typeof(IslandBorder),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    internal event Action? SurfaceOpacityChanged;
 
     // The theme's layers over the base color: a gradient and a pattern (scan lines, or a pixel theme's texture). Like the rim
     // they fade with MaterialOpacity, so the indicator, which has neither, keeps its plain color.
@@ -89,6 +96,8 @@ public sealed class IslandBorder : Border
         set => SetValue(MaterialOpacityProperty, value);
     }
     public double SurfaceOpacity { get => (double)GetValue(SurfaceOpacityProperty); set => SetValue(SurfaceOpacityProperty, value); }
+    public double RimOpacity { get => (double)GetValue(RimOpacityProperty); set => SetValue(RimOpacityProperty, value); }
+    public bool CompositionBackdrop { get => (bool)GetValue(CompositionBackdropProperty); set => SetValue(CompositionBackdropProperty, value); }
     public Brush? Gradient { get => (Brush?)GetValue(GradientProperty); set => SetValue(GradientProperty, value); }
     public Brush? Pattern { get => (Brush?)GetValue(PatternProperty); set => SetValue(PatternProperty, value); }
     internal IslandDecor? Decor { get => (IslandDecor?)GetValue(DecorProperty); set => SetValue(DecorProperty, value); }
@@ -102,38 +111,27 @@ public sealed class IslandBorder : Border
     protected override void OnRender(DrawingContext drawingContext)
     {
         var outline = Outline();
-        double material = Math.Clamp(MaterialOpacity, 0, 1), surface = Math.Clamp(SurfaceOpacity, 0, 1);
-        // The faintest fill under the surface keeps the whole outline the panel's own for input (see InputCatch), whatever the surface shows.
+        double material = Math.Clamp(MaterialOpacity, 0, 1);
+        double surface = CompositionBackdrop ? 0 : Math.Clamp(SurfaceOpacity, 0, 1);
+        double rim = material * Math.Clamp(RimOpacity, 0, 1);
+        // The input shape stays live when the backdrop and rim are hidden.
         drawingContext.DrawGeometry(InputCatch, null, outline);
-        // Only a fading material needs the opacity layer; fully shown, the layers draw straight onto the surface.
-        bool fading = material < 1;
-        if (surface >= 1)
+        if (surface > 0)
         {
+            if (surface < 1) drawingContext.PushOpacity(surface);
             drawingContext.DrawGeometry(Background, null, outline);
-            if (material <= 0) return;
-            if (fading) drawingContext.PushOpacity(material);
-            Layers(drawingContext, outline);
-            Rim(drawingContext, outline);
-            if (fading) drawingContext.Pop();
-            return;
+            if (material > 0)
+            {
+                if (material < 1) drawingContext.PushOpacity(material);
+                Layers(drawingContext, outline);
+                if (material < 1) drawingContext.Pop();
+            }
+            if (surface < 1) drawingContext.Pop();
         }
-        // See-through: the base color and the layers together take the surface's opacity, and the rim keeps its own strength so
-        // the outline stays readable.
-        drawingContext.PushOpacity(surface);
-        // The base is drawn even fully clear (liquid glass): its outline is what takes the pointer. The layers are not, as nothing
-        // of them would show.
-        drawingContext.DrawGeometry(Background, null, outline);
-        if (material > 0 && surface > 0)
-        {
-            if (fading) drawingContext.PushOpacity(material);
-            Layers(drawingContext, outline);
-            if (fading) drawingContext.Pop();
-        }
-        drawingContext.Pop();
-        if (material <= 0) return;
-        if (fading) drawingContext.PushOpacity(material);
+        if (rim <= 0) return;
+        if (rim < 1) drawingContext.PushOpacity(rim);
         Rim(drawingContext, outline);
-        if (fading) drawingContext.Pop();
+        if (rim < 1) drawingContext.Pop();
     }
 
     private void Layers(DrawingContext drawingContext, Geometry outline)

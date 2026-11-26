@@ -228,6 +228,9 @@ public partial class MainWindow
         });
     }
 
+    private double SurfaceOpacityForGlassFrame()
+        => _glassActive ? Island.SurfaceOpacity : SurfaceOpacityFor(_expanded, true);
+
     private void ShowGlass()
     {
         if (_glassSurface is null) return;
@@ -298,7 +301,7 @@ public partial class MainWindow
         GlassTargets(now, snap: !Animates);
         var material = GlassMaterialNow(now);
         var owner = new WindowInteropHelper(this).Handle;
-        if (!_glassSurface.Show(owner, _glassBounds, clip, outline, HoverZone.Opacity * Island.MaterialOpacity, material, out var applied))
+        if (!_glassSurface.Show(owner, _glassBounds, clip, outline, HoverZone.Opacity * Island.MaterialOpacity * SurfaceOpacityForGlassFrame(), material, out var applied))
         {
             // Retry on a later settings or environment update instead of every layout pass.
             CloseGlass();

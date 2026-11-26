@@ -306,6 +306,14 @@ public partial class App : Application
     }
     public void UpdateSettings(DeckSettings settings)
     {
+        if (_offscreen)
+        {
+            settings.Normalize();
+            Profiles.Keep(settings);
+            Settings = settings;
+            PanelTheme.Use(settings);
+            return;
+        }
         foreach (var previous in Settings.Apps)
         {
             var next = settings.Entry(previous.InstanceId);

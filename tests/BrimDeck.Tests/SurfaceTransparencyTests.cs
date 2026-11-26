@@ -15,5 +15,23 @@ internal static class SurfaceTransparencyTests
         var kept = new DeckSettings { SurfaceTransparency = 35 }; kept.Normalize();
         check("the transparency is held to its range", high.SurfaceTransparency == DeckSettings.MaxSurfaceTransparency && low.SurfaceTransparency == 0 && kept.SurfaceTransparency == 35);
         check("a copy keeps the transparency", kept.Copy().SurfaceTransparency == 35);
+        check("legacy background carries over to both ordinary states and leaves active glass unchanged",
+            kept.PanelBackgroundTransparency(false, false) == 35 && kept.PanelBackgroundTransparency(true, false) == 35
+            && kept.PanelBackgroundTransparency(false, true) == 0 && kept.PanelBackgroundTransparency(true, true) == 0
+            && kept.PanelRimTransparency(false) == 0 && kept.PanelRimTransparency(true) == 0);
+        kept.CollapsedBackgroundTransparency = 0;
+        kept.ExpandedBackgroundTransparency = 150;
+        kept.CollapsedRimTransparency = -15;
+        kept.ExpandedRimTransparency = 75;
+        kept.Normalize();
+        var imported = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(kept.Copy()))!;
+        imported.Normalize();
+        check("independent settings preserve explicit zero and full transparency through a settings round trip",
+            imported.PanelBackgroundTransparency(false, false) == 0 && imported.PanelBackgroundTransparency(true, true) == 100
+            && imported.PanelRimTransparency(false) == 0 && imported.PanelRimTransparency(true) == 75);
+        imported.ResetPanelTransparency();
+        check("reset clears independent overrides and the legacy background", imported.SurfaceTransparency == 0
+            && imported.CollapsedBackgroundTransparency is null && imported.ExpandedBackgroundTransparency is null
+            && imported.CollapsedRimTransparency is null && imported.ExpandedRimTransparency is null);
     }
 }

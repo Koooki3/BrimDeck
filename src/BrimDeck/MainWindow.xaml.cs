@@ -159,6 +159,11 @@ public partial class MainWindow : Window
             if (_expanded && !_preview) PointerChanged(_pointerInside);
         }) { Interval = TimeSpan.FromSeconds(1) };
         InitializeComponent();
+        Island.SurfaceOpacityChanged += () =>
+        {
+            UpdateSurfaceInk();
+            if (_glassActive) QueueGlass();
+        };
         InitializeComposition();
         MenuDismissal.Attach(this);
         // Out of sight until the boot (or, without animations, until it has its place): the window shows before it is placed.
@@ -752,18 +757,42 @@ public partial class MainWindow : Window
         if (_detailPopup is { } popup) Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_detailPopup, popup)) popup.Close(); });
         if (MediaSourceButton.ContextMenu?.IsOpen == true) Dispatcher.BeginInvoke(CloseSourceMenu);
     }
-    // The surface's transparency (DeckSettings.SurfaceTransparency). ClearType needs an opaque color under the text, so over a
-    // see-through surface the island's text is smoothed in grayscale (a pixel theme's stays unsmoothed, PanelTheme.Text). The
-    // shadow is cast by an opaque copy of the surface that would show through it, so a see-through surface casts none.
+    private double SurfaceOpacityFor(bool expanded, bool glass)
+        => Look.HighContrast ? 1 : 1 - Settings.PanelBackgroundTransparency(expanded, glass) / 100d;
+
+    private double RimOpacityFor(bool expanded)
+        => Look.HighContrast ? 1 : 1 - Settings.PanelRimTransparency(expanded) / 100d;
+
+    private (double Surface, double Rim)? _opacityTarget;
+
+    private (double Surface, double Rim) PanelOpacityFor(bool expanded)
+        => (SurfaceOpacityFor(expanded, _glassActive), RimOpacityFor(expanded));
+
     private void ApplySurface()
     {
-        double opacity = _glassActive ? 0 : 1 - Settings.SurfaceTransparency / 100d;
-        bool clear = opacity < 1;
-        Island.SurfaceOpacity = opacity;
+        Island.CompositionBackdrop = _glassActive;
+        var target = PanelOpacityFor(_expanded);
+        if (_opacityTarget != target)
+        {
+            _opacityTarget = target;
+            SetImmediate(Island, IslandBorder.SurfaceOpacityProperty, target.Surface);
+            SetImmediate(Island, IslandBorder.RimOpacityProperty, target.Rim);
+        }
+        UpdateSurfaceInk();
+    }
+
+    private void UpdateSurfaceInk()
+    {
+        // A shadow caster would leave an opaque copy beneath a translucent island.
+        bool clear = _glassActive || Island.SurfaceOpacity < 1;
         if (Look.Current.Effects.Pixel <= 0)
         {
-            if (clear) TextOptions.SetTextRenderingMode(Island, TextRenderingMode.Grayscale);
-            else Island.ClearValue(TextOptions.TextRenderingModeProperty);
+            var mode = clear ? TextRenderingMode.Grayscale : TextRenderingMode.Auto;
+            if (TextOptions.GetTextRenderingMode(Island) != mode)
+            {
+                if (clear) TextOptions.SetTextRenderingMode(Island, mode);
+                else Island.ClearValue(TextOptions.TextRenderingModeProperty);
+            }
         }
         IslandShadow.Visibility = clear ? Visibility.Hidden : Visibility.Visible;
     }
@@ -1199,7 +1228,14 @@ public partial class MainWindow : Window
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
         Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
-        // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
+        if (wasExpanded != expanded)
+        {
+            var target = PanelOpacityFor(expanded);
+            _opacityTarget = target;
+            Animate(Island, IslandBorder.SurfaceOpacityProperty, target.Surface, duration, surface, easeInOut);
+            Animate(Island, IslandBorder.RimOpacityProperty, target.Rim, duration, surface, easeInOut);
+        }
+        // The indicator loses the themed rim when it reaches its smaller shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
         var tone = Look.ColorOf(indicator ? "indicator" : "surface");
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is

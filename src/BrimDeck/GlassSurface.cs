@@ -276,7 +276,8 @@ internal sealed class GlassSurface : IDisposable
     public bool Show(IntPtr owner, Int32Rect bounds, GlassBoundaryMath.GlassClip? clip, Outline? outline, double opacity, Material material, out AppliedMaterial applied)
     {
         applied = default;
-        if (_disposed || owner == IntPtr.Zero || bounds.Width < 2 || bounds.Height < 2 || opacity <= 0 || clip is null && outline is null)
+        // Zero opacity is a valid panel setting. Keep the composition surface for the next animated state.
+        if (_disposed || owner == IntPtr.Zero || bounds.Width < 2 || bounds.Height < 2 || clip is null && outline is null)
         {
             Hide();
             return false;

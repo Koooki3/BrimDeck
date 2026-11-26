@@ -32,6 +32,12 @@ internal static class Program
             if (args is ["--only", "themecards"]) { ThemeCardChecks.Run(Check); return Finish(); }
             if (args is ["--only", "glass"]) { GlassChecks.Run(Check); AcrylicProbeChecks.Run(Check); return Finish(); }
             if (args is ["--only", "edge"]) { EdgeRingChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "panel-opacity"])
+            {
+                PanelOpacityChecks.Run(Check);
+                GlassChecks.ZeroOpacity(Check);
+                return Finish();
+            }
             if (args is ["--only", "themelook"]) { ThemeLookChecks.Run(Check); return Finish(); }
             if (args is ["--only", "hoverowners"]) { HoverOwnerChecks.Run(Check); return Finish(); }
             if (args is ["--only", "fonts"]) { FontFollowTests.Run(Check); return Finish(); }
@@ -49,6 +55,7 @@ internal static class Program
             if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: window capture (not yet known to work on a virtual display).");
             else CaptureChecks.Run(Check);
             CheckSettledClip();
+            PanelOpacityChecks.Run(Check);
             IslandNoticeDecorTests.Run(Check);
             CheckIslandTakesClicks();
             NoticeProtectionTests.Run(Check);

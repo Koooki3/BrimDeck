@@ -195,7 +195,8 @@ internal sealed class PanelLook
     {
         // Turning the surface see-through or opaque again changes how text and marquees are drawn on it, so what was built for the
         // other is built again (Outdate); a new amount alone only redraws the surface.
-        bool translucent = settings.SurfaceTransparency > 0;
+        bool translucent = settings.PanelBackgroundTransparency(false, false) > 0
+            || settings.PanelBackgroundTransparency(true, false) > 0;
         if (translucent != Translucent) { Translucent = translucent; Outdate(); }
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
         bool automaticGlass = chosen == PanelThemes.GlassAuto;

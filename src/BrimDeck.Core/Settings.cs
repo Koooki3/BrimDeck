@@ -623,6 +623,30 @@ public sealed class DeckSettings
     // surface and its theme layers are see-through; text, icons and the rim are drawn as before.
     public int SurfaceTransparency { get; set; }
     public const int MaxSurfaceTransparency = 90;
+    public const int MaxPanelTransparency = 100;
+    // Unset values preserve the old global background control, which never applied to active glass.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? CollapsedBackgroundTransparency { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ExpandedBackgroundTransparency { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? CollapsedRimTransparency { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ExpandedRimTransparency { get; set; }
+
+    public int PanelBackgroundTransparency(bool expanded, bool glass)
+        => (expanded ? ExpandedBackgroundTransparency : CollapsedBackgroundTransparency)
+            ?? (glass ? 0 : SurfaceTransparency);
+
+    public int PanelRimTransparency(bool expanded)
+        => (expanded ? ExpandedRimTransparency : CollapsedRimTransparency) ?? 0;
+
+    public void ResetPanelTransparency()
+    {
+        SurfaceTransparency = 0;
+        CollapsedBackgroundTransparency = ExpandedBackgroundTransparency = null;
+        CollapsedRimTransparency = ExpandedRimTransparency = null;
+    }
     public int GlassTransparency { get; set; } = GlassMaterial.DefaultTransparency;
     public int OpenDelay { get; set; } = 0;
     // The collapsed panel opens on a click instead of on hover; OpenDelay then does not apply.
@@ -1051,6 +1075,11 @@ public sealed class DeckSettings
         ClipboardExcluded = ClipboardExclusions.Normalize(ClipboardExcluded);
         PanelScale = PanelScales.Fit(PanelScale);
         SurfaceTransparency = Math.Clamp(SurfaceTransparency, 0, MaxSurfaceTransparency);
+        static int? PanelPercent(int? value) => value is int percent ? Math.Clamp(percent, 0, MaxPanelTransparency) : null;
+        CollapsedBackgroundTransparency = PanelPercent(CollapsedBackgroundTransparency);
+        ExpandedBackgroundTransparency = PanelPercent(ExpandedBackgroundTransparency);
+        CollapsedRimTransparency = PanelPercent(CollapsedRimTransparency);
+        ExpandedRimTransparency = PanelPercent(ExpandedRimTransparency);
         GlassTransparency = GlassMaterial.NormalizeTransparency(GlassTransparency);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();

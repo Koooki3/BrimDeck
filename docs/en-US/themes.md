@@ -2,7 +2,9 @@
 
 Choose **Liquid Glass** for a material that adapts to the backdrop in the capsule, notch, and expanded panel. If you open the panel during a color transition, the transition runs to completion. While the panel stays open, the glass keeps adapting and the text colors stay stable. Before the first sample, text colors follow the Windows app theme.
 
-Use **Settings › Panel theme › Current theme** to adjust glass transparency. The default is 50%. Higher values let more of the backdrop show through where text contrast allows. The panel uses a solid surface in high contrast or when Windows transparency effects are off.
+Use **Settings › Panel theme › Current theme** to adjust **Glass clarity**. The default is 50%. Higher values show more of the blurred backdrop. When Windows transparency effects are off, Liquid Glass uses the ordinary panel surface.
+
+Under **Settings › Panel theme › Panel transparency**, adjust the background and border separately for the collapsed and expanded panel. At 100% the selected layer is hidden, while text and controls remain available. These controls also apply to Liquid Glass. Glass clarity shapes only the glass that is visible. Windows high contrast uses the system appearance.
 
 The Notch, Capsule and Indicator, the quota notice, the expanded panel and its pop-ups are colored by a "panel theme". Choose it in **Settings › Panel theme**. There are three kinds:
 
