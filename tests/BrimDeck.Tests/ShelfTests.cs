@@ -6,6 +6,30 @@ internal static class ShelfTests
 {
     internal static void Run(Action<string, bool> check)
     {
+        var failures = new List<string>();
+        foreach (var theme in PanelThemes.BuiltIns)
+        foreach (var look in new[] { DaylightLook.Day, DaylightLook.Dusk, DaylightLook.Night })
+        {
+            if (look == DaylightLook.Dusk && theme.File.Dusk is null || look == DaylightLook.Night && theme.File.Night is null)
+                continue;
+            var palette = PanelThemes.Resolve(theme, look);
+            var stack = ShelfStackPalette.For(palette);
+            var ratio = new[]
+            {
+                ThemeColor.Contrast(palette["textPrimary"], stack.Front),
+                ThemeColor.Contrast(palette["textSecondary"], stack.Front),
+                ThemeColor.Contrast(palette["textTertiary"], stack.Front),
+                ThemeColor.Contrast(stack.Ink, stack.Rest),
+                ThemeColor.Contrast(stack.Faint, stack.Rest),
+                ThemeColor.Contrast(stack.InkLit, stack.Hover),
+                ThemeColor.Contrast(stack.FaintLit, stack.Hover),
+                ThemeColor.Contrast(stack.InkLit, stack.Pressed),
+                ThemeColor.Contrast(stack.FaintLit, stack.Pressed)
+            }.Min();
+            if (ratio < PanelThemes.TextContrast - .001) failures.Add($"{theme.Id}/{look} {ratio:F2}");
+        }
+        check("Shelf stacked cards and switch text meet theme text contrast: " + string.Join(", ", failures), failures.Count == 0);
+
         check("Shelf kinds: a single web address is a link, other text is not",
             Shelf.Classify("https://github.com/MoFeng2223/BrimDeck/pull/175") == ClipKind.Link && Shelf.Classify("see https://example.com") == ClipKind.Text
             && Shelf.Classify("ftp://example.com/file") != ClipKind.Link);

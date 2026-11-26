@@ -248,26 +248,13 @@ public partial class MainWindow
     private bool CanQuickSwitchShelf => _expanded && !_preview && IsShelfPage && Settings.ShelfStacked()
         && _shelfDetail is null && _shelfEdit is null && !_dropping && _shelfMenu?.IsOpen != true;
 
-    private static bool IsLightColor(Color color) => (0.299 * color.R + 0.587 * color.G + 0.114 * color.B) > 140;
-    private static Color Blend(Color from, Color to, double amount) => Color.FromRgb(
-        (byte)Math.Round(from.R + (to.R - from.R) * amount), (byte)Math.Round(from.G + (to.G - from.G) * amount), (byte)Math.Round(from.B + (to.B - from.B) * amount));
-
     private FrameworkElement StackedColumns(ShelfLayout layout)
     {
         var front = ShelfFront;
         // Built as they stood last, so a change of the card in front (files dragged in, a text to edit) is drawn as the change.
         var shown = _shelfBuiltFront is { } was && _deck is not null && _expanded && !_preview && Animates ? was : front;
-        // The cards are opaque, in the theme's surface made a little lighter on a dark theme: more in front than behind. On a light
-        // theme the card in front goes toward white and the one behind a little darker. A card behind under the pointer comes
-        // closer to the fill of the one in front without reaching it.
-        var surface = Look.ColorOf("surface"); surface.A = 255;
-        bool light = IsLightColor(surface);
-        Color Toward(double white, double black) => light ? Blend(surface, Colors.Black, black) : Blend(surface, Colors.White, white);
-        var cardFill = light ? Blend(surface, Colors.White, .55) : Blend(surface, Colors.White, .075);
-        Color rest = Toward(.043, .045), lit = Toward(.06, .065), down = Toward(.05, .08);
-        var edge = light ? Colors.Black : Colors.White;
-        Color cardRim = Color.FromArgb(26, edge.R, edge.G, edge.B), restRim = Color.FromArgb(18, edge.R, edge.G, edge.B);
-        Color ink = Look.ColorOf("textSecondary"), inkLit = Look.ColorOf("textPrimary"), faint = Look.ColorOf("textTertiary");
+        var colors = ShelfStackPalette.For(Look.Current);
+        var (ink, faint) = (PanelTheme.ToColor(colors.Ink), PanelTheme.ToColor(colors.Faint));
 
         var host = new Grid();
         var clips = DeckCardFor(ShelfSide.Clipboard, ClipColumn(layout), layout, ink, faint);
@@ -280,8 +267,11 @@ public partial class MainWindow
         root.Children.Add(host); root.Children.Add(hit);
         var deck = _deck = new Deck
         {
-            Host = host, Clips = clips, Files = files, Hit = hit, CardFill = cardFill, CardRim = cardRim, Rest = rest, RestRim = restRim,
-            Lit = lit, Down = down, Ink = ink, InkLit = inkLit, Faint = faint, FaintLit = ink, Front = shown
+            Host = host, Clips = clips, Files = files, Hit = hit, CardFill = PanelTheme.ToColor(colors.Front), CardRim = PanelTheme.ToColor(colors.FrontRim),
+            Rest = PanelTheme.ToColor(colors.Rest), RestRim = PanelTheme.ToColor(colors.RestRim),
+            Lit = PanelTheme.ToColor(colors.Hover), Down = PanelTheme.ToColor(colors.Pressed),
+            Ink = ink, InkLit = PanelTheme.ToColor(colors.InkLit), Faint = faint,
+            FaintLit = PanelTheme.ToColor(colors.FaintLit), Front = shown
         };
         _shelfBuiltFront = front;
         WireDeckHit(deck);
