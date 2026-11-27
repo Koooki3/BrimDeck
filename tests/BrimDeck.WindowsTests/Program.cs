@@ -23,6 +23,7 @@ internal static class Program
             if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return Finish(); }
             if (args is ["--only", "frames"]) { FrameRateChecks.Run(Check); return Finish(); }
             if (args is ["--only", "ringletter", ..]) { RingLetterChecks.Run(Check, args.Length > 2 ? args[2] : null); return Finish(); }
+            if (args is ["--only", "audio"]) { AudioMeterChecks.Run(Check); return Finish(); }
             if (args is ["--only", "drawn"]) { DrawnAutomationTests.Run(Check); return Finish(); }
             if (args is ["--only", "paste"]) { PasteInputChecks.Run(Check); return Finish(); }
             if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return Finish(); }
@@ -49,6 +50,7 @@ internal static class Program
             InkLabelSettleTests.Run(Check);
             RightDragChecks.Run(Check);
             DropRelayChecks.Run(Check);
+            AudioMeterChecks.Run(Check);
             DrawnAutomationTests.Run(Check);
             RingLetterChecks.Run(Check);
             SettingsFocusTests.Run(Check);
