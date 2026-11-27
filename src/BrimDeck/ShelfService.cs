@@ -15,7 +15,7 @@ namespace BrimDeck;
 // are read only to paste. Only the list is held in memory; pictures are read to be shown. Earlier versions encrypted both for the current Windows user
 // (DPAPI); such files are still read, and the list is written plain at its next save. Encrypting the whole list took from a
 // tenth of a second to seconds once it held thousands of entries, on the panel's thread, at every save.
-internal enum PasteResult { Pasted, Copied, Elevated }
+internal enum PasteResult { Pasted, Copied, Elevated, Busy }
 
 internal sealed class ShelfService : IDisposable
 {
@@ -491,27 +491,25 @@ internal sealed class ShelfService : IDisposable
         return data;
     }
 
-    // Puts data on the clipboard, without recording it as a new copy. The clipboard may be held by another application for a moment.
+    // Puts data on the clipboard, without recording it as a new copy. The clipboard may be held by another application for a moment:
+    // SetDataObject waits for it itself, for about a second, on this thread. Asking again would hold the panel that long once more.
     public bool Put(DataObject data)
     {
-        for (int attempt = 0; attempt < 5; attempt++)
+        try
         {
-            try
-            {
-                Clipboard.SetDataObject(data, true);
-                _watch?.IgnoreCurrent();
-                return true;
-            }
-            catch (ExternalException) { Thread.Sleep(30); }
+            Clipboard.SetDataObject(data, true);
+            _watch?.IgnoreCurrent();
+            return true;
         }
-        return false;
+        catch (ExternalException) { return false; }
     }
 
     // The window to paste into after the panel took the focus for typing (MainWindow.ShelfTyping).
     public IntPtr TypingTarget { get; set; }
 
     // Puts data on the clipboard and pastes it into the window the user was typing in. done: Pasted once Ctrl+V was sent; Copied
-    // when it could only be copied (no other window to paste into, or keys still held after a second).
+    // when it could only be copied (no other window to paste into, or keys still held after a second); Busy when another program
+    // held the clipboard and nothing was put there.
     //
     // The paste is always tried first. A window of a program run as administrator does not take it: Windows drops the keys an
     // ordinary program sends there, and says nothing of it, SendInput reporting them sent all the same. So once the paste has
@@ -519,7 +517,7 @@ internal sealed class ShelfService : IDisposable
     // have had the paste, and done is Elevated.
     public void Paste(DataObject data, Action<PasteResult> done)
     {
-        if (!Put(data)) { done(PasteResult.Copied); return; }
+        if (!Put(data)) { done(PasteResult.Busy); return; }
         var target = PasteInput.IsOther(PasteInput.Foreground) ? PasteInput.Foreground : TypingTarget;
         if (!PasteInput.IsOther(target)) { done(PasteResult.Copied); return; }
         void Tried(bool sent) => done(PasteInput.HasMoreRights(target) ? PasteResult.Elevated : sent ? PasteResult.Pasted : PasteResult.Copied);
