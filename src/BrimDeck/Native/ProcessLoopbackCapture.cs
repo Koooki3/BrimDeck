@@ -59,7 +59,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
             client = new AudioClient(audio);
             return new ProcessLoopbackCapture(processId, client);
         }
-        catch (Exception ex) when (ex is COMException or InvalidCastException or DllNotFoundException or EntryPointNotFoundException or ArgumentException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             client?.Dispose();
             return null;

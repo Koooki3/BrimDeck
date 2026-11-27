@@ -157,9 +157,14 @@ internal sealed class AudioLevelMeter : IDisposable
             }
         }
         catch { Clear(); return; }
-        // Capture the process that owns the playing session; its child processes are included.
-        var playing = _sessions.FirstOrDefault(s => s.State == AudioSessionState.AudioSessionStateActive) ?? _sessions.FirstOrDefault();
-        if (playing is not null && ProcessLoopbackCapture.TryStart(playing.GetProcessID) is { } capture) { capture.AnalysisMs = AnalysisMs; _capture = capture; }
+        // Capture the process that owns the playing session; its child processes are included. A session asked after its device
+        // has gone throws; nothing thrown here may leave the meter's thread, where it would end the process, so the meter looks again.
+        try
+        {
+            var playing = _sessions.FirstOrDefault(s => s.State == AudioSessionState.AudioSessionStateActive) ?? _sessions.FirstOrDefault();
+            if (playing is not null && ProcessLoopbackCapture.TryStart(playing.GetProcessID) is { } capture) { capture.AnalysisMs = AnalysisMs; _capture = capture; }
+        }
+        catch { Clear(); }
     }
     // Every render device, for their peak meters, and a capture of every process but this one.
     private void EnumerateEverything()
