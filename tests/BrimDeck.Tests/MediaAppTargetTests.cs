@@ -12,6 +12,20 @@ internal static class MediaAppTargetTests
         check("An application id of the application's own choosing names no process",
             MediaAppTarget.ProcessName("BroNekoX.QueMusic") == "" && MediaAppTarget.ProcessName("Vendor.Product.Player") == ""
             && MediaAppTarget.ProcessName("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify") == "");
+        // Issue #401: a session the panel names after QQ Music, NetEase or KuGou belongs to that player's connection, so it is
+        // not listed a second time beside the connection's own entry with the same song.
+        string Named(string id) => MediaAppTarget.DisplayName(id, _ => null);
+        string[] qq = ["QQMusic.exe", @"D:\Tencent\QQMusic\QQMusic.exe", "qqmusic.exe", "QQMusic", "Tencent.QQMusic"];
+        check("Every session named after QQ Music belongs to QQ Music's connection",
+            qq.All(id => Named(id) == "QQ 音乐" && MediaAppTarget.SessionOf(id, "QQMusic")));
+        string[] netease = ["cloudmusic.exe", @"C:\Program Files\NetEase\CloudMusic\cloudmusic.exe", "cloudmusic"];
+        check("Every session named after NetEase or KuGou belongs to that player's connection",
+            netease.All(id => Named(id) == "网易云音乐" && MediaAppTarget.SessionOf(id, "cloudmusic"))
+            && Named("kugou") == "酷狗音乐" && MediaAppTarget.SessionOf("kugou", "kugou"));
+        check("Another player's session stays its own",
+            !MediaAppTarget.SessionOf("Chrome", "QQMusic") && !MediaAppTarget.SessionOf("MSEdge", "cloudmusic") && !MediaAppTarget.SessionOf("foobar2000.exe", "QQMusic")
+            && !MediaAppTarget.SessionOf("Spotify.exe", "kugou") && !MediaAppTarget.SessionOf("cloudmusic.exe", "QQMusic") && !MediaAppTarget.SessionOf("QQMusic.exe", "kugou")
+            && !MediaAppTarget.SessionOf("BroNekoX.QueMusic", "QQMusic"));
 
         MediaAppProcess P(int pid, string name, string appId = "", string? family = null) => new(pid, name, family, appId);
         var queMusic = new MediaAppOwner(null, MediaAppTarget.ProcessName("BroNekoX.QueMusic"), "BroNekoX.QueMusic");

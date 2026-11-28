@@ -513,8 +513,6 @@ internal sealed class MediaSessions : IDisposable
             source.Dirty = source.MetadataDirty = true; Schedule();
         }
     }
-    private static bool AppMatches(SystemSource source, string executable) =>
-        string.Equals(Path.GetFileName(source.Session.SourceAppUserModelId), executable, StringComparison.OrdinalIgnoreCase);
     // Applications whose playback is left out (DeckSettings.IgnoredMediaApps).
     private IReadOnlyList<IgnoredMediaApp> _ignored = [];
     public IReadOnlyList<IgnoredMediaApp> Ignored
@@ -542,9 +540,7 @@ internal sealed class MediaSessions : IDisposable
             if (connection.ProcessId is not { } pid || connection.Snapshot is not { } snapshot) continue;
             bool netease = connection is NeteaseSource;
             string name = connection switch { NeteaseSource => "cloudmusic", KugouCdpConnection => "kugou", _ => "QQMusic" };
-            // KuGou's session is named "kugou", the others by their executable.
-            var systems = _sessions.Values.Where(s => connection is KugouCdpConnection
-                ? string.Equals(s.App, name, StringComparison.OrdinalIgnoreCase) : AppMatches(s, name + ".exe")).ToArray();
+            var systems = _sessions.Values.Where(s => MediaAppTarget.SessionOf(s.App, name)).ToArray();
             var system = systems.FirstOrDefault(s => s.Session == current) ?? systems.FirstOrDefault();
             // A disconnected QQ pipe falls back as a whole to GSMTC. Retain its last
             // song without capabilities only when there is no system replacement.

@@ -38,6 +38,14 @@ public static class MediaAppTarget
         return appId.Contains('.') || appId.Contains('\\') ? "" : appId;
     }
 
+    // Whether a media session, by its AppUserModelID, is the session of the player read through its own connection (named by
+    // its process name: "QQMusic", "cloudmusic", "kugou"). The connection's entry stands for the session, which is not listed
+    // again. It is the rule that names the session's player (ProcessName), so a session shown under the player's name is never
+    // left beside the connection's entry: an id other than the executable's file name ("QQMusic", "Tencent.QQMusic") listed the
+    // same song twice (issue #401).
+    public static bool SessionOf(string appId, string player) =>
+        player.Length > 0 && string.Equals(ProcessName(appId), player, StringComparison.OrdinalIgnoreCase);
+
     // Whether a process with an audio session is the owner's: its known process, a process Windows identifies by the same
     // application id or package, or a process of the executable the id names. Every one of the owner's processes counts,
     // since a player may play from a process other than the one it reports (a browser's audio process, NetEase's own).
