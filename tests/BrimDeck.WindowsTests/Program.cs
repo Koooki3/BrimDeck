@@ -30,6 +30,7 @@ internal static class Program
             if (args is ["--only", "settings"]) { SettingsFocusTests.Run(Check); BrimDeck.MainWindow.CheckPageCapsuleFit(Check); return Finish(); }
             if (args is ["--only", "maximize"]) { SettingsMaximizeChecks.Run(Check); return Finish(); }
             if (args is ["--only", "popup"]) { PopupGhostChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "sourcemenu"]) { SourceMenuChecks.Run(Check); return Finish(); }
             if (args is ["--only", "themecards"]) { ThemeCardChecks.Run(Check); return Finish(); }
             if (args is ["--only", "glass"]) { GlassChecks.Run(Check); AcrylicProbeChecks.Run(Check); return Finish(); }
             if (args is ["--only", "edge"]) { EdgeRingChecks.Run(Check); return Finish(); }
@@ -92,6 +93,7 @@ internal static class Program
             GlassChecks.Run(Check);
             EdgeRingChecks.Run(Check);
             HandoverScaleChecks.Run(Check);
+            SourceMenuChecks.Run(Check);
             PanelKeyboardTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
