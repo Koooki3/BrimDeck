@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Text.Json;
@@ -156,6 +158,11 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
         value?.Delta ?? (value?.Date is { } date ? date - DateTimeOffset.UtcNow : null);
 
     private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(30);
+    // A download cut off midway (the connection dropped, or 30 seconds without data) goes on from the bytes already received, up
+    // to MaxResumes times, waiting ResumeWait longer before each; a server that ignores the range sends the whole file again.
+    // Cancelling, a refused file (404) and a wrong size or checksum end it at once. The SHA-256 covers every byte as before.
+    public const int MaxResumes = 5;
+    public TimeSpan ResumeWait { get; init; } = TimeSpan.FromSeconds(2);
     public async Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation)
     {
         var manifest = _available is { } available && available.Version == release.Version ? available
@@ -164,30 +171,62 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
         var package = manifest.Package(Mode) ?? throw new InvalidDataException("The release has no package for this copy.");
         Directory.CreateDirectory(_directory);
         var target = Path.Combine(_directory, package.File); var partial = target + ".partial";
+        var uri = _package(manifest, package);
         try
         {
-            using (var response = await _http.GetAsync(_package(manifest, package), HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false))
+            await using (var file = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
             {
-                response.EnsureSuccessStatusCode();
-                if (response.Content.Headers.ContentLength is { } length && length != package.Size) throw new InvalidDataException("Package size mismatch.");
-                await using var source = await response.Content.ReadAsStreamAsync(cancellation).ConfigureAwait(false);
-                await using var file = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
-                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                var buffer = new byte[81920]; long total = 0; int reported = -1, read;
-                // The client timeout ends with the response headers; a body that stops arriving fails after 30 seconds without data.
-                using var stall = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-                stall.CancelAfter(StallTimeout);
-                while ((read = await source.ReadAsync(buffer, stall.Token).ConfigureAwait(false)) > 0)
+                var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                try
                 {
-                    stall.CancelAfter(StallTimeout);
-                    total += read;
-                    if (total > package.Size) throw new InvalidDataException("Package size mismatch.");
-                    hash.AppendData(buffer, 0, read);
-                    await file.WriteAsync(buffer.AsMemory(0, read), cancellation).ConfigureAwait(false);
-                    var percent = (int)(total * 100 / package.Size);
-                    if (percent != reported) { reported = percent; progress(percent); }
+                    var buffer = new byte[81920]; long total = 0; int reported = -1;
+                    for (int resumes = 0; ; resumes++)
+                    {
+                        try
+                        {
+                            // What a broken write may have left past the bytes counted is cut off.
+                            file.SetLength(total); file.Position = total;
+                            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+                            if (total > 0) request.Headers.Range = new RangeHeaderValue(total, null);
+                            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false);
+                            response.EnsureSuccessStatusCode();
+                            var headers = response.Content.Headers;
+                            if (total > 0 && response.StatusCode != HttpStatusCode.PartialContent)
+                            {
+                                // The range was not honoured: the whole file comes again.
+                                total = 0; hash.Dispose(); hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                                file.SetLength(0); file.Position = 0;
+                            }
+                            else if (total > 0 && (headers.ContentRange is not { From: { } from, Length: { } whole } || from != total || whole != package.Size))
+                                throw new InvalidDataException("Package size mismatch.");
+                            if (headers.ContentLength is { } length && length != package.Size - total) throw new InvalidDataException("Package size mismatch.");
+                            await using var source = await response.Content.ReadAsStreamAsync(cancellation).ConfigureAwait(false);
+                            // The client timeout ends with the response headers; a body that stops arriving fails after 30 seconds without data.
+                            using var stall = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+                            stall.CancelAfter(StallTimeout);
+                            int read;
+                            while ((read = await source.ReadAsync(buffer, stall.Token).ConfigureAwait(false)) > 0)
+                            {
+                                stall.CancelAfter(StallTimeout);
+                                if (total + read > package.Size) throw new InvalidDataException("Package size mismatch.");
+                                await file.WriteAsync(buffer.AsMemory(0, read), cancellation).ConfigureAwait(false);
+                                hash.AppendData(buffer, 0, read);
+                                total += read;
+                                var percent = (int)(total * 100 / package.Size);
+                                if (percent != reported) { reported = percent; progress(percent); }
+                            }
+                            // A body that ends early, as a dropped connection can, is resumed as well.
+                            if (total < package.Size) throw new IOException("The package ended early.");
+                            break;
+                        }
+                        catch (Exception ex) when (resumes < MaxResumes && !cancellation.IsCancellationRequested && Resumable(ex))
+                        {
+                            await Task.Delay(ResumeWait * (resumes + 1), cancellation).ConfigureAwait(false);
+                        }
+                    }
+                    if (total != package.Size || !Matches(hash.GetHashAndReset(), package.Sha256)) throw new InvalidDataException("Package checksum mismatch.");
                 }
-                if (total != package.Size || !Matches(hash.GetHashAndReset(), package.Sha256)) throw new InvalidDataException("Package checksum mismatch.");
+                finally { hash.Dispose(); }
             }
             File.Move(partial, target, true);
             var pending = Path.Combine(_directory, PendingFile);
@@ -196,6 +235,16 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
         }
         catch { TryDelete(partial); throw; }
     }
+
+    // What a resumed request may get past: the connection or the body breaking off, 30 seconds without data, and the server
+    // answering busy or failing (408, 429, 5xx). Not a missing file or any other refusal, nor a wrong size or checksum.
+    private static bool Resumable(Exception ex) => ex switch
+    {
+        InvalidDataException => false,
+        HttpRequestException { StatusCode: { } status } => status is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests || (int)status >= 500,
+        HttpRequestException or IOException or OperationCanceledException => true,
+        _ => false
+    };
 
     // The file is hashed again right before it is run or extracted, so a download changed after verification is never used.
     public void PrepareRestart()
