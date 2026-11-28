@@ -821,6 +821,11 @@ try
     priceTime = priceTime.AddHours(23).AddMinutes(54);
     await pricing.RefreshAsync();
     Check("Next daily catalog refresh recovers", handler.Calls == 4 && pricing.LastError is null);
+    priceTime = priceTime.AddHours(-8);
+    await pricing.RefreshAsync();
+    Check("A clock set back does not hold the daily catalog request until it catches up", handler.Calls == 5 && pricing.LastError is null);
+    await pricing.RefreshAsync();
+    Check("After the clock was set back the daily wait counts from the new time", handler.Calls == 5);
     var cacheBefore = File.ReadAllText(Path.Combine(priceDirectory, "model-prices.json"));
     handler.Json = "{\"data\":[]}";
     await pricing.RefreshAsync(true);

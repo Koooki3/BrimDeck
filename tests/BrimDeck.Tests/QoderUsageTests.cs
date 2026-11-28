@@ -330,6 +330,10 @@ static class QoderUsageTests
             calls.Clear();
             await Refresh(service);
             check("The API is asked again on every read, while a CLI that failed is not started again for a while", calls.SequenceEqual([Usage, "ide:56510"]));
+            now = now.AddHours(-8);
+            calls.Clear();
+            await Refresh(service);
+            check("With the clock set back, Qoder is read again and the CLI that failed is tried again", calls.SequenceEqual([Usage, "cli", "ide:56510"]));
 
             api.Status = HttpStatusCode.OK;
             now = now.AddMinutes(1);

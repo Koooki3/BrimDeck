@@ -406,7 +406,15 @@ public sealed class ConfiguredProviders : IDisposable
     private readonly SemaphoreSlim _parallel = new(4);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new();
     private readonly ConcurrentDictionary<string, ProviderSnapshot> _lastGood = new();
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _retryAt = new();
+    // When a site's Retry-After was read, and the time it ends. As in RateLimitBackoff, a clock set back since cannot make the wait
+    // longer than the site asked for: what is left is cut to that length from the new time.
+    private readonly ConcurrentDictionary<string, (DateTimeOffset Read, DateTimeOffset Until)> _retryAt = new();
+    private DateTimeOffset? RetryUntil(string requestKey, DateTimeOffset now)
+    {
+        if (!_retryAt.TryGetValue(requestKey, out var pause)) return null;
+        if (now < pause.Read) _retryAt[requestKey] = pause = (now, now + (pause.Until - pause.Read));
+        return now < pause.Until ? pause.Until : null;
+    }
     private readonly ConcurrentDictionary<string, string> _memory = new();
     public ConfiguredProviders(IProviderSecrets? secrets = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null)
     {
@@ -463,7 +471,7 @@ public sealed class ConfiguredProviders : IDisposable
                 ProviderSnapshot snapshot = new(entry.QuotaSource) { Configurations = [entry.ConfigurationKey], Source = ProviderCatalog.Name(entry.QuotaSource) };
                 try
                 {
-                    if (_retryAt.TryGetValue(requestKey, out var retry) && now < retry) throw new ProviderReadException(Loc.T("请求频繁", "Too many requests"), Loc.T($"站点要求在 {retry.LocalDateTime:HH:mm:ss} 后重试。", $"The site asks to retry after {retry.LocalDateTime:HH:mm:ss}."));
+                    if (RetryUntil(requestKey, now) is { } retry) throw new ProviderReadException(Loc.T("请求频繁", "Too many requests"), Loc.T($"站点要求在 {retry.LocalDateTime:HH:mm:ss} 后重试。", $"The site asks to retry after {retry.LocalDateTime:HH:mm:ss}."));
                     // A Volcengine Ark row can read with the sign-in from settings alone (ScriptSession.RunVolcengineArkAsync).
                     if (secret.Length == 0 && entry.QuotaSource != ProviderId.Custom && !(ProviderCatalog.NeedsAkSk(entry.QuotaSource) && SignedInToArk(entry.QuotaSource)))
                         throw new ProviderReadException(Loc.T("未配置", "Not configured"), ProviderCatalog.NeedsAkSk(entry.QuotaSource)
@@ -505,7 +513,7 @@ public sealed class ConfiguredProviders : IDisposable
                     if (snapshot.Status.Length > 200) snapshot.Status = snapshot.Status[..200];
                     if (snapshot.IsStale) snapshot.Status += Loc.T($" 显示 {snapshot.QuotaTime?.LocalDateTime:MM-dd HH:mm} 读取的数据。", $" Showing the data read at {snapshot.QuotaTime?.LocalDateTime:MM-dd HH:mm}.");
                 }
-                if (session.RetryAt is { } next) _retryAt[requestKey] = next;
+                if (session.RetryAt is { } next) _retryAt[requestKey] = (now, next);
                 return new(snapshot, timer.Elapsed.TotalSeconds, session.Logs);
             }
             finally { _parallel.Release(); }

@@ -2239,7 +2239,8 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
     // and otherwise shows the last reading, so a slow or stuck Qoder never holds up the other sources. When the read ends
     // after its round did, BackgroundReadFinished asks for another round to show it. A daemon that failed is not started again for
     // QoderRetry, while the API is asked on every read, so a sign-in the desktop app renews is read at once; a source whose sign-in
-    // has expired is named in the status meanwhile.
+    // has expired is named in the status meanwhile. A start or a failure later than now (the clock set back since) counts as over,
+    // so neither pause lasts for as long as the clock went back.
     private sealed class QoderKept
     {
         public QoderUsage.Reading? Reading;
@@ -2278,7 +2279,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         lock (kept)
         {
             // The round a finished read asks for only shows it, without starting the next read at once.
-            if (!_backgroundCompletion && kept.Pending is not { IsCompleted: false } && now - kept.Started >= QoderGap)
+            if (!_backgroundCompletion && kept.Pending is not { IsCompleted: false } && (now - kept.Started >= QoderGap || now < kept.Started))
             {
                 kept.Started = now;
                 kept.Unshown = false;
@@ -2358,7 +2359,7 @@ public sealed partial class UsageService(IDesktopSources desktop, DataLocations?
         async Task<bool> Try(QoderUsage.Route at, Func<Task<QoderUsage.Reading>> read, bool remember = true)
         {
             found = true;
-            if (remember && failed.TryGetValue(at, out var last) && now - last.Time < QoderRetry)
+            if (remember && failed.TryGetValue(at, out var last) && now >= last.Time && now - last.Time < QoderRetry)
             {
                 if (last.SignIn) expired.Add(QoderUsage.RouteName(edition, at));
                 return false;

@@ -86,6 +86,11 @@ internal static class ConfiguredProviderTests
         check("Transient errors preserve amounts as stale data without live alerts", stale.Snapshot.IsStale && !stale.Snapshot.LiveQuota && stale.Snapshot.Metrics[0].Amount == 12.4m);
         int calls = handler.Calls.Count; now = now.AddSeconds(60); await providers.TestAsync(entry);
         check("Retry-After suppresses premature manual and scheduled requests", handler.Calls.Count == calls);
+        var setBack = now; now = now.AddHours(-8); await providers.TestAsync(entry);
+        check("With the clock set back, Retry-After still holds requests back", handler.Calls.Count == calls);
+        now = now.AddSeconds(181); await providers.TestAsync(entry);
+        check("With the clock set back, Retry-After holds requests back no longer than the site asked", handler.Calls.Count > calls);
+        now = setBack;
         now = now.AddSeconds(121);
         handler.Respond = request => request.RequestUri!.AbsolutePath.EndsWith("/status")
             ? Reply("""{"success":true,"data":{"quota_per_unit":500000,"quota_display_type":"CNY","usd_exchange_rate":7}}""")
