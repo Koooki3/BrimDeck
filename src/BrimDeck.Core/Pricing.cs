@@ -58,6 +58,7 @@ public sealed class Pricing : IDisposable
     }
     internal static IReadOnlyList<ModelPrice> BuiltInModels => BuiltIn;
     public static string PeakHours => Loc.T("高峰时段：北京时间工作日 9:00–12:00、14:00–18:00", "Peak: 9:00–12:00 and 14:00–18:00 Beijing time on weekdays");
+    // The catalog is asked for once per RefreshInterval; a last attempt later than now (the clock set back since) does not hold it back.
     public static readonly TimeSpan RefreshInterval = TimeSpan.FromDays(1);
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
@@ -181,7 +182,7 @@ public sealed class Pricing : IDisposable
         {
             var before = Volatile.Read(ref _version);
             var now = _now();
-            if (force || _lastAttempt is not { } previous || now - previous >= RefreshInterval) await RefreshCatalogAsync(now, cancellation).ConfigureAwait(false);
+            if (force || _lastAttempt is not { } previous || now - previous >= RefreshInterval || now < previous) await RefreshCatalogAsync(now, cancellation).ConfigureAwait(false);
             await RefreshOfficialAsync(force, cancellation).ConfigureAwait(false);
             return Volatile.Read(ref _version) != before;
         }
