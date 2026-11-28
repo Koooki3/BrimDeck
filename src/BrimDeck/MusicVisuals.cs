@@ -351,7 +351,7 @@ internal sealed class MusicMarquee : FrameworkElement
     private double[]? _edges;
     // The share of the line's color the words still to come are drawn in (KaraokeFaded).
     private const double FadedShare = .35;
-    // The faded color the words still to come are drawn in (KaraokeFaded), cached for the line's color.
+    // The faded color the words still to come are drawn in (KaraokeFaded), cached for the color it is.
     private Brush? _karaokeFaded;
     private Color? _karaokeColor;
     // Every frame the window samples the player's continuous position and hands the target here. The drawn position eases
@@ -444,7 +444,7 @@ internal sealed class MusicMarquee : FrameworkElement
     private Brush SweepEdge(double from, double to)
     {
         var color = InkColor;
-        var brush = new LinearGradientBrush(new GradientStopCollection { new(color, 0), new(Color.FromArgb((byte)(255 * FadedShare), color.R, color.G, color.B), 1) },
+        var brush = new LinearGradientBrush(new GradientStopCollection { new(color, 0), new(FadedColor(color), 1) },
             new Point(from, 0), new Point(to, 0)) { MappingMode = BrushMappingMode.Absolute };
         brush.Freeze();
         return brush;
@@ -453,13 +453,17 @@ internal sealed class MusicMarquee : FrameworkElement
     {
         get
         {
-            Color color = InkColor;
+            Color color = FadedColor(InkColor);
             if (_karaokeColor == color && _karaokeFaded is not null) return _karaokeFaded;
-            var faded = new SolidColorBrush(Color.FromArgb((byte)(255 * FadedShare), color.R, color.G, color.B)); faded.Freeze();
+            var faded = new SolidColorBrush(color); faded.Freeze();
             _karaokeFaded = faded; _karaokeColor = color;
             return faded;
         }
     }
+    // The color the words still to come are drawn in: the line's color at FadedShare, or under high contrast the system's gray
+    // text (Look.Tertiary) at full strength, which the system keeps legible on its window color.
+    private Color FadedColor(Color color) =>
+        Look.HighContrast ? Look.ColorOf("textTertiary") : Color.FromArgb((byte)(255 * FadedShare), color.R, color.G, color.B);
     private FormattedText Formatted
     {
         get
