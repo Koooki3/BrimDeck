@@ -50,6 +50,7 @@ internal static class Program
             // says something about the machine, not the code. Without the flag every check runs.
             if (args is ["--only", "rightdrag"]) { RightDragChecks.Run(Check); return Finish(); }
             if (args is ["--only", "droprelay"]) { DropRelayChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "handover"]) { HandoverScaleChecks.Run(Check); return Finish(); }
             bool hosted = args is ["--hosted"];
             Console.WriteLine($"Windows native smoke tests{(hosted ? " (hosted subset)" : "")}: {Environment.OSVersion.Version}");
             CheckWindowChrome();
@@ -89,6 +90,7 @@ internal static class Program
             PopupGhostChecks.Run(Check);
             GlassChecks.Run(Check);
             EdgeRingChecks.Run(Check);
+            HandoverScaleChecks.Run(Check);
             PanelKeyboardTests.Run(Check);
             BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckPageCapsuleFit(Check);
