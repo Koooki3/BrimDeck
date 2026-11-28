@@ -27,7 +27,7 @@ internal static class PopupGhostChecks
     private static void Settle() { for (int i = 0; i < 3; i++) Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle); }
 
     // Forces SystemParameters.MenuDropAlignment, returning false where the framework's cache is not where it was looked for.
-    private static bool Force(bool value, out bool before)
+    internal static bool Force(bool value, out bool before)
     {
         before = SystemParameters.MenuDropAlignment;
         var type = typeof(SystemParameters);

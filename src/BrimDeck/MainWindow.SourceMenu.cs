@@ -30,7 +30,7 @@ public partial class MainWindow
         double maxWidth = Math.Min(172 + 28 * Math.Min(1, widthStep) + 32 * Math.Max(0, widthStep - 1), Math.Max(120, ContentCanvas.Width - 40));
         menu.Padding = new Thickness(2 + Math.Min(1, density));
         double anchorBottom = MediaSourceButton.TranslatePoint(new Point(0, MediaSourceButton.ActualHeight), ExpandedContent).Y;
-        menu.MaxHeight = Math.Clamp(ContentCanvas.Height - anchorBottom - menu.VerticalOffset / _scale - 8, 18 + 2 * density + 2 * menu.Padding.Top + 2, 400);
+        menu.MaxHeight = Math.Clamp(ContentCanvas.Height - anchorBottom - SourceMenuPlacement.Gap - 8, 18 + 2 * density + 2 * menu.Padding.Top + 2, 400);
         foreach (var separator in menu.Items.OfType<Separator>())
             separator.Margin = new Thickness(4 + density, 2 + density, 6 + density, 2 + density);
         foreach (var item in menu.Items.OfType<MenuItem>())
@@ -43,7 +43,6 @@ public partial class MainWindow
             title.FontSize = font - .5; title.Height = item.Height; title.Margin = new Thickness(0, 0, gap * 2, 0); status.FontSize = font - 1.5;
         }
         menu.Width = maxWidth;
-        menu.HorizontalOffset = MediaSourceButton.ActualWidth - menu.Width;
     }
 
     private void TickSourceMenu()
