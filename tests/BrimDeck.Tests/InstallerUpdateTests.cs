@@ -18,7 +18,7 @@ internal static class InstallerUpdateTests
         var directory = Path.Combine(root, "installer-updates");
         var launches = new List<ProcessStartInfo>();
         InstallerUpdateBackend Backend(string version = "0.1.0", UpdateMode mode = UpdateMode.Installer) => new(http, ManifestUri,
-            (m, p) => new Uri($"https://updates.test/v{m.Version}/{p.File}"), version, directory, mode, start => { launches.Add(start); return true; });
+            (m, p) => new Uri($"https://updates.test/v{m.Version}/{p.File}"), version, directory, mode, start => { launches.Add(start); return true; }) { ResumeWait = TimeSpan.Zero };
 
         var backend = Backend();
         var release = await backend.CheckAsync(CancellationToken.None);
@@ -70,6 +70,9 @@ internal static class InstallerUpdateTests
         var saved = Path.Combine(directory, manifest.File);
         check("verified installer is stored with progress up to 100%", File.Exists(saved) && reported.LastOrDefault() == 100 &&
             reported.SequenceEqual(reported.Order()) && !File.Exists(saved + ".partial"));
+        await Resumes(server, installer, () => Backend(), directory, manifest.File, check);
+        backend = Backend(); release = await backend.CheckAsync(CancellationToken.None);
+        await backend.DownloadAsync(release!, _ => { }, CancellationToken.None);
         var requests = server.Requests;
         check("a verified download is restored after restart without network", Backend().PendingRelease == release && server.Requests == requests);
 
@@ -113,8 +116,88 @@ internal static class InstallerUpdateTests
         check("an unreadable beta manifest leaves the release", (await betaBackend.CheckAsync(true, CancellationToken.None))?.Version == "0.2.0");
     }
 
+    // The connection breaks off midway (issue #416: update downloads often failed): the download goes on from where it stopped.
+    private static async Task Resumes(ReleaseServer server, byte[] installer, Func<InstallerUpdateBackend> backend, string directory, string file,
+        Action<string, bool> check)
+    {
+        async Task<(Exception? Error, bool Saved)> Download()
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            var attempt = backend(); var found = await attempt.CheckAsync(CancellationToken.None);
+            server.Ranges.Clear(); server.Served = 0;
+            try { await attempt.DownloadAsync(found!, _ => { }, CancellationToken.None); }
+            catch (Exception ex) { return (ex, false); }
+            var path = Path.Combine(directory, file);
+            return (null, File.Exists(path) && File.ReadAllBytes(path).AsSpan().SequenceEqual(installer));
+        }
+        bool NoLeftovers() => !File.Exists(Path.Combine(directory, file + ".partial")) && !File.Exists(Path.Combine(directory, file));
+
+        server.CutAfter.Enqueue(100_000); server.CutAfter.Enqueue(100_000);
+        var (error, saved) = await Download();
+        check("a download cut off twice goes on from the bytes received and is verified", error is null && saved);
+        check("the resumed requests ask only for the rest, so nothing is downloaded twice",
+            server.Ranges.SequenceEqual(new long?[] { null, 100_000, 200_000 }) && server.Served == installer.Length);
+
+        server.CutAfter.Enqueue(120_000); server.IgnoreRange = true;
+        (error, saved) = await Download();
+        server.IgnoreRange = false;
+        check("a server that ignores the range sends the whole file again, and the result is still verified", error is null && saved && server.Ranges.Count == 2);
+
+        server.Statuses.Enqueue(HttpStatusCode.ServiceUnavailable); server.Statuses.Enqueue(HttpStatusCode.BadGateway);
+        (error, saved) = await Download();
+        check("a busy or failing server (5xx) is asked again", error is null && saved && server.Ranges.Count == 3);
+
+        server.Statuses.Enqueue(HttpStatusCode.NotFound);
+        (error, _) = await Download();
+        check("a missing package (404) is not asked for again", error is HttpRequestException && server.Ranges.Count == 1 && NoLeftovers());
+
+        for (int i = 0; i <= InstallerUpdateBackend.MaxResumes; i++) server.CutAfter.Enqueue(10_000);
+        (error, _) = await Download();
+        check("a download that keeps breaking off gives up after the last resume and leaves nothing",
+            error is IOException && server.Ranges.Count == InstallerUpdateBackend.MaxResumes + 1 && NoLeftovers());
+        server.CutAfter.Clear();
+
+        var corrupt = (byte[])installer.Clone(); corrupt[250_000] ^= 0xFF;
+        server.Installer = corrupt; server.CutAfter.Enqueue(100_000);
+        (error, _) = await Download();
+        server.Installer = installer;
+        check("a resumed download with a wrong byte after the break is still rejected", error is InvalidDataException && NoLeftovers());
+        if (Directory.Exists(directory)) Directory.Delete(directory, true);
+    }
+
+    // Serves a file from a given offset and breaks off (an IOException, as a dropped connection does) after limit bytes.
+    private sealed class BreakingStream(byte[] data, long from, int? limit) : Stream
+    {
+        private long _at = from;
+        private int _sent;
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (limit is { } most && _sent >= most) throw new IOException("The connection was reset.");
+            int n = (int)Math.Min(count, data.Length - _at);
+            if (limit is { } cap) n = Math.Min(n, cap - _sent);
+            Array.Copy(data, _at, buffer, offset, n); _at += n; _sent += n;
+            return n;
+        }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => _at; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private sealed class ReleaseServer : HttpMessageHandler
     {
+        // For the package: bytes to send before breaking off, one per response; statuses to answer instead, one per request;
+        // whether a Range is ignored. Recorded: the start of each Range asked for (null for none), and the bytes sent.
+        public Queue<int> CutAfter { get; } = new();
+        public Queue<HttpStatusCode> Statuses { get; } = new();
+        public bool IgnoreRange { get; set; }
+        public List<long?> Ranges { get; } = [];
+        public long Served { get; set; }
         public string Manifest { get; set; } = "";
         public byte[] Installer { get; set; } = [];
         // Null answers the beta manifest with 404, as before the first beta.
@@ -125,10 +208,24 @@ internal static class InstallerUpdateTests
         {
             Requests++;
             if (request.RequestUri == BetaManifestUri) BetaRequests++;
+            if (request.RequestUri?.AbsolutePath == "/v0.2.0/BrimDeck-0.2.0-Setup.exe") return Task.FromResult(Package(request));
             HttpContent? content = request.RequestUri == ManifestUri ? new StringContent(Manifest)
                 : request.RequestUri == BetaManifestUri && BetaManifest is not null ? new StringContent(BetaManifest)
                 : request.RequestUri?.AbsolutePath == "/v0.2.0/BrimDeck-0.2.0-Setup.exe" ? new ByteArrayContent(Installer) : null;
             return Task.FromResult(new HttpResponseMessage(content is null ? HttpStatusCode.NotFound : HttpStatusCode.OK) { Content = content ?? new StringContent("") });
+        }
+        private HttpResponseMessage Package(HttpRequestMessage request)
+        {
+            long? from = request.Headers.Range?.Ranges.Single().From;
+            Ranges.Add(from);
+            if (Statuses.TryDequeue(out var status)) return new HttpResponseMessage(status) { Content = new StringContent("") };
+            long start = IgnoreRange ? 0 : from ?? 0;
+            int? limit = CutAfter.TryDequeue(out var cut) ? cut : null;
+            Served += Math.Min(Installer.Length - start, limit ?? int.MaxValue);
+            var content = new StreamContent(new BreakingStream(Installer, start, limit));
+            content.Headers.ContentLength = Installer.Length - start;
+            if (start > 0) content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(start, Installer.Length - 1, Installer.Length);
+            return new HttpResponseMessage(start > 0 ? HttpStatusCode.PartialContent : HttpStatusCode.OK) { Content = content };
         }
     }
 }
