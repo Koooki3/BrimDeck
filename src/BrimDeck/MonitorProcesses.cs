@@ -244,7 +244,7 @@ internal sealed class ProcessListView : FrameworkElement
         {
             bool chosen = (int)_sort == i;
             var text = MonitorDraw.Text(names[i], _layout.Caption, chosen ? Look.Primary : Look.Secondary, ppd, strong: chosen);
-            MonitorDraw.Baseline(drawing, text, _sortRects[i].X + pad, baseline);
+            MonitorDraw.BaselineKept(drawing, text, _sortRects[i].X + pad, baseline);
         }
     }
 
