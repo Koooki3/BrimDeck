@@ -12,9 +12,11 @@ namespace BrimDeck;
 //   the whole island, content too, over everything, fading over ThemeFadeMs whatever the change. Readings and titles go on
 //   changing under it, and two different figures must never stand over each other for long (the monitor's rule), so the old
 //   content leaves quickly even while the old surface lingers.
-// Nothing moves with animations off; each picture is taken once, so the fade costs two bitmaps and two opacity animations. A
-// change during a fade lets the pictures already fading go on fading under the new ones, so nothing that was on screen
-// vanishes at once; a change of the island's shape fades them out quickly (LeaveMs), as they no longer lie on it.
+// Nothing moves with animations off, nor over a see-through surface: the pictures stacked on it would show it nearly solid
+// for the length of the fade, so it changes at once. Each picture is taken once, so the fade costs two bitmaps and two
+// opacity animations. A change during a fade lets the pictures already fading go on fading under the new ones, so nothing
+// that was on screen vanishes at once; a change of the island's shape fades them out quickly (LeaveMs), as they no longer
+// lie on it.
 public partial class MainWindow
 {
     private const int DaylightFadeMs = 1600, ThemeFadeMs = 320, LeaveMs = 120;
@@ -37,6 +39,7 @@ public partial class MainWindow
     {
         // Pictures still fading are left to finish on their own, under the new ones.
         _themeFade = null; _materialFade = null;
+        if (Island.SurfaceOpacity < 1) return;
         if (!IsVisible || !Animates || _preview || Island.ActualWidth < 1 || Island.ActualHeight < 1 || PresentationSource.FromVisual(Island) is null) return;
         if (Island.Child is not Panel content) return;
         double width = Island.ActualWidth, height = Island.ActualHeight;
