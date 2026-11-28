@@ -63,6 +63,7 @@
     <Compile Include="..\..\src\BrimDeck\Native\AppWindowSystem.cs" Link="AppWindowSystem.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\AudioLevelMeter.cs" Link="AudioLevelMeter.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProcessLoopbackCapture.cs" Link="ProcessLoopbackCapture.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\ProviderSecrets.cs" Link="ProviderSecrets.cs" />
     <Compile Include="..\..\src\BrimDeck\MainWindow.Shadow.cs" Link="MainWindow.Shadow.cs" />
     <Compile Include="..\..\src\BrimDeck\LayoutRetry.cs" Link="LayoutRetry.cs" />
     <Compile Include="..\..\src\BrimDeck\InkCentredLabel.cs" Link="InkCentredLabel.cs" />
