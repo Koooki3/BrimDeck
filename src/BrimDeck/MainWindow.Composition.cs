@@ -68,8 +68,9 @@ public partial class MainWindow
     {
         if (_regionQueued || Environment.TickCount64 < _regionHeldUntil) return;
         _regionQueued = true;
-        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, () => { _regionQueued = false; FitRegion(); });
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, _fitQueued ??= () => { _regionQueued = false; FitRegion(); });
     }
+    private Action? _fitQueued;
 
     // While the island opens, closes or changes size, the region is set once, to cover where it starts and where it ends, and
     // held until the move is over: set on every frame, it made DWM shape the window again on every frame of the move. Clicks
@@ -132,48 +133,52 @@ public partial class MainWindow
     // What takes clicks beside the island: the resize grips and the open panel's hover strip.
     private IEnumerable<Rect> Beside()
     {
-        if (_grips.Visibility == Visibility.Visible && VisualTreeHelper.GetDescendantBounds(_grips) is { IsEmpty: false } grips)
-            yield return new Rect(_grips.TranslatePoint(grips.TopLeft, this), grips.Size);
-        if (HoverExtension.Visibility == Visibility.Visible && HoverExtension.ActualHeight > 0)
-            yield return new Rect(HoverExtension.TranslatePoint(new Point(0, 0), this), HoverExtension.RenderSize);
+        if (Grips() is { } grips) yield return grips;
+        if (HoverStrip() is { } strip) yield return strip;
     }
+    private Rect? Grips() => _grips.Visibility == Visibility.Visible && VisualTreeHelper.GetDescendantBounds(_grips) is { IsEmpty: false } grips
+        ? new Rect(_grips.TranslatePoint(grips.TopLeft, this), grips.Size) : null;
+    private Rect? HoverStrip() => HoverExtension.Visibility == Visibility.Visible && HoverExtension.ActualHeight > 0
+        ? new Rect(HoverExtension.TranslatePoint(new Point(0, 0), this), HoverExtension.RenderSize) : null;
 
     // At rest the region keeps the island's rounded corners, widened by the shadow around them: a rectangle took clicks up to
     // 28 px out from a corner of the open liquid glass panel where the layered window took them to 15 (live check 10-27).
     private void FitRegion()
     {
         if (Environment.TickCount64 < _regionHeldUntil) return;
-        if (!IsVisible) { SetRegion([]); return; }
+        var pieces = _regionPieces; pieces.Clear();
+        if (!IsVisible) { SetRegion(pieces); return; }
         var island = new Rect(Island.TranslatePoint(new Point(0, 0), this), Island.RenderSize);
         var around = Shadowed(island);
         double side = Math.Max(0, island.Left - around.Left), corners = Island.CornerRadius.TopLeft, bottom = Island.CornerRadius.BottomLeft;
-        var pieces = new List<(Rect Bounds, double Radius)> { (around, bottom + side) };
+        pieces.Add((around, bottom + side));
         // A flatter top than bottom (the notch, the open panel hanging from the screen's edge): its upper half rounds as the top.
         if (corners < bottom) pieces.Add((new Rect(around.Left, around.Top, around.Width, around.Height / 2), corners + side));
-        foreach (var extra in Beside()) pieces.Add((extra, 0));
+        if (Grips() is { } grips) pieces.Add((grips, 0));
+        if (HoverStrip() is { } strip) pieces.Add((strip, 0));
         SetRegion(pieces);
     }
 
-    private void SetRegion(Rect bounds) => SetRegion(bounds.IsEmpty ? [] : [(bounds, 0)]);
+    private void SetRegion(Rect bounds)
+    {
+        var pieces = _regionPieces; pieces.Clear();
+        if (!bounds.IsEmpty) pieces.Add((bounds, 0));
+        SetRegion(pieces);
+    }
 
     // The region in device pixels from rounded rectangles (radius in DIPs), whole pixels around each; nothing at all for none.
-    private string _regionKey = "";
+    // Every layout asks for it: the pieces and the shapes are kept in lists used again, and the region is set only when the
+    // shapes differ from the ones set last.
+    private readonly List<(Rect Bounds, double Radius)> _regionPieces = [];
+    private List<(int Left, int Top, int Right, int Bottom, int Round)> _regionShapes = [], _regionNext = [];
     private void SetRegion(List<(Rect Bounds, double Radius)> pieces)
     {
         if (PresentationSource.FromVisual(this) is not HwndSource source || source.CompositionTarget is null) return;
-        var device = source.CompositionTarget.TransformToDevice;
-        var shapes = new List<(int Left, int Top, int Right, int Bottom, int Round)>();
-        foreach (var (bounds, radius) in pieces)
-        {
-            if (bounds.IsEmpty) continue;
-            var corner = device.Transform(bounds.TopLeft); var far = device.Transform(bounds.BottomRight);
-            shapes.Add((Math.Max(0, (int)Math.Floor(corner.X)), Math.Max(0, (int)Math.Floor(corner.Y)), (int)Math.Ceiling(far.X), (int)Math.Ceiling(far.Y), (int)Math.Round(Math.Max(0, radius) * device.M11)));
-        }
-        string key = string.Join(";", shapes);
-        if (key == _regionKey) return;
-        _regionKey = key;
+        DeviceShapes(pieces, source.CompositionTarget.TransformToDevice, _regionNext);
+        if (SameShapes(_regionNext, _regionShapes)) return;
+        (_regionShapes, _regionNext) = (_regionNext, _regionShapes);
         var region = CreateRectRgn(0, 0, 0, 0);
-        foreach (var (l, t, r, b, round) in shapes)
+        foreach (var (l, t, r, b, round) in _regionShapes)
         {
             var piece = round > 0 ? CreateRoundRectRgn(l, t, r + 1, b + 1, 2 * round, 2 * round) : CreateRectRgn(l, t, r, b);
             CombineRgn(region, region, piece, 2); // RGN_OR
@@ -182,6 +187,18 @@ public partial class MainWindow
         // The system owns the region once it is set; it is deleted only if setting it failed.
         if (SetWindowRgn(source.Handle, region, false) == 0) DeleteObject(region);
     }
+    internal static void DeviceShapes(List<(Rect Bounds, double Radius)> pieces, Matrix device, List<(int Left, int Top, int Right, int Bottom, int Round)> shapes)
+    {
+        shapes.Clear();
+        foreach (var (bounds, radius) in pieces)
+        {
+            if (bounds.IsEmpty) continue;
+            var corner = device.Transform(bounds.TopLeft); var far = device.Transform(bounds.BottomRight);
+            shapes.Add((Math.Max(0, (int)Math.Floor(corner.X)), Math.Max(0, (int)Math.Floor(corner.Y)), (int)Math.Ceiling(far.X), (int)Math.Ceiling(far.Y), (int)Math.Round(Math.Max(0, radius) * device.M11)));
+        }
+    }
+    internal static bool SameShapes(List<(int Left, int Top, int Right, int Bottom, int Round)> a, List<(int Left, int Top, int Right, int Bottom, int Round)> b)
+        => CollectionsMarshal.AsSpan(a).SequenceEqual(CollectionsMarshal.AsSpan(b));
 
     [StructLayout(LayoutKind.Sequential)] private struct Margins { public int Left, Right, Top, Bottom; }
     [DllImport("dwmapi")] private static extern int DwmExtendFrameIntoClientArea(IntPtr window, ref Margins margins);
