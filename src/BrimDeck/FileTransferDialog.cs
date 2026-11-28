@@ -133,6 +133,9 @@ internal abstract class FileTransferDialog : Window
         _hero.Content = hero;
     }
 
+    // The picture in the hero now. The hero is built again at each state and progress report: the pictures it replaced are let go.
+    private Action? _loadPicture;
+    private bool _watchingPictures;
     // The file's own large picture (a thumbnail for pictures), at 64 units; with several files, a count on its corner.
     protected FrameworkElement FilePicture(string path, int count = 1)
     {
@@ -145,9 +148,14 @@ internal abstract class FileTransferDialog : Window
             else if (image.Source == null && ShelfFiles.Icon(path) is { } small) image.Source = small;
         }
         Load();
-        void Arrived() => Dispatcher.InvokeAsync(Load);
-        ShelfFiles.Changed += Arrived;
-        Closed += (_, _) => ShelfFiles.Changed -= Arrived;
+        _loadPicture = Load;
+        if (!_watchingPictures)
+        {
+            _watchingPictures = true;
+            void Arrived() => Dispatcher.InvokeAsync(() => _loadPicture?.Invoke());
+            ShelfFiles.Changed += Arrived;
+            Closed += (_, _) => ShelfFiles.Changed -= Arrived;
+        }
         grid.Children.Add(image);
         if (count > 1)
         {
