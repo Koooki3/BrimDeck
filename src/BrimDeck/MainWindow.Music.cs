@@ -1186,7 +1186,7 @@ public partial class MainWindow
         // display frames from the position the player gave (extrapolated continuously by MediaTrack.Position), easing to it.
         // Only start when something on screen will take the frames, so a hidden or caption row is not re-started every tick.
         bool lyricTarget = page ? _lyricCurrent is not null : _karaokeCompact;
-        if (Animates && track.State == MediaState.Playing && lyricTarget && words is not null) Motion.Start(this, KaraokeFrame);
+        if (Animates && track.State == MediaState.Playing && lyricTarget && words is not null && MusicPresentationVisible) Motion.Start(this, KaraokeFrame);
         MusicIndicator.Visibility = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && track.State != MediaState.Stopped && track.HasTimeline ? Visibility.Visible : Visibility.Collapsed;
         // Hidden, the bar keeps its last length: setting it four times a second laid the island out again for nothing. It takes
         // its length on the first update after it shows again.
@@ -1205,7 +1205,7 @@ public partial class MainWindow
     // tick starts it again when there is one.
     private bool KaraokeFrame(double now)
     {
-        if (_mediaTrack is not { } track || track.State != MediaState.Playing || !Animates) return false;
+        if (_mediaTrack is not { } track || track.State != MediaState.Playing || !Animates || !MusicPresentationVisible) return false;
         bool page = _expanded && IsMusicPage;
         // Nothing on screen would take this sample: stop the frame loop instead of burning frames on a hidden
         // or non-lyric row. The 250 ms position tick starts it again when a target becomes visible.
