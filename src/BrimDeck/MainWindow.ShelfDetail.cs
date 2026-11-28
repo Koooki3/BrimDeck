@@ -388,7 +388,7 @@ public partial class MainWindow
                     {
                         e.Handled = true;
                         if (!copyOnly) _app.Shelf.Paste(ShelfService.TextData(value), result => text.Text = value + "  " + PasteWord(result));
-                        else if (_app.Shelf.Put(ShelfService.TextData(value))) text.Text = value + "  " + Loc.T("已复制", "Copied");
+                        else text.Text = value + "  " + (_app.Shelf.Put(ShelfService.TextData(value)) ? Loc.T("已复制", "Copied") : ClipboardBusyWord);
                     };
                     forms.Children.Add(row);
                 }
@@ -573,7 +573,7 @@ public partial class MainWindow
         }
         if (gone.Count > 0) RemoveFiles(gone);
     }
-    private void CopyPath(TransferFile file) { if (_app.Shelf.Put(ShelfService.TextData(file.Path))) Flash(file.Id, Loc.T("已复制路径", "Path copied")); }
+    private void CopyPath(TransferFile file) => Flash(file.Id, _app.Shelf.Put(ShelfService.TextData(file.Path)) ? Loc.T("已复制路径", "Path copied") : ClipboardBusyWord);
 
     // ---- Menus ----
     // The panel's menus only use and file what is here; categories and phrases are made and changed in the settings. A row has an

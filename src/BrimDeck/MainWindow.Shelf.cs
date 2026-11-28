@@ -1126,7 +1126,7 @@ public partial class MainWindow
     // Copied again, the entry moves to the top as any new copy does, and the list shows it there.
     private void CopyClip(ClipEntry clip)
     {
-        if (!_app.Shelf.Put(_app.Shelf.ClipData(clip))) return;
+        if (!_app.Shelf.Put(_app.Shelf.ClipData(clip))) { Flash(clip.Id, ClipboardBusyWord); return; }
         Shelf.Recopied(ShelfData, clip, DateTimeOffset.Now);
         _clipOffset = 0;
         Flash(clip.Id, Loc.T("已复制", "Copied"));
@@ -1161,12 +1161,15 @@ public partial class MainWindow
         if (present.Count == 0) return;
         _app.Shelf.Paste(ShelfService.FileData(present.Select(file => file.Path)), result => { string word = PasteWord(result); foreach (var file in present) Flash(file.Id, word); });
     }
+    // Another program held the clipboard for over a second, and nothing was put there.
+    private static string ClipboardBusyWord => Loc.T("剪贴板被占用", "Clipboard busy");
     // What the row says after a click: pasted, or copied with the paste left to the user. The window of a program run as
     // administrator takes no paste from BrimDeck: the row says copied, and the reason, too long for a row's end, stands at the
     // foot of the panel for a moment.
     private string PasteWord(PasteResult result)
     {
         if (result == PasteResult.Pasted) return Loc.T("已粘贴", "Pasted");
+        if (result == PasteResult.Busy) return ClipboardBusyWord;
         if (result == PasteResult.Elevated)
         {
             ShowShelfNotice(Loc.T("已复制，目标窗口是管理员权限，请手动粘贴", "Copied. Target runs as administrator; paste manually"));
