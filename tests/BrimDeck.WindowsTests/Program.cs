@@ -38,6 +38,7 @@ internal static class Program
             // says something about the machine, not the code. Without the flag every check runs.
             if (args is ["--only", "rightdrag"]) { RightDragChecks.Run(Check); return Finish(); }
             if (args is ["--only", "droprelay"]) { DropRelayChecks.Run(Check); return Finish(); }
+            if (args is ["--only", "secrets"]) { ProviderSecretsChecks.Run(Check); return Finish(); }
             bool hosted = args is ["--hosted"];
             Console.WriteLine($"Windows native smoke tests{(hosted ? " (hosted subset)" : "")}: {Environment.OSVersion.Version}");
             CheckWindowChrome();
@@ -62,6 +63,7 @@ internal static class Program
             BrimDeck.MainWindow.CheckPageCapsuleStretch(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
             DeviceChecks.PushedNames(Check);
+            ProviderSecretsChecks.Run(Check);
             if (hosted) Console.WriteLine("EXCLUDED on a hosted runner: GPU, display, maximized settings window, frame rate, temperature, device battery and power readings, and the application identity the shell resolves (they read this machine or its shell).");
             else
             {

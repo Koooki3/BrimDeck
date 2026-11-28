@@ -26,7 +26,7 @@ public sealed class ProviderSecrets(string directory) : IProviderSecrets
     {
         lock (_gate)
         {
-            var values = Load();
+            var values = LoadForWrite();
             if (secret.Length == 0) values.Remove(instanceId);
             else
             {
@@ -40,4 +40,12 @@ public sealed class ProviderSecrets(string directory) : IProviderSecrets
         }
     }
     public void Delete(Guid instanceId) => Write(instanceId, "");
+    // A file that no longer reads as the store's JSON (cut short, written over by another program) would refuse every change
+    // and leave the user no way to save a key again. Its keys cannot be read either way, so it is kept beside the store as
+    // secrets.dat.bad and the change starts from an empty store.
+    private Dictionary<Guid, string> LoadForWrite()
+    {
+        try { return Load(); }
+        catch (JsonException) { File.Copy(FilePath, FilePath + ".bad", true); return []; }
+    }
 }

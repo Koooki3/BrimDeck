@@ -46,6 +46,7 @@
     <Compile Include="..\..\src\BrimDeck\Native\EncoDeckBatteries.cs" Link="EncoDeckBatteries.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\PhoneLinkBatteries.cs" Link="PhoneLinkBatteries.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\AppIdentity.cs" Link="AppIdentity.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\ProviderSecrets.cs" Link="ProviderSecrets.cs" />
     <Compile Include="..\..\src\BrimDeck\MainWindow.Shadow.cs" Link="MainWindow.Shadow.cs" />
     <Compile Include="..\..\src\BrimDeck\LayoutRetry.cs" Link="LayoutRetry.cs" />
     <Compile Include="..\..\src\BrimDeck\InkCentredLabel.cs" Link="InkCentredLabel.cs" />
